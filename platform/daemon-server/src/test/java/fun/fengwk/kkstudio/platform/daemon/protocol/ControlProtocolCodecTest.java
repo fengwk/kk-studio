@@ -243,22 +243,12 @@ class ControlProtocolCodecTest {
             .build());
   }
 
-  /** 目录结果与视图回执互斥，新命令遵守绑定和路径边界。 */
+  /** 零根绑定与移动端命令字段边界：directory 可缺省，workspacePath 与 epoch 永远必备。 */
   @Test
-  void validatesDirectoryListingAndMobileCommands() {
+  void validatesMobileLayoutCommandsAndZeroRootBindings() {
     Envelope command =
         ControlProtocolCodec.decodeBinary(
             ControlProtocolFixtures.goldenUnchecked("ide-command.bin"));
-    IdeCommand list =
-        IdeCommand.newBuilder().setAction(IdeAction.LIST_DIRECTORIES).setDirectory("/a b").build();
-    ControlProtocolCodec.encodeBinary(command.toBuilder().setIdeCommand(list).build());
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                command.toBuilder()
-                    .setIdeCommand(list.toBuilder().setViewId("unexpected"))
-                    .build()));
     IdeCommand mobile =
         IdeCommand.newBuilder()
             .setAction(IdeAction.COLLAPSE_MOBILE)
@@ -273,44 +263,41 @@ class ControlProtocolCodecTest {
         () ->
             ControlProtocolCodec.encodeBinary(
                 command.toBuilder().setIdeCommand(mobile.toBuilder().setDirectory("/x")).build()));
+
     Envelope result =
         ControlProtocolCodec.decodeBinary(
             ControlProtocolFixtures.goldenUnchecked("ide-result.bin"));
-    IdeDirectoryListing listing =
-        IdeDirectoryListing.newBuilder()
-            .setPath("/")
-            .setTruncated(false)
-            .addChildren(IdeDirectoryEntry.newBuilder().setName("x").setPath("/x"))
+    IdeResult bound = result.getIdeResult();
+    IdeResult zeroRoot =
+        bound.toBuilder()
+            .clearDirectory()
+            .setViews(0, bound.getViews(0).toBuilder().clearDirectory().build())
             .build();
-    IdeResult reply = IdeResult.newBuilder().setOk(true).setDirectoryListing(listing).build();
     ControlProtocolCodec.decodeBinary(
-        ControlProtocolCodec.encodeBinary(result.toBuilder().setIdeResult(reply).build()));
+        ControlProtocolCodec.encodeBinary(result.toBuilder().setIdeResult(zeroRoot).build()));
+
     assertThrows(
         ControlProtocolException.class,
         () ->
             ControlProtocolCodec.encodeBinary(
-                result.toBuilder()
-                    .setIdeResult(reply.toBuilder().setViewId(mobile.getViewId()))
-                    .build()));
+                result.toBuilder().setIdeResult(bound.toBuilder().clearWorkspacePath()).build()),
+        "workspacePath stays mandatory for every binding");
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder().setIdeResult(zeroRoot.toBuilder().setDirectory("/dir")).build()),
+        "a one-sided directory cannot describe a zero-root snapshot view");
     assertThrows(
         ControlProtocolException.class,
         () ->
             ControlProtocolCodec.encodeBinary(
                 result.toBuilder()
                     .setIdeResult(
-                        reply.toBuilder().setDirectoryListing(listing.toBuilder().clearTruncated()))
-                    .build()));
-    IdeDirectoryListing.Builder large = listing.toBuilder();
-    for (int i = 0; i < 1000; i++) {
-      large.addChildren(listing.getChildren(0));
-    }
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                result.toBuilder()
-                    .setIdeResult(reply.toBuilder().setDirectoryListing(large))
-                    .build()));
+                        bound.toBuilder()
+                            .setViews(0, bound.getViews(0).toBuilder().clearDirectory().build()))
+                    .build()),
+        "a zero-root summary cannot match a directory-bearing top-level binding");
   }
 
   /** 各类消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
@@ -605,13 +592,19 @@ class ControlProtocolCodecTest {
                     .setDirectory(view.getDirectory())
                     .setWorkspacePath(view.getWorkspacePath()))
             .build());
+    // 零根绑定回执：directory 缺省，workspacePath 与 epoch 仍是必备事实。
     ControlProtocolCodec.encodeBinary(
         result.toBuilder()
             .setIdeResult(
                 IdeResult.newBuilder()
                     .setOk(true)
                     .setViewId(view.getViewId())
-                    .setDirectory("/work"))
+                    .setBrowserSessionId(view.getBrowserSessionId())
+                    .setEventNodeId(view.getEventNodeId())
+                    .setConnectionId(view.getConnectionId())
+                    .setClaimId(view.getClaimId())
+                    .setBindingEpoch(view.getBindingEpoch())
+                    .setWorkspacePath(view.getWorkspacePath()))
             .build());
     ControlProtocolCodec.encodeBinary(
         result.toBuilder()

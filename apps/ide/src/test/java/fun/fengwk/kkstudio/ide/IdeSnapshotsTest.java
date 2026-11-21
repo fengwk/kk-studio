@@ -185,10 +185,17 @@ class IdeSnapshotsTest {
   }
 
   @Test
-  void sameBindingIgnoresDirectoryButNotEpoch() {
+  void sameBindingIgnoresDirectoryButNotEpochOrWorkspaceFile() {
     IdeViewSnapshotStore.View expected = view(7L, "/dir");
     assertTrue(IdeSnapshots.sameBinding(view(7L, "/other"), expected));
+    assertTrue(
+        IdeSnapshots.sameBinding(view(7L, null), expected),
+        "a zero-root rebinding keeps the same owner binding identity");
     assertEquals(false, IdeSnapshots.sameBinding(view(8L, "/dir"), expected));
+    assertEquals(
+        false,
+        IdeSnapshots.sameBinding(view(7L, "/dir", "/other.code-workspace"), expected),
+        "the registered workspace file is part of the binding identity");
   }
 
   @Test
@@ -226,6 +233,11 @@ class IdeSnapshotsTest {
   }
 
   private static IdeViewSnapshotStore.View view(long epoch, String directory) {
+    return view(epoch, directory, "/ws");
+  }
+
+  private static IdeViewSnapshotStore.View view(
+      long epoch, String directory, String workspacePath) {
     return new IdeViewSnapshotStore.View(
         VIEW,
         BROWSER_SESSION,
@@ -234,7 +246,7 @@ class IdeSnapshotsTest {
         CLAIM,
         epoch,
         directory,
-        "/ws",
+        workspacePath,
         IdeViewState.OPEN);
   }
 

@@ -99,14 +99,15 @@ final class IdeSnapshots {
     }
   }
 
-  /** 比较稳定的 owner 绑定字段；目录可在 CHANGE_DIRECTORY 中合法变化。 */
+  /** 比较稳定的 owner 绑定字段：目录可在 CHANGE_DIRECTORY 中合法变化，而正 epoch 与登记的 workspace 文件都属于绑定身份。 */
   static boolean sameBinding(IdeViewSnapshotStore.View actual, IdeViewSnapshotStore.View expected) {
     return actual.viewId().equals(expected.viewId())
         && actual.browserSessionId().equals(expected.browserSessionId())
         && actual.eventNodeId().equals(expected.eventNodeId())
         && actual.connectionId().equals(expected.connectionId())
         && actual.claimId().equals(expected.claimId())
-        && actual.bindingEpoch() == expected.bindingEpoch();
+        && actual.bindingEpoch() == expected.bindingEpoch()
+        && actual.workspacePath().equals(expected.workspacePath());
   }
 
   private IdeViewSnapshotStore.Snapshot acceptSnapshot(

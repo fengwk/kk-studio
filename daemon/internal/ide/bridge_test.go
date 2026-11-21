@@ -723,6 +723,8 @@ func TestBridgeDirectoryAndLoopbackPredicates(t *testing.T) {
 		want      bool
 	}{
 		{[]string{managed}, managed, true}, {[]string{reportedDirectory}, managed, true}, {[]string{managed, managed}, managed, false}, {[]string{"relative"}, managed, false},
+		// A view without a directory accepts only a host that reports no folder.
+		{nil, "", true}, {[]string{}, "", true}, {[]string{managed}, "", false}, {nil, managed, false},
 	}
 	if runtime.GOOS == "windows" {
 		folderCases = append(folderCases, struct {
@@ -866,7 +868,12 @@ func bridgeTestResultBody(id, viewID string, epoch int64, hostID string, result 
 
 func bridgeTestStreamParams(bridge *Bridge, workspace, hostID, folder string) url.Values {
 	viewID, epoch := bridgeTestIdentity(bridge, workspace)
-	return url.Values{"viewId": {viewID}, "bindingEpoch": {strconv.FormatInt(epoch, 10)}, "hostId": {hostID}, "folder": {folder}}
+	params := url.Values{"viewId": {viewID}, "bindingEpoch": {strconv.FormatInt(epoch, 10)}, "hostId": {hostID}}
+	// A view without a directory registers no folder at all.
+	if folder != "" {
+		params.Set("folder", folder)
+	}
+	return params
 }
 
 func openManualBridgeStream(t *testing.T, ctx context.Context, bridge *Bridge, workspace, hostID, folder string) (*http.Response, *bufio.Reader) {

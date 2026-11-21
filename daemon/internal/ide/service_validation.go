@@ -3,7 +3,6 @@ package ide
 import (
 	"encoding/json"
 	"math"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -269,17 +268,6 @@ func (s *Service) writeManagedWorkspace(path, directory string) error {
 		return err
 	}
 	return native.WritePrivateFile(path, []byte(WorkspaceFileContent(directory)))
-}
-
-func hostEnvironment() map[string]string {
-	env := make(map[string]string)
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	return env
 }
 
 func (s *Service) snapshot() IdeSnapshot {

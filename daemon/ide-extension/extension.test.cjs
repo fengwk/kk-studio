@@ -75,7 +75,14 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
       },
       updateWorkspaceFolders(start, remove, ...added) {
         calls.updateWorkspaceFolders.push([start, remove, added])
-        return options.updateWorkspaceFolders ? options.updateWorkspaceFolders(start, remove, ...added) : true
+        if (options.updateWorkspaceFolders) { return options.updateWorkspaceFolders(start, remove, ...added) }
+        // A workspace-file window applies folder changes in place: the live list changes and the
+        // workbench reports it, which is what the managed directory change waits for.
+        const next = vscode.workspace.workspaceFolders.slice()
+        next.splice(start, remove, ...added.map((folder) => ({ uri: folder.uri })))
+        vscode.workspace.workspaceFolders = next
+        setImmediate(() => { for (const listener of [...folderListeners]) { listener() } })
+        return true
       },
       async openTextDocument(uri) {
         if (uri.scheme !== 'file') {
@@ -228,6 +235,7 @@ function setup(fake = fakeVscode(), options = {}) {
     viewId: options.viewId || VIEW_ID,
     bindingEpoch: options.bindingEpoch || BINDING_EPOCH,
     reconnectMillis: options.reconnectMillis === undefined ? 5 : options.reconnectMillis,
+    directoryConfirmMillis: options.directoryConfirmMillis === undefined ? 10 : options.directoryConfirmMillis,
     http: network.http,
   })
   host.start()
@@ -249,6 +257,16 @@ async function command(context, op, fields = {}) {
 }
 
 async function focus(context) { return command(context, 'focusTerminal') }
+
+// A directory change answers nothing on this channel when control moves to the restarted host, so
+// these tests observe the side effects instead of a reply.
+async function changeDirectory(context, fields) {
+  await connected(context)
+  context.network.streams.at(-1).response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', ...fields })}\n`)
+  await waitFor(() => context.fake.calls.updateWorkspaceFolders.length > 0)
+  await waitFor(() => context.fake.calls.commands.length > 0 || context.network.streams.at(-1).request.destroyed)
+  return context.fake.calls.updateWorkspaceFolders.at(-1)
+}
 
 test('openAttachment displays immutable virtual text and releases it on close or host disposal', async (t) => {
   const context = setup()
@@ -299,6 +317,18 @@ function expectedReply(context, id, result) {
   const hostId = new URL(context.network.streams[0].url).searchParams.get('hostId')
   return Object.assign({ id, viewId: VIEW_ID, bindingEpoch: BINDING_EPOCH, hostId }, result)
 }
+
+test('refreshExplorer adds no root to a zero-root window', async (t) => {
+  const fake = fakeVscode(WORKSPACE, [])
+  const context = setup(fake)
+  t.after(() => context.host.dispose())
+  const result = await command(context, 'refreshExplorer', { path: '/anywhere/file.txt' })
+  assert.deepEqual(result, expectedReply(context, 'cmd-1', { ok: true }))
+  assert.deepEqual(fake.calls.commands, ['kk-studio.refreshExplorer'])
+  // Refreshing is never a way to acquire a root, and a window without one has nothing to refresh.
+  assert.deepEqual(fake.calls.updateWorkspaceFolders, [])
+  assert.deepEqual(fake.vscode.workspace.workspaceFolders, [])
+})
 
 test('refreshExplorer failure is reported instead of acknowledged as success', async (t) => {
   const fake = fakeVscode(undefined, ['/home/user'], { executeCommand: () => { throw new Error('not available') } })
@@ -430,24 +460,129 @@ test('disposes a terminal when daemon-side process supervision rejects it', asyn
   } finally { context.host.dispose() }
 })
 
-test('refuses a directory change while text documents are dirty', async () => {
+test('confirms a no-op directory change without closing editors or restarting', async () => {
+  const fake = fakeVscode(WORKSPACE, ['/home/user'], { tabGroups: [{ tabs: [{}] }] })
+  const context = setup(fake)
+  try {
+    const result = await command(context, 'changeDirectory', { directory: '/home/user' })
+    assert.deepEqual(result, expectedReply(context, 'cmd-1', { ok: true, directory: '/home/user' }))
+    assert.deepEqual(fake.calls.updateWorkspaceFolders, [])
+    assert.deepEqual(fake.calls.closeTabs, [])
+    assert.deepEqual(fake.calls.commands, [])
+    assert.equal(context.network.streams[0].request.destroyed, false)
+  } finally { context.host.dispose() }
+})
+
+test('leaves a cancelled native prompt in control of the current root', async () => {
+  const fake = fakeVscode(WORKSPACE, ['/home/user'], { tabGroups: [{ tabs: [{}] }], closeTabs: () => false })
+  const context = setup(fake)
+  try {
+    const result = await command(context, 'changeDirectory', { directory: '/target' })
+    assert.deepEqual(
+      result,
+      expectedReply(context, 'cmd-1', { ok: false, code: 'CANCELLED', message: 'directory change was cancelled' }),
+    )
+    assert.equal(fake.calls.closeTabs.length, 1)
+    assert.deepEqual(fake.calls.updateWorkspaceFolders, [])
+    assert.deepEqual(fake.calls.commands, [])
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    assert.equal(context.network.streams.length, 1)
+    assert.equal(context.network.streams[0].request.destroyed, false)
+  } finally { context.host.dispose() }
+})
+
+test('refuses a directory change when an unrepresented dirty document survives', async () => {
+  // The native prompts only cover editors they can see; a hidden draft keeps the old root.
   const context = setup()
   try {
     context.fake.vscode.workspace.textDocuments.push({ isDirty: true })
     const result = await command(context, 'changeDirectory', { directory: '/target' })
-    assert.equal(result.code, 'DIRTY')
-    assert.deepEqual(context.fake.calls.updateWorkspaceFolders, [])
-  } finally { context.host.dispose() }
-})
-
-test('confirms a no-op directory change without restarting the extension host', async () => {
-  const context = setup()
-  try {
-    const result = await command(context, 'changeDirectory', { directory: '/home/user' })
-    assert.deepEqual(result, expectedReply(context, 'cmd-1', { ok: true, directory: '/home/user' }))
+    assert.deepEqual(
+      result,
+      expectedReply(context, 'cmd-1', {
+        ok: false,
+        code: 'DIRTY',
+        message: 'save or discard unsaved changes before switching directory',
+      }),
+    )
     assert.deepEqual(context.fake.calls.updateWorkspaceFolders, [])
     assert.equal(context.network.streams[0].request.destroyed, false)
   } finally { context.host.dispose() }
+})
+
+test('gives a zero-root window its first managed root through a restarted host', async () => {
+  const fake = fakeVscode(WORKSPACE, [])
+  const context = setup(fake)
+  try {
+    await connected(context)
+    // A zero-root window registers no folder at all; it is not a folder that failed to resolve.
+    assert.deepEqual(new URL(context.network.streams[0].url).searchParams.getAll('folder'), [])
+    const [start, remove, added] = await changeDirectory(context, { directory: '/target' })
+    assert.deepEqual([start, remove], [0, 0])
+    assert.equal(added.length, 1)
+    assert.equal(added[0].uri.fsPath, '/target')
+    // The folder list is live here, so this window restarts and its fresh host reports the root.
+    assert.deepEqual(fake.calls.commands, ['workbench.action.reloadWindow'])
+    assert.equal(context.network.streams[0].request.destroyed, true)
+    assert.equal(context.network.posts.some((post) => post.payload.id === 'change'), false)
+  } finally { context.host.dispose() }
+})
+
+test('replaces every live folder before the window restarts into the new root', async () => {
+  const fake = fakeVscode(WORKSPACE, ['/first', '/second'])
+  const context = setup(fake)
+  try {
+    const [start, remove] = await changeDirectory(context, { directory: '/target' })
+    assert.deepEqual([start, remove], [0, 2])
+    assert.deepEqual(fake.vscode.workspace.workspaceFolders.map((folder) => folder.uri.fsPath), ['/target'])
+    assert.deepEqual(fake.calls.commands, ['workbench.action.reloadWindow'])
+  } finally { context.host.dispose() }
+})
+
+test('does not restart a window the workbench replaces for the new root', async () => {
+  // Without a workspace file a folder swap opens a replacement window, whose fresh host confirms
+  // the target root; asking this window to reload as well would restart it for nothing.
+  const fake = fakeVscode(WORKSPACE, ['/home/user'])
+  fake.vscode.workspace.workspaceFile = undefined
+  const context = setup(fake)
+  try {
+    const [start, remove, added] = await changeDirectory(context, { directory: '/target' })
+    assert.deepEqual([start, remove], [0, 1])
+    assert.equal(added[0].uri.fsPath, '/target')
+    assert.deepEqual(fake.calls.commands, [])
+    assert.equal(context.network.streams[0].request.destroyed, true)
+  } finally { context.host.dispose() }
+})
+
+test('keeps the old root when the workbench never shows the applied folder change', async () => {
+  // Fail closed: without evidence that the new root is live, no restart is asked for and no
+  // confirmation is claimed, so the daemon keeps the change unknown instead of trusting it.
+  const fake = fakeVscode(WORKSPACE, ['/home/user'], { updateWorkspaceFolders: () => true })
+  const context = setup(fake, { directoryConfirmMillis: 5 })
+  try {
+    await connected(context)
+    context.network.streams[0].response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', directory: '/target' })}\n`)
+    await waitFor(() => fake.calls.updateWorkspaceFolders.length === 1)
+    await waitFor(() => context.network.streams[0].request.destroyed)
+    assert.deepEqual(fake.calls.commands, [])
+    assert.equal(context.network.posts.some((post) => post.payload.id === 'change'), false)
+  } finally { context.host.dispose() }
+})
+
+test('refuses a directory the daemon cannot have registered', async () => {
+  const directories = ['relative/dir', `/home/user/${'a'.repeat(4096)}`, '/home/user/\u0000bad', null, 42]
+  for (const directory of directories) {
+    const fake = fakeVscode()
+    const context = setup(fake)
+    try {
+      const result = await command(context, 'changeDirectory', { directory })
+      assert.equal(result.ok, false)
+      assert.equal(result.message, 'directory change was rejected')
+      assert.deepEqual(fake.calls.updateWorkspaceFolders, [])
+      assert.deepEqual(fake.calls.closeTabs, [])
+      assert.deepEqual(fake.vscode.workspace.workspaceFolders.map((folder) => folder.uri.fsPath), ['/home/user'])
+    } finally { context.host.dispose() }
+  }
 })
 
 test('reports a rejected public workspace-folder update safely', async () => {
@@ -457,17 +592,7 @@ test('reports a rejected public workspace-folder update safely', async () => {
     assert.equal(result.ok, false)
     assert.equal(result.message, 'directory change was rejected')
     assert.equal(context.network.streams[0].request.destroyed, false)
-  } finally { context.host.dispose() }
-})
-
-test('retires control immediately after a public folder update is accepted', async () => {
-  const context = setup()
-  try {
-    await connected(context)
-    context.network.streams[0].response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', directory: '/target' })}\n`)
-    await waitFor(() => context.fake.calls.updateWorkspaceFolders.length === 1)
-    await waitFor(() => context.network.streams[0].request.destroyed)
-    assert.equal(context.network.posts.some((post) => post.payload.id === 'change'), false)
+    assert.deepEqual(context.fake.calls.commands, [])
   } finally { context.host.dispose() }
 })
 
@@ -711,6 +836,30 @@ test('a clean window snapshots as an explicit complete and empty backup', async 
   } finally { context.host.dispose() }
 })
 
+test('backs up and restores an absolute draft in a zero-root window', async () => {
+  // A view without a root still holds drafts; recovery keys them by absolute path, not by folder.
+  const fake = fakeVscode(WORKSPACE, [])
+  fake.openedDocuments.set('/outside/draft.txt', {
+    uri: contextUri('/outside/draft.txt'), isDirty: false, isClosed: false,
+    getText: () => 'current', positionAt: (offset) => new FakePosition(0, offset),
+  })
+  fake.vscode.workspace.textDocuments.push({
+    uri: contextUri('/outside/draft.txt'), isDirty: true, isClosed: false, getText: () => 'unsaved',
+  })
+  const context = setup(fake)
+  try {
+    assert.deepEqual(
+      await command(context, 'snapshot', { maxBytes: 1024 }),
+      expectedReply(context, 'cmd-1', {
+        ok: true, documents: [{ path: '/outside/draft.txt', text: 'unsaved' }], bytes: 7, omitted: 0, complete: true,
+      }),
+    )
+    const restored = await command(context, 'restore', { documents: [{ path: '/outside/draft.txt', text: 'recovered' }] })
+    assert.deepEqual(restored, expectedReply(context, 'cmd-2', { ok: true, restored: 1, skipped: 0 }))
+    assert.equal(fake.calls.applyEdit[0].edits[0].text, 'recovered')
+  } finally { context.host.dispose() }
+})
+
 test('explicit discard still closes a view whose untitled buffer cannot be backed up', async () => {
   const context = setup()
   await focus(context)
@@ -871,13 +1020,29 @@ test('stops reconnecting when the daemon returns 410 for a superseded host', asy
   } finally { context.host.dispose() }
 })
 
-test('does not re-register when workspace folders change during an active session', async () => {
+test('restarts registration when the workbench changes folders without a managed command', async () => {
   const context = setup(undefined, { reconnectMillis: 1 })
   try {
     await connected(context)
     context.fake.fireFolders()
     await waitFor(() => context.network.streams.length >= 2)
     assert.deepEqual(new URL(context.network.streams[1].url).searchParams.getAll('folder'), ['/home/user'])
+  } finally { context.host.dispose() }
+})
+
+test('gives up control when a folder change leaves the managed binding', async () => {
+  const network = fakeHttp({ streamStatuses: [200, 410] })
+  const context = setup(undefined, { network, reconnectMillis: 1 })
+  try {
+    await connected(context)
+    context.fake.vscode.workspace.workspaceFolders = [{ uri: context.fake.fileUri('/elsewhere') }]
+    context.fake.fireFolders()
+    await waitFor(() => context.network.streams.length >= 2)
+    assert.deepEqual(new URL(context.network.streams[1].url).searchParams.getAll('folder'), ['/elsewhere'])
+    // The daemon refuses a window that is no longer the managed root, and a refused host stays gone.
+    await waitFor(() => context.network.streams[1].request.destroyed)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    assert.equal(context.network.streams.length, 2)
   } finally { context.host.dispose() }
 })
 

@@ -98,93 +98,67 @@ func TestWorkspaceFileContent(t *testing.T) {
 	}
 }
 
-func TestListCanonicalDirectories(t *testing.T) {
-	root := t.TempDir()
-	for _, name := range []string{"zeta", "alpha"} {
-		if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(root, "file"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	listing, err := ListDirectories(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listing.Children) != 2 || listing.Children[0].Name != "alpha" || listing.Children[1].Name != "zeta" {
-		t.Fatalf("unexpected listing: %#v", listing)
+// Verifies a view created without a directory registers an empty folder list.
+func TestWorkspaceFileContentWithoutDirectory(t *testing.T) {
+	want := "{\n  \"folders\": []\n}\n"
+	if got := WorkspaceFileContent(""); got != want {
+		t.Fatalf("zero-folder workspace content mismatch:\n%s", got)
 	}
 }
 
-func TestUnsafeDirectoryNames(t *testing.T) {
+// Verifies the two Windows URI path shapes a VS Code client reports are converted natively.
+func TestWindowsPathFromURIPath(t *testing.T) {
+	for _, test := range []struct {
+		input, want string
+	}{
+		{"/C:/work/project", `C:\work\project`},
+		{"/c:/work/space", `c:\work\space`},
+		{"/C:/", `C:\`},
+		{"//server/share/project", `\\server\share\project`},
+		// A percent sign is an actual file name character and is never decoded.
+		{"/C:/work/100%25/50% off", `C:\work\100%25\50% off`},
+		// Native and unrecognized shapes stay untouched.
+		{`C:\work\project`, `C:\work\project`},
+		{`\\server\share`, `\\server\share`},
+		{"/opt/work", "/opt/work"},
+		{"/1:/work", "/1:/work"},
+		{"/C:work", "/C:work"},
+		{"", ""},
+	} {
+		if got := windowsPathFromURIPath(test.input); got != test.want {
+			t.Errorf("windowsPathFromURIPath(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
+// Verifies only Windows clients need URI path conversion.
+func TestNativeDirectoryPath(t *testing.T) {
+	converted := windowsPathFromURIPath("/C:/work/project")
 	if runtime.GOOS == "windows" {
-		t.Skip("unsafe directory names are platform-specific")
-	}
-	root := t.TempDir()
-	for _, name := range []string{"valid", "line\nbreak"} {
-		if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
-			t.Fatal(err)
+		if got := nativeDirectoryPath("/C:/work/project"); got != converted {
+			t.Fatalf("windows directory = %q, want %q", got, converted)
 		}
+		return
 	}
-	listing, err := ListDirectories(root)
-	if err != nil || len(listing.Children) != 1 || listing.Children[0].Name != "valid" || !listing.Truncated {
-		t.Fatalf("unsafe name leaked: %#v, %v", listing, err)
-	}
-	if _, err := ListDirectories(filepath.Join(root, "line\nbreak")); err == nil || err.Error() != "directory path is invalid" {
-		t.Fatalf("unsafe directory error = %v", err)
+	if got := nativeDirectoryPath("/C:/work/project"); got != "/C:/work/project" {
+		t.Fatalf("non-windows directory = %q, want the reported path", got)
 	}
 }
 
-func TestHostHome(t *testing.T) {
-	if home, err := HostHome(map[string]string{"HOME": "/home/test"}); err != nil || home != "/home/test" {
-		t.Fatalf("HOME = %q, %v", home, err)
+// Verifies a view without a directory may only back up captured absolute dirty documents.
+func TestRecoveryBackupDirectoryIsOptional(t *testing.T) {
+	backup := RecoveryBackup{ViewID: "123e4567-e89b-42d3-a456-426614174000", BindingEpoch: "1", CreatedAt: "2025-01-01T00:00:00Z", Complete: true, Documents: []RecoveryDocument{{Path: "/work/draft.txt", Text: "draft"}}}
+	if err := validateBackup(backup); err != nil {
+		t.Fatalf("zero-folder backup rejected: %v", err)
 	}
-	if home, err := HostHome(map[string]string{"USERPROFILE": "C:\\\\Users\\\\test"}); err != nil || home == "" {
-		t.Fatalf("USERPROFILE = %q, %v", home, err)
+	backup.Directory = "relative/directory"
+	if err := validateBackup(backup); err == nil {
+		t.Fatal("relative backup directory accepted")
 	}
-	if _, err := HostHome(nil); err == nil {
-		t.Fatal("missing home accepted")
-	}
-}
-
-func TestListingLimits(t *testing.T) {
-	var names []string
-	truncated := false
-	for i := 1000; i >= 0; i-- {
-		names, truncated = insertDirectoryName(names, fmt.Sprintf("%04d", i))
-	}
-	last := ""
-	if len(names) > 0 {
-		last = names[len(names)-1]
-	}
-	if len(names) != 1000 || !truncated || last != "0999" {
-		t.Fatalf("name count limit: last=%q count=%d truncated=%v", last, len(names), truncated)
-	}
-	root, err := os.MkdirTemp(os.TempDir(), "i")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
-	for i := 0; i < 1001; i++ {
-		if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("d%04d", i)), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	listing, err := ListDirectories(root)
-	if err != nil || len(listing.Children) == 0 || len(listing.Children) > 1000 || !listing.Truncated {
-		t.Fatalf("entry limit: children=%d truncated=%v err=%v", len(listing.Children), listing.Truncated, err)
-	}
-	root = t.TempDir()
-	for i := 0; i < 250; i++ {
-		name := fmt.Sprintf("%03d-%s", i, strings.Repeat("x", 220))
-		if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	listing, err = ListDirectories(root)
-	if err != nil || len(listing.Children) >= 250 || !listing.Truncated {
-		t.Fatalf("byte limit: children=%d truncated=%v err=%v", len(listing.Children), listing.Truncated, err)
+	backup.Directory = ""
+	backup.Documents[0].Path = "relative/draft.txt"
+	if err := validateBackup(backup); err == nil {
+		t.Fatal("relative backup document accepted")
 	}
 }
 

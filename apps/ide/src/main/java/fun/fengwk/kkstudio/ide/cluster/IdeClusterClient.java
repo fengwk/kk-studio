@@ -4,11 +4,9 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
@@ -163,15 +161,6 @@ public class IdeClusterClient {
       EnvironmentIdeViewBindingDTO request) {
     exchange(
         "POST", IdeInternalPaths.mobileLayoutPath(environmentId, viewId), owner, request, null);
-  }
-
-  public EnvironmentIdeDirectoryListingDTO listDirectories(
-      EnvironmentId environmentId, ClusterOwnerRoute owner, String path) {
-    String target = IdeInternalPaths.environmentPrefix(environmentId) + "/directories";
-    if (path != null) {
-      target += "?path=" + UrlEncoding.encode(path);
-    }
-    return exchange("GET", target, owner, null, EnvironmentIdeDirectoryListingDTO.class);
   }
 
   public void closeView(

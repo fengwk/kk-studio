@@ -21,8 +21,9 @@ import java.util.regex.Pattern;
  * IDE 命令、结果快照与租约的语义校验。
  *
  * <p>按 action 校验字段归属：OPEN_VIEW 要求完整 open
- * 字段集合，CHANGE_DIRECTORY/FOCUS_TERMINAL/COLLAPSE_MOBILE/CLOSE_VIEW 要求已绑定 view，LIST_* 禁止任何 view
- * 字段。IDE 结果区分失败回执、目录列举、快照与绑定回执四类形态，并保证快照内 top-level 绑定与对应 summary 一致。
+ * 字段集合，CHANGE_DIRECTORY/FOCUS_TERMINAL/COLLAPSE_MOBILE/CLOSE_VIEW 要求已绑定 view，LIST_VIEWS 禁止任何 view
+ * 字段。IDE 结果区分失败回执、快照与绑定回执三类形态，并保证快照内 top-level 绑定与对应 summary 一致。绑定事实以 {@code workspacePath} 为正
+ * bindingEpoch 为必备字段；零根视图的 {@code directory} 可缺省。
  */
 final class ControlProtocolIdeChecks {
 
@@ -145,7 +146,7 @@ final class ControlProtocolIdeChecks {
         }
         rejectOpenFields(command);
       }
-      case LIST_VIEWS, LIST_DIRECTORIES -> {
+      case LIST_VIEWS -> {
         if (command.hasViewId()
             || command.hasBrowserSessionId()
             || command.hasEventNodeId()
@@ -155,12 +156,9 @@ final class ControlProtocolIdeChecks {
             || command.hasExpectedBindingEpoch()
             || command.hasExpectedDaemonInstanceId()
             || command.getMode() != IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED
-            || (command.getAction() == IdeAction.LIST_VIEWS && command.hasDirectory())
+            || command.hasDirectory()
             || command.hasDiscard()) {
           throw new ControlProtocolException("IDE list command has invalid fields");
-        }
-        if (command.hasDirectory()) {
-          requireIdePath(command.getDirectory(), "ideCommand.directory");
         }
       }
       default -> throw new ControlProtocolException("ideCommand.action is required");
@@ -212,10 +210,6 @@ final class ControlProtocolIdeChecks {
     if (result.hasCode() || result.hasMessage()) {
       throw new ControlProtocolException("successful IDE result must not declare code or message");
     }
-    if (result.hasDirectoryListing()) {
-      validateDirectoryListingResult(result);
-      return;
-    }
     if (result.hasRevision()) {
       validateIdeSnapshot(result);
     } else if (result.getViewsCount() > 0) {
@@ -223,11 +217,6 @@ final class ControlProtocolIdeChecks {
     }
     if (declaresBinding(result)) {
       validateBoundIdeResult(result);
-      return;
-    }
-    if (result.hasDirectory()) {
-      requireUuid(result.hasViewId(), result.getViewId(), "ideResult.viewId");
-      requireIdePath(result.getDirectory(), "ideResult.directory");
       return;
     }
     if (result.hasViewId()) {
@@ -242,14 +231,14 @@ final class ControlProtocolIdeChecks {
   /** 失败回执：只能带 code/message，可附只读快照；带 views 时必须同时带 revision。 */
   private static void validateFailedIdeResult(IdeResult result) {
     if (result.hasRevision()) {
-      if (declaresViewState(result) || result.hasDirectoryListing()) {
+      if (declaresViewState(result)) {
         throw new ControlProtocolException(
             "failed IDE result with a snapshot must only declare code, message, revision and views");
       }
       validateIdeSnapshot(result);
     } else if (result.getViewsCount() > 0) {
       throw new ControlProtocolException("ideResult.revision is required with views");
-    } else if (declaresViewState(result) || result.hasDirectoryListing()) {
+    } else if (declaresViewState(result)) {
       throw new ControlProtocolException("failed IDE result must only declare code and message");
     }
     requirePattern(result.hasCode(), result.getCode(), "ideResult.code", IDE_CODE_PATTERN);
@@ -261,34 +250,7 @@ final class ControlProtocolIdeChecks {
         true);
   }
 
-  /** 目录列举回执：与 view/快照字段互斥，children 只校验名称与路径。 */
-  private static void validateDirectoryListingResult(IdeResult result) {
-    if (result.hasRevision() || result.getViewsCount() > 0 || declaresViewState(result)) {
-      throw new ControlProtocolException(
-          "directory listing result must not contain view or snapshot fields");
-    }
-    IdeDirectoryListing listing = result.getDirectoryListing();
-    requireIdePath(
-        requirePresent(listing.hasPath(), listing.getPath(), "directoryListing.path"),
-        "directoryListing.path");
-    if (listing.hasParentPath()) {
-      requireIdePath(listing.getParentPath(), "directoryListing.parentPath");
-    }
-    if (!listing.hasTruncated() || listing.getChildrenCount() > 1000) {
-      throw new ControlProtocolException(
-          "directory listing requires truncated and at most 1000 children");
-    }
-    for (IdeDirectoryEntry child : listing.getChildrenList()) {
-      requireIdePath(
-          requirePresent(child.hasName(), child.getName(), "directoryEntry.name"),
-          "directoryEntry.name");
-      requireIdePath(
-          requirePresent(child.hasPath(), child.getPath(), "directoryEntry.path"),
-          "directoryEntry.path");
-    }
-  }
-
-  /** 完整绑定回执：全部绑定字段必填，带 revision 时还必须与快照中的同名 summary 一致。 */
+  /** 完整绑定回执：零根视图可缺省 directory，workspacePath 与 epoch 永远必填；带 revision 时还必须与快照中的同名 summary 一致。 */
   private static void validateBoundIdeResult(IdeResult result) {
     requireUuid(result.hasViewId(), result.getViewId(), "ideResult.viewId");
     requireUuid(
@@ -297,9 +259,9 @@ final class ControlProtocolIdeChecks {
     requireUuid(result.hasConnectionId(), result.getConnectionId(), "ideResult.connectionId");
     requireUuid(result.hasClaimId(), result.getClaimId(), "ideResult.claimId");
     requirePositive(result.hasBindingEpoch(), result.getBindingEpoch(), "ideResult.bindingEpoch");
-    requireIdePath(
-        requirePresent(result.hasDirectory(), result.getDirectory(), "ideResult.directory"),
-        "ideResult.directory");
+    if (result.hasDirectory()) {
+      requireIdePath(result.getDirectory(), "ideResult.directory");
+    }
     requireIdePath(
         requirePresent(
             result.hasWorkspacePath(), result.getWorkspacePath(), "ideResult.workspacePath"),
@@ -321,13 +283,14 @@ final class ControlProtocolIdeChecks {
         || result.hasWorkspacePath();
   }
 
-  /** 任一绑定字段出现即按完整绑定回执校验。 */
+  /** 任一绑定字段出现即按完整绑定回执校验；directory 只在绑定回执里合法。 */
   private static boolean declaresBinding(IdeResult result) {
     return result.hasBrowserSessionId()
         || result.hasEventNodeId()
         || result.hasConnectionId()
         || result.hasClaimId()
         || result.hasBindingEpoch()
+        || result.hasDirectory()
         || result.hasWorkspacePath();
   }
 
@@ -372,7 +335,7 @@ final class ControlProtocolIdeChecks {
           || !view.getConnectionId().equals(result.getConnectionId())
           || !view.getClaimId().equals(result.getClaimId())
           || view.getBindingEpoch() != result.getBindingEpoch()
-          || !view.getDirectory().equals(result.getDirectory())
+          || !sameOptionalPath(view, result)
           || !view.getWorkspacePath().equals(result.getWorkspacePath())) {
         throw new ControlProtocolException(
             "ideResult snapshot view must match the top-level binding");
@@ -383,6 +346,14 @@ final class ControlProtocolIdeChecks {
         "ideResult snapshot must contain the top-level binding view");
   }
 
+  /** 零根绑定两侧都没有 directory；仅一侧缺省与带值都属于不一致。 */
+  private static boolean sameOptionalPath(IdeViewSummary view, IdeResult result) {
+    if (!view.hasDirectory() || !result.hasDirectory()) {
+      return view.hasDirectory() == result.hasDirectory();
+    }
+    return view.getDirectory().equals(result.getDirectory());
+  }
+
   static void validateView(IdeViewSummary view, String path) {
     requireUuid(view.hasViewId(), view.getViewId(), path + ".viewId");
     requireUuid(view.hasBrowserSessionId(), view.getBrowserSessionId(), path + ".browserSessionId");
@@ -390,9 +361,9 @@ final class ControlProtocolIdeChecks {
     requireUuid(view.hasConnectionId(), view.getConnectionId(), path + ".connectionId");
     requireUuid(view.hasClaimId(), view.getClaimId(), path + ".claimId");
     requirePositive(view.hasBindingEpoch(), view.getBindingEpoch(), path + ".bindingEpoch");
-    requireIdePath(
-        requirePresent(view.hasDirectory(), view.getDirectory(), path + ".directory"),
-        path + ".directory");
+    if (view.hasDirectory()) {
+      requireIdePath(view.getDirectory(), path + ".directory");
+    }
     requireIdePath(
         requirePresent(view.hasWorkspacePath(), view.getWorkspacePath(), path + ".workspacePath"),
         path + ".workspacePath");

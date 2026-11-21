@@ -140,6 +140,66 @@ class EnvironmentIdeServiceImplTest {
   }
 
   @Test
+  void zeroRootOpenOmitsDirectoryAndKeepsWorkspaceBinding() {
+    transport.replies.add(snapshot(5L, zeroRootSummary(7L, CLAIM)));
+
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null));
+
+    assertNull(dto.getDirectory(), "a zero-root view must not report a directory");
+    assertEquals("/daemon/ws", dto.getWorkspacePath());
+    assertEquals(7L, dto.getBindingEpoch());
+    assertTrue(dto.getEntryUrl().contains("?token="), "a zero-root claim still issues its entry");
+    IdeCommand command = transport.commands.get(0);
+    assertEquals(IdeAction.OPEN_VIEW, command.getAction());
+    assertFalse(command.hasDirectory(), "no directory means zero roots, never a HOME fallback");
+    assertNull(snapshot().find(VIEW).orElseThrow().directory());
+  }
+
+  @Test
+  void reconcileOpenAcceptsAZeroRootReplyWithoutDirectory() {
+    transport.failNext.set(IdeAction.OPEN_VIEW);
+    transport.replies.add(snapshot(5L, zeroRootSummary(7L, CLAIM)));
+
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null));
+
+    assertNull(dto.getDirectory());
+    assertEquals("/daemon/ws", dto.getWorkspacePath());
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
+    assertEquals(1, tickets.pendingCount());
+  }
+
+  /** workspacePath 与 epoch 是绑定必备事实：零根只能用空目录表示，不能用缺失 workspace 表示。 */
+  @Test
+  void openRejectsSnapshotWithoutWorkspacePath() {
+    transport.replies.add(
+        snapshot(5L, summary(7L, CLAIM).toBuilder().clearWorkspacePath().build()));
+
+    DomainException error =
+        assertThrows(
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+
+    assertEquals("IDE_PROTOCOL_ERROR", error.reason());
+    assertEquals(0, tickets.pendingCount());
+  }
+
+  @Test
+  void changeDirectoryStillRequiresADirectory() {
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null));
+    EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
+    change.setBrowserSessionId(BROWSER_SESSION.toString());
+    change.setBindingEpoch(7L);
+    change.setExpectedDaemonInstanceId(DAEMON_INSTANCE);
+
+    DomainException error =
+        assertThrows(
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+
+    assertEquals("validation", error.code().code());
+    assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
+  }
+
+  @Test
   void openViewRequiresExplicitExpectedDaemonInstanceWithoutFallback() {
     EnvironmentIdeOpenViewDTO request = openRequest("create", 0L, null);
     request.setExpectedDaemonInstanceId(null);
@@ -687,7 +747,47 @@ class EnvironmentIdeServiceImplTest {
         assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close));
 
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
+    assertEquals("validation", error.code().code());
     assertTrue(snapshot().find(VIEW).isPresent());
+    assertEquals(1, tickets.pendingCount(), "a cancelled close keeps the current entry ticket");
+  }
+
+  /** 目录切换被用户取消：只映射为可重试的 validation，绑定、入口票据与租约来源快照都不变，同一 epoch 仍可重试。 */
+  @Test
+  void cancelledChangeDirectoryKeepsBindingTicketsAndLeaseSnapshot() {
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null));
+    EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
+    change.setBrowserSessionId(BROWSER_SESSION.toString());
+    change.setBindingEpoch(7L);
+    change.setExpectedDaemonInstanceId(DAEMON_INSTANCE);
+    change.setDirectory("/next");
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(false)
+            .setCode("CANCELLED")
+            .setMessage("save cancelled")
+            .build());
+
+    DomainException error =
+        assertThrows(
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+
+    assertEquals("IDE_CLOSE_CANCELLED", error.reason());
+    assertEquals("validation", error.code().code());
+    assertEquals("/daemon/dir", snapshot().find(VIEW).orElseThrow().directory());
+    assertEquals(1, tickets.pendingCount(), "a cancelled change keeps the current entry ticket");
+
+    // 续租读取的权威快照仍包含同一 epoch 的 OPEN 视图，旧目录没有被取消结果修改。
+    transport.replies.add(snapshot(5L, summary(7L, CLAIM, "/daemon/dir")));
+    EnvironmentIdeViewsDTO leased = service.listViews(ENV);
+    assertEquals(7L, leased.getViews().getFirst().getBindingEpoch());
+    assertEquals("/daemon/dir", leased.getViews().getFirst().getDirectory());
+
+    // 同 epoch 的重试仍被授权，而不是退化为 STALE_BINDING/VIEW_GONE。
+    transport.replies.add(snapshot(6L, summary(7L, CLAIM, "/daemon/next")));
+    EnvironmentIdeViewDTO retried = service.changeDirectory(ENV, VIEW.toString(), change);
+    assertEquals("/daemon/next", retried.getDirectory());
   }
 
   @Test
@@ -950,6 +1050,11 @@ class EnvironmentIdeServiceImplTest {
 
   private static IdeViewSummary summary(long epoch, UUID claimId) {
     return summary(epoch, claimId, "/daemon/dir");
+  }
+
+  /** 零根视图：Daemon 不返回 directory，workspacePath 仍是唯一受管根。 */
+  private static IdeViewSummary zeroRootSummary(long epoch, UUID claimId) {
+    return summary(epoch, claimId).toBuilder().clearDirectory().build();
   }
 
   private static IdeViewSummary summary(long epoch, UUID claimId, String directory) {

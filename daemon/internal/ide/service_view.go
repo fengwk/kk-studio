@@ -160,25 +160,22 @@ func (s *Service) createView(ctx context.Context, parsed parsedOpen, shape strin
 	return openReply(view, s.snapshot()), nil
 }
 
-// prepareOpenWorkspace writes and resolves the managed workspace file under a fresh epoch.
+// prepareOpenWorkspace writes and resolves the managed workspace file under a fresh epoch. A view
+// created without a directory keeps an empty folder list; no host home is substituted.
 func (s *Service) prepareOpenWorkspace(parsed parsedOpen) (string, string, int64, error) {
-	directory := parsed.directory
-	var err error
-	if !parsed.hasDirectory {
-		directory, err = HostHome(hostEnvironment())
+	directory := ""
+	if parsed.hasDirectory {
+		canonical, err := CanonicalDirectory(parsed.directory)
 		if err != nil {
 			return "", "", 0, err
 		}
-	}
-	directory, err = CanonicalDirectory(directory)
-	if err != nil {
-		return "", "", 0, err
+		directory = canonical
 	}
 	workspacePath := filepath.Join(s.paths.ViewsDir, parsed.viewID+".code-workspace")
 	if err := s.writeManagedWorkspace(workspacePath, directory); err != nil {
 		return "", "", 0, NewError("managed workspace could not be written", "UNAVAILABLE")
 	}
-	workspacePath, err = filepath.EvalSymlinks(workspacePath)
+	workspacePath, err := filepath.EvalSymlinks(workspacePath)
 	if err != nil {
 		_ = os.Remove(workspacePath)
 		return "", "", 0, NewError("managed workspace could not be resolved", "UNAVAILABLE")
@@ -600,27 +597,6 @@ func (s *Service) collapseMobile(ctx context.Context, command *protocol.IdeComma
 	return viewAck(viewID), nil
 }
 
-func (s *Service) listDirectories(command *protocol.IdeCommand) *protocol.IdeResult {
-	path := ""
-	if command.Directory != nil {
-		path = command.GetDirectory()
-		if strings.TrimSpace(path) == "" || len([]rune(path)) > maxCommandTextCharacters || hasControl(path) {
-			return failureResult(NewError("directory is invalid", "UNAVAILABLE"), IdeSnapshot{}, false)
-		}
-	} else {
-		var err error
-		path, err = HostHome(hostEnvironment())
-		if err != nil {
-			return failureResult(err, IdeSnapshot{}, false)
-		}
-	}
-	listing, err := ListDirectories(path)
-	if err != nil {
-		return failureResult(err, IdeSnapshot{}, false)
-	}
-	return directoryListingReply(listing)
-}
-
 func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
 	viewID, err := s.requiredViewCommand(command, false)
 	if err != nil {
@@ -835,7 +811,9 @@ func (s *Service) snapshotRecovery(ctx context.Context, view *viewRecord, requir
 		return false, NewError(result.MessageOr("dirty text snapshot failed"), "UNAVAILABLE")
 	}
 	complete := result.Complete != nil && *result.Complete && (result.Omitted == nil || *result.Omitted == 0)
-	if requireComplete && (!complete || result.Documents == nil) {
+	// A view without a directory may hold drafts from unrelated files, so a force close also needs
+	// a captured, provably complete set of absolute-path documents.
+	if (requireComplete || view.directory == "") && (!complete || result.Documents == nil) {
 		return false, NewError("dirty text snapshot was incomplete", "UNAVAILABLE")
 	}
 	if len(result.Documents) == 0 {

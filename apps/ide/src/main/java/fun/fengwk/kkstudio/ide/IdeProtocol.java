@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
@@ -18,7 +17,8 @@ import java.util.UUID;
 /**
  * IDE 控制面的协议边界：Daemon 回执的取值校验、状态/模式映射、快照与 DTO 转换，以及 IDE 结构化失败工厂。
  *
- * <p>回执里的字符串都不可信：任何非规范值都翻译为 {@code IDE_PROTOCOL_ERROR}，绝不把坏回执写进权威快照。
+ * <p>回执里的字符串都不可信：任何非规范值都翻译为 {@code IDE_PROTOCOL_ERROR}，绝不把坏回执写进权威快照。绑定以 {@code workspacePath} 与正
+ * bindingEpoch 为必备事实；零根视图没有目录，读到缺省目录是正常事实而不是缺失。
  */
 final class IdeProtocol {
 
@@ -75,7 +75,7 @@ final class IdeProtocol {
           protocolUuid(view.getConnectionId(), "connectionId"),
           protocolUuid(view.getClaimId(), "claimId"),
           view.getBindingEpoch(),
-          IdeInputs.requireProtocolPath(view.getDirectory(), "directory"),
+          view.hasDirectory() ? view.getDirectory() : null,
           IdeInputs.requireProtocolPath(view.getWorkspacePath(), "workspacePath"),
           view.getState());
     } catch (DomainException error) {
@@ -108,29 +108,6 @@ final class IdeProtocol {
     dto.setDaemonInstanceId(identity.daemonInstanceId());
     dto.setRevision(snapshot.revision());
     dto.setViews(snapshot.views().stream().map(view -> toDto(identity, view)).toList());
-    return dto;
-  }
-
-  static EnvironmentIdeDirectoryListingDTO toDirectoryListing(IdeResult reply) {
-    if (!reply.hasDirectoryListing()) {
-      throw protocolFailure("daemon did not return a directory listing");
-    }
-    var listing = reply.getDirectoryListing();
-    EnvironmentIdeDirectoryListingDTO dto = new EnvironmentIdeDirectoryListingDTO();
-    dto.setPath(listing.getPath());
-    dto.setParentPath(listing.hasParentPath() ? listing.getParentPath() : null);
-    dto.setTruncated(listing.getTruncated());
-    dto.setChildren(
-        listing.getChildrenList().stream()
-            .map(
-                child -> {
-                  EnvironmentIdeDirectoryListingDTO.Entry entry =
-                      new EnvironmentIdeDirectoryListingDTO.Entry();
-                  entry.setName(child.getName());
-                  entry.setPath(child.getPath());
-                  return entry;
-                })
-            .toList());
     return dto;
   }
 

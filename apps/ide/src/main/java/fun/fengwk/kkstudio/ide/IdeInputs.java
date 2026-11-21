@@ -9,7 +9,7 @@ import java.util.UUID;
 /**
  * IDE 控制面客户端入参校验：字段缺失、形态错误与 CREATE/RESUME 的显式实例/epoch 约束。
  *
- * <p>{@link #requireDirectory(String)} 同时作为跨节点组合服务在路由前对目录入参的唯一校验，避免把非法请求转发到 owner。
+ * <p>目录是可缺省的候选输入：缺省表示零根视图，存在时才校验形态；绑定事实始终以 Daemon 回执的 {@code workspacePath} 与正 bindingEpoch 为准。
  */
 public final class IdeInputs {
 
@@ -109,6 +109,14 @@ public final class IdeInputs {
       throw IdeProtocol.protocolFailure("daemon did not return " + field);
     }
     return value;
+  }
+
+  /** 可缺省的目录回执：缺省是零根视图的正常事实，存在时仍必须非空白。 */
+  static String optionalProtocolPath(String value, String field) {
+    if (value == null) {
+      return null;
+    }
+    return requireProtocolPath(value, field);
   }
 
   /** 客户端提交的 viewId：canonical UUID。 */

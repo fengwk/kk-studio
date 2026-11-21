@@ -814,20 +814,6 @@ export interface EnvironmentIdeCloseViewDTO {
   discard: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO */
-export interface EnvironmentIdeDirectoryListingDTO {
-  path: string
-  parentPath: string | null
-  children: EnvironmentIdeDirectoryListingEntry[]
-  truncated: boolean
-}
-
-/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO.Entry */
-export interface EnvironmentIdeDirectoryListingEntry {
-  name: string
-  path: string
-}
-
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode */
 export type EnvironmentIdeOpenMode =
   | 'create'
@@ -868,7 +854,7 @@ export interface EnvironmentIdeViewDTO {
   claimId: string
   daemonInstanceId: string
   bindingEpoch: string
-  directory: string
+  directory?: string | null
   workspacePath: string
   state: EnvironmentIdeViewState
   entryUrl?: string | null
@@ -3145,11 +3131,6 @@ export interface ApiRoutes {
   'GET /api/harness/threads/{threadId}/tree': {
     path: { threadId: string }
     response: HarnessThreadTreeNodeDTO[]
-  }
-  'GET /api/ide/environments/{environmentId}/directories': {
-    path: { environmentId: string }
-    query: { path?: string }
-    response: EnvironmentIdeDirectoryListingDTO
   }
   'GET /api/ide/environments/{environmentId}/views/{viewId}': {
     path: { environmentId: string; viewId: string }

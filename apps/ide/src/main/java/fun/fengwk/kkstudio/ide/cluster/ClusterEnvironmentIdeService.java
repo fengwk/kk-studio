@@ -4,11 +4,9 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.ide.IdeInputs;
 import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
@@ -103,16 +101,6 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
         environmentId,
         () -> local.collapseMobile(environmentId, parsedViewId, request),
         owner -> client.collapseMobile(environmentId, owner, parsedViewId, request));
-  }
-
-  @Override
-  public EnvironmentIdeDirectoryListingDTO listDirectories(
-      EnvironmentId environmentId, String path) {
-    String directory = IdeInputs.requireDirectory(path);
-    return route(
-        environmentId,
-        () -> local.listDirectories(environmentId, directory),
-        owner -> client.listDirectories(environmentId, owner, directory));
   }
 
   @Override

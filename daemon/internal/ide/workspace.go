@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"unicode/utf8"
@@ -55,19 +54,35 @@ func ValidateBindingEpoch(value string) (string, error) {
 	return value, nil
 }
 
-// HostHome returns HOME or USERPROFILE and refuses to guess when neither is set.
-func HostHome(env map[string]string) (string, error) {
-	if home := env["HOME"]; strings.TrimSpace(home) != "" {
-		return home, nil
+// nativeDirectoryPath converts the VS Code URI path a Windows Studio client reports into a native
+// path. URI paths are not percent-decoded: a percent sign is an actual file name character. Other
+// platforms already report native absolute paths, and Windows paths are never re-encoded.
+func nativeDirectoryPath(input string) string {
+	if runtime.GOOS != "windows" {
+		return input
 	}
-	if home := env["USERPROFILE"]; strings.TrimSpace(home) != "" {
-		return home, nil
+	return windowsPathFromURIPath(input)
+}
+
+// windowsPathFromURIPath maps the two URI path shapes VS Code reports for Windows: `/C:/folder`
+// for a drive path and `//server/share` for a UNC path. Unmatched shapes are returned unchanged.
+func windowsPathFromURIPath(input string) string {
+	if rest, ok := strings.CutPrefix(input, "//"); ok {
+		return `\\` + strings.ReplaceAll(rest, "/", `\`)
 	}
-	return "", NewError("host HOME is not set", "UNAVAILABLE")
+	if len(input) >= 3 && input[0] == '/' && input[2] == ':' && isASCIILetter(input[1]) && (len(input) == 3 || input[3] == '/') {
+		return strings.ReplaceAll(input[1:], "/", `\`)
+	}
+	return input
+}
+
+func isASCIILetter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
 }
 
 // CanonicalDirectory resolves symlinks and requires an existing directory.
 func CanonicalDirectory(input string) (string, error) {
+	input = nativeDirectoryPath(input)
 	if !filepath.IsAbs(input) {
 		return "", NewError("directory must be an absolute path", "UNAVAILABLE")
 	}
@@ -88,94 +103,25 @@ func CanonicalDirectory(input string) (string, error) {
 	return resolved, nil
 }
 
-// DirectoryEntry is one real direct child directory.
-type DirectoryEntry struct {
-	Name string `json:"name"`
+// workspaceFolder is one entry of the managed workspace folder list.
+type workspaceFolder struct {
 	Path string `json:"path"`
 }
 
-// DirectoryListing is bounded for safe inclusion in a control response.
-type DirectoryListing struct {
-	Path       string           `json:"path"`
-	ParentPath string           `json:"parentPath,omitempty"`
-	Children   []DirectoryEntry `json:"children"`
-	Truncated  bool             `json:"truncated"`
-}
-
-// ListDirectories lists direct real directories in canonical name order, within protocol limits.
-func ListDirectories(input string) (DirectoryListing, error) {
-	path, err := CanonicalDirectory(input)
-	if err != nil {
-		return DirectoryListing{}, err
-	}
-	if len([]rune(path)) > 4096 || hasControl(path) {
-		return DirectoryListing{}, NewError("directory path is invalid", "UNAVAILABLE")
-	}
-	listing := DirectoryListing{Path: path, Children: []DirectoryEntry{}}
-	parent := filepath.Dir(path)
-	if parent != path {
-		listing.ParentPath = parent
-	}
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return DirectoryListing{}, NewError("directory cannot be listed", "UNAVAILABLE")
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.TrimSpace(name) == "" || hasControl(name) || len([]rune(filepath.Join(path, name))) > 4096 {
-			listing.Truncated = true
-			continue
-		}
-		var truncated bool
-		names, truncated = insertDirectoryName(names, name)
-		listing.Truncated = listing.Truncated || truncated
-	}
-	encoded, _ := json.Marshal(listing)
-	budget := len(encoded)
-	for _, name := range names {
-		entry := DirectoryEntry{Name: name, Path: filepath.Join(path, name)}
-		encoded, _ = json.Marshal(entry)
-		if budget+len(encoded)+1 > 48*1024 {
-			listing.Truncated = true
-			break
-		}
-		budget += len(encoded) + 1
-		listing.Children = append(listing.Children, entry)
-	}
-	return listing, nil
-}
-
-func insertDirectoryName(names []string, name string) ([]string, bool) {
-	index := sort.SearchStrings(names, name)
-	if index >= 1000 {
-		return names, true
-	}
-	names = append(names, "")
-	copy(names[index+1:], names[index:])
-	names[index] = name
-	if len(names) > 1000 {
-		return names[:1000], true
-	}
-	return names, false
-}
-
-// WorkspaceFileContent returns the single-folder workspace JSON written for a view.
+// WorkspaceFileContent returns the managed workspace JSON written for a view. A view created
+// without a directory keeps an empty folder list instead of inventing a folder.
 func WorkspaceFileContent(directory string) string {
+	folders := []workspaceFolder{}
+	if directory != "" {
+		folders = append(folders, workspaceFolder{Path: directory})
+	}
 	var output strings.Builder
 	encoder := json.NewEncoder(&output)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	_ = encoder.Encode(struct {
-		Folders []struct {
-			Path string `json:"path"`
-		} `json:"folders"`
-	}{Folders: []struct {
-		Path string `json:"path"`
-	}{{Path: directory}}})
+		Folders []workspaceFolder `json:"folders"`
+	}{Folders: folders})
 	return output.String()
 }
 
@@ -185,11 +131,12 @@ type RecoveryDocument struct {
 	Text string `json:"text"`
 }
 
-// RecoveryBackup is the bounded persistent recovery payload for one managed view.
+// RecoveryBackup is the bounded persistent recovery payload for one managed view. A view created
+// without a directory has no directory, while every captured document still has an absolute path.
 type RecoveryBackup struct {
 	ViewID       string             `json:"viewId"`
 	BindingEpoch string             `json:"bindingEpoch"`
-	Directory    string             `json:"directory"`
+	Directory    string             `json:"directory,omitempty"`
 	CreatedAt    string             `json:"createdAt"`
 	Complete     bool               `json:"complete"`
 	Documents    []RecoveryDocument `json:"documents"`
@@ -498,7 +445,7 @@ func validateBackup(backup RecoveryBackup) error {
 	if _, err := ValidateViewID(backup.ViewID); err != nil {
 		return &RecoveryQuotaError{message: "recovery backup is corrupt"}
 	}
-	if _, err := ValidateBindingEpoch(backup.BindingEpoch); err != nil || !filepath.IsAbs(backup.Directory) || backup.CreatedAt == "" || backup.Documents == nil || len(backup.Documents) > 256 {
+	if _, err := ValidateBindingEpoch(backup.BindingEpoch); err != nil || backup.Directory != "" && !filepath.IsAbs(backup.Directory) || backup.CreatedAt == "" || backup.Documents == nil || len(backup.Documents) > 256 {
 		return &RecoveryQuotaError{message: "recovery backup is corrupt"}
 	}
 	for _, document := range backup.Documents {

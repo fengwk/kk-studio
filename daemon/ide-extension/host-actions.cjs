@@ -15,9 +15,19 @@ const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
 const MAX_SNAPSHOT_DOCUMENTS = 256
 /** Matches the daemon's per-path limit; a longer path would reject the whole reply. */
 const MAX_SNAPSHOT_PATH_CHARS = 4096
+/** The daemon only ever registers a bounded absolute root; nothing else may become one here. */
+const MAX_DIRECTORY_CHARS = 4096
+const DIRECTORY_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
+/**
+ * The daemon accepts a directory change only from an extension host that already holds the new root.
+ * A workspace-file window applies a folder list in place, so it restarts into the new root to give
+ * the daemon that host; a window the workbench replaces needs no help.
+ */
+const DIRECTORY_RELOAD_COMMAND = 'workbench.action.reloadWindow'
 
 function createHostActions(host) {
   const { vscode, post, reply, retire, isInactive, folderPaths, workspacePath, viewId, bindingEpoch, hostId } = host
+  const directoryConfirmMillis = host.directoryConfirmMillis
 
   let terminal = null
   const terminals = []
@@ -170,16 +180,92 @@ function createHostActions(host) {
     await reply(message.id, { ok: true, restored, skipped })
   }
 
-  const sameDirectory = (actual, expected) => {
+  const samePath = (left, right) => {
     const normalize = (path) => {
       const resolved = nodePath.resolve(path)
       return process.platform === 'win32' ? resolved.toLowerCase() : resolved
     }
-    return actual.length === 1 && normalize(actual[0]) === normalize(expected)
+    return normalize(left) === normalize(right)
+  }
+
+  // A managed window carries exactly one root, and a change either replaces every live folder at
+  // once or gives a zero-root window its first one.
+  const singleFolderMatches = (directories, expected) =>
+    directories.length === 1 && samePath(directories[0], expected)
+
+  // The daemon only ever registers an absolute, bounded path; refusing anything else keeps a
+  // relative or malformed value from resolving against the code-server working directory.
+  const isManagedDirectory = (value) =>
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_DIRECTORY_CHARS &&
+    nodePath.isAbsolute(value) &&
+    !DIRECTORY_CONTROL_CHARACTERS.test(value)
+
+  // Resolves true once the workbench reports a folder list of exactly the requested root. The wait
+  // ends on the first folder notification, because a folder swap applied by replacing the window
+  // never reports a change here, and the timeout covers a workbench that never answers.
+  const awaitSingleFolder = (expected, timeoutMillis) =>
+    new Promise((resolve) => {
+      let timer = null
+      const settle = (matched) => {
+        subscription.dispose()
+        if (timer) {
+          clearTimeout(timer)
+        }
+        resolve(matched)
+      }
+      const subscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        settle(singleFolderMatches(folderPaths(), expected))
+      })
+      timer = setTimeout(() => settle(singleFolderMatches(folderPaths(), expected)), timeoutMillis)
+      if (timer.unref) {
+        timer.unref()
+      }
+    })
+
+  // Native tab closing decides save, discard or cancel for every editor the root change abandons.
+  // 'cancelled' means the user kept the window as it was; 'unsafe' means a hidden draft or a tab the
+  // prompts never covered survived, which no later step may treat as settled.
+  const settleEditors = async () => {
+    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+    const closed = await vscode.window.tabGroups.close(tabs)
+    if (isInactive()) {
+      return 'abandoned'
+    }
+    if (!closed) {
+      return 'cancelled'
+    }
+    if (
+      documents.hasHiddenDirtyDocuments(vscode, tabs) ||
+      vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)
+    ) {
+      return 'unsafe'
+    }
+    return 'settled'
   }
 
   const changeDirectory = async (message) => {
-    if (!documents.canProveClean(vscode)) {
+    const requested = message.directory
+    if (!isManagedDirectory(requested)) {
+      await reply(message.id, { ok: false, message: 'directory change was rejected' })
+      return
+    }
+    if (singleFolderMatches(folderPaths(), requested)) {
+      // Repeats the spelling the daemon registered: the workbench may respell a root (VS Code
+      // lowercases a Windows drive letter) while the daemon compares the directory it wrote.
+      await reply(message.id, { ok: true, directory: requested })
+      return
+    }
+    const settled = await settleEditors()
+    if (settled === 'abandoned') {
+      return
+    }
+    if (settled === 'cancelled') {
+      await reply(message.id, { ok: false, code: 'CANCELLED', message: 'directory change was cancelled' })
+      return
+    }
+    if (settled === 'unsafe') {
       await reply(message.id, {
         ok: false,
         code: 'DIRTY',
@@ -188,18 +274,25 @@ function createHostActions(host) {
       return
     }
     const folders = vscode.workspace.workspaceFolders || []
-    const uri = vscode.Uri.file(message.directory)
-    if (sameDirectory(folderPaths(), message.directory)) {
-      await reply(message.id, { ok: true, directory: folderPaths()[0] })
-      return
-    }
-    // Replacing the first folder restarts extension hosts; only the new host can confirm it.
-    const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
-    if (updated === false) {
+    const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri: vscode.Uri.file(requested) })
+    if (updated !== true) {
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
+    // A workspace-file window applies the folder list in place, so this host is still the one running
+    // when the new root becomes visible; only a fresh host may confirm it.
+    let observed = false
+    if (vscode.workspace.workspaceFile) {
+      observed = await awaitSingleFolder(requested, directoryConfirmMillis)
+    }
+    if (isInactive()) {
+      return
+    }
+    // Retire control either way: control belongs to a host that registers the target root.
     retire()
+    if (observed) {
+      await vscode.commands.executeCommand(DIRECTORY_RELOAD_COMMAND)
+    }
   }
 
   const ensureTerminal = () => {
@@ -310,14 +403,12 @@ function createHostActions(host) {
     // Explicit discard/expiry follows the daemon's backup attempt and cannot await an interactive window.
     if (message.discard !== true) {
       // Let the workbench handle dirty and custom editors, including save, discard and cancel.
-      const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      const closed = await vscode.window.tabGroups.close(tabs)
+      const settled = await settleEditors()
+      if (settled === 'abandoned') {
+        return
+      }
       // A hidden dirty document or a newly opened tab must not be destroyed with the view.
-      if (
-        !closed ||
-        documents.hasHiddenDirtyDocuments(vscode, tabs) ||
-        vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)
-      ) {
+      if (settled !== 'settled') {
         await reply(message.id, {
           ok: false,
           code: 'CANCELLED',

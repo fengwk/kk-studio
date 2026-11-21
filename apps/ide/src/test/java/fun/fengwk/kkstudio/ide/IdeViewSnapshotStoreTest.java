@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -89,7 +90,30 @@ class IdeViewSnapshotStoreTest {
     assertFalse(store.snapshot(CURRENT).isEmpty());
   }
 
+  @Test
+  void zeroRootViewKeepsWorkspacePathAndRejectsBlankWorkspaceOrDirectory() {
+    IdeViewSnapshotStore store = new IdeViewSnapshotStore(environmentId -> Optional.of(CURRENT));
+    IdeViewSnapshotStore.Acceptance accepted =
+        store.accept(CURRENT, 1L, List.of(view(7L, "/workspace", null)));
+
+    assertNull(accepted.snapshot().find(VIEW).orElseThrow().directory());
+    assertEquals("/workspace", accepted.snapshot().find(VIEW).orElseThrow().workspacePath());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> view(7L, "/workspace", " "),
+        "a present directory must not be blank");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> view(7L, " ", null),
+        "workspacePath stays mandatory for every binding");
+  }
+
   private static IdeViewSnapshotStore.View view(long bindingEpoch, String workspacePath) {
+    return view(bindingEpoch, workspacePath, "/dir");
+  }
+
+  private static IdeViewSnapshotStore.View view(
+      long bindingEpoch, String workspacePath, String directory) {
     return new IdeViewSnapshotStore.View(
         VIEW,
         BROWSER_SESSION,
@@ -97,7 +121,7 @@ class IdeViewSnapshotStoreTest {
         CONNECTION,
         CLAIM,
         bindingEpoch,
-        "/dir",
+        directory,
         workspacePath,
         IdeViewState.OPEN);
   }
