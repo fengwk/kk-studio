@@ -69,6 +69,10 @@ func (s *Service) FileChanged(path string) {
 }
 
 func pathWithin(directory, path string) bool {
+	if directory == "" {
+		// A view without a managed root owns no path, so no change can match it.
+		return false
+	}
 	relative, err := filepath.Rel(directory, path)
 	if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return false

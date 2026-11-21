@@ -459,15 +459,15 @@ public class IdeGatewayDataPlane {
     browserSessionHandler.handleSession(environmentId, viewId, request, response);
   }
 
+  /** 受管绑定只认登记的 workspace 文件：{@code folder}/{@code ew} 选择与不匹配的 {@code workspace} 都不能覆盖绑定。 */
   private static boolean workspaceQueryAllowed(
       IdeDataViewAuthorizer.IdeDataViewAccess access, HttpServletRequest request) {
-    for (String name : List.of("workspace", "folder")) {
-      String value = request.getParameter(name);
-      if (value != null && !access.authorizedWorkspaces().contains(value)) {
-        return false;
-      }
+    if (request.getParameter("folder") != null || request.getParameter("ew") != null) {
+      return false;
     }
-    return true;
+    String[] workspace = request.getParameterValues("workspace");
+    return workspace == null
+        || (workspace.length == 1 && access.authorizedWorkspaces().contains(workspace[0]));
   }
 
   private static boolean isExactEndpoint(String rawPathAndQuery, String endpoint) {

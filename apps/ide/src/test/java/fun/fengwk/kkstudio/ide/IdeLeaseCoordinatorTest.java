@@ -89,6 +89,23 @@ class IdeLeaseCoordinatorTest {
     assertEquals(List.of(IDENTITY), transport.expectedIdentities);
   }
 
+  /** 零根视图没有 directory，但租约只按 view/browserSession/epoch 匹配，续租不受影响。 */
+  @Test
+  void leasesZeroRootViewsWithoutDirectory() {
+    EnvironmentIdeViewDTO zeroRoot = view(VIEW_1, 7L);
+    zeroRoot.setDirectory(null);
+    views.response = views(zeroRoot);
+    gateway.proofs.put(
+        new Group(EVENT_NODE, CONNECTION, DOCUMENT),
+        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+
+    coordinator.onHeartbeat(ENV, IDENTITY, 44L);
+
+    assertEquals(
+        List.of(new DaemonIdeLease.Binding(VIEW_1, DOCUMENT, 7L)),
+        transport.leases.getFirst().bindings());
+  }
+
   @Test
   void failedEventNodeQueryDoesNotRenewThatGroupButDoesNotBlockOtherGroups() {
     UUID otherNode = UUID.fromString("dddddddd-eeee-ffff-0000-111111111111");

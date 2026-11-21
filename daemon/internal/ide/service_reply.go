@@ -10,12 +10,13 @@ type IdeSnapshot struct {
 	Views    []*protocol.IdeViewSummary
 }
 
+// viewSummary reports one view; a view without a directory omits it instead of inventing one.
 func viewSummary(view *viewRecord) *protocol.IdeViewSummary {
 	state := protocol.IdeViewState_OPEN
 	if view.state == viewClosing {
 		state = protocol.IdeViewState_CLOSING
 	}
-	return &protocol.IdeViewSummary{ViewId: stringPtr(view.viewID), BrowserSessionId: stringPtr(view.browserSession), EventNodeId: stringPtr(view.eventNode), ConnectionId: stringPtr(view.connectionID), ClaimId: stringPtr(view.claimID), BindingEpoch: int64Ptr(view.bindingEpoch), Directory: stringPtr(view.directory), WorkspacePath: stringPtr(view.workspacePath), State: state}
+	return &protocol.IdeViewSummary{ViewId: stringPtr(view.viewID), BrowserSessionId: stringPtr(view.browserSession), EventNodeId: stringPtr(view.eventNode), ConnectionId: stringPtr(view.connectionID), ClaimId: stringPtr(view.claimID), BindingEpoch: int64Ptr(view.bindingEpoch), Directory: optionalStringPtr(view.directory), WorkspacePath: stringPtr(view.workspacePath), State: state}
 }
 
 func successSnapshot(snapshot IdeSnapshot) *protocol.IdeResult {
@@ -30,7 +31,7 @@ func openReply(view *viewRecord, snapshot IdeSnapshot) *protocol.IdeResult {
 	result.ConnectionId = stringPtr(view.connectionID)
 	result.ClaimId = stringPtr(view.claimID)
 	result.BindingEpoch = int64Ptr(view.bindingEpoch)
-	result.Directory = stringPtr(view.directory)
+	result.Directory = optionalStringPtr(view.directory)
 	result.WorkspacePath = stringPtr(view.workspacePath)
 	return result
 }
@@ -44,14 +45,6 @@ func changedDirectoryReply(view *viewRecord, snapshot IdeSnapshot) *protocol.Ide
 
 func viewAck(viewID string) *protocol.IdeResult {
 	return &protocol.IdeResult{Ok: boolPtr(true), ViewId: stringPtr(viewID)}
-}
-
-func directoryListingReply(listing DirectoryListing) *protocol.IdeResult {
-	children := make([]*protocol.IdeDirectoryEntry, 0, len(listing.Children))
-	for _, child := range listing.Children {
-		children = append(children, &protocol.IdeDirectoryEntry{Name: stringPtr(child.Name), Path: stringPtr(child.Path)})
-	}
-	return &protocol.IdeResult{Ok: boolPtr(true), DirectoryListing: &protocol.IdeDirectoryListing{Path: stringPtr(listing.Path), ParentPath: optionalStringPtr(listing.ParentPath), Children: children, Truncated: boolPtr(listing.Truncated)}}
 }
 
 func failureResult(err error, snapshot IdeSnapshot, includeSnapshot bool) *protocol.IdeResult {

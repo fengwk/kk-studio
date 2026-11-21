@@ -349,10 +349,6 @@ func TestCommandValidationAndDispatch(t *testing.T) {
 	if unknown := service.HandleCommand(context.Background(), nil); unknown.GetOk() || unknown.GetMessage() != "unknown ide action" {
 		t.Fatalf("nil action=%v", unknown)
 	}
-	badListing := service.HandleCommand(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction_LIST_DIRECTORIES, Directory: stringPointer(" ")})
-	if badListing.GetOk() || badListing.Revision != nil || badListing.Views != nil {
-		t.Fatalf("list-directory error included snapshot: %v", badListing)
-	}
 	if service.HasActiveViews() || service.GetViewState("bad") != nil {
 		t.Fatal("empty service reports a view")
 	}
@@ -1491,14 +1487,17 @@ func startBridgeReplyHost(t *testing.T, bridge *Bridge, workspace, viewID, direc
 
 func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, directory string, overrides map[string]map[string]any) (*http.Response, context.CancelFunc) {
 	t.Helper()
-	canonicalDirectory, err := CanonicalDirectory(directory)
-	if err != nil {
-		t.Fatal(err)
+	folder := ""
+	if directory != "" {
+		canonicalDirectory, err := CanonicalDirectory(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		folder = canonicalDirectory
 	}
-	directory = canonicalDirectory
 	ctx, cancel := context.WithCancel(context.Background())
 	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, hostID, directory)
+	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, hostID, folder)
 	bridge.mu.Lock()
 	view := bridge.views[viewID]
 	epoch := int64(0)
@@ -2628,19 +2627,8 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	assertBackupPreserved()
 }
 
-// Verifies the omitted directory defaults to host HOME and missing HOME is reported safely.
-func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
-	root := t.TempDir()
-	canonicalRoot, err := CanonicalDirectory(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := filepath.Join(canonicalRoot, "projects")
-	if err := os.Mkdir(child, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", root)
-	t.Setenv("USERPROFILE", "")
+// Verifies a create without a directory keeps an empty folder list, no directory and a host root.
+func TestCreateWithoutDirectoryKeepsZeroFolders(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
 		t.Fatal(err)
@@ -2651,44 +2639,308 @@ func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
-	listed := service.HandleCommand(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction_LIST_DIRECTORIES})
-	if !listed.GetOk() || listed.GetDirectoryListing().GetPath() != canonicalRoot || len(listed.GetDirectoryListing().GetChildren()) != 1 {
-		t.Fatalf("home listing=%v", listed)
+	command := openCommandForTest("", "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+	command.Directory = nil
+	opened := service.HandleCommand(context.Background(), command)
+	if !opened.GetOk() || opened.WorkspacePath == nil {
+		t.Fatalf("zero-folder open reply=%v", opened)
 	}
-	t.Setenv("HOME", "")
-	missing := service.HandleCommand(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction_LIST_DIRECTORIES})
-	if missing.GetOk() || missing.GetCode() != "UNAVAILABLE" {
-		t.Fatalf("missing-home listing=%v", missing)
+	if opened.Directory != nil {
+		t.Fatalf("zero-folder reply declared a directory: %v", opened.Directory)
+	}
+	state := service.GetViewState(opened.GetViewId())
+	if state == nil || state.Directory != nil || state.GetWorkspacePath() != opened.GetWorkspacePath() {
+		t.Fatalf("zero-folder view summary=%v", state)
+	}
+	data, err := os.ReadFile(opened.GetWorkspacePath())
+	if err != nil || string(data) != "{\n  \"folders\": []\n}\n" {
+		t.Fatalf("zero-folder workspace=%q err=%v", data, err)
+	}
+	// The bridge accepts only a host that reports no folder for this binding.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	admitted, admittedReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "")
+	defer admitted.Body.Close()
+	if _, err := admittedReader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	contradictingStatus := func() int {
+		params := bridgeTestStreamParams(bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", t.TempDir())
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+bridge.Secret)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}()
+	if contradictingStatus != http.StatusGone {
+		t.Fatalf("folder host status=%d, want retired", contradictingStatus)
 	}
 }
 
-// Verifies directory listing is routed through the IDE command service.
-func TestDirectoryListingCommand(t *testing.T) {
-	root := t.TempDir()
-	canonicalRoot, err := CanonicalDirectory(root)
+// Verifies a native directory confirmation moves a zero-folder view to exactly one root.
+func TestZeroFolderViewSwitchesToNativeDirectory(t *testing.T) {
+	next, err := CanonicalDirectory(t.TempDir())
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(canonicalRoot, "workspace"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	bridge, err := NewBridge()
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
-		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
-	})
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
-	result := service.HandleCommand(context.Background(), &protocol.IdeCommand{
-		Action: protocol.IdeAction_LIST_DIRECTORIES, Directory: stringPointer(canonicalRoot),
-	})
-	listing := result.GetDirectoryListing()
-	if !result.GetOk() || listing == nil || listing.GetPath() != canonicalRoot || len(listing.GetChildren()) != 1 || listing.GetChildren()[0].GetName() != "workspace" {
-		t.Fatalf("directory reply = %v", result)
+	command := openCommandForTest("", "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+	command.Directory = nil
+	opened := service.HandleCommand(context.Background(), command)
+	if !opened.GetOk() {
+		t.Fatalf("zero-folder open reply=%v", opened)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oldStream, oldReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "")
+	defer oldStream.Body.Close()
+	if _, err := oldReader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	change := viewCommandForTest(protocol.IdeAction_CHANGE_DIRECTORY, opened, false)
+	change.Directory = stringPointer(next)
+	resultChannel := make(chan *protocol.IdeResult, 1)
+	go func() { resultChannel <- service.HandleCommand(ctx, change) }()
+	var nativeCommand struct {
+		Op        string `json:"op"`
+		Directory string `json:"directory"`
+	}
+	if err := json.NewDecoder(oldReader).Decode(&nativeCommand); err != nil {
+		t.Fatal(err)
+	}
+	if nativeCommand.Op != "changeDirectory" || nativeCommand.Directory != next {
+		t.Fatalf("native directory command=%+v", nativeCommand)
+	}
+	// Only the replacement host that reports the target folder confirms the transition.
+	newStream, newReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
+	defer newStream.Body.Close()
+	if _, err := newReader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case changed := <-resultChannel:
+		if !changed.GetOk() || changed.GetDirectory() != next {
+			t.Fatalf("zero-folder change reply=%v", changed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("zero-folder change was not confirmed by the replacement host")
+	}
+	state := service.GetViewState(opened.GetViewId())
+	if state == nil || state.GetDirectory() != next {
+		t.Fatalf("switched view summary=%v", state)
+	}
+	data, err := os.ReadFile(opened.GetWorkspacePath())
+	if err != nil || !strings.Contains(string(data), next) {
+		t.Fatalf("switched workspace=%q err=%v", data, err)
+	}
+}
+
+// Verifies a dirty rejection leaves the zero-folder binding open for a retry.
+func TestZeroFolderChangeRejectionKeepsBinding(t *testing.T) {
+	next, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	command := openCommandForTest("", "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+	command.Directory = nil
+	opened := service.HandleCommand(context.Background(), command)
+	if !opened.GetOk() {
+		t.Fatalf("zero-folder open reply=%v", opened)
+	}
+	for _, code := range []string{"DIRTY", "CANCELLED"} {
+		_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), "", map[string]map[string]any{
+			"changeDirectory": {"ok": false, "code": code, "message": "unsaved changes"},
+		})
+		change := viewCommandForTest(protocol.IdeAction_CHANGE_DIRECTORY, opened, false)
+		change.Directory = stringPointer(next)
+		result := service.HandleCommand(context.Background(), change)
+		cancelHost()
+		if result.GetCode() != code {
+			t.Fatalf("%s rejection=%v", code, result)
+		}
+		state := service.GetViewState(opened.GetViewId())
+		if state == nil || state.Directory != nil {
+			t.Fatalf("%s rejection changed the binding: %v", code, state)
+		}
+	}
+}
+
+// Verifies a zero-folder view backs up only a complete, captured dirty snapshot.
+func TestZeroFolderRecoveryRequiresCompleteSnapshot(t *testing.T) {
+	draft := filepath.Join(t.TempDir(), "draft.txt")
+	for _, test := range []struct {
+		name     string
+		snapshot map[string]any
+		backedUp bool
+	}{
+		{name: "complete", snapshot: map[string]any{"documents": []map[string]string{{"path": draft, "text": "unsaved"}}, "complete": true}, backedUp: true},
+		{name: "incomplete", snapshot: map[string]any{"documents": []map[string]string{{"path": draft, "text": "unsaved"}}, "complete": false}},
+		{name: "missing documents", snapshot: map[string]any{"complete": true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.DaemonConfig{DataDir: t.TempDir()}
+			bridge, err := NewBridge()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer bridge.Close(context.Background())
+			service, err := NewService(cfg, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer service.Close(context.Background())
+			command := openCommandForTest("", "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+			command.Directory = nil
+			opened := service.HandleCommand(context.Background(), command)
+			if !opened.GetOk() {
+				t.Fatalf("zero-folder open reply=%v", opened)
+			}
+			_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), "", map[string]map[string]any{"snapshot": test.snapshot})
+			defer cancelHost()
+			service.mu.Lock()
+			view := service.views[opened.GetViewId()]
+			service.mu.Unlock()
+			// A best-effort close snapshot still needs complete, captured dirty documents.
+			complete, snapshotErr := service.snapshotRecovery(context.Background(), view, false)
+			backup, err := ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !test.backedUp {
+				if snapshotErr == nil || complete || backup != nil {
+					t.Fatalf("incomplete zero-folder snapshot was accepted: complete=%v backup=%#v err=%v", complete, backup, snapshotErr)
+				}
+				return
+			}
+			if snapshotErr != nil || !complete {
+				t.Fatalf("complete zero-folder snapshot was rejected: complete=%v err=%v", complete, snapshotErr)
+			}
+			if backup == nil || backup.Directory != "" || !backup.Complete || len(backup.Documents) != 1 || backup.Documents[0].Path != draft || backup.Documents[0].Text != "unsaved" {
+				t.Fatalf("zero-folder backup=%#v", backup)
+			}
+		})
+	}
+}
+
+// Verifies an offline zero-folder view is never expired into a lost draft.
+func TestZeroFolderOfflineExpiryKeepsView(t *testing.T) {
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	events := make(chan IdeServiceEvent, 4)
+	service, err := NewService(cfg, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}, Scheduler: scheduler, OnEvent: func(event IdeServiceEvent) { events <- event }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	command := openCommandForTest("", "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+	command.Directory = nil
+	opened := service.HandleCommand(context.Background(), command)
+	if !opened.GetOk() {
+		t.Fatalf("zero-folder open reply=%v", opened)
+	}
+	// No host ever registers, so expiry can never prove the drafts complete.
+	scheduler.Advance(viewLeaseDuration)
+	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("offline zero-folder view was expired: %v", state)
+	}
+	if event := <-events; event.Kind != "expiry-deferred" {
+		t.Fatalf("offline zero-folder expiry event=%+v", event)
+	}
+	backup, err := ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
+	if err != nil || backup != nil {
+		t.Fatalf("offline zero-folder backup=%#v err=%v", backup, err)
+	}
+}
+
+// Verifies two views opened on the same directory stay independent.
+func TestSameDirectoryViewsStayIndependent(t *testing.T) {
+	root, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	first := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	second := service.HandleCommand(context.Background(), openCommandForTest(root, "22222222-2222-4222-8222-222222222222", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
+	if !first.GetOk() || !second.GetOk() {
+		t.Fatalf("same-directory replies=%v, %v", first, second)
+	}
+	if first.GetWorkspacePath() == second.GetWorkspacePath() || first.GetBindingEpoch() == second.GetBindingEpoch() {
+		t.Fatalf("same-directory views shared identity: %v, %v", first, second)
+	}
+	_, cancelFirst := startBridgeReplyHostWith(t, bridge, first.GetWorkspacePath(), first.GetViewId(), root, nil)
+	defer cancelFirst()
+	_, cancelSecond := startBridgeReplyHostWith(t, bridge, second.GetWorkspacePath(), second.GetViewId(), root, nil)
+	defer cancelSecond()
+	if closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, first, false)); !closed.GetOk() {
+		t.Fatalf("close first view=%v", closed)
+	}
+	if service.GetViewState(first.GetViewId()) != nil {
+		t.Fatal("closed view is still listed")
+	}
+	if _, err := os.Stat(first.GetWorkspacePath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("closed view workspace remains: %v", err)
+	}
+	state := service.GetViewState(second.GetViewId())
+	if state == nil || state.GetState() != protocol.IdeViewState_OPEN || state.GetDirectory() != root {
+		t.Fatalf("sibling view was affected: %v", state)
+	}
+	data, err := os.ReadFile(second.GetWorkspacePath())
+	if err != nil || !strings.Contains(string(data), root) {
+		t.Fatalf("sibling workspace=%q err=%v", data, err)
+	}
+	bridge.mu.Lock()
+	_, firstBound := bridge.views[first.GetViewId()]
+	secondBound := bridge.views[second.GetViewId()] != nil
+	bridge.mu.Unlock()
+	if firstBound || !secondBound {
+		t.Fatalf("bridge bindings first=%v second=%v", firstBound, secondBound)
+	}
+}
+
+// Verifies a view without a managed root claims no file change.
+func TestPathWithinZeroFolderView(t *testing.T) {
+	if pathWithin("", filepath.Join(t.TempDir(), "file.txt")) {
+		t.Fatal("zero-folder view matched a path")
 	}
 }
 

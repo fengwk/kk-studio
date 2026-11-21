@@ -123,7 +123,6 @@ class ClusterEnvironmentIdeServiceTest {
         binding);
     service.collapseMobile(ENV, VIEW, binding);
     service.closeView(ENV, VIEW, close);
-    service.listDirectories(ENV, "/tmp");
     service.readView(ENV, VIEW, read);
 
     verify(delegate).changeDirectory(ENV, VIEW, directory);
@@ -137,7 +136,6 @@ class ClusterEnvironmentIdeServiceTest {
             binding);
     verify(delegate).collapseMobile(ENV, VIEW, binding);
     verify(delegate).closeView(ENV, VIEW, close);
-    verify(delegate).listDirectories(ENV, "/tmp");
     verify(delegate).readView(ENV, VIEW, read);
     verifyNoInteractions(remote);
   }

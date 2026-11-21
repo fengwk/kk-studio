@@ -735,7 +735,7 @@ func (b *Bridge) resolvePendingLocked(id string, result BridgeResult) {
 			listener := b.onDirectoryReconciled
 			go listener(pending.viewID, pending.epoch, id, pending.expectedDirectory)
 		}
-	} else if !result.OK && result.Code != "OUTCOME_UNKNOWN" && pending.op == "changeDirectory" && result.Code != "DIRTY" && view.stream == pending.stream {
+	} else if !result.OK && !bridgeKeepsHost(result.Code) && pending.op == "changeDirectory" && view.stream == pending.stream {
 		view.hostID = ""
 		stream := view.stream
 		view.stream = nil
@@ -752,6 +752,17 @@ func (b *Bridge) settleViewLocked(viewID string, result BridgeResult) {
 			b.resolvePendingLocked(id, result)
 		}
 	}
+}
+
+// bridgeKeepsHost reports whether a rejected directory change leaves the reporting host in control:
+// the extension refused before touching the workspace (dirty drafts, a cancelled native prompt) or
+// the outcome is unknown, so its stream must not be retired as a replaced host.
+func bridgeKeepsHost(code string) bool {
+	switch code {
+	case "DIRTY", "CANCELLED", "OUTCOME_UNKNOWN":
+		return true
+	}
+	return false
 }
 
 func (b *Bridge) rejectWaitersLocked(viewID string, err error) {
@@ -877,6 +888,10 @@ func validDirectoryExpectation(directory, expected string) bool {
 	return directory != "" && expected != "" && filepath.IsAbs(directory) && filepath.IsAbs(expected) && bridgePathKey(directory) == bridgePathKey(expected)
 }
 func matchesBridgeDirectory(folders []string, directory string) bool {
+	if directory == "" {
+		// A view without a directory reports no folder; any folder would contradict the binding.
+		return len(folders) == 0
+	}
 	return len(folders) == 1 && filepath.IsAbs(folders[0]) && bridgePathKey(folders[0]) == bridgePathKey(directory)
 }
 func bridgePathKey(path string) string {

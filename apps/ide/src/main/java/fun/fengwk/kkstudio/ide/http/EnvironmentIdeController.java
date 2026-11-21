@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
@@ -30,7 +29,8 @@ import java.util.UUID;
  * Environment IDE 视图控制 API：把 Studio pane 的 view 生命周期翻译为对 Daemon 的 IDE 命令。
  *
  * <p>{@code OPEN_VIEW} 返回受控的同源 entryUrl；{@code CHANGE_DIRECTORY} 明确拒绝 dirty（由 Daemon 判定）； {@code
- * FOCUS_TERMINAL} 只新建/显示人工终端，不模拟输入；{@code CLOSE_VIEW} 幂等清理该 view，不影响其它 view 或 Agent。
+ * FOCUS_TERMINAL} 只新建/显示人工终端，不模拟输入；{@code CLOSE_VIEW} 幂等清理该 view，不影响其它 view 或 Agent。 目录选择只发生在 VS
+ * Code 工作台内，Studio 不提供目录枚举 API。
  */
 @AllArgsConstructor
 @RequestMapping("/api/ide/environments/{environmentId}")
@@ -95,12 +95,6 @@ public class EnvironmentIdeController {
     UUID parsedEnvironmentId = IdeUuids.requireInput(environmentId, "environmentId");
     environmentIdeService.openAttachment(
         EnvironmentId.of(parsedEnvironmentId), viewId, sessionId, resourceId, request);
-  }
-
-  @GetMapping("/directories")
-  public EnvironmentIdeDirectoryListingDTO listDirectories(
-      @PathVariable UUID environmentId, @RequestParam(required = false) String path) {
-    return environmentIdeService.listDirectories(EnvironmentId.of(environmentId), path);
   }
 
   @PostMapping("/views/{viewId}/apply-mobile-layout")

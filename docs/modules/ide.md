@@ -1,6 +1,6 @@
 # IDE
 
-IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管的 code-server，并把视图定位到受管工作区目录。它是建立在平台之上的应用：[`apps/ide`](../../apps/ide/pom.xml) 持有 HTTP 入口、DTO、载荷协议、权威快照与跨节点转发；[Platform](platform.md) 的 Daemon 连接服务提供一条不解析载荷的 IDE 通道；[Web](web.md#同源-ide-网关) 组合应用；Daemon 侧见 [Environment Daemon](daemon.md)。
+IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管的 code-server，每个视图有独立的受管 `.code-workspace`。未指定目录时以 `folders: []` 打开，用户在 VS Code 内选择目录；选择相同目录的多个视图仍然独立。它是建立在平台之上的应用：[`apps/ide`](../../apps/ide/pom.xml) 持有 HTTP 入口、DTO、载荷协议、权威快照与跨节点转发；[Platform](platform.md) 的 Daemon 连接服务提供一条不解析载荷的 IDE 通道；[Web](web.md#同源-ide-网关) 组合应用；Daemon 侧见 [Environment Daemon](daemon.md)。
 
 模块依赖 [Harness Environment](harness-environment.md)（能力契约）、[Platform](platform.md)（Daemon 连接与通道、集群节点注册与内部认证）与 [Common](common.md)，经 [`IdeAutoConfiguration`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeAutoConfiguration.java) 装配。IDE 控制消息属于 Daemon 控制协议 v4，发行版本与 Daemon 一致。
 
@@ -30,14 +30,13 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 | action | 请求字段 | 成功回执 |
 | --- | --- | --- |
-| `OPEN_VIEW` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`mode(CREATE/RESUME)`、`expectedBindingEpoch`、`expectedDaemonInstanceId`、可选 `directory` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath`、`revision`、`views` |
+| `OPEN_VIEW` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`mode(CREATE/RESUME)`、`expectedBindingEpoch`、`expectedDaemonInstanceId`、可选 `directory` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、可选 `directory`、`workspacePath`、`revision`、`views` |
 | `CHANGE_DIRECTORY` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、`directory` | `viewId`、Daemon 确认的规范 `directory`、`revision`、`views` |
 | `FOCUS_TERMINAL` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` | `viewId` |
 | `OPEN_ATTACHMENT` | 绑定字段、`attachmentId`、不超过 64 KiB 的 UTF-8 `attachmentText` | `viewId` |
 | `COLLAPSE_MOBILE` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` | `viewId` |
 | `CLOSE_VIEW` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、`discard` | `viewId`、`revision`、`views` |
 | `LIST_VIEWS` | 无 | `revision`、`views[]`：完整权威视图快照 |
-| `LIST_DIRECTORIES` | 可选 `directory`，省略时为宿主主目录 | `directoryListing`：规范 `path`、可选 `parentPath`、`children[]`、`truncated` |
 
 失败回执只携带安全大写 `code` 与去敏 `message`，不把不同原因压成同一个错误。UUID 一律规范小写；Protobuf 的 `bindingEpoch` 是正 int64，`revision` 是非负 int64，HTTP 中均使用规范十进制字符串。`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。
 
@@ -59,11 +58,10 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 | 接口 | 请求 / 结果 |
 | --- | --- |
 | POST `/api/ide/environments/{id}/views` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、`expectedBindingEpoch`、`expectedDaemonInstanceId`、可选 `directory`；claim 成功返回绑定身份、目录、workspacePath、短期 entryUrl |
-| PUT `/api/ide/environments/{id}/views/{viewId}/directory` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、目标目录；检查 dirty，成功才写工作区 |
+| PUT `/api/ide/environments/{id}/views/{viewId}/directory` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、原生选择的目标目录；同目录不变更，否则经原生保存/不保存/取消确认后切换 |
 | POST `/api/ide/environments/{id}/views/{viewId}/focus-terminal` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`；聚焦/创建该视图终端 |
 | POST `/api/ide/environments/{id}/views/{viewId}/attachments/{sessionId}/{resourceId}` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`；在已绑定视图中打开经该 Session 授权的只读文本副本 |
 | POST `/api/ide/environments/{id}/views/{viewId}/apply-mobile-layout` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`；收起原生侧栏和面板，不更改用户设置 |
-| GET `/api/ide/environments/{id}/directories?path=<absolute>` | 省略 path 时使用宿主主目录；返回 `{path,parentPath,children:[{name,path}],truncated}`，根目录的 `parentPath` 为 null |
 | GET `/api/ide/environments/{id}/views/{viewId}` | 显式 query：`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、可选 `expectedDaemonInstanceId`；直接返回 `{daemonInstanceId,revision,view?}`，`view` 为 null 是当前快照的有效 absent 事实 |
 | POST `/api/ide/environments/{id}/views/{viewId}/close` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` 与显式 `discard`；正常关闭等待原生保存/不保存/取消，状态未知或不可达时才提供经确认的强制关闭 |
 | 应用事件 WS `ide-use` | `browserSessionId`、同一连接内 usage 序号 `revision`、`views[]`；空列表分离全部，不表示确认销毁 |
@@ -73,11 +71,11 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 
 `GET /views/{viewId}` 是纯读：控制器的 query 参数显式声明，ReadDTO 只作为 Java 内部参数，不生成第二份前端字段接口。读取先要求当前 WS usage 已 ACK，只返回该 `browserSessionId` 的资源与绑定；不创建 view、不续租、不生成票据、不执行终端操作。view 不存在时返回当前快照的 absent 事实，而不是命令未执行的证明；如果其它 owner 持有该 view，返回 `VIEW_OWNED_BY_OTHER_SESSION`。初始 create 可先通过该读取发现当前 `daemonInstanceId`，之后在持久 pending 中冻结此代次；其它恢复必须带 expected 实例。
 
-目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。HTTP 中 64 位整数在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
+零根视图在控制协议中省略 `directory`，在 HTTP 响应中可为 `null` 或缺省；正 `bindingEpoch` 和登记的绝对 `workspacePath` 对所有绑定都是必需的。HTTP 中 64 位整数在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
 
 正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设命令超时；用户取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。已发送但未确认的关闭以 `IDE_OUTCOME_UNKNOWN` 返回并保留视图；命令未发送或控制通道不可用时以 `IDE_CONTROL_UNAVAILABLE` 返回，用户可以显式确认强制关闭。强制关闭不伪装成原生退出成功，仍须取得 code-server 的资源清理证明。
 
-Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。目录切换命令发送后，取消或超时仅停止调用方等待：未确认意图按每个活动 view 最多一条保留，直到同代对账或 view 关闭/重绑；期间不会接受新的目录切换。只有同一 bindingEpoch、且 folder 与目标目录匹配的新 host 能确认迟到操作；旧 host、旧 epoch 或不匹配的 folder 不能夺回控制权。确认后 Daemon 收敛 bridge 目录、视图快照与受管 `.code-workspace` 文件。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
+Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。目录切换命令发送后，请求方中断或超时仅停止等待：未确认意图按每个活动 view 最多一条保留，直到同代对账或 view 关闭/重绑；期间不会接受新的目录切换。只有同一 bindingEpoch、且 folder 与目标目录匹配的新 host 能确认迟到操作；旧 host、旧 epoch 或不匹配的 folder 不能夺回控制权。切换时扩展先用原生关闭交互处理编辑器；取消或发现无法确认的脏草稿时不变更根。扩展更新 folder（包括零根加首根），由再次启动的新 host 注册确认，随后 Daemon 收敛 bridge 目录、视图快照与受管 `.code-workspace` 文件。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
 
 ## 结构化失败与结果对账
 
@@ -96,7 +94,7 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 | `IDE_OUTCOME_UNKNOWN` | 命令已发送但没有结果确认；目录操作意图仍在同代 bridge 中等待目标 host 对账 | 纯读对账，不重放命令；待目录状态收敛前不覆盖该意图 |
 | `IDE_CLEANUP_FAILED` | 资源清理未完成 | 保留 CLOSING 与容量，等待显式重试或人工处理 |
 | `IDE_PROTOCOL_ERROR` | 回执或快照破坏协议不变量 | 失败本调用并保留上一个已接受快照，不自行修补 |
-| `IDE_CLOSE_CANCELLED` | 用户在 IDE 原生关闭中选择取消 | 视图保持原绑定，不触发外层放弃确认 |
+| `IDE_CLOSE_CANCELLED` | 用户在关闭视图或切换目录时取消原生确认 | 视图保持原绑定，不触发外层放弃确认 |
 | `IDE_CONTROL_UNAVAILABLE` | 正常关闭未发送或没有控制通道，无法检查编辑器 dirty 状态 | 保留 view，只有用户显式确认后才可强制关闭 |
 | `IDE_UNAUTHORIZED` | 跨节点内部调用被目标节点以 401 `unauthorized` 拒绝（HMAC 或目标实例不匹配） | 不重试；先对账集群密钥与时钟 |
 | `IDE_CONFLICT` | 目标节点返回 409 但未携带可识别 reason 的兜底映射 | 不自动重试，按失败回读权威快照 |
@@ -115,7 +113,7 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 
 ## 浏览器会话与数据面
 
-iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。路径段与 query 值统一经 `common.uri.UrlEncoding` 做 RFC 3986 百分号编码，空格是 `%20`，不使用表单语义的 `+`。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
+iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。路径段与 query 值统一经 `common.uri.UrlEncoding` 做 RFC 3986 百分号编码，空格是 `%20`，不使用表单语义的 `+`。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。查询中的 `folder`、`ew`、重复的 `workspace` 或与登记路径不同的 `workspace` 不通过网关。
 
 - `openView` 先向事件节点核验 exact intent：只有该物理连接、browserSession 与 view/claim 意图仍存活且匹配时才发命令（[`IdeBrowserUseGateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBrowserUseGateway.java)）；事件节点不可达或当前 usage 未 ACK 时不建立新绑定。`claimId` 在单次请求未确认期间保持不变，同 claim 的同形请求返回同一绑定，参数漂移被拒绝。
 - `openView` 成功后才用权威快照铸造一次性 bootstrap 票据；票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管工作区路径，短时、消费即删除。`GET` 不生成 entryUrl，也不发票据。
@@ -138,7 +136,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。b
 
 ## 跨节点
 
-多节点部署时，Environment 的 Daemon 连接只在一个 owner 节点上。元数据请求、快照读取与使用意图查询由 [`ClusterEnvironmentIdeService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/ClusterEnvironmentIdeService.java) 按 owner 快照路由；目录入参在路由前由 [`IdeInputs.requireDirectory`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeInputs.java) 统一校验，非法请求不会被转发。所有内部路径都参与 HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空或认证失败时立即失败，不改投其它节点、不自动重放。租约续租只在 owner 本地读取 `LIST_VIEWS` 快照，不走内部 HTTP，因此内部面只暴露 view 命令、单 view 纯读与数据面转发。
+多节点部署时，Environment 的 Daemon 连接只在一个 owner 节点上。元数据请求、快照读取与使用意图查询由 [`ClusterEnvironmentIdeService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/ClusterEnvironmentIdeService.java) 按 owner 快照路由；owner 校验目录输入，Daemon 确认规范目录。所有内部路径都参与 HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空或认证失败时立即失败，不改投其它节点、不自动重放。租约续租只在 owner 本地读取 `LIST_VIEWS` 快照，不走内部 HTTP，因此内部面只暴露 view 命令、单 view 纯读与数据面转发。
 
 [`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalController.java)、
 [`ClusterEnvironmentIdeInternalDataPlaneController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalDataPlaneController.java)

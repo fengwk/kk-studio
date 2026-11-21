@@ -87,7 +87,8 @@ enum IdeAction {
   reserved 5;
   reserved "DETACH_VIEW";
   LIST_VIEWS = 6;
-  LIST_DIRECTORIES = 7;
+  reserved 7;
+  reserved "LIST_DIRECTORIES";
   COLLAPSE_MOBILE = 8;
   OPEN_ATTACHMENT = 9;
 }
@@ -419,21 +420,10 @@ message IdeResult {
   optional string directory = 10;
   optional string workspace_path = 11;
   repeated IdeViewSummary views = 12;
-  IdeDirectoryListing directory_listing = 13;
+  reserved 13;
+  reserved "directory_listing";
   // 与 views 同一提交点冻结的完整可见快照代次；不存在 view 时也可为 0。
   optional int64 revision = 14;
-}
-
-message IdeDirectoryListing {
-  optional string path = 1;
-  optional string parent_path = 2;
-  repeated IdeDirectoryEntry children = 3;
-  optional bool truncated = 4;
-}
-
-message IdeDirectoryEntry {
-  optional string name = 1;
-  optional string path = 2;
 }
 
 message IdeViewSummary {

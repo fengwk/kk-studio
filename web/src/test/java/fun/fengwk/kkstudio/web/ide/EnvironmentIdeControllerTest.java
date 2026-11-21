@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.web.ide;
 
 import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -41,7 +40,6 @@ import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
@@ -64,7 +62,6 @@ import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,7 +70,7 @@ import java.util.stream.Stream;
 
 /**
  * Environment IDE 视图控制 API 的实际 HTTP 契约：成功路径映射与参数转发，以及 domain 错误（dirty 拒绝 400、IDE 通道不可用
- * 409）与请求体错误的统一 problem+json。
+ * 409）与请求体错误的统一 problem+json。目录枚举不再是 Studio API：目录选择只发生在 VS Code 工作台内。
  */
 class EnvironmentIdeControllerTest {
 
@@ -101,19 +98,12 @@ class EnvironmentIdeControllerTest {
             .build();
   }
 
-  /** 查询与绑定命令映射到对应服务，根目录必须显式返回 null。 */
+  /** 已删除的目录枚举端点不再存在；绑定命令仍映射到对应服务。 */
   @Test
-  void routesDirectoryListingAndMobileLayout() throws Exception {
-    EnvironmentIdeDirectoryListingDTO listing = new EnvironmentIdeDirectoryListingDTO();
-    listing.setPath("/");
-    listing.setChildren(List.of());
-    when(environmentIdeService.listDirectories(EnvironmentId.of(ENV_ID), "/a b"))
-        .thenReturn(listing);
+  void removedDirectoryListingEndpointIsGoneAndMobileLayoutRoutes() throws Exception {
     mockMvc
         .perform(get("/api/ide/environments/" + ENV_ID + "/directories").param("path", "/a b"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.path").value("/"))
-        .andExpect(jsonPath("$.parentPath").value(nullValue()));
+        .andExpect(status().isNotFound());
     mockMvc
         .perform(
             post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/apply-mobile-layout")
@@ -191,6 +181,28 @@ class EnvironmentIdeControllerTest {
     verify(environmentIdeService).openView(eq(EnvironmentId.of(ENV_ID)), request.capture());
     assertEquals(VIEW_ID, request.getValue().getViewId());
     assertEquals("/workspace", request.getValue().getDirectory());
+  }
+
+  /** 零根视图在 HTTP 契约上缺省 directory，但仍带权威 workspacePath。 */
+  @Test
+  void openViewReturnsNullDirectoryForAZeroRootWorkspace() throws Exception {
+    EnvironmentIdeViewDTO view = view(null);
+    view.setWorkspacePath("/managed/zero.code-workspace");
+    when(environmentIdeService.openView(eq(EnvironmentId.of(ENV_ID)), any())).thenReturn(view);
+
+    mockMvc
+        .perform(
+            post("/api/ide/environments/" + ENV_ID + "/views")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(openViewBody(null)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.directory").doesNotExist())
+        .andExpect(jsonPath("$.workspacePath").value("/managed/zero.code-workspace"));
+
+    ArgumentCaptor<EnvironmentIdeOpenViewDTO> request =
+        ArgumentCaptor.forClass(EnvironmentIdeOpenViewDTO.class);
+    verify(environmentIdeService).openView(eq(EnvironmentId.of(ENV_ID)), request.capture());
+    assertNull(request.getValue().getDirectory(), "the wire contract keeps directory optional");
   }
 
   /**

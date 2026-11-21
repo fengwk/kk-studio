@@ -346,6 +346,46 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
+  /** 零根受管视图：未指定目录时 workspace 文件声明空 folders，绑定仍由 workspacePath 与正 epoch 确认，工作台按该登记文件加载。 */
+  @Test
+  @Order(13)
+  void servesAZeroRootManagedViewWithoutAnyDirectory() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    UUID browserSessionId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID claimId = UUID.randomUUID();
+      events.registerUsage(
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+
+      JsonNode opened =
+          openView(environmentId, viewId, browserSessionId, identity, claimId, "create", null);
+
+      assertFalse(opened.hasNonNull("directory"), "a zero-root view must not report a directory");
+      long epoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      assertTrue(epoch > 0, "a zero-root view still receives its binding epoch");
+      String workspacePath = opened.path("workspacePath").asText();
+      assertFalse(
+          workspacePath.isBlank(), "a zero-root view still receives its managed workspace file");
+      JsonNode workspaceFile =
+          JsonMapper.builder().build().readTree(Files.readString(Path.of(workspacePath)));
+      assertTrue(
+          workspaceFile.path("folders").isArray(), "the workspace file must declare folders");
+      assertEquals(0, workspaceFile.path("folders").size(), "a zero-root workspace has no folders");
+
+      String cookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, viewId, cookie, "/").toLowerCase().contains("<html"),
+          "the zero-root workbench must load from the registered workspace file");
+
+      closeView(environmentId, viewId, browserSessionId, epoch);
+      assertTrue(
+          Files.notExists(Path.of(workspacePath)),
+          "closing a zero-root view must remove its workspace file");
+    }
+  }
+
   /**
    * Session-owned attachment requests must open ordinary UTF-8 as immutable virtual content without
    * a workspace file.
@@ -897,44 +937,16 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  /** 不打开视图列目录，再以真实工作台的原生对话框验证取消和正常关闭。 */
+  /** 不打开视图时不产生视图，再以真实工作台的原生对话框验证取消和正常关闭。 */
   @Test
   @Order(6)
-  void listsDirectoriesAndClosesDirtyViewThroughNativeDialog() throws Exception {
+  void closesDirtyViewThroughNativeDialog() throws Exception {
     Path playwright = explicitPlaywrightModule();
     Path node = nodeBinary();
     browserTempDir = Files.createTempDirectory("kk-ide-br-");
     String environmentId = startEnvironmentAndDaemon();
     Path workspace = daemon.workspaceDirectory();
-    Files.createDirectory(workspace.resolve("z-dir"));
-    Files.createDirectory(workspace.resolve("a-dir"));
-    Files.createDirectory(workspace.resolve("a-dir").resolve("nested"));
-    Files.createSymbolicLink(workspace.resolve("link-dir"), workspace.resolve("a-dir"));
     Files.writeString(workspace.resolve("editable.txt"), "initial text in workspace\n");
-    String listingUrl =
-        HttpUrl.get(baseUrl() + "/api/ide/environments/" + environmentId + "/directories")
-            .newBuilder()
-            .addQueryParameter("path", workspace.toString())
-            .build()
-            .toString();
-    try (Response response =
-        browser.newCall(new Request.Builder().url(listingUrl).build()).execute()) {
-      assertEquals(200, response.code());
-      JsonNode listing = JsonMapper.builder().build().readTree(response.body().string());
-      assertEquals(workspace.toRealPath().toString(), listing.path("path").asText());
-      assertEquals(
-          workspace.toRealPath().getParent().toString(), listing.path("parentPath").asText());
-      assertFalse(listing.path("truncated").asBoolean());
-      assertEquals(2, listing.path("children").size());
-      assertEquals("a-dir", listing.path("children").get(0).path("name").asText());
-      assertEquals(
-          workspace.resolve("a-dir").toRealPath().toString(),
-          listing.path("children").get(0).path("path").asText());
-      assertEquals("z-dir", listing.path("children").get(1).path("name").asText());
-      assertEquals(
-          workspace.resolve("z-dir").toRealPath().toString(),
-          listing.path("children").get(1).path("path").asText());
-    }
     assertTrue(localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().isEmpty());
     Files.createDirectory(workspace.resolve(".vscode"));
     Files.writeString(workspace.resolve(".vscode/settings.json"), "{\"files.autoSave\":\"off\"}\n");
@@ -1593,25 +1605,28 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         expectedEpochOverride != null
             ? expectedEpochOverride
             : bindingEpochs.getOrDefault(viewId, 0L);
-    return "{\"viewId\":\""
-        + viewId
-        + "\",\"browserSessionId\":\""
-        + browserSessionId
-        + "\",\"eventNodeId\":\""
-        + identity.eventNodeId()
-        + "\",\"connectionId\":\""
-        + identity.connectionId()
-        + "\",\"claimId\":\""
-        + claimId
-        + "\",\"mode\":\""
-        + mode
-        + "\",\"expectedBindingEpoch\":\""
-        + expectedBindingEpoch
-        + "\",\"expectedDaemonInstanceId\":\""
-        + daemonInstance
-        + "\",\"directory\":\""
-        + directory
-        + "\"}";
+    StringBuilder body =
+        new StringBuilder("{\"viewId\":\"")
+            .append(viewId)
+            .append("\",\"browserSessionId\":\"")
+            .append(browserSessionId)
+            .append("\",\"eventNodeId\":\"")
+            .append(identity.eventNodeId())
+            .append("\",\"connectionId\":\"")
+            .append(identity.connectionId())
+            .append("\",\"claimId\":\"")
+            .append(claimId)
+            .append("\",\"mode\":\"")
+            .append(mode)
+            .append("\",\"expectedBindingEpoch\":\"")
+            .append(expectedBindingEpoch)
+            .append("\",\"expectedDaemonInstanceId\":\"")
+            .append(daemonInstance)
+            .append('"');
+    if (directory != null) {
+      body.append(",\"directory\":\"").append(directory).append('"');
+    }
+    return body.append('}').toString();
   }
 
   /** 创建前必须通过纯读 GET 发现当前 Daemon 实例；不能猜测或用空值回退。 */

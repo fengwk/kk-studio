@@ -10,12 +10,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
-import fun.fengwk.kkstudio.platform.daemon.protocol.IdeDirectoryEntry;
-import fun.fengwk.kkstudio.platform.daemon.protocol.IdeDirectoryListing;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
@@ -76,6 +73,39 @@ class IdeProtocolTest {
   }
 
   @Test
+  void zeroRootSnapshotKeepsWorkspaceAuthorityWithoutDirectory() {
+    IdeViewSummary zeroRoot = summary().clearDirectory().build();
+
+    IdeViewSnapshotStore.View view = IdeProtocol.toSnapshotView(zeroRoot);
+
+    assertNull(view.directory(), "a zero-root view has no folder");
+    assertEquals("/ws", view.workspacePath());
+    assertEquals(7L, view.bindingEpoch());
+    assertNull(
+        IdeProtocol.toDto(IDENTITY, view).getDirectory(),
+        "the DTO must not invent a directory for a zero-root view");
+    assertEquals("/ws", IdeProtocol.toDto(IDENTITY, view).getWorkspacePath());
+    IdeViewSnapshotStore.Snapshot snapshot =
+        new IdeViewSnapshotStore.Snapshot(IDENTITY, 3L, List.of(view));
+    assertEquals(3L, IdeProtocol.toViews(IDENTITY, snapshot).getRevision());
+  }
+
+  @Test
+  void snapshotWithoutWorkspacePathOrWithBlankDirectoryIsAProtocolError() {
+    DomainException missingWorkspace =
+        assertThrows(
+            DomainException.class,
+            () -> IdeProtocol.toSnapshotView(summary().clearWorkspacePath().build()));
+    assertEquals("IDE_PROTOCOL_ERROR", missingWorkspace.reason());
+
+    DomainException blankDirectory =
+        assertThrows(
+            DomainException.class,
+            () -> IdeProtocol.toSnapshotView(summary().setDirectory(" ").build()));
+    assertEquals("IDE_PROTOCOL_ERROR", blankDirectory.reason());
+  }
+
+  @Test
   void invalidSnapshotSummaryKeepsTheOriginalCause() {
     IdeViewSummary invalid =
         IdeViewSummary.newBuilder()
@@ -93,32 +123,6 @@ class IdeProtocolTest {
     DomainException error =
         assertThrows(DomainException.class, () -> IdeProtocol.toSnapshotView(invalid));
     assertEquals("IDE_PROTOCOL_ERROR", error.reason());
-  }
-
-  @Test
-  void directoryListingRequiresTheReplyPayload() {
-    DomainException missing =
-        assertThrows(
-            DomainException.class,
-            () -> IdeProtocol.toDirectoryListing(IdeResult.newBuilder().setOk(true).build()));
-    assertEquals("daemon did not return a directory listing", missing.getMessage());
-
-    IdeResult reply =
-        IdeResult.newBuilder()
-            .setOk(true)
-            .setDirectoryListing(
-                IdeDirectoryListing.newBuilder()
-                    .setPath("/root")
-                    .setTruncated(true)
-                    .addChildren(IdeDirectoryEntry.newBuilder().setName("a").setPath("/root/a"))
-                    .build())
-            .build();
-    EnvironmentIdeDirectoryListingDTO listing = IdeProtocol.toDirectoryListing(reply);
-    assertEquals("/root", listing.getPath());
-    assertNull(listing.getParentPath());
-    assertTrue(listing.isTruncated());
-    assertEquals("a", listing.getChildren().get(0).getName());
-    assertEquals("/root/a", listing.getChildren().get(0).getPath());
   }
 
   @Test
@@ -151,6 +155,19 @@ class IdeProtocolTest {
     assertFalse(IdeProtocol.isViewGone(IdeResult.newBuilder().setOk(true).build()));
     assertEquals(
         ENV.toString(), IdeProtocol.toDto(IDENTITY, view(IdeViewState.OPEN)).getEnvironmentId());
+  }
+
+  private static IdeViewSummary.Builder summary() {
+    return IdeViewSummary.newBuilder()
+        .setViewId("11111111-2222-3333-4444-555555555555")
+        .setBrowserSessionId("66666666-7777-8888-9999-aaaaaaaaaaaa")
+        .setEventNodeId("bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
+        .setConnectionId("12345678-1234-1234-1234-123456789abc")
+        .setClaimId("87654321-4321-4321-4321-cba987654321")
+        .setBindingEpoch(7L)
+        .setDirectory("/dir")
+        .setWorkspacePath("/ws")
+        .setState(IdeViewState.OPEN);
   }
 
   private static IdeResult code(String code) {

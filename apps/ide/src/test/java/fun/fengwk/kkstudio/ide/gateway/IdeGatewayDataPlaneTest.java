@@ -134,7 +134,7 @@ class IdeGatewayDataPlaneTest {
     when(req.getContextPath()).thenReturn("");
     when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
     when(req.getHeader("Cookie")).thenReturn("kk_ide_session=token");
-    when(req.getParameter("workspace")).thenReturn("/workspace");
+    when(req.getParameterValues("workspace")).thenReturn(new String[] {"/workspace"});
     when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
     when(req.getContentLengthLong()).thenReturn(4L);
 
@@ -446,13 +446,13 @@ class IdeGatewayDataPlaneTest {
             Optional.of(
                 new IdeDataViewAuthorizer.IdeDataViewAccess(
                     IDENTITY, VIEW, 1L, Set.of("/workspace"))));
-    when(req.getParameter("workspace")).thenReturn("/forbidden");
+    when(req.getParameterValues("workspace")).thenReturn(new String[] {"/forbidden"});
     HttpServletResponse res5 = mock(HttpServletResponse.class);
     dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res5);
     verify(res5).sendError(HttpServletResponse.SC_FORBIDDEN);
 
     // 6. Tunnel missing -> 503
-    when(req.getParameter("workspace")).thenReturn("/workspace");
+    when(req.getParameterValues("workspace")).thenReturn(new String[] {"/workspace"});
     HttpServletResponse res6 = mock(HttpServletResponse.class);
     dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res6);
     verify(res6).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -469,6 +469,59 @@ class IdeGatewayDataPlaneTest {
     dataPlane.handleInternalDataPlane(ENV, VIEW, "/__ide/bootstrapxxx", req, res8);
     // treated as data path -> 409 because otherTunnel does not match IDENTITY
     verify(res8).sendError(HttpServletResponse.SC_CONFLICT);
+  }
+
+  /** 受管绑定只认登记的 workspace 文件：folder/ew 与不匹配的 workspace 都不能覆盖绑定。 */
+  @Test
+  void dataPlaneRejectsFolderEmptyWorkspaceAndForeignWorkspaceOverrides() throws IOException {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/managed/zero.code-workspace"))));
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(
+            registry,
+            new FakeEnvironmentTunnels(),
+            authorizer,
+            mock(IdeBrowserSessionHandler.class),
+            mock(IdeRemoteDataPlaneForwarder.class));
+
+    HttpServletRequest folder = mock(HttpServletRequest.class);
+    when(folder.getParameter("folder")).thenReturn("/managed/zero.code-workspace");
+    HttpServletResponse folderRes = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/index.html", folder, folderRes);
+    verify(folderRes).sendError(HttpServletResponse.SC_FORBIDDEN);
+
+    HttpServletRequest emptyWorkspace = mock(HttpServletRequest.class);
+    when(emptyWorkspace.getParameter("ew")).thenReturn("true");
+    HttpServletResponse emptyRes = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/index.html", emptyWorkspace, emptyRes);
+    verify(emptyRes).sendError(HttpServletResponse.SC_FORBIDDEN);
+
+    HttpServletRequest foreign = mock(HttpServletRequest.class);
+    when(foreign.getParameterValues("workspace"))
+        .thenReturn(new String[] {"/other.code-workspace"});
+    HttpServletResponse foreignRes = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/index.html", foreign, foreignRes);
+    verify(foreignRes).sendError(HttpServletResponse.SC_FORBIDDEN);
+
+    HttpServletRequest duplicate = mock(HttpServletRequest.class);
+    when(duplicate.getParameterValues("workspace"))
+        .thenReturn(new String[] {"/managed/zero.code-workspace", "/other.code-workspace"});
+    HttpServletResponse duplicateRes = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/index.html", duplicate, duplicateRes);
+    verify(duplicateRes).sendError(HttpServletResponse.SC_FORBIDDEN);
+
+    // 匹配登记事实的 workspace 文件仍被放行到数据面（本地隧道缺失时是 503，不是 403）。
+    HttpServletRequest bound = mock(HttpServletRequest.class);
+    when(bound.getParameterValues("workspace"))
+        .thenReturn(new String[] {"/managed/zero.code-workspace"});
+    HttpServletResponse boundRes = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/index.html", bound, boundRes);
+    verify(boundRes).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
   }
 
   @Test

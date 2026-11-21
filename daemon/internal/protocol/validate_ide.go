@@ -19,8 +19,8 @@ func validateIDECommand(c *IdeCommand) error {
 		return validateOpenViewCommand(c)
 	case IdeAction_CHANGE_DIRECTORY, IdeAction_FOCUS_TERMINAL, IdeAction_CLOSE_VIEW, IdeAction_COLLAPSE_MOBILE, IdeAction_OPEN_ATTACHMENT:
 		return validateBoundViewCommand(c)
-	case IdeAction_LIST_VIEWS, IdeAction_LIST_DIRECTORIES:
-		return validateListCommand(c)
+	case IdeAction_LIST_VIEWS:
+		return validateListViewCommand(c)
 	default:
 		return invalid("ideCommand.action is required")
 	}
@@ -128,12 +128,9 @@ func validateViewActionCommand(c *IdeCommand) error {
 	return nil
 }
 
-func validateListCommand(c *IdeCommand) error {
-	if c.ViewId != nil || c.BrowserSessionId != nil || c.EventNodeId != nil || c.ConnectionId != nil || c.ClaimId != nil || c.BindingEpoch != nil || c.ExpectedBindingEpoch != nil || c.ExpectedDaemonInstanceId != nil || c.Mode != IdeOpenMode_IDE_OPEN_MODE_UNSPECIFIED || c.Discard != nil || c.Action == IdeAction_LIST_VIEWS && c.Directory != nil {
+func validateListViewCommand(c *IdeCommand) error {
+	if c.ViewId != nil || c.BrowserSessionId != nil || c.EventNodeId != nil || c.ConnectionId != nil || c.ClaimId != nil || c.BindingEpoch != nil || c.ExpectedBindingEpoch != nil || c.ExpectedDaemonInstanceId != nil || c.Mode != IdeOpenMode_IDE_OPEN_MODE_UNSPECIFIED || c.Discard != nil || c.Directory != nil {
 		return invalid("IDE list command has invalid fields")
-	}
-	if c.Directory != nil {
-		return requireIDEPath(c.GetDirectory(), "ideCommand.directory")
 	}
 	return nil
 }
@@ -191,11 +188,14 @@ func validateViewSummary(v *IdeViewSummary, path string) error {
 	if v.GetBindingEpoch() <= 0 {
 		return invalid(path + ".bindingEpoch must be positive")
 	}
-	if err := requireIDEPath(v.GetDirectory(), path+".directory"); err != nil {
-		return err
-	}
 	if err := requireIDEPath(v.GetWorkspacePath(), path+".workspacePath"); err != nil {
 		return err
+	}
+	// A view created without a directory omits it; a present directory must still be a usable path.
+	if v.Directory != nil {
+		if err := requireIDEPath(v.GetDirectory(), path+".directory"); err != nil {
+			return err
+		}
 	}
 	if v.State != IdeViewState_OPEN && v.State != IdeViewState_CLOSING {
 		return invalid(path + ".state is required")
@@ -242,60 +242,23 @@ func validateIDEResult(r *IdeResult) error {
 	if r.Code != nil || r.Message != nil {
 		return invalid("successful IDE result must not declare code or message")
 	}
-	if r.DirectoryListing != nil {
-		return validateIDEDirectoryListing(r)
-	}
 	return validateSuccessfulIDEResult(r)
 }
 
 func validateFailedIDEResult(r *IdeResult) error {
 	if r.Revision != nil {
-		if hasIDESnapshotState(r) {
+		if hasIDEViewState(r) {
 			return invalid("failed IDE result with a snapshot must only declare code, message, revision and views")
 		}
 	} else if len(r.Views) > 0 {
 		return invalid("ideResult.revision is required with views")
-	} else if hasIDESnapshotState(r) {
+	} else if hasIDEViewState(r) {
 		return invalid("failed IDE result must only declare code and message")
 	}
 	if r.Code == nil || !ideCodePattern.MatchString(r.GetCode()) {
 		return invalid("ideResult.code has invalid syntax")
 	}
 	return requireString(r.Message, "ideResult.message", true, 500)
-}
-
-func validateIDEDirectoryListing(r *IdeResult) error {
-	if r.Revision != nil || len(r.Views) > 0 || hasIDEViewState(r) {
-		return invalid("directory listing result must not contain view or snapshot fields")
-	}
-	d := r.DirectoryListing
-	if err := requireIDEPath(d.GetPath(), "directoryListing.path"); err != nil {
-		return err
-	}
-	if d.ParentPath != nil {
-		if err := requireIDEPath(d.GetParentPath(), "directoryListing.parentPath"); err != nil {
-			return err
-		}
-	}
-	if d.Truncated == nil || len(d.Children) > 1000 {
-		return invalid("directory listing requires truncated and at most 1000 children")
-	}
-	return validateDirectoryEntries(d.Children)
-}
-
-func validateDirectoryEntries(children []*IdeDirectoryEntry) error {
-	for _, child := range children {
-		if child == nil {
-			return invalid("directoryEntry is invalid")
-		}
-		if err := requireIDEPath(child.GetName(), "directoryEntry.name"); err != nil {
-			return err
-		}
-		if err := requireIDEPath(child.GetPath(), "directoryEntry.path"); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func validateSuccessfulIDEResult(r *IdeResult) error {
@@ -333,11 +296,14 @@ func validateIDEBinding(r *IdeResult) error {
 	if r.BindingEpoch == nil || r.GetBindingEpoch() <= 0 {
 		return invalid("ideResult.bindingEpoch must be positive")
 	}
-	if err := requireIDEPath(r.GetDirectory(), "ideResult.directory"); err != nil {
-		return err
-	}
 	if err := requireIDEPath(r.GetWorkspacePath(), "ideResult.workspacePath"); err != nil {
 		return err
+	}
+	// A view created without a directory omits it; a present directory must still be a usable path.
+	if r.Directory != nil {
+		if err := requireIDEPath(r.GetDirectory(), "ideResult.directory"); err != nil {
+			return err
+		}
 	}
 	if r.Revision == nil {
 		return nil
@@ -361,11 +327,6 @@ func validateIDEBinding(r *IdeResult) error {
 // hasIDEViewState reports whether the result declares view identity, binding or directory state.
 func hasIDEViewState(r *IdeResult) bool {
 	return r.ViewId != nil || r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.Directory != nil || r.WorkspacePath != nil
-}
-
-// hasIDESnapshotState reports whether the result carries view state or a directory listing.
-func hasIDESnapshotState(r *IdeResult) bool {
-	return hasIDEViewState(r) || r.DirectoryListing != nil
 }
 
 // hasIDEBindingFields reports whether the result declares a view binding without its view id.

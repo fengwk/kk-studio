@@ -26,7 +26,12 @@ public final class IdeViewSnapshotStore {
 
   public static final int MAX_VIEWS = 64;
 
-  /** 一条来自完整快照的 IDE 视图；所有字段都由 Daemon 提交点确认。 */
+  /**
+   * 一条来自完整快照的 IDE 视图；所有字段都由 Daemon 提交点确认。
+   *
+   * <p>{@code workspacePath} 与 {@code bindingEpoch} 是绑定的必备事实；零根视图没有文件夹，此时 {@code directory} 为
+   * {@code null}，不能用 HOME 或伪造目录补位。
+   */
   public record View(
       UUID viewId,
       UUID browserSessionId,
@@ -47,7 +52,9 @@ public final class IdeViewSnapshotStore {
       if (bindingEpoch <= 0) {
         throw new IllegalArgumentException("bindingEpoch must be positive");
       }
-      directory = requirePath(directory, "directory");
+      if (directory != null && directory.isBlank()) {
+        throw new IllegalArgumentException("directory must not be blank when present");
+      }
       workspacePath = requirePath(workspacePath, "workspacePath");
       state = Objects.requireNonNull(state, "state");
       if (state != IdeViewState.OPEN && state != IdeViewState.CLOSING) {

@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -36,7 +38,6 @@ import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
-import fun.fengwk.kkstudio.platform.daemon.protocol.IdeDirectoryListing;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
@@ -171,17 +172,33 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertTrue(localTransportA.commands.isEmpty());
   }
 
+  /** 零根视图：目录在 wire 上缺省，workspacePath 与正 epoch 仍是绑定权威。 */
+  @Test
+  void remoteZeroRootOpenKeepsWorkspaceAuthorityWithoutDirectory() {
+    EnvironmentIdeViewDTO dto = nodeAService.openView(ENV, openViewRequest(null));
+
+    assertEquals(VIEW, dto.getViewId());
+    assertNull(dto.getDirectory(), "a zero-root view must not report a directory");
+    assertEquals("/daemon/workspaces/" + VIEW, dto.getWorkspacePath());
+    assertEquals(7L, dto.getBindingEpoch());
+    assertTrue(
+        dto.getEntryUrl().startsWith("/ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
+        () -> "unexpected entry url: " + dto.getEntryUrl());
+    assertEquals(1, received.get());
+    IdeCommand sent = transportB.commands.getFirst();
+    assertEquals(IdeAction.OPEN_VIEW, sent.getAction());
+    assertFalse(sent.hasDirectory(), "zero roots must not be sent as a directory");
+  }
+
   /** 编码查询参与签名，远端按解码后的原始路径发送命令。 */
   @Test
-  void directoryQueryAndMobileCommandReachRemoteOwner() {
-    assertEquals("/", nodeAService.listDirectories(ENV, "/a b+中").getPath());
-    assertEquals("/a b+中", transportB.commands.getLast().getDirectory());
+  void mobileCommandReachesRemoteOwner() {
     nodeAService.openView(ENV, openViewRequest(null));
     nodeAService.collapseMobile(ENV, VIEW, binding(7L));
-    assertEquals(IdeAction.COLLAPSE_MOBILE, transportB.commands.getLast().getAction());
-    assertEquals(3, received.get());
-    assertThrows(DomainException.class, () -> nodeAService.listDirectories(ENV, "x".repeat(4097)));
-    assertEquals(3, received.get());
+    assertEquals(2, received.get());
+    IdeCommand mobile = transportB.commands.getLast();
+    assertEquals(IdeAction.COLLAPSE_MOBILE, mobile.getAction());
+    assertEquals(VIEW, mobile.getViewId());
   }
 
   @Test
@@ -463,16 +480,6 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     String method = exchange.getRequestMethod();
     String[] segments = path.split("/");
     try {
-      if ("GET".equals(method) && path.endsWith("/directories")) {
-        String query = exchange.getRequestURI().getRawQuery();
-        String directory =
-            query == null ? null : URLDecoder.decode(query.substring(5), StandardCharsets.UTF_8);
-        respond(
-            exchange,
-            200,
-            objectMapper.writeValueAsString(nodeBLocal.listDirectories(environmentId, directory)));
-        return;
-      }
       if ("POST".equals(method) && path.endsWith("/views")) {
         EnvironmentIdeOpenViewDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeOpenViewDTO.class);
@@ -632,12 +639,6 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     }
 
     private IdeResult replyFor(IdeCommand command) {
-      if (command.getAction() == IdeAction.LIST_DIRECTORIES) {
-        return IdeResult.newBuilder()
-            .setOk(true)
-            .setDirectoryListing(IdeDirectoryListing.newBuilder().setPath("/").setTruncated(false))
-            .build();
-      }
       if (command.getAction() == IdeAction.OPEN_VIEW) {
         views.put(
             command.getViewId(),
@@ -647,7 +648,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
                 command.getEventNodeId(),
                 command.getConnectionId(),
                 command.getClaimId(),
-                "/home/dev/project"));
+                command.hasDirectory() ? command.getDirectory() : null));
         revision++;
       } else if (command.getAction() == IdeAction.CHANGE_DIRECTORY) {
         IdeViewSummary current = views.get(command.getViewId());
@@ -676,17 +677,20 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         String connectionId,
         String claimId,
         String directory) {
-      return IdeViewSummary.newBuilder()
-          .setViewId(viewId)
-          .setBrowserSessionId(browserSessionId)
-          .setEventNodeId(eventNodeId)
-          .setConnectionId(connectionId)
-          .setClaimId(claimId)
-          .setBindingEpoch(7L)
-          .setDirectory(directory)
-          .setWorkspacePath("/daemon/workspaces/" + viewId)
-          .setState(IdeViewState.OPEN)
-          .build();
+      IdeViewSummary.Builder builder =
+          IdeViewSummary.newBuilder()
+              .setViewId(viewId)
+              .setBrowserSessionId(browserSessionId)
+              .setEventNodeId(eventNodeId)
+              .setConnectionId(connectionId)
+              .setClaimId(claimId)
+              .setBindingEpoch(7L)
+              .setWorkspacePath("/daemon/workspaces/" + viewId)
+              .setState(IdeViewState.OPEN);
+      if (directory != null) {
+        builder.setDirectory(directory);
+      }
+      return builder.build();
     }
 
     @Override

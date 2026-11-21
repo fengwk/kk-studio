@@ -89,14 +89,6 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void newEndpointsAuthenticateAndDelegate() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
-    String directories = IdeInternalPaths.environmentPrefix(ENV) + "/directories?path=%2Fa%2Bb";
-    mockMvc
-        .perform(
-            get(URI.create(directories))
-                .headers(mockHeaders(authentication.sign("GET", directories, NODE_B))))
-        .andExpect(status().isOk());
-    verify(localEnvironmentIdeService).listDirectories(ENV, "/a+b");
-
     String mobile = IdeInternalPaths.mobileLayoutPath(ENV, VIEW);
     mockMvc
         .perform(
@@ -107,6 +99,21 @@ class ClusterEnvironmentIdeInternalControllerTest {
                     "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}"))
         .andExpect(status().isOk());
     verify(localEnvironmentIdeService).collapseMobile(eq(ENV), eq(VIEW), any());
+  }
+
+  /** 目录枚举内部端点已删除：即使签名合法也只能得到 404，且不触达本地 delegate。 */
+  @Test
+  void removedDirectoryListingEndpointIsNotFound() throws Exception {
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
+    String directories = IdeInternalPaths.environmentPrefix(ENV) + "/directories?path=%2Fa";
+
+    mockMvc
+        .perform(
+            get(URI.create(directories))
+                .headers(mockHeaders(authentication.sign("GET", directories, NODE_B))))
+        .andExpect(status().isNotFound());
+
+    verifyNoInteractions(localEnvironmentIdeService);
   }
 
   /** 纯读 GET 内部端点同样先认证 owner，再把显式 query 转发给本地服务。 */

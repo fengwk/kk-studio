@@ -61,6 +61,43 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   }
 
   @Test
+  void authorizerAcceptsZeroRootViewOnItsRegisteredWorkspaceOnly() {
+    IdeBrowserSessionRegistry sessions = new IdeBrowserSessionRegistry();
+    IdeCommandTransport transport = mock(IdeCommandTransport.class);
+    when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
+    IdeViewSnapshotStore snapshots =
+        new IdeViewSnapshotStore(environmentId -> Optional.of(IDENTITY));
+    snapshots.accept(
+        IDENTITY,
+        1L,
+        List.of(
+            new IdeViewSnapshotStore.View(
+                VIEW,
+                BROWSER_SESSION,
+                EVENT_NODE,
+                CONNECTION,
+                CLAIM,
+                1L,
+                null,
+                "/workspace",
+                IdeViewState.OPEN)));
+    SessionIdeDataViewAuthorizer authorizer =
+        new SessionIdeDataViewAuthorizer(sessions, snapshots, transport);
+
+    String zeroRootToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/workspace");
+    Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
+        authorizer.authorize(ENV, VIEW, "kk_ide_session=" + zeroRootToken);
+
+    assertTrue(access.isPresent(), "a zero-root view authorizes on its registered workspace file");
+    assertEquals(Set.of("/workspace"), access.get().authorizedWorkspaces());
+
+    String foreignWorkspaceToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/elsewhere");
+    assertFalse(
+        authorizer.authorize(ENV, VIEW, "kk_ide_session=" + foreignWorkspaceToken).isPresent(),
+        "the workspace file, not a directory, is the data-plane authority");
+  }
+
+  @Test
   void authorizerRejectsReplacedEpochOrRemovedView() {
     Fixture fixture = fixture();
     fixture.snapshots.accept(

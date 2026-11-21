@@ -10,7 +10,8 @@ import (
 )
 
 func TestCodec_PayloadRoundtrip(t *testing.T) {
-	e := testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: &IdeResult{Ok: proto.Bool(true), DirectoryListing: &IdeDirectoryListing{Path: proto.String("/"), Truncated: proto.Bool(false), Children: []*IdeDirectoryEntry{{Name: proto.String("src"), Path: proto.String("/src")}}}}})
+	// A zero-folder view summary carries the optional directory the managed runtime omits.
+	e := testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: &IdeResult{Ok: proto.Bool(true), Revision: proto.Int64(1), Views: []*IdeViewSummary{{ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), WorkspacePath: proto.String("/managed/view.code-workspace"), State: IdeViewState_OPEN}}}})
 	data, err := proto.Marshal(e)
 	if err != nil {
 		t.Fatal(err)

@@ -446,6 +446,17 @@ func TestBridgePendingLifecycleFences(t *testing.T) {
 		}
 	})
 
+	t.Run("cancelled transition remains bound", func(t *testing.T) {
+		bridge, view, stream := makeBridge(3)
+		result := make(chan BridgeResult, 1)
+		bridge.pending["change"] = &bridgePending{viewID: viewID, epoch: 3, op: "changeDirectory", stream: stream, result: result}
+		bridge.resolvePending("change", BridgeResult{Code: "CANCELLED"})
+		<-result
+		if view.stream != stream || view.hostID == "" {
+			t.Fatal("cancelled transition disconnected its active host")
+		}
+	})
+
 	t.Run("disconnect settles ordinary commands and waits for transition confirmation", func(t *testing.T) {
 		bridge, view, stream := makeBridge(3)
 		ordinary := make(chan BridgeResult, 1)

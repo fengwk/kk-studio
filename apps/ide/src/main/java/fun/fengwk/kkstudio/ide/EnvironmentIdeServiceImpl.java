@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBindings.Binding;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
@@ -20,7 +19,6 @@ import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
-import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
@@ -231,7 +229,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             "IDE binding changed before the unknown OPEN_VIEW outcome was read");
       }
       long bindingEpoch = IdeProtocol.requirePositiveEpoch(view.getBindingEpoch());
-      String confirmedDirectory = IdeInputs.requireProtocolPath(view.getDirectory(), "directory");
+      String confirmedDirectory = IdeInputs.optionalProtocolPath(view.getDirectory(), "directory");
       String workspacePath =
           IdeInputs.requireProtocolPath(view.getWorkspacePath(), "workspacePath");
       return publishOpen(
@@ -472,22 +470,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       }
     }
     revokeExactBinding(binding.identity(), parsedViewId, bindingEpoch);
-  }
-
-  @Override
-  public EnvironmentIdeDirectoryListingDTO listDirectories(
-      EnvironmentId environmentId, String path) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    String directory = IdeInputs.requireDirectory(path);
-    IdeCommand.Builder command = IdeCommand.newBuilder().setAction(IdeAction.LIST_DIRECTORIES);
-    if (directory != null) {
-      command.setDirectory(directory);
-    }
-    IdeResult reply = caller.callConfirmed(environmentId, command.build()).reply();
-    if (!reply.getOk()) {
-      throw IdeProtocol.rejection(reply);
-    }
-    return IdeProtocol.toDirectoryListing(reply);
   }
 
   /** owner 的当前视图快照；不创建视图，也不续租。只供本节点 lease 续租读取，不经跨节点转发。 */

@@ -147,7 +147,7 @@ func TestCodec_IDEActions(t *testing.T) {
 	bound := func(action IdeAction) *IdeCommand {
 		return &IdeCommand{Action: action, ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), ExpectedDaemonInstanceId: proto.String(testEnvironmentID)}
 	}
-	commands := []*IdeCommand{bound(IdeAction_CHANGE_DIRECTORY), bound(IdeAction_FOCUS_TERMINAL), bound(IdeAction_COLLAPSE_MOBILE), bound(IdeAction_CLOSE_VIEW), {Action: IdeAction_LIST_VIEWS}, {Action: IdeAction_LIST_DIRECTORIES, Directory: proto.String("workspace")}}
+	commands := []*IdeCommand{bound(IdeAction_CHANGE_DIRECTORY), bound(IdeAction_FOCUS_TERMINAL), bound(IdeAction_COLLAPSE_MOBILE), bound(IdeAction_CLOSE_VIEW), {Action: IdeAction_LIST_VIEWS}}
 	commands[0].Directory = proto.String("workspace")
 	commands[3].Discard = proto.Bool(false)
 	for _, command := range commands {
@@ -156,12 +156,25 @@ func TestCodec_IDEActions(t *testing.T) {
 			t.Errorf("action %s rejected: %v", command.Action, err)
 		}
 	}
-	results := []*IdeResult{{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID)}, {Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID), Directory: proto.String("workspace")}, {Ok: proto.Bool(true), DirectoryListing: &IdeDirectoryListing{Path: proto.String("workspace"), Truncated: proto.Bool(false)}}, {Ok: proto.Bool(false), Code: proto.String("VIEW_GONE"), Message: proto.String("gone")}}
+	// A view created without a directory omits it in every result shape.
+	zeroFolder := &IdeViewSummary{ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), WorkspacePath: proto.String("managed/view.code-workspace"), State: IdeViewState_OPEN}
+	results := []*IdeResult{
+		{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID)},
+		{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID), Directory: proto.String("workspace")},
+		{Ok: proto.Bool(true), Revision: proto.Int64(1), Views: []*IdeViewSummary{zeroFolder}},
+		{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), WorkspacePath: proto.String("managed/view.code-workspace"), Revision: proto.Int64(1), Views: []*IdeViewSummary{zeroFolder}},
+		{Ok: proto.Bool(false), Code: proto.String("VIEW_GONE"), Message: proto.String("gone")},
+	}
 	for _, result := range results {
 		e := testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: result})
 		if _, err := MarshalEnvelope(e); err != nil {
 			t.Errorf("IDE result rejected: %v", err)
 		}
+	}
+	blankDirectory := proto.Clone(results[2]).(*IdeResult)
+	blankDirectory.Views[0].Directory = proto.String("")
+	if _, err := MarshalEnvelope(testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: blankDirectory})); err == nil {
+		t.Fatal("blank view directory accepted")
 	}
 }
 

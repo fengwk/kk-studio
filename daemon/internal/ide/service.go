@@ -212,8 +212,6 @@ func (s *Service) HandleCommand(ctx context.Context, command *protocol.IdeComman
 		result, err = s.closeView(ctx, command)
 	case protocol.IdeAction_LIST_VIEWS:
 		return successSnapshot(s.snapshot())
-	case protocol.IdeAction_LIST_DIRECTORIES:
-		return s.listDirectories(command)
 	case protocol.IdeAction_COLLAPSE_MOBILE:
 		result, err = s.collapseMobile(ctx, command)
 	default:

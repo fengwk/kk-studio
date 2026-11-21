@@ -421,7 +421,6 @@ const (
 	IdeAction_FOCUS_TERMINAL         IdeAction = 3
 	IdeAction_CLOSE_VIEW             IdeAction = 4
 	IdeAction_LIST_VIEWS             IdeAction = 6
-	IdeAction_LIST_DIRECTORIES       IdeAction = 7
 	IdeAction_COLLAPSE_MOBILE        IdeAction = 8
 	IdeAction_OPEN_ATTACHMENT        IdeAction = 9
 )
@@ -435,7 +434,6 @@ var (
 		3: "FOCUS_TERMINAL",
 		4: "CLOSE_VIEW",
 		6: "LIST_VIEWS",
-		7: "LIST_DIRECTORIES",
 		8: "COLLAPSE_MOBILE",
 		9: "OPEN_ATTACHMENT",
 	}
@@ -446,7 +444,6 @@ var (
 		"FOCUS_TERMINAL":         3,
 		"CLOSE_VIEW":             4,
 		"LIST_VIEWS":             6,
-		"LIST_DIRECTORIES":       7,
 		"COLLAPSE_MOBILE":        8,
 		"OPEN_ATTACHMENT":        9,
 	}
@@ -3680,7 +3677,6 @@ type IdeResult struct {
 	Directory        *string                `protobuf:"bytes,10,opt,name=directory,proto3,oneof" json:"directory,omitempty"`
 	WorkspacePath    *string                `protobuf:"bytes,11,opt,name=workspace_path,json=workspacePath,proto3,oneof" json:"workspace_path,omitempty"`
 	Views            []*IdeViewSummary      `protobuf:"bytes,12,rep,name=views,proto3" json:"views,omitempty"`
-	DirectoryListing *IdeDirectoryListing   `protobuf:"bytes,13,opt,name=directory_listing,json=directoryListing,proto3" json:"directory_listing,omitempty"`
 	// 与 views 同一提交点冻结的完整可见快照代次；不存在 view 时也可为 0。
 	Revision      *int64 `protobuf:"varint,14,opt,name=revision,proto3,oneof" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -3801,138 +3797,11 @@ func (x *IdeResult) GetViews() []*IdeViewSummary {
 	return nil
 }
 
-func (x *IdeResult) GetDirectoryListing() *IdeDirectoryListing {
-	if x != nil {
-		return x.DirectoryListing
-	}
-	return nil
-}
-
 func (x *IdeResult) GetRevision() int64 {
 	if x != nil && x.Revision != nil {
 		return *x.Revision
 	}
 	return 0
-}
-
-type IdeDirectoryListing struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          *string                `protobuf:"bytes,1,opt,name=path,proto3,oneof" json:"path,omitempty"`
-	ParentPath    *string                `protobuf:"bytes,2,opt,name=parent_path,json=parentPath,proto3,oneof" json:"parent_path,omitempty"`
-	Children      []*IdeDirectoryEntry   `protobuf:"bytes,3,rep,name=children,proto3" json:"children,omitempty"`
-	Truncated     *bool                  `protobuf:"varint,4,opt,name=truncated,proto3,oneof" json:"truncated,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *IdeDirectoryListing) Reset() {
-	*x = IdeDirectoryListing{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *IdeDirectoryListing) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*IdeDirectoryListing) ProtoMessage() {}
-
-func (x *IdeDirectoryListing) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use IdeDirectoryListing.ProtoReflect.Descriptor instead.
-func (*IdeDirectoryListing) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{46}
-}
-
-func (x *IdeDirectoryListing) GetPath() string {
-	if x != nil && x.Path != nil {
-		return *x.Path
-	}
-	return ""
-}
-
-func (x *IdeDirectoryListing) GetParentPath() string {
-	if x != nil && x.ParentPath != nil {
-		return *x.ParentPath
-	}
-	return ""
-}
-
-func (x *IdeDirectoryListing) GetChildren() []*IdeDirectoryEntry {
-	if x != nil {
-		return x.Children
-	}
-	return nil
-}
-
-func (x *IdeDirectoryListing) GetTruncated() bool {
-	if x != nil && x.Truncated != nil {
-		return *x.Truncated
-	}
-	return false
-}
-
-type IdeDirectoryEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          *string                `protobuf:"bytes,1,opt,name=name,proto3,oneof" json:"name,omitempty"`
-	Path          *string                `protobuf:"bytes,2,opt,name=path,proto3,oneof" json:"path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *IdeDirectoryEntry) Reset() {
-	*x = IdeDirectoryEntry{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *IdeDirectoryEntry) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*IdeDirectoryEntry) ProtoMessage() {}
-
-func (x *IdeDirectoryEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use IdeDirectoryEntry.ProtoReflect.Descriptor instead.
-func (*IdeDirectoryEntry) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{47}
-}
-
-func (x *IdeDirectoryEntry) GetName() string {
-	if x != nil && x.Name != nil {
-		return *x.Name
-	}
-	return ""
-}
-
-func (x *IdeDirectoryEntry) GetPath() string {
-	if x != nil && x.Path != nil {
-		return *x.Path
-	}
-	return ""
 }
 
 type IdeViewSummary struct {
@@ -3952,7 +3821,7 @@ type IdeViewSummary struct {
 
 func (x *IdeViewSummary) Reset() {
 	*x = IdeViewSummary{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3964,7 +3833,7 @@ func (x *IdeViewSummary) String() string {
 func (*IdeViewSummary) ProtoMessage() {}
 
 func (x *IdeViewSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3977,7 +3846,7 @@ func (x *IdeViewSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeViewSummary.ProtoReflect.Descriptor instead.
 func (*IdeViewSummary) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{48}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *IdeViewSummary) GetViewId() string {
@@ -4053,7 +3922,7 @@ type IdeLease struct {
 
 func (x *IdeLease) Reset() {
 	*x = IdeLease{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4065,7 +3934,7 @@ func (x *IdeLease) String() string {
 func (*IdeLease) ProtoMessage() {}
 
 func (x *IdeLease) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4078,7 +3947,7 @@ func (x *IdeLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeLease.ProtoReflect.Descriptor instead.
 func (*IdeLease) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{49}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *IdeLease) GetRound() int64 {
@@ -4106,7 +3975,7 @@ type IdeLeaseBinding struct {
 
 func (x *IdeLeaseBinding) Reset() {
 	*x = IdeLeaseBinding{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4118,7 +3987,7 @@ func (x *IdeLeaseBinding) String() string {
 func (*IdeLeaseBinding) ProtoMessage() {}
 
 func (x *IdeLeaseBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4131,7 +4000,7 @@ func (x *IdeLeaseBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeLeaseBinding.ProtoReflect.Descriptor instead.
 func (*IdeLeaseBinding) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{50}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *IdeLeaseBinding) GetViewId() string {
@@ -4164,7 +4033,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[51]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4176,7 +4045,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[51]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4189,7 +4058,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{51}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *Error) GetMessage() string {
@@ -4522,7 +4391,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x17_expected_binding_epochB\x1e\n" +
 	"\x1c_expected_daemon_instance_idB\x10\n" +
 	"\x0e_attachment_idB\x12\n" +
-	"\x10_attachment_text\"\x8a\x06\n" +
+	"\x10_attachment_text\"\xc3\x05\n" +
 	"\tIdeResult\x12\x13\n" +
 	"\x02ok\x18\x01 \x01(\bH\x00R\x02ok\x88\x01\x01\x12\x17\n" +
 	"\x04code\x18\x02 \x01(\tH\x01R\x04code\x88\x01\x01\x12\x1d\n" +
@@ -4537,8 +4406,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	" \x01(\tH\tR\tdirectory\x88\x01\x01\x12*\n" +
 	"\x0eworkspace_path\x18\v \x01(\tH\n" +
 	"R\rworkspacePath\x88\x01\x01\x12B\n" +
-	"\x05views\x18\f \x03(\v2,.kkstudio.environment.control.IdeViewSummaryR\x05views\x12^\n" +
-	"\x11directory_listing\x18\r \x01(\v21.kkstudio.environment.control.IdeDirectoryListingR\x10directoryListing\x12\x1f\n" +
+	"\x05views\x18\f \x03(\v2,.kkstudio.environment.control.IdeViewSummaryR\x05views\x12\x1f\n" +
 	"\brevision\x18\x0e \x01(\x03H\vR\brevision\x88\x01\x01B\x05\n" +
 	"\x03_okB\a\n" +
 	"\x05_codeB\n" +
@@ -4554,22 +4422,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\n" +
 	"_directoryB\x11\n" +
 	"\x0f_workspace_pathB\v\n" +
-	"\t_revision\"\xeb\x01\n" +
-	"\x13IdeDirectoryListing\x12\x17\n" +
-	"\x04path\x18\x01 \x01(\tH\x00R\x04path\x88\x01\x01\x12$\n" +
-	"\vparent_path\x18\x02 \x01(\tH\x01R\n" +
-	"parentPath\x88\x01\x01\x12K\n" +
-	"\bchildren\x18\x03 \x03(\v2/.kkstudio.environment.control.IdeDirectoryEntryR\bchildren\x12!\n" +
-	"\ttruncated\x18\x04 \x01(\bH\x02R\ttruncated\x88\x01\x01B\a\n" +
-	"\x05_pathB\x0e\n" +
-	"\f_parent_pathB\f\n" +
-	"\n" +
-	"_truncated\"W\n" +
-	"\x11IdeDirectoryEntry\x12\x17\n" +
-	"\x04name\x18\x01 \x01(\tH\x00R\x04name\x88\x01\x01\x12\x17\n" +
-	"\x04path\x18\x02 \x01(\tH\x01R\x04path\x88\x01\x01B\a\n" +
-	"\x05_nameB\a\n" +
-	"\x05_path\"\x96\x04\n" +
+	"\t_revisionJ\x04\b\r\x10\x0eR\x11directory_listing\"\x96\x04\n" +
 	"\x0eIdeViewSummary\x12\x1c\n" +
 	"\aview_id\x18\x01 \x01(\tH\x00R\x06viewId\x88\x01\x01\x121\n" +
 	"\x12browser_session_id\x18\x02 \x01(\tH\x01R\x10browserSessionId\x88\x01\x01\x12'\n" +
@@ -4666,7 +4519,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x18UPDATE_PHASE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fUPDATE_ACCEPTED\x10\x01\x12\x13\n" +
 	"\x0fUPDATE_PREPARED\x10\x02\x12\x11\n" +
-	"\rUPDATE_FAILED\x10\x03*\xd3\x01\n" +
+	"\rUPDATE_FAILED\x10\x03*\xd5\x01\n" +
 	"\tIdeAction\x12\x1a\n" +
 	"\x16IDE_ACTION_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tOPEN_VIEW\x10\x01\x12\x14\n" +
@@ -4675,10 +4528,9 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\n" +
 	"CLOSE_VIEW\x10\x04\x12\x0e\n" +
 	"\n" +
-	"LIST_VIEWS\x10\x06\x12\x14\n" +
-	"\x10LIST_DIRECTORIES\x10\a\x12\x13\n" +
+	"LIST_VIEWS\x10\x06\x12\x13\n" +
 	"\x0fCOLLAPSE_MOBILE\x10\b\x12\x13\n" +
-	"\x0fOPEN_ATTACHMENT\x10\t\"\x04\b\x05\x10\x05*\vDETACH_VIEW*D\n" +
+	"\x0fOPEN_ATTACHMENT\x10\t\"\x04\b\x05\x10\x05\"\x04\b\a\x10\a*\vDETACH_VIEW*\x10LIST_DIRECTORIES*D\n" +
 	"\vIdeOpenMode\x12\x1d\n" +
 	"\x19IDE_OPEN_MODE_UNSPECIFIED\x10\x00\x12\n" +
 	"\n" +
@@ -4704,7 +4556,7 @@ func file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP() [
 }
 
 var file_platform_daemon_server_src_main_protocol_control_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_platform_daemon_server_src_main_protocol_control_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
+var file_platform_daemon_server_src_main_protocol_control_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_platform_daemon_server_src_main_protocol_control_proto_goTypes = []any{
 	(MessageType)(0),                // 0: kkstudio.environment.control.MessageType
 	(ImageInputTier)(0),             // 1: kkstudio.environment.control.ImageInputTier
@@ -4761,13 +4613,11 @@ var file_platform_daemon_server_src_main_protocol_control_proto_goTypes = []any{
 	(*UpdateResult)(nil),            // 52: kkstudio.environment.control.UpdateResult
 	(*IdeCommand)(nil),              // 53: kkstudio.environment.control.IdeCommand
 	(*IdeResult)(nil),               // 54: kkstudio.environment.control.IdeResult
-	(*IdeDirectoryListing)(nil),     // 55: kkstudio.environment.control.IdeDirectoryListing
-	(*IdeDirectoryEntry)(nil),       // 56: kkstudio.environment.control.IdeDirectoryEntry
-	(*IdeViewSummary)(nil),          // 57: kkstudio.environment.control.IdeViewSummary
-	(*IdeLease)(nil),                // 58: kkstudio.environment.control.IdeLease
-	(*IdeLeaseBinding)(nil),         // 59: kkstudio.environment.control.IdeLeaseBinding
-	(*Error)(nil),                   // 60: kkstudio.environment.control.Error
-	nil,                             // 61: kkstudio.environment.control.PresignedPut.HeadersEntry
+	(*IdeViewSummary)(nil),          // 55: kkstudio.environment.control.IdeViewSummary
+	(*IdeLease)(nil),                // 56: kkstudio.environment.control.IdeLease
+	(*IdeLeaseBinding)(nil),         // 57: kkstudio.environment.control.IdeLeaseBinding
+	(*Error)(nil),                   // 58: kkstudio.environment.control.Error
+	nil,                             // 59: kkstudio.environment.control.PresignedPut.HeadersEntry
 }
 var file_platform_daemon_server_src_main_protocol_control_proto_depIdxs = []int32{
 	0,  // 0: kkstudio.environment.control.Envelope.message_type:type_name -> kkstudio.environment.control.MessageType
@@ -4793,8 +4643,8 @@ var file_platform_daemon_server_src_main_protocol_control_proto_depIdxs = []int3
 	52, // 20: kkstudio.environment.control.Envelope.update_result:type_name -> kkstudio.environment.control.UpdateResult
 	53, // 21: kkstudio.environment.control.Envelope.ide_command:type_name -> kkstudio.environment.control.IdeCommand
 	54, // 22: kkstudio.environment.control.Envelope.ide_result:type_name -> kkstudio.environment.control.IdeResult
-	58, // 23: kkstudio.environment.control.Envelope.ide_lease:type_name -> kkstudio.environment.control.IdeLease
-	60, // 24: kkstudio.environment.control.Envelope.error:type_name -> kkstudio.environment.control.Error
+	56, // 23: kkstudio.environment.control.Envelope.ide_lease:type_name -> kkstudio.environment.control.IdeLease
+	58, // 24: kkstudio.environment.control.Envelope.error:type_name -> kkstudio.environment.control.Error
 	47, // 25: kkstudio.environment.control.Envelope.resource_download_request:type_name -> kkstudio.environment.control.ResourceDownloadRequest
 	48, // 26: kkstudio.environment.control.Envelope.resource_download_ticket:type_name -> kkstudio.environment.control.ResourceDownloadTicket
 	13, // 27: kkstudio.environment.control.Envelope.environment_config:type_name -> kkstudio.environment.control.EnvironmentConfig
@@ -4823,22 +4673,20 @@ var file_platform_daemon_server_src_main_protocol_control_proto_depIdxs = []int3
 	35, // 50: kkstudio.environment.control.Content.resource:type_name -> kkstudio.environment.control.ResourceContent
 	4,  // 51: kkstudio.environment.control.ResourceUploadTicket.state:type_name -> kkstudio.environment.control.TicketState
 	45, // 52: kkstudio.environment.control.ResourceUploadTicket.presigned_put:type_name -> kkstudio.environment.control.PresignedPut
-	61, // 53: kkstudio.environment.control.PresignedPut.headers:type_name -> kkstudio.environment.control.PresignedPut.HeadersEntry
+	59, // 53: kkstudio.environment.control.PresignedPut.headers:type_name -> kkstudio.environment.control.PresignedPut.HeadersEntry
 	4,  // 54: kkstudio.environment.control.ResourceDownloadTicket.state:type_name -> kkstudio.environment.control.TicketState
 	46, // 55: kkstudio.environment.control.ResourceDownloadTicket.presigned_get:type_name -> kkstudio.environment.control.PresignedGet
 	5,  // 56: kkstudio.environment.control.UpdateResult.phase:type_name -> kkstudio.environment.control.UpdatePhase
 	6,  // 57: kkstudio.environment.control.IdeCommand.action:type_name -> kkstudio.environment.control.IdeAction
 	7,  // 58: kkstudio.environment.control.IdeCommand.mode:type_name -> kkstudio.environment.control.IdeOpenMode
-	57, // 59: kkstudio.environment.control.IdeResult.views:type_name -> kkstudio.environment.control.IdeViewSummary
-	55, // 60: kkstudio.environment.control.IdeResult.directory_listing:type_name -> kkstudio.environment.control.IdeDirectoryListing
-	56, // 61: kkstudio.environment.control.IdeDirectoryListing.children:type_name -> kkstudio.environment.control.IdeDirectoryEntry
-	8,  // 62: kkstudio.environment.control.IdeViewSummary.state:type_name -> kkstudio.environment.control.IdeViewState
-	59, // 63: kkstudio.environment.control.IdeLease.bindings:type_name -> kkstudio.environment.control.IdeLeaseBinding
-	64, // [64:64] is the sub-list for method output_type
-	64, // [64:64] is the sub-list for method input_type
-	64, // [64:64] is the sub-list for extension type_name
-	64, // [64:64] is the sub-list for extension extendee
-	0,  // [0:64] is the sub-list for field type_name
+	55, // 59: kkstudio.environment.control.IdeResult.views:type_name -> kkstudio.environment.control.IdeViewSummary
+	8,  // 60: kkstudio.environment.control.IdeViewSummary.state:type_name -> kkstudio.environment.control.IdeViewState
+	57, // 61: kkstudio.environment.control.IdeLease.bindings:type_name -> kkstudio.environment.control.IdeLeaseBinding
+	62, // [62:62] is the sub-list for method output_type
+	62, // [62:62] is the sub-list for method input_type
+	62, // [62:62] is the sub-list for extension type_name
+	62, // [62:62] is the sub-list for extension extendee
+	0,  // [0:62] is the sub-list for field type_name
 }
 
 func init() { file_platform_daemon_server_src_main_protocol_control_proto_init() }
@@ -4920,15 +4768,13 @@ func file_platform_daemon_server_src_main_protocol_control_proto_init() {
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49].OneofWrappers = []any{}
-	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50].OneofWrappers = []any{}
-	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[51].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_platform_daemon_server_src_main_protocol_control_proto_rawDesc), len(file_platform_daemon_server_src_main_protocol_control_proto_rawDesc)),
 			NumEnums:      9,
-			NumMessages:   53,
+			NumMessages:   51,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
