@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import type { Theme } from '@fengwk/kchart'
+import type { DiagramDiagnostic, Theme } from '@fengwk/kchart'
 import { CodeBlock, CopyableShell } from '@/shared/ui/markdown/CodeBlock'
 import { useI18n } from '@/shared/i18n'
 import './mermaid-block.css'
@@ -31,6 +31,7 @@ const PALETTE_ROLES = {
 const FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif'
 
+const MAX_LAYOUT_WIDTH = 720
 let rendererPromise: Promise<Renderer> | null = null
 const svgCache = new Map<string, string>()
 const SVG_TEMPLATE_PREFIX = 'kk-mermaid-template'
@@ -67,10 +68,9 @@ function canvasMeasure(): Measure | undefined {
 }
 
 /** KChart 按给定宽度排版；放不下时才加宽并在框内横向滚动。 */
-async function renderSvg(source: string, width: number): Promise<string | null> {
+async function renderDiagram(source: string, width: number) {
   const { kchart, theme, measure } = await loadRenderer()
-  const { svg } = await kchart.diagram(source, { width, theme, frame: false, measure, prefix: SVG_TEMPLATE_PREFIX })
-  return svg
+  return kchart.diagram(source, { width, theme, frame: false, compact: true, measure, prefix: SVG_TEMPLATE_PREFIX })
 }
 
 /** 缓存共用布局；挂载前只重写 SVG 引用属性，让标题、标记和裁剪都指向当前图。 */
@@ -103,6 +103,18 @@ function remember(key: string, svg: string) {
   }
 }
 
+const CJK_END = /[\u3000-\u303f\u3400-\u9fff\uf900-\ufaff\uff00-\uffef]$/
+const HAS_CJK = /[\u3400-\u9fff\uf900-\ufaff]/
+
+/** 诊断用图源的语言书写：按该语言补句末标点，中文句子直接相接，西文句子以空格分隔。 */
+function diagnosticText({ message, fix }: DiagramDiagnostic) {
+  return [message, fix]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .map((part) => (/[.!?。！？]$/.test(part) ? part : `${part}${HAS_CJK.test(part) ? '。' : '.'}`))
+    .reduce((text, part) => (text ? `${text}${CJK_END.test(text) ? '' : ' '}${part}` : part), '')
+}
+
 function SourceView({ code }: { code: string }) {
   return (
     <CodeBlock source={code} className="language-mermaid">
@@ -112,15 +124,15 @@ function SourceView({ code }: { code: string }) {
 }
 
 /**
- * 闭合 mermaid fence 的稳定渲染节点：按容器宽度成图，宽度变化时重绘；同一源码和宽度只渲染一次。
+ * 按紧凑布局宽度重绘和缓存；容器超过 720px 后布局不再变化。
  */
 export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
   const { t } = useI18n()
   const hostRef = useRef<HTMLDivElement>(null)
   const diagramPrefix = `kk-mermaid-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`
   const source = code.trim()
-  const [failedSource, setFailedSource] = useState<string | null>(null)
-  const failed = !source || failedSource === source
+  const [failure, setFailure] = useState<{ source: string; diagnostic?: DiagramDiagnostic } | null>(null)
+  const failed = failure?.source === source
 
   useEffect(() => {
     const host = hostRef.current
@@ -140,21 +152,21 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
         mountSvg(host, cached, diagramPrefix)
         return
       }
-      renderSvg(source, next).then(
-        (svg) => {
+      renderDiagram(source, next).then(
+        ({ svg, diagnostics }) => {
           if (cancelled || width !== next) {
             return
           }
           if (svg === null) {
-            setFailedSource(source)
+            setFailure({ source, diagnostic: diagnostics.find(({ severity }) => severity === 'error') })
             return
           }
           mountSvg(host, svg, diagramPrefix)
           remember(key, svg)
         },
         () => {
-          if (!cancelled) {
-            setFailedSource(source)
+          if (!cancelled && width === next) {
+            setFailure({ source })
           }
         },
       )
@@ -162,7 +174,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[entries.length - 1]
       if (entry) {
-        draw(Math.floor(entry.contentRect.width))
+        draw(Math.min(Math.floor(entry.contentRect.width), MAX_LAYOUT_WIDTH))
       }
     })
     observer.observe(host)
@@ -172,8 +184,25 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
     }
   }, [source, diagramPrefix])
 
-  if (failed) {
+  if (!source) {
     return <SourceView code={code} />
+  }
+
+  if (failed) {
+    const { diagnostic } = failure
+    const detail = diagnostic ? diagnosticText(diagnostic) : ''
+    return (
+      <>
+        <SourceView code={code} />
+        <div className="md-mermaid-error">
+          {!detail
+            ? t('shared.mermaidRenderFailed')
+            : Number.isInteger(diagnostic?.line) && diagnostic!.line > 0
+              ? t('shared.mermaidRenderFailedAt', { line: diagnostic!.line, detail })
+              : t('shared.mermaidRenderFailedWith', { detail })}
+        </div>
+      </>
+    )
   }
 
   return (

@@ -89,13 +89,28 @@ test.describe('Mermaid rendering and sanitization', () => {
     await expect(link).toHaveAttribute('rel', 'noreferrer noopener')
   })
 
+  test('fits a small diagram to its drawing and aligns it with the preceding prose', async ({ page }) => {
+    // 紧凑图不能是占满消息列的 SVG（即使外层盒子与正文已对齐）。
+    const svg = await renderDiagram(page, 'flowchart TD\n A[Start] --> B[End]')
+    const prose = page.getByText('普通段落。', { exact: true })
+    const layout = await svg.evaluate((element) => ({
+      left: element.getBoundingClientRect().left,
+      width: element.getBoundingClientRect().width,
+      hostWidth: element.parentElement!.clientWidth,
+    }))
+    expect(Math.abs(layout.left - (await prose.boundingBox())!.x)).toBeLessThan(1)
+    expect(layout.width).toBeLessThan(layout.hostWidth / 2)
+  })
+
   test('keeps a diagram wider than the message at 1:1 and scrolls it inside its block', async ({ page }) => {
     // 缩放会让图中文字小于排版字号：放不下的图保持原尺寸，在图框内横向滚动，页面本身不加宽。
     const chain = Array.from({ length: 14 }, (_, index) => `S${index}[Stage ${index}]`).join(' --> ')
     const svg = await renderDiagram(page, `flowchart LR\n ${chain}`)
     const layout = await svg.evaluate((element) => {
       const host = element.parentElement as HTMLElement
+      host.scrollLeft = 100
       return {
+        scrollLeft: host.scrollLeft,
         width: Number(element.getAttribute('width')),
         drawn: element.getBoundingClientRect().width,
         hostWidth: host.clientWidth,
@@ -109,6 +124,7 @@ test.describe('Mermaid rendering and sanitization', () => {
     expect(layout.width).toBeGreaterThan(layout.hostWidth)
     expect(layout.hostScroll).toBeGreaterThan(layout.hostWidth)
     expect(layout.overflow).toBe('auto')
+    expect(layout.scrollLeft).toBeGreaterThan(0)
     expect(layout.pageScroll).toBeLessThanOrEqual(layout.viewport)
   })
 })

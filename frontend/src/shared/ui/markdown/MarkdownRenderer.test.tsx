@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 
 const kchart = vi.hoisted(() => ({
-  diagram: vi.fn<(source: string, options: object) => Promise<{ svg: string | null }>>(),
+  diagram: vi.fn<(source: string, options: object) => Promise<{ svg: string | null; diagnostics: [] }>>(),
   themes: { terminal: { style: {} } },
 }))
 
@@ -14,6 +14,7 @@ beforeEach(() => {
   kchart.diagram.mockReset()
   kchart.diagram.mockImplementation(async (source) => ({
     svg: `<svg data-source="${source}"></svg>`,
+    diagnostics: [],
   }))
 })
 
@@ -169,7 +170,7 @@ describe('MarkdownRenderer', () => {
   })
 
   it('falls back to the source view when the diagram is invalid', async () => {
-    kchart.diagram.mockResolvedValueOnce({ svg: null })
+    kchart.diagram.mockResolvedValueOnce({ svg: null, diagnostics: [] })
     const view = render(<MarkdownRenderer content={'```mermaid\nnot a graph\n```'} />)
 
     await waitFor(() => {
