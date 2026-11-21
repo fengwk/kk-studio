@@ -1,102 +1,89 @@
-import { useId, useMemo, useState } from 'react'
+import { useId, useState } from 'react'
+import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import type { CapabilityOption } from '@/features/catalog/agent-capability-candidates'
 import { useI18n } from '@/shared/i18n'
 import './capability-picker.css'
 
-export function ToolSelectionPanel({
-  options,
-  selected,
-  emptyText,
-  onToggle,
-}: {
-  options: CapabilityOption[]
-  selected: string[]
-  emptyText: string
-  onToggle: (value: string) => void
-}) {
-  return <CapabilitySelectionPanel options={options} selected={selected} emptyText={emptyText} onToggle={onToggle} />
+export interface CapabilityDirectory {
+  status: 'loading' | 'error' | 'ready'
+  retry: () => void
 }
 
-export function SkillSelectionPanel({
-  options,
-  selected,
-  emptyText,
-  statusText,
-  errorText,
-  onToggle,
+export function CapabilitySelectionPanel({
+  label, manageLabel, searchLabel, options, selected, emptyText, directory, error, onToggle,
 }: {
+  label: string
+  manageLabel: string
+  searchLabel: string
   options: CapabilityOption[]
   selected: string[]
   emptyText: string
-  statusText?: string | null
-  errorText?: string | null
-  onToggle: (value: string) => void
-}) {
-  return <CapabilitySelectionPanel
-    options={options}
-    selected={selected}
-    emptyText={emptyText}
-    statusText={statusText}
-    errorText={errorText}
-    onToggle={onToggle}
-  />
-}
-
-function CapabilitySelectionPanel({
-  options,
-  selected,
-  emptyText,
-  statusText,
-  errorText,
-  onToggle,
-}: {
-  options: CapabilityOption[]
-  selected: string[]
-  emptyText: string
-  statusText?: string | null
-  errorText?: string | null
+  directory?: CapabilityDirectory
+  error?: string
   onToggle: (value: string) => void
 }) {
   const { t } = useI18n()
+  const searchId = useId()
   const [search, setSearch] = useState('')
-  const filtered = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase()
-    return options.filter((option) =>
-      !term || `${option.name} ${option.description ?? ''}`.toLocaleLowerCase().includes(term),
-    )
-  }, [options, search])
+  const [selectedOnly, setSelectedOnly] = useState(false)
+  const checkedValues = new Set(selected)
+  const selectedNames = options.filter((option) => checkedValues.has(option.value)).slice(0, 2)
+  const status = directory?.status ?? 'ready'
+  const empty = !options.some((option) => !option.missing)
+  const term = search.trim().toLocaleLowerCase()
   const groups = new Map<string, CapabilityOption[]>()
-  for (const option of filtered) {
-    const group = option.group ?? (option.missing ? t('ai.catalog.form.unavailable') : '')
+  for (const option of options) {
+    if (selectedOnly && !checkedValues.has(option.value)) continue
+    if (term && !`${option.group ?? ''} ${option.name} ${option.description ?? ''}`.toLocaleLowerCase().includes(term)) continue
+    const group = option.group ?? ''
     const items = groups.get(group) ?? []
     items.push(option)
     groups.set(group, items)
   }
-  const searchId = useId()
 
   return (
-    <div className="capability-selection-panel">
-      <label className="capability-search-label" htmlFor={searchId}>{t('ai.catalog.form.searchCapabilities')}</label>
-      <input
-        id={searchId}
-        className="capability-search"
-        type="search"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-      />
-      {statusText ? <div className="inline-hint" role="status">{statusText}</div> : null}
-      {errorText ? <div className="inline-hint" role="alert">{errorText}</div> : null}
-      {groups.size === 0 ? (
-        <div className="capability-options"><div className="inline-hint">{emptyText}</div></div>
-      ) : (
-        <div className="capability-options">
+    <fieldset className={`form-group capability-picker${error ? ' is-error' : ''}`}>
+      <legend>{label} · {t('ai.catalog.form.selectedCount', { count: checkedValues.size })}</legend>
+      <details className="capability-selection-details">
+        <summary>{manageLabel}</summary>
+        <div className="capability-selection-panel">
+          {error ? <span className="field-error">{error}</span> : null}
+          <label className="capability-search-label" htmlFor={searchId}>{searchLabel}</label>
+          <TextInput
+            id={searchId}
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }}
+          />
+          <div className="capability-filter">
+            <Button size="compact" variant="ghost" aria-pressed={!selectedOnly} onClick={() => setSelectedOnly(false)}>
+              {t('ai.catalog.form.allCapabilities')}
+            </Button>
+            <Button size="compact" variant="ghost" aria-pressed={selectedOnly} onClick={() => setSelectedOnly(true)}>
+              {t('ai.catalog.form.selectedCapabilities')}
+            </Button>
+          </div>
+          {status === 'loading' ? <div className="inline-hint" role="status">{t('ai.common.loadingResources')}</div> : null}
+          {status === 'error' ? (
+            <div className="inline-hint" role="alert">
+              {t('ai.common.resourceLoadFailed')}{' '}
+              <Button variant="inline" onClick={directory?.retry}>{t('shared.retry')}</Button>
+            </div>
+          ) : null}
+          {status === 'ready' && empty ? <div className="inline-hint" role="status">{emptyText}</div> : null}
+          {groups.size === 0 && status === 'ready' && (!empty || options.length > 0) ? (
+            <div className="inline-hint" role="status">{t('ai.catalog.form.noMatchingCapabilities')}</div>
+          ) : null}
           {[...groups].map(([group, items]) => (
-            <section className="capability-group" key={group || 'all'} aria-label={group || undefined}>
+            <section className="capability-group" key={group} aria-label={group || undefined}>
               {group ? <h4 className="capability-group-heading">{group}</h4> : null}
               {items.map((option) => {
-                const checked = selected.includes(option.value)
-                const stateClass = option.missing ? ' is-offline is-missing' : option.offline ? ' is-offline' : ''
+                const checked = checkedValues.has(option.value)
+                const missing = status === 'ready' && option.missing
+                const stateClass = missing ? ' is-offline is-missing' : option.offline && !option.missing ? ' is-offline' : ''
                 return (
                   <Checkbox
                     key={option.value}
@@ -107,9 +94,10 @@ function CapabilitySelectionPanel({
                     <span className="capability-option-body">
                       <span className="capability-option-heading">
                         <code className="capability-name">{option.name}</code>
-                        {option.missing ? <span className="capability-option-status">{t('ai.catalog.form.unavailable')}</span> : null}
+                        {missing ? <span className="capability-option-status">{t('ai.catalog.form.unavailable')}</span> : null}
+                        {option.offline && !option.missing ? <span className="capability-option-status">{t('ai.catalog.form.offline')}</span> : null}
                       </span>
-                      {option.description ? <span className="capability-option-description" title={option.description}>{option.description}</span> : null}
+                      {option.description ? <span className="capability-option-description">{option.description}</span> : null}
                     </span>
                   </Checkbox>
                 )
@@ -117,7 +105,10 @@ function CapabilitySelectionPanel({
             </section>
           ))}
         </div>
-      )}
-    </div>
+      </details>
+      {selectedNames.length > 0 ? (
+        <div className="inline-hint capability-selection-summary">{selectedNames.map((option) => option.name).join(' · ')}</div>
+      ) : null}
+    </fieldset>
   )
 }

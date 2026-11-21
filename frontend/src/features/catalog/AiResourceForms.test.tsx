@@ -673,6 +673,60 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
   })
 
+  // 切换默认预设只允许改 defaultVariant：其余草稿字段必须原样保留。
+  it('keeps every other model draft field when the default preset changes', async () => {
+    const user = userEvent.setup()
+    const providers: ProviderDTO[] = [{
+      name: 'minimax',
+      description: null,
+      providerType: 'openai',
+      promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
+      baseUrl: null,
+      credential: { configured: true },
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
+      version: '1',
+      createdAt: 0,
+      updatedAt: 0,
+      modelHttpRetryStatusCodes: null,
+    }]
+    let currentDraft: ModelDraft = {
+      ...emptyModelDraft({ name: 'minimax' }),
+      providerName: 'minimax',
+      name: 'Preset-Model',
+      modelId: 'wire-preset',
+      reasoning: true,
+    }
+    function PresetHarness() {
+      const [draft, setDraft] = useState<ModelDraft>(currentDraft)
+      return (
+        <ModelForm
+          draft={draft}
+          mode="create"
+          providers={providers}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+    render(<PresetHarness />)
+
+    await user.type(screen.getByPlaceholderText('模型说明'), 'preset description')
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    await user.clear(secondNameInput)
+    await user.type(secondNameInput, 'creative')
+    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+
+    const before = currentDraft
+    await selectFormOption(user, 'Default Variant', 'creative')
+
+    expect(currentDraft.defaultVariant).toBe('creative')
+    expect(currentDraft).toEqual({ ...before, defaultVariant: 'creative' })
+  })
+
   it('renders every model field error kind inline', () => {
     render(
       <ModelForm
@@ -745,14 +799,16 @@ describe('AiResourceForms', () => {
     const user = userEvent.setup()
     render(<AgentFormHarness />)
 
-    expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
+    expect(screen.getByRole('button', { name: '使用第一个模型' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '使用第一个模型' }))
     expect(screen.getByLabelText('Default Model')).toHaveAttribute('data-value', 'MiniMax-M2.7')
     expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
 
     await selectFormOption(user, 'Default Model', 'Claude-Sonnet-4.5')
     expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
-    expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
+    // 能力区默认收起：先展开 Tools 面板再确认空目录文案。
+    await user.click(screen.getByText('管理工具'))
+    expect(screen.getByText('目录还没有工具')).toBeInTheDocument()
   })
 
   it('shows the model prerequisite hint when no model is available', () => {

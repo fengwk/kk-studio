@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentForm } from '@/features/catalog/AiAgentResourceForm'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
@@ -16,6 +16,16 @@ import type {
   ModelDTO,
   SkillPackageSummaryDTO,
 } from '@/shared/api/generated/contracts'
+
+/** 能力区默认收起：先展开对应面板再操作候选。 */
+async function openCapabilityPanel(user: ReturnType<typeof userEvent.setup>, summary: string) {
+  await user.click(screen.getByText(summary))
+}
+
+/** 以 legend 前缀定位单个能力面板，避免三个面板的提示互相串味。 */
+function capabilityPanel(label: string): HTMLElement {
+  return screen.getByRole('group', { name: new RegExp(`^${label}`) })
+}
 
 const baseConfig: ModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -93,7 +103,7 @@ describe('AgentForm current contracts', () => {
     // 非内置执行配置不应暴露模型校验或重置入口；普通编辑不改变不透明配置。
     expect(screen.getByLabelText('执行驱动')).toHaveTextContent('future')
     expect(screen.queryByLabelText('Default Model')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '使用第一个 Model 填充默认配置' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '使用第一个模型' })).not.toBeInTheDocument()
     await chooseSelectOption(user, '执行驱动', 'future (不可用)')
     fireEvent.change(screen.getByPlaceholderText('用途说明'), { target: { value: 'edited' } })
     expect(toEditableAgentUpdate(latest).execution).toEqual(execution)
@@ -177,6 +187,7 @@ describe('AgentForm current contracts', () => {
     expect(bashInput).toBeChecked()
 
     // Skill candidate shows "core / dev"
+    await openCapabilityPanel(user, '管理技能')
     const devSkill = screen.getByLabelText(/core \/ dev/)
     expect(devSkill).not.toBeChecked()
     await user.click(devSkill)
@@ -203,6 +214,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
+    await openCapabilityPanel(user, '管理技能')
     const skillCheckbox = screen.getByLabelText(/core \/ online-skill/)
     expect(skillCheckbox).not.toBeChecked()
     await user.click(skillCheckbox)
@@ -236,6 +248,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
+    await openCapabilityPanel(user, '管理技能')
     const orphanCheckbox = screen.getByLabelText(/orphan-pkg \/ orphan-skill/)
     expect(orphanCheckbox).toBeChecked()
 
@@ -296,6 +309,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
+    await openCapabilityPanel(user, '管理子代理')
     const helperCheckbox = screen.getByLabelText(/helper/)
     expect(helperCheckbox).not.toBeChecked()
     await user.click(helperCheckbox)
@@ -370,11 +384,57 @@ describe('AgentForm current contracts', () => {
       'true',
     )
     const fillButton = screen.getByRole('button', {
-      name: '使用第一个 Model 填充默认配置',
+      name: '使用第一个模型',
     })
     expect(fillButton).toBeInTheDocument()
 
     await user.click(fillButton)
     expect(currentDraft.model).toBe('MiniMax')
+  })
+
+  // 三个能力目录各自独立：失败可重试，未读到时不能把已配置值当成不可用。
+  it('reflects each capability directory status and forwards its retry', async () => {
+    const user = userEvent.setup()
+    const retryTools = vi.fn()
+    const retrySkills = vi.fn()
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>({
+        ...emptyAgentDraft(modelWithVariants()),
+        tools: ['removed-tool'],
+        skills: [{ packageName: 'gone', name: 'old-skill' }],
+      })
+      return (
+        <AgentForm
+          draft={draft}
+          mode="edit"
+          models={[modelWithVariants()]}
+          capabilityDirectories={{
+            tools: { status: 'error', retry: retryTools },
+            skills: { status: 'loading', retry: retrySkills },
+            subagents: { status: 'ready', retry: () => undefined },
+          }}
+          onChange={setDraft}
+        />
+      )
+    }
+    render(<Harness />)
+
+    await openCapabilityPanel(user, '管理工具')
+    const toolsPanel = capabilityPanel('工具')
+    expect(within(toolsPanel).getByRole('alert')).toHaveTextContent('资源加载失败')
+    expect(within(toolsPanel).getByRole('checkbox', { name: /removed-tool/ })).toBeChecked()
+    expect(within(toolsPanel).queryByText('不可用')).not.toBeInTheDocument()
+    await user.click(within(toolsPanel).getByRole('button', { name: '重试' }))
+    expect(retryTools).toHaveBeenCalledTimes(1)
+
+    await openCapabilityPanel(user, '管理技能')
+    const skillsPanel = capabilityPanel('技能')
+    expect(within(skillsPanel).getByRole('status')).toHaveTextContent('正在加载资源')
+    expect(within(skillsPanel).getByRole('checkbox', { name: /gone \/ old-skill/ })).toBeChecked()
+    expect(within(skillsPanel).queryByText('不可用')).not.toBeInTheDocument()
+    expect(retrySkills).not.toHaveBeenCalled()
+
+    // 只有读成功的空目录才给出「还没有候选」的结论。
+    expect(within(capabilityPanel('子代理')).getByText('目录还没有子代理')).toBeInTheDocument()
   })
 })

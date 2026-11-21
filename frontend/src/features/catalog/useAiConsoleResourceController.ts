@@ -9,18 +9,24 @@ import {
 import { useResourceDeleteConfirm, useResourceFormErrors } from '@/features/catalog/ai-resource-editor-state'
 import { useDraftResourceSync, useResourceMutationError } from '@/features/catalog/useResourceDraftSync'
 import { useResourceEditorNavigation } from '@/features/catalog/useResourceEditorNavigation'
+import type { CapabilityDirectory } from '@/features/catalog/CapabilitySelectionPanels'
 import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
 
-/** 校验失败时先滚到模态顶部，再滚到首个标红字段，便于看见具体哪一项。 */
-function revealFirstFieldError(form: HTMLFormElement) {
-  form.querySelector('.modal-body')?.scrollTo({ top: 0, behavior: 'smooth' })
-  window.requestAnimationFrame(() => {
-    const firstError =
-      form.querySelector('.form-group.is-error') ||
-      form.querySelector('.capability-picker.is-error') ||
-      form.querySelector('.field-error')
-    firstError?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  })
+/**
+ * 能力目录的读取状态直接取自各自的查询：失败可重试，成功即可信目录，
+ * 其余（含未启用）都是尚未读到，避免把未知当成「目录为空」。
+ */
+function capabilityDirectory(query: {
+  isError: boolean
+  isSuccess: boolean
+  refetch: () => unknown
+}): CapabilityDirectory {
+  return {
+    status: query.isError ? 'error' : query.isSuccess ? 'ready' : 'loading',
+    retry: () => {
+      void query.refetch()
+    },
+  }
 }
 
 /**
@@ -32,6 +38,12 @@ export function useAiConsoleResourceController(
 ) {
   const { queries, resources } = useAiConsoleResourceQueries(enabled)
   const { providers, models, agents, toolCatalog, skills } = resources
+  // 三份目录各自独立，任一失败不影响其他能力列表的可用性判断。
+  const capabilityDirectories = {
+    tools: capabilityDirectory(queries.tools),
+    skills: capabilityDirectory(queries.skills),
+    subagents: capabilityDirectory(queries.agents),
+  }
 
   const navigation = useResourceEditorNavigation()
   const { resourceModal, drafts, closeResourceModal } = navigation
@@ -90,7 +102,6 @@ export function useAiConsoleResourceController(
     if (!validation.ok) {
       errors.setFormError(validation.message)
       errors.setFieldErrors(validation.fields)
-      revealFirstFieldError(event.currentTarget)
       return
     }
     errors.clear()
@@ -142,8 +153,7 @@ export function useAiConsoleResourceController(
       agents,
       toolCatalog,
       skills,
-      skillsLoading: queries.skills.isLoading,
-      skillsError: queries.skills.error,
+      capabilityDirectories,
       providerDraft: drafts.providerDraft,
       modelDraft: drafts.modelDraft,
       modelGroupDraft: drafts.modelGroupDraft,

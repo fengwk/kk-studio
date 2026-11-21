@@ -9,6 +9,8 @@ test('renders the shared model and grouped capability pickers across their host 
   await expect(page.getByRole('region', { name: 'Agent configuration fixture' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Compression model setting fixture' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Model group edit fixture' })).toBeVisible()
+  await page.getByText('Manage tools', { exact: true }).click()
+  await page.getByText('Manage skills', { exact: true }).click()
   await expect(page.getByRole('searchbox')).toHaveCount(2)
   await expect(page.getByText('BUILTIN', { exact: true })).toBeVisible()
   await expect(page.getByText('MCP', { exact: true })).toBeVisible()

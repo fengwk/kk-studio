@@ -101,7 +101,7 @@ export function buildSkillCandidates(
       options.push({
         value: key,
         name: `${packageName} / ${name}`,
-        description: skill.description?.trim() || null,
+        description: skill.description ?? null,
         group: packageName,
       })
     }
