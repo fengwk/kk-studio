@@ -2794,9 +2794,26 @@ func testZeroFolderDirectoryChange(t *testing.T, failure string) {
 	if state == nil || state.GetDirectory() != next {
 		t.Fatalf("switched view summary=%v", state)
 	}
-	data, err := os.ReadFile(opened.GetWorkspacePath())
-	if err != nil || !strings.Contains(string(data), next) {
-		t.Fatalf("switched workspace=%q err=%v", data, err)
+	assertWorkspaceFolder(t, opened.GetWorkspacePath(), next)
+}
+
+// Compare the decoded path so JSON escaping of Windows separators does not affect the assertion.
+func assertWorkspaceFolder(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workspace struct {
+		Folders []struct {
+			Path string `json:"path"`
+		} `json:"folders"`
+	}
+	if err := json.Unmarshal(data, &workspace); err != nil {
+		t.Fatalf("decode workspace %q: %v", path, err)
+	}
+	if len(workspace.Folders) != 1 || workspace.Folders[0].Path != want {
+		t.Fatalf("workspace %q folders=%+v, want one folder at %q", path, workspace.Folders, want)
 	}
 }
 
@@ -2974,10 +2991,7 @@ func TestSameDirectoryViewsStayIndependent(t *testing.T) {
 	if state == nil || state.GetState() != protocol.IdeViewState_OPEN || state.GetDirectory() != root {
 		t.Fatalf("sibling view was affected: %v", state)
 	}
-	data, err := os.ReadFile(second.GetWorkspacePath())
-	if err != nil || !strings.Contains(string(data), root) {
-		t.Fatalf("sibling workspace=%q err=%v", data, err)
-	}
+	assertWorkspaceFolder(t, second.GetWorkspacePath(), root)
 	bridge.mu.Lock()
 	_, firstBound := bridge.views[first.GetViewId()]
 	secondBound := bridge.views[second.GetViewId()] != nil

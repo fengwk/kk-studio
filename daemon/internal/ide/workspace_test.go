@@ -147,7 +147,7 @@ func TestNativeDirectoryPath(t *testing.T) {
 
 // Verifies a view without a directory may only back up captured absolute dirty documents.
 func TestRecoveryBackupDirectoryIsOptional(t *testing.T) {
-	backup := RecoveryBackup{ViewID: "123e4567-e89b-42d3-a456-426614174000", BindingEpoch: "1", CreatedAt: "2025-01-01T00:00:00Z", Complete: true, Documents: []RecoveryDocument{{Path: "/work/draft.txt", Text: "draft"}}}
+	backup := RecoveryBackup{ViewID: "123e4567-e89b-42d3-a456-426614174000", BindingEpoch: "1", CreatedAt: "2025-01-01T00:00:00Z", Complete: true, Documents: []RecoveryDocument{{Path: filepath.Join(t.TempDir(), "draft.txt"), Text: "draft"}}}
 	if err := validateBackup(backup); err != nil {
 		t.Fatalf("zero-folder backup rejected: %v", err)
 	}
