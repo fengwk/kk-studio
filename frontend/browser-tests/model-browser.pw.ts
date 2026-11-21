@@ -146,34 +146,94 @@ async function selectListOption(page: Page, trigger: Locator, optionName: string
 }
 
 /**
- * 基础费率标签按中英双语匹配（zh-CN 输入/输出/缓存读取/缓存写入，en-US Input/Output/Cache Read/Cache Write），
+ * 基础费率标签在 zh-CN 界面下按精确标签定位（输入/输出/缓存读取/缓存写入），
  * 并限定在基础价格分组的第一行内，避免与 TTL 行或档位行的同名标签混用。
  */
 const RATE_LABELS = {
-  input: /^(输入|input)$/i,
-  output: /^(输出|output)$/i,
-  cacheRead: /^(缓存读取|cache read)$/i,
-  cacheWrite: /^(缓存写入|cache write)$/i,
+  input: '输入',
+  output: '输出',
+  cacheRead: '缓存读取',
+  cacheWrite: '缓存写入',
 } as const
 
 function baseRateInput(pricing: Locator, field: keyof typeof RATE_LABELS): Locator {
   return pricing.locator('.pricing-plan-section').first().locator('.form-grid-2').first()
-    .getByLabel(RATE_LABELS[field])
+    .getByLabel(RATE_LABELS[field], { exact: true })
 }
 
-/** 推理费率单独成行（zh-CN 推理费率 / en-US Reasoning rate）。 */
+/** 推理费率单独成行（zh-CN 推理费率）。 */
 function reasoningRateInput(pricing: Locator): Locator {
-  return pricing.locator('.pricing-plan-section').first().getByLabel(/^(推理费率|reasoning rate)$/i)
+  return pricing.locator('.pricing-plan-section').first().getByLabel('推理费率', { exact: true })
 }
 
 async function readModelIdentity(dialog: Locator) {
   return {
-    provider: await dialog.getByRole('button', { name: 'Provider', exact: true }).textContent(),
-    name: await dialog.getByLabel('Name', { exact: true }).inputValue(),
-    modelId: await dialog.getByLabel('Model ID', { exact: true }).inputValue(),
-    description: await dialog.getByLabel('Description', { exact: true }).inputValue(),
+    provider: await dialog.getByRole('button', { name: '供应商', exact: true }).textContent(),
+    name: await dialog.getByLabel('名称', { exact: true }).inputValue(),
+    modelId: await dialog.getByLabel('模型 ID', { exact: true }).inputValue(),
+    description: await dialog.getByLabel('说明', { exact: true }).inputValue(),
   }
 }
+
+/**
+ * 模型卡与模型编辑器的精确文案对照。同一份表同时用于两件事：
+ * 当前 locale 下每个标签精确命中一次，另一种 locale 的旧文案必须零命中。
+ */
+const MODEL_COPY = {
+  'zh-CN': {
+    cardLabels: ['供应商', '模型 ID', '请求限制', '功能', '价格', '默认预设', '模型预设'],
+    cardLimit: '上下文 128000 · 输出 4096',
+    cardAbilities: '工具 · TEXT',
+    presetTags: ['standard', 'fast'],
+    presetsHeading: '预设列表',
+    variantHint: '模型预设包含思考强度与原生协议选项。预设 ID 不可重复，默认预设必须是其中一项。',
+    fields: {
+      provider: { role: 'button', name: '供应商' },
+      name: { role: 'textbox', name: '名称' },
+      // 创建态的模型 ID 带 datalist 远程候选，可访问角色是 combobox。
+      modelId: { role: 'combobox', name: '模型 ID' },
+      description: { role: 'textbox', name: '说明' },
+      contextWindow: { role: 'textbox', name: '上下文窗口' },
+      inputLimit: { role: 'textbox', name: '输入上限' },
+      maxOutputTokens: { role: 'textbox', name: '最大输出 token 数' },
+      tools: { role: 'checkbox', name: '工具' },
+      reasoning: { role: 'checkbox', name: '推理' },
+      defaultVariant: { role: 'button', name: '默认预设' },
+      variantId: { role: 'textbox', name: '预设 ID 1' },
+      reasoningEffort: { role: 'textbox', name: '思考强度 1' },
+      addVariant: { role: 'button', name: '添加预设' },
+      deleteVariant: { role: 'button', name: '删除预设' },
+    },
+    // 原生协议选项折叠在 <details> 内，未展开时不在可访问性树里，只能按 aria-label 断言。
+    protocolOptions: '原生协议选项 1',
+  },
+  'en-US': {
+    cardLabels: ['Provider', 'Model ID', 'Limit', 'Abilities', 'Pricing', 'Default Variant', 'Model presets'],
+    cardLimit: 'ctx 128000 · out 4096',
+    cardAbilities: 'tools · TEXT',
+    presetTags: ['standard', 'fast'],
+    presetsHeading: 'Preset list',
+    variantHint:
+      'A Variant carries reasoning effort and protocol options; IDs must be unique, and Default Variant must point to one of them.',
+    fields: {
+      provider: { role: 'button', name: 'Provider' },
+      name: { role: 'textbox', name: 'Name' },
+      modelId: { role: 'combobox', name: 'Model ID' },
+      description: { role: 'textbox', name: 'Description' },
+      contextWindow: { role: 'textbox', name: 'Context Window' },
+      inputLimit: { role: 'textbox', name: 'Input Limit' },
+      maxOutputTokens: { role: 'textbox', name: 'Max Output Tokens' },
+      tools: { role: 'checkbox', name: 'Tools' },
+      reasoning: { role: 'checkbox', name: 'Reasoning' },
+      defaultVariant: { role: 'button', name: 'Default Variant' },
+      variantId: { role: 'textbox', name: 'Variant ID 1' },
+      reasoningEffort: { role: 'textbox', name: 'Reasoning Effort 1' },
+      addVariant: { role: 'button', name: 'Add Variant' },
+      deleteVariant: { role: 'button', name: 'Delete Variant' },
+    },
+    protocolOptions: 'Protocol Options 1',
+  },
+} as const
 
 test.describe('Model, Model Group and catalog real browser acceptance', () => {
   test('keeps the model grid/search/single create card; create tabs own independent drafts; edit has no type switch', async ({
@@ -232,7 +292,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(memberList.getByRole('option')).toHaveCount(2)
       await expect(memberList.getByRole('option', { name: 'coding' })).toHaveCount(0)
       await memberList.getByRole('option', { name: 'main' }).click()
-      await expect(dialog.getByRole('button', { name: '成员 Variant 1' })).toContainText(
+      await expect(dialog.getByRole('button', { name: '成员预设 1', exact: true })).toContainText(
         'standard',
       )
 
@@ -242,7 +302,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         dialog.getByRole('button', { name: '成员模型 2' }),
         'backup',
       )
-      await expect(dialog.getByRole('button', { name: '成员 Variant 2' })).toContainText(
+      await expect(dialog.getByRole('button', { name: '成员预设 2', exact: true })).toContainText(
         'default',
       )
       await expect(dialog.locator('.group-member-row')).toHaveCount(2)
@@ -254,8 +314,8 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(summary).toContainText('2048')
       await expect(summary.locator('input, select, textarea')).toHaveCount(0)
       await expect(dialog.locator('section[aria-labelledby="model-pricing-heading"]')).toHaveCount(0)
-      await expect(dialog.getByLabel('Variant ID 1')).toHaveCount(0)
-      await expect(dialog.getByRole('button', { name: 'Provider', exact: true })).toHaveCount(0)
+      await expect(dialog.getByLabel('预设 ID 1', { exact: true })).toHaveCount(0)
+      await expect(dialog.getByRole('button', { name: '供应商', exact: true })).toHaveCount(0)
 
       // 状态码复用 TagInput；冷却时间是非负整数，默认 0。
       await expect(dialog.locator('.ui-tag-item').filter({ hasText: '429' })).toBeVisible()
@@ -287,7 +347,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         dialog = page.getByRole('dialog')
         await expect(dialog).toHaveAccessibleName('编辑 Model')
         await expect(dialog.getByRole('tab')).toHaveCount(0)
-        await expect(dialog.getByRole('button', { name: 'Provider', exact: true })).toBeDisabled()
+        await expect(dialog.getByRole('button', { name: '供应商', exact: true })).toBeDisabled()
         await dialog.getByRole('button', { name: '关闭' }).click()
 
         await page.getByRole('button', { name: '编辑 coding', exact: true }).click()
@@ -314,9 +374,9 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await gotoHarness(page)
     await page.locator('.create-card').click()
     const dialog = page.getByRole('dialog')
-    await selectListOption(page, dialog.getByLabel('Provider', { exact: true }), 'acme')
-    await dialog.getByLabel('Name', { exact: true }).fill('auto-cache')
-    const modelId = dialog.getByLabel('Model ID', { exact: true })
+    await selectListOption(page, dialog.getByLabel('供应商', { exact: true }), 'acme')
+    await dialog.getByLabel('名称', { exact: true }).fill('auto-cache')
+    const modelId = dialog.getByLabel('模型 ID', { exact: true })
     await modelId.fill('long-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'LONG')
 
@@ -343,15 +403,15 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await page.locator('.create-card').click()
 
     let dialog = page.getByRole('dialog')
-    await selectListOption(page, dialog.getByLabel('Provider', { exact: true }), 'acme')
-    await dialog.getByLabel('Name', { exact: true }).fill('new-model')
-    await dialog.getByLabel('Model ID', { exact: true }).fill('acme-new-model')
+    await selectListOption(page, dialog.getByLabel('供应商', { exact: true }), 'acme')
+    await dialog.getByLabel('名称', { exact: true }).fill('new-model')
+    await dialog.getByLabel('模型 ID', { exact: true }).fill('acme-new-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
     const advancedOptions = dialog.locator('.advanced-options').first()
     await expect(advancedOptions).not.toHaveAttribute('open', '')
-    await expect(advancedOptions.getByLabel('Protocol Options 1')).not.toBeVisible()
+    await expect(advancedOptions.getByLabel('原生协议选项 1', { exact: true })).not.toBeVisible()
     await advancedOptions.locator('summary').click()
-    await expect(advancedOptions.getByLabel('Protocol Options 1')).toBeVisible()
+    await expect(advancedOptions.getByLabel('原生协议选项 1', { exact: true })).toBeVisible()
 
     const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
     const inputPrice = baseRateInput(pricing, 'input')
@@ -374,7 +434,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
 
     await newModelCard.getByRole('button', { name: '编辑 new-model', exact: true }).click()
     dialog = page.getByRole('dialog')
-    await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('new-model')
+    await expect(dialog.getByLabel('名称', { exact: true })).toHaveValue('new-model')
     const reopenedPricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
     await expect(baseRateInput(reopenedPricing, 'input')).toHaveValue('')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
@@ -404,7 +464,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       const candidates = page.locator('.catalog-candidate')
       await expect(candidates).toHaveCount(2)
       await expect(dialog.getByText('models.dev', { exact: true })).toBeVisible()
-      const contextWindow = dialog.getByLabel('Context Window', { exact: true })
+      const contextWindow = dialog.getByLabel('上下文窗口', { exact: true })
       await expect(contextWindow).toHaveValue('128000')
 
       // 行点击只展开当前行的简洁 preview，不改草稿。
@@ -428,7 +488,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(contextWindow).toHaveValue('128000')
       await expect(page.getByRole('dialog')).toHaveCount(1)
       await expect(
-        dialog.getByRole('button', { name: /使用参数|Use parameters/ }),
+        dialog.getByRole('button', { name: '使用参数', exact: true }),
       ).toHaveCount(0)
       await expect(dialog.locator('.modal-footer').getByRole('button', { name: '取消', exact: true })).toBeVisible()
       await page.screenshot({
@@ -453,15 +513,15 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(page.locator('.catalog-candidate-list')).toHaveCount(0)
       await expect(page.getByRole('dialog')).toHaveCount(1)
       await expect(contextWindow).toHaveValue('200000')
-      await expect(dialog.getByLabel('Max Output Tokens', { exact: true })).toHaveValue('100000')
-      await expect(dialog.getByRole('checkbox', { name: 'Reasoning', exact: true })).toBeChecked()
+      await expect(dialog.getByLabel('最大输出 token 数', { exact: true })).toHaveValue('100000')
+      await expect(dialog.getByRole('checkbox', { name: '推理', exact: true })).toBeChecked()
       await expect(dialog.getByRole('checkbox', { name: 'IMAGE', exact: true })).toBeChecked()
       await readModelIdentity(dialog).then((current) => expect(current).toEqual(identity))
-      await expect(dialog.getByRole('button', { name: 'Default Variant', exact: true })).toContainText(
+      await expect(dialog.getByRole('button', { name: '默认预设', exact: true })).toContainText(
         'turbo',
       )
-      await expect(dialog.getByLabel('Variant ID 1', { exact: true })).toHaveValue('turbo')
-      await expect(dialog.getByLabel('Variant ID 2', { exact: true })).toHaveValue('thinking')
+      await expect(dialog.getByLabel('预设 ID 1', { exact: true })).toHaveValue('turbo')
+      await expect(dialog.getByLabel('预设 ID 2', { exact: true })).toHaveValue('thinking')
       // 基础价格四项费率标签可见，零价/未定价仅在值上区分。
       await expect(baseRateInput(pricing, 'input')).toHaveValue('3')
       await expect(baseRateInput(pricing, 'output')).toHaveValue('15')
@@ -483,8 +543,8 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(rangeGroup.locator('.pricing-rule-details')).toHaveAttribute('open', '')
       // Start (inclusive) / End (exclusive) 是区间行的两个边界字段，上限留空即为无上限。
       const rangeBounds = rangeGroup.locator('.pricing-rule-details')
-      await expect(rangeBounds.getByLabel(/^(起点（含）|start \(inclusive\))$/i)).toHaveValue('200001')
-      await expect(rangeBounds.getByLabel(/^(终点（不含）|end \(exclusive\))$/i)).toHaveValue('')
+      await expect(rangeBounds.getByLabel('起点（含）', { exact: true })).toHaveValue('200001')
+      await expect(rangeBounds.getByLabel('终点（不含）', { exact: true })).toHaveValue('')
       const tierGroup = pricing.locator('.pricing-plan-section').nth(2)
       await tierGroup.locator('.pricing-rule-details > summary').click()
       await expect(tierGroup.getByLabel('服务档名称')).toHaveValue('priority')
@@ -556,8 +616,8 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await rangeGroup.getByRole('button', { name: '添加输入档位', exact: true }).click()
       const row = rangeGroup.locator('.pricing-rule-details').last()
       await expect(row).toHaveAttribute('open', '')
-      await row.getByLabel(/^(起点（含）|start \(inclusive\))$/i).fill(min)
-      await row.getByLabel(/^(终点（不含）|end \(exclusive\))$/i).fill(max)
+      await row.getByLabel('起点（含）', { exact: true }).fill(min)
+      await row.getByLabel('终点（不含）', { exact: true }).fill(max)
     }
     await expect(rangeGroup.getByRole('alert')).toHaveCount(2)
 
@@ -612,8 +672,46 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       for (const item of cases) {
         await gotoHarness(page, `?locale=${item.locale}`)
         await expect(page.locator('html')).toHaveAttribute('lang', item.locale)
+        const copy = MODEL_COPY[item.locale]
+        const staleCopy = MODEL_COPY[item.locale === 'zh-CN' ? 'en-US' : 'zh-CN']
+
+        // 模型卡行标签整体精确相等：既覆盖当前语言的全部卡片标签，也证明另一种语言的旧标签已消失。
+        const mainCard = page.locator('.resource-card')
+          .filter({ has: page.getByRole('heading', { name: 'main', exact: true }) })
+        await expect(mainCard).toHaveCount(1)
+        await expect(mainCard.locator('.resource-card-meta-label')).toHaveText([...copy.cardLabels])
+        // 行顺序已由上一行锁定：2 请求限制 / 3 功能 / 6 预设标签。
+        await expect(
+          mainCard.locator('.resource-card-meta-row').nth(2).locator('.resource-card-meta-value'),
+        ).toHaveText(copy.cardLimit)
+        await expect(
+          mainCard.locator('.resource-card-meta-row').nth(3).locator('.resource-card-meta-value'),
+        ).toHaveText(copy.cardAbilities)
+        await expect(
+          mainCard.locator('.resource-card-meta-row').nth(6).locator('.resource-card-tag'),
+        ).toHaveText([...copy.presetTags])
+
         await page.locator('.create-card').click()
         const dialog = page.getByRole('dialog')
+        for (const field of Object.values(copy.fields)) {
+          await expect(dialog.getByRole(field.role, { name: field.name, exact: true })).toHaveCount(1)
+        }
+        for (const stale of Object.values(staleCopy.fields)) {
+          await expect(
+            dialog.getByRole(stale.role, { name: stale.name, exact: true }),
+          ).toHaveCount(0)
+        }
+        // 折叠在 <details> 内的字段不在可访问性树里，按 aria-label 精确断言。
+        await expect(dialog.locator(`[aria-label="${copy.protocolOptions}"]`)).toHaveCount(1)
+        await expect(dialog.locator(`[aria-label="${staleCopy.protocolOptions}"]`))
+          .toHaveCount(0)
+        const presetsSection = page.locator('.structured-section')
+          .filter({ has: page.locator('.variant-stack') })
+        await expect(
+          presetsSection.getByRole('heading', { name: copy.presetsHeading, exact: true }),
+        ).toHaveCount(1)
+        await expect(presetsSection).toContainText(copy.variantHint)
+
         await dialog.getByRole('tab', { name: item.groupTab, exact: true }).click()
         await expect(dialog).toHaveAccessibleName(item.title)
 

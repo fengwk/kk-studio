@@ -136,7 +136,7 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   await expect(dialog.getByRole('button', { name: '确认创建' })).toBeInViewport()
 
   // Select 的 portal 选项在弹窗内打开时也遵循同一触区。
-  await dialog.getByRole('button', { name: 'Provider', exact: true }).click()
+  await dialog.getByRole('button', { name: '供应商', exact: true }).click()
   const options = page.getByRole('option')
   await expect(options.first()).toBeVisible()
   const optionHeights = await options.evaluateAll((items) =>
@@ -187,7 +187,7 @@ test('navigates model sections on desktop and reveals preset and pricing errors 
   await dialog.getByRole('button', { name: '确认创建' }).click()
   await expectSubmitCount(page, 1)
   const presetError = dialog.locator('#catalog-section-presets .field-error')
-  await expect(presetError).toHaveText('Variant ID 不能重复')
+  await expect(presetError).toHaveText('预设 ID 不能重复')
   await expect(presetError).toBeInViewport()
   await expectFocusedInside(page, '#catalog-section-presets')
   expect(await page.evaluate(() => document.activeElement?.classList.contains('field-error'))).toBe(true)

@@ -82,7 +82,7 @@ describe('CreateChatModal', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('matches resource modal validation style with Name * and field errors', async () => {
+  it('matches resource modal validation style with a required 名称 label and field errors', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn((event) => event.preventDefault())
     const onSelectAgent = vi.fn()
@@ -99,7 +99,7 @@ describe('CreateChatModal', () => {
       />,
     )
 
-    expect(screen.getByText('Name')).toBeInTheDocument()
+    expect(screen.getByText('名称')).toBeInTheDocument()
     expect(screen.getAllByText('*')).toHaveLength(2)
     expect(screen.getByRole('alert')).toHaveTextContent('请填写 Chat 名称')
     expect(screen.getByText('请填写名称')).toBeInTheDocument()

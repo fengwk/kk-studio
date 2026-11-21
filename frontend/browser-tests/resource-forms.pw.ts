@@ -35,14 +35,23 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(invalid).toHaveAttribute('aria-invalid', 'true')
     await invalid.focus()
     await expect(invalid).toHaveCSS('border-top-color', 'rgb(240, 133, 133)')
-    // 等到能力读取完成、Variant 控件可用，再测量布局与截图。
+    // 等到能力读取完成、模型预设控件可用，再测量布局与截图。
     await expect(model.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
-    await expect(model.getByLabel('Provider', { exact: true })).toBeDisabled()
-    await expect(model.getByRole('textbox', { name: 'Model ID' })).toHaveJSProperty('required', true)
-    await expect(model.getByLabel('Reasoning Effort 1')).toBeDisabled()
-    await expect(model.getByRole('button', { name: '删除 Variant' })).toBeDisabled()
-    // 基础费率输入按标签定位（zh-CN 输入 / en-US Input）。
-    const price = model.getByLabel(/^(输入|input)$/i)
+    await expect(model.getByLabel('供应商', { exact: true })).toBeDisabled()
+    await expect(model.getByRole('textbox', { name: '模型 ID', exact: true }))
+      .toHaveJSProperty('required', true)
+    await expect(model.getByLabel('思考强度 1', { exact: true })).toBeDisabled()
+    await expect(model.getByRole('button', { name: '删除预设', exact: true })).toBeDisabled()
+    // 供应商与 Agent 表单共用同一批目录标签。
+    await expect(provider.getByRole('textbox', { name: '名称', exact: true }))
+      .toHaveAttribute('readonly', '')
+    await expect(provider.getByRole('textbox', { name: '说明', exact: true })).toBeVisible()
+    await expect(agent.getByRole('textbox', { name: '名称', exact: true }))
+      .toHaveAttribute('readonly', '')
+    await expect(agent.getByRole('textbox', { name: '说明', exact: true })).toBeVisible()
+    await expect(agent.getByRole('button', { name: '默认模型', exact: true })).toBeVisible()
+    // 基础费率输入按 zh-CN 精确标签定位。
+    const price = model.getByLabel('输入', { exact: true })
     // 十进制编辑器保留文本精度与尾零，不经过原生 number 的浮点转换。
     await expect(price).toHaveAttribute('type', 'text')
     await expect(price).toHaveAttribute('inputmode', 'decimal')
@@ -51,7 +60,7 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await price.fill('1.2500')
     await expect(price).toHaveValue('1.2500')
     await model.getByText('高级选项', { exact: true }).click()
-    const protocol = model.getByLabel('Protocol Options 1')
+    const protocol = model.getByLabel('原生协议选项 1', { exact: true })
     await protocol.fill('{\n  "temperature": 0.5\n}')
     await expect(protocol).toHaveValue('{\n  "temperature": 0.5\n}')
     const description = agent.getByPlaceholder('用途说明')
@@ -64,7 +73,7 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(password).toHaveCSS('outline-style', 'solid')
     await expect(password).toHaveCSS('outline-width', '2px')
     await expect(password).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
-    await expect(model.getByLabel('Reasoning Effort 1')).toHaveCSS('cursor', 'not-allowed')
+    await expect(model.getByLabel('思考强度 1', { exact: true })).toHaveCSS('cursor', 'not-allowed')
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.screenshot({ path: test.info().outputPath(`resource-forms-${width}.png`), fullPage: true })

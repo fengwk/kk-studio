@@ -87,7 +87,7 @@ interface SubmitErrors {
  */
 const ERROR_FIXTURES: Record<string, SubmitErrors> = {
   preset: {
-    fieldErrors: { variants: 'Variant ID 不能重复' },
+    fieldErrors: { variants: '预设 ID 不能重复' },
     formError: '',
   },
   price: {

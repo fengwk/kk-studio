@@ -1094,7 +1094,7 @@ async function main(argv) {
     const title = `e2e-ui-chat-${stamp}`
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(title).first().waitFor({ state: 'visible', timeout: 15_000 })
     await shot(caseArt, 'chat-created')
@@ -1107,15 +1107,15 @@ async function main(argv) {
     const name = `e2e-ui-model-${stamp}`
     await goto('/models')
     await page.getByText('新建 Model', { exact: true }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
-    await page.getByLabel('Model ID', { exact: true }).fill(name)
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill(name)
+    await page.getByLabel('模型 ID', { exact: true }).fill(name)
     await page.getByRole('button', { name: '确认创建' }).click()
     const modelRef = await resourceCardTitle(page, name)
     await shot(caseArt, 'model-created')
 
     // 编辑
     await page.getByRole('button', { name: `编辑 ${modelRef}` }).click()
-    await page.getByRole('textbox', { name: 'Description', exact: true }).fill('updated by UI E2E')
+    await page.getByRole('textbox', { name: '说明', exact: true }).fill('updated by UI E2E')
     await page.getByRole('button', { name: '保存修改' }).click()
     await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 20_000 })
     const updatedModelRef = await resourceCardTitle(page, name)
@@ -1138,10 +1138,10 @@ async function main(argv) {
   await run('ui.agent.create_edit_delete_flow', 'UI 创建/编辑/删除 Agent', async (caseArt) => {
     const name = `e2e-ui-agent-${stamp}`
     const systemPrompt = () =>
-      page.getByRole('textbox', { name: /^(System Prompt|系统提示词)$/ })
+      page.getByRole('textbox', { name: '系统提示词', exact: true })
     await goto('/agents')
     await page.getByText('新建 Agent', { exact: true }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill(name)
     await systemPrompt().fill('ui e2e agent')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
@@ -1170,7 +1170,7 @@ async function main(argv) {
     await page.waitForTimeout(200)
     await page.locator('.resource-grid').getByText('新建 Model', { exact: true }).click()
     await page.locator('form.modal-card, .modal-card').first().waitFor({ state: 'visible', timeout: 10_000 })
-    const nameInput = page.getByRole('textbox', { name: 'Name', exact: true })
+    const nameInput = page.getByRole('textbox', { name: '名称', exact: true })
     await nameInput.fill('')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.waitForTimeout(400)
@@ -1186,7 +1186,7 @@ async function main(argv) {
     await goto('/providers')
     await page.keyboard.press('Escape')
     await page.locator('.resource-grid').getByText('新建 Provider', { exact: true }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill(name)
     await page.getByLabel('Base URL').fill('https://example.com/v1')
     await page.getByRole('dialog').getByLabel('API Key').fill('sk-e2e-ui-test')
     await page.getByRole('button', { name: '确认创建' }).click()
@@ -1219,7 +1219,7 @@ async function main(argv) {
     // 创建带 Agent 的 Chat，便于 blank 首发
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
     // 选 default-assistant
     await selectCustomOption(
       page,
@@ -1285,7 +1285,7 @@ async function main(argv) {
         await goto('/chats')
         await page.getByText('新建 Chat', { exact: true }).click()
         // Create Chat 只允许选择 Name、Agent 与默认 Environment；不存在 Workspace 路径选择器。
-        await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+        await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
         const workspaceShell = page.locator(
           'button[aria-label="工作区路径"], button[aria-label="Workspace Path"], button.environment-binding-trigger',
         )
@@ -1370,7 +1370,7 @@ async function main(argv) {
       try {
         await goto('/chats')
         await page.getByText('新建 Chat', { exact: true }).click()
-        await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+        await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
         await selectCustomOption(
           page,
           page.getByRole('button', { name: 'Agent' }),

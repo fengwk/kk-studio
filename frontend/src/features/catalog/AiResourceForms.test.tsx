@@ -302,7 +302,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Provider Type')).toHaveValue('openai')
     expect(screen.getByLabelText('Provider Type')).toHaveAttribute('readonly')
     const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
-    expect(labels[0]).toMatch(/^Name(?: \*)?$/)
+    expect(labels[0]).toBe('名称 *')
     expect(labels[1]).toBe('API Key')
     // 没有已配置密钥时没有可清除的对象。
     expect(screen.queryByLabelText('清除已保存的凭据')).not.toBeInTheDocument()
@@ -363,10 +363,8 @@ describe('AiResourceForms', () => {
   it('does not infer model abilities from provider model IDs', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
-    const modelId = screen.getByLabelText('Model ID')
-    const capability = screen.getByRole('checkbox', {
-      name: /Mid-conversation system messages|对话中的系统消息更新/,
-    })
+    const modelId = screen.getByLabelText('模型 ID')
+    const capability = screen.getByRole('checkbox', { name: '对话中的系统消息更新' })
 
     await user.type(modelId, 'anthropic/claude-opus-4.8')
     expect(capability).not.toBeChecked()
@@ -376,44 +374,44 @@ describe('AiResourceForms', () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    expect(screen.getByRole('heading', { name: 'Limit' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Name' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '请求限制' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '名称' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '功能' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /^(Pricing|价格)$/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('Tools')).toBeChecked()
-    expect(screen.getByLabelText('Reasoning')).toBeChecked()
+    expect(screen.getByLabelText('工具')).toBeChecked()
+    expect(screen.getByLabelText('推理')).toBeChecked()
     expect(screen.getByLabelText('TEXT')).toBeChecked()
     expect(screen.queryByText('Capabilities')).not.toBeInTheDocument()
     // 定价单位提示固定在价格标题旁；空费率表示未知，不代表免费。
     expect(screen.getByText(/USD \/ 百万 token/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Reasoning Effort 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('思考强度 1')).toBeInTheDocument()
     expect(screen.getByText('思考强度')).toBeInTheDocument()
     // 空值即协议默认：思考强度不强必填，默认空
-    expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('')
-    expect(screen.getByLabelText('Reasoning Effort 1')).not.toBeRequired()
+    expect(screen.getByLabelText('思考强度 1')).toHaveValue('')
+    expect(screen.getByLabelText('思考强度 1')).not.toBeRequired()
 
     // 新建时 Name 跟随 Model ID，直到单独编辑 Name。
-    await user.type(screen.getByLabelText('Model ID'), 'upstream-claude-3')
-    expect(screen.getByLabelText('Model ID')).toHaveValue('upstream-claude-3')
-    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('upstream-claude-3')
-    await user.clear(screen.getByRole('textbox', { name: 'Name' }))
-    await user.type(screen.getByRole('textbox', { name: 'Name' }), 'claude')
-    await user.type(screen.getByLabelText('Model ID'), '-x')
-    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('claude')
+    await user.type(screen.getByLabelText('模型 ID'), 'upstream-claude-3')
+    expect(screen.getByLabelText('模型 ID')).toHaveValue('upstream-claude-3')
+    expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('upstream-claude-3')
+    await user.clear(screen.getByRole('textbox', { name: '名称' }))
+    await user.type(screen.getByRole('textbox', { name: '名称' }), 'claude')
+    await user.type(screen.getByLabelText('模型 ID'), '-x')
+    expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('claude')
 
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    const secondNameInput = screen.getByLabelText('预设 ID 2')
     expect(secondNameInput).toHaveValue('variant-2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    const secondEffortInput = screen.getByLabelText('Reasoning Effort 2')
+    const secondEffortInput = screen.getByLabelText('思考强度 2')
     expect(secondEffortInput).toHaveAttribute('maxLength', '64')
     await user.type(secondEffortInput, 'max')
     expect(secondEffortInput).toHaveValue('max')
     expect(screen.getByDisplayValue('creative')).toBeInTheDocument()
 
-    await selectFormOption(user, 'Default Variant', 'creative')
-    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'creative')
+    await selectFormOption(user, '默认预设', 'creative')
+    expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'creative')
   })
 
   it.each(['deleted-provider', 'off-page-provider'])(
@@ -448,7 +446,7 @@ describe('AiResourceForms', () => {
         />,
       )
 
-      const providerSelect = screen.getByLabelText('Provider')
+      const providerSelect = screen.getByLabelText('供应商')
       expect(providerSelect).toHaveAttribute('data-value', providerName)
       expect(providerSelect).toBeDisabled()
       expect(providerSelect).toHaveAttribute('aria-describedby', 'model-provider-identity-status')
@@ -461,22 +459,23 @@ describe('AiResourceForms', () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    const secondNameInput = screen.getByLabelText('预设 ID 2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    await selectFormOption(user, 'Default Variant', 'creative')
+    await selectFormOption(user, '默认预设', 'creative')
 
     fireEvent.change(secondNameInput, { target: { value: 'creative-2' } })
-    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'creative-2')
+    expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'creative-2')
 
-    await user.click(screen.getAllByRole('button', { name: '删除 Variant' })[1])
-    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+    await user.click(screen.getAllByRole('button', { name: '删除预设' })[1])
+    expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'medium')
 
-    await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning Effort 1')).toBeDisabled()
-    expect(screen.getByText(/Reasoning 当前已关闭/)).toBeInTheDocument()
-    expect(screen.getByText(/勾选开启上方 Reasoning/)).toBeInTheDocument()
+    await user.click(screen.getByLabelText('推理'))
+    expect(screen.getByLabelText('思考强度 1')).toBeDisabled()
+    expect(
+      screen.getByText(/推理当前已关闭；若需配置思考强度，请勾选上方的「推理」。/),
+    ).toBeInTheDocument()
   })
 
   it('keeps at least one input modality and toggles IMAGE alongside TEXT', async () => {
@@ -505,28 +504,30 @@ describe('AiResourceForms', () => {
     render(<ModelFormHarness />)
 
     // 新增 variant 的思考强度默认为空（协议默认），且提示文案说明空值语义
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
-    expect(screen.getByText(/留空保持 Provider 协议默认/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    expect(screen.getByLabelText('思考强度 2')).toHaveValue('')
+    expect(
+      screen.getByText(/留空使用供应商协议的默认值；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。/),
+    ).toBeInTheDocument()
 
-    await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning Effort 1')).toBeDisabled()
-    expect(screen.getByLabelText('Reasoning Effort 2')).toBeDisabled()
-    expect(screen.getByText(/Reasoning 当前已关闭/)).toBeInTheDocument()
+    await user.click(screen.getByLabelText('推理'))
+    expect(screen.getByLabelText('思考强度 1')).toBeDisabled()
+    expect(screen.getByLabelText('思考强度 2')).toBeDisabled()
+    expect(screen.getByText(/推理当前已关闭；若需配置思考强度，请勾选上方的「推理」。/)).toBeInTheDocument()
 
     // 重新开启后仍然是空值，不得被 variant id / medium 补全
-    await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning Effort 1')).toBeEnabled()
-    expect(screen.getByLabelText('Reasoning Effort 2')).toBeEnabled()
-    expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('')
-    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
+    await user.click(screen.getByLabelText('推理'))
+    expect(screen.getByLabelText('思考强度 1')).toBeEnabled()
+    expect(screen.getByLabelText('思考强度 2')).toBeEnabled()
+    expect(screen.getByLabelText('思考强度 1')).toHaveValue('')
+    expect(screen.getByLabelText('思考强度 2')).toHaveValue('')
   })
 
   it('allows editing protocolOptions on variants and keeps it available when reasoning is toggled off', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    const protocolInput = screen.getByLabelText('Protocol Options 1')
+    const protocolInput = screen.getByLabelText('原生协议选项 1')
     expect(protocolInput).toBeInTheDocument()
     expect(protocolInput).toHaveValue('')
 
@@ -534,16 +535,16 @@ describe('AiResourceForms', () => {
     expect(protocolInput).toHaveValue('{\n  "temperature": 0.5\n}')
 
     // 禁用 Reasoning
-    await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning Effort 1')).toBeDisabled()
+    await user.click(screen.getByLabelText('推理'))
+    expect(screen.getByLabelText('思考强度 1')).toBeDisabled()
 
     // protocolOptions 依然可用且保留已编辑的值
-    expect(screen.getByLabelText('Protocol Options 1')).toBeInTheDocument()
-    expect(screen.getByLabelText('Protocol Options 1')).toHaveValue('{\n  "temperature": 0.5\n}')
+    expect(screen.getByLabelText('原生协议选项 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('原生协议选项 1')).toHaveValue('{\n  "temperature": 0.5\n}')
 
     // 可以在 Reasoning 禁用时新增 variant 并编辑其 protocolOptions
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const protocolInput2 = screen.getByLabelText('Protocol Options 2')
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    const protocolInput2 = screen.getByLabelText('原生协议选项 2')
     expect(protocolInput2).toBeInTheDocument()
     expect(protocolInput2).toHaveValue('')
     fireEvent.change(protocolInput2, { target: { value: '{\n  "top_p": 0.9\n}' } })
@@ -581,14 +582,14 @@ describe('AiResourceForms', () => {
     render(<DefaultNewModelHarness />)
 
     // 新建时默认 reasoning 为 false
-    expect(screen.getByLabelText('Reasoning')).not.toBeChecked()
-    const effort1 = screen.getByLabelText('Reasoning Effort 1')
+    expect(screen.getByLabelText('推理')).not.toBeChecked()
+    const effort1 = screen.getByLabelText('思考强度 1')
     expect(effort1).toBeInTheDocument()
     expect(effort1).toBeDisabled()
 
     // 新增 variant 同样始终渲染且为 disabled
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const effort2 = screen.getByLabelText('Reasoning Effort 2')
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    const effort2 = screen.getByLabelText('思考强度 2')
     expect(effort2).toBeInTheDocument()
     expect(effort2).toBeDisabled()
   })
@@ -597,19 +598,19 @@ describe('AiResourceForms', () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    const effort1 = screen.getByLabelText('Reasoning Effort 1')
+    const effort1 = screen.getByLabelText('思考强度 1')
     await user.type(effort1, 'high')
     expect(effort1).toHaveValue('high')
 
     // 关闭 Reasoning：输入框置灰，但草稿值依然保留
-    await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning')).not.toBeChecked()
+    await user.click(screen.getByLabelText('推理'))
+    expect(screen.getByLabelText('推理')).not.toBeChecked()
     expect(effort1).toBeDisabled()
     expect(effort1).toHaveValue('high')
 
     // 重新开启 Reasoning：输入框激活，草稿值完整恢复
-    await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning')).toBeChecked()
+    await user.click(screen.getByLabelText('推理'))
+    expect(screen.getByLabelText('推理')).toBeChecked()
     expect(effort1).toBeEnabled()
     expect(effort1).toHaveValue('high')
   })
@@ -620,17 +621,17 @@ describe('AiResourceForms', () => {
     // 1. 中文测试
     act(() => setLocale('zh-CN'))
     const { unmount } = render(<ModelFormHarness />)
-    const reasoningCheckbox = screen.getByLabelText('Reasoning')
+    const reasoningCheckbox = screen.getByLabelText('推理')
     await user.click(reasoningCheckbox) // 关闭 Reasoning
 
-    const zhEffort = screen.getByLabelText('Reasoning Effort 1')
+    const zhEffort = screen.getByLabelText('思考强度 1')
     expect(zhEffort).toBeDisabled()
     const hintId = zhEffort.getAttribute('aria-describedby')
     expect(hintId).toBeTruthy()
     const hintElement = document.getElementById(hintId!)
     expect(hintElement).not.toBeNull()
-    expect(hintElement?.textContent).toContain('Reasoning 当前已关闭')
-    expect(hintElement?.textContent).toContain('勾选开启上方 Reasoning')
+    expect(hintElement?.textContent).toContain('推理当前已关闭')
+    expect(hintElement?.textContent).toContain('勾选上方的「推理」')
 
     // 重新开启后，不设置 aria-describedby 到关闭提示
     await user.click(reasoningCheckbox)
@@ -666,17 +667,17 @@ describe('AiResourceForms', () => {
       </>,
     )
 
-    for (const checkbox of screen.getAllByLabelText('Reasoning')) {
+    for (const checkbox of screen.getAllByLabelText('推理')) {
       await user.click(checkbox)
     }
-    const efforts = screen.getAllByLabelText('Reasoning Effort 1')
+    const efforts = screen.getAllByLabelText('思考强度 1')
     const hintIds = efforts.map((effort) => effort.getAttribute('aria-describedby'))
     expect(new Set(hintIds).size).toBe(2)
     for (const effort of efforts) {
       expect(effort).toBeDisabled()
       const hintId = effort.getAttribute('aria-describedby')
       expect(hintId).toBeTruthy()
-      expect(document.getElementById(hintId!)?.textContent).toContain('Reasoning 当前已关闭')
+      expect(document.getElementById(hintId!)?.textContent).toContain('推理当前已关闭')
     }
   })
 
@@ -708,25 +709,25 @@ describe('AiResourceForms', () => {
   it('avoids duplicate generated variant ids and keeps the final variant undeletable', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
-    fireEvent.change(screen.getByLabelText('Variant ID 1'), { target: { value: 'variant-2' } })
-    expect(screen.getByRole('button', { name: '删除 Variant' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    expect(screen.getByLabelText('Variant ID 2')).toHaveValue('variant-3')
+    fireEvent.change(screen.getByLabelText('预设 ID 1'), { target: { value: 'variant-2' } })
+    expect(screen.getByRole('button', { name: '删除预设' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    expect(screen.getByLabelText('预设 ID 2')).toHaveValue('variant-3')
   })
 
   it('keeps the default variant unchanged when renaming a non-default variant', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    const secondNameInput = screen.getByLabelText('预设 ID 2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+    expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'medium')
 
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative-2')
-    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+    expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'medium')
   })
 
   // 切换默认预设只允许改 defaultVariant：其余草稿字段必须原样保留。
@@ -770,14 +771,14 @@ describe('AiResourceForms', () => {
     render(<PresetHarness />)
 
     await user.type(screen.getByPlaceholderText('模型说明'), 'preset description')
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
+    const secondNameInput = screen.getByLabelText('预设 ID 2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+    expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'medium')
 
     const before = currentDraft
-    await selectFormOption(user, 'Default Variant', 'creative')
+    await selectFormOption(user, '默认预设', 'creative')
 
     expect(currentDraft.defaultVariant).toBe('creative')
     expect(currentDraft).toEqual({ ...before, defaultVariant: 'creative' })
@@ -811,35 +812,35 @@ describe('AiResourceForms', () => {
           },
         ]}
         fieldErrors={{
-          providerName: '请选择 Provider',
+          providerName: '请选择供应商',
           name: '请填写 Model 名称',
           contextWindow: '上下文窗口无效',
           maxOutputTokens: '最大输出长度无效',
           inputModalities: '请至少选择一种输入类型',
           pricing: '价格必须为非负数',
-          defaultVariant: '请选择默认 Variant',
-          variants: 'Variant ID 不能重复',
+          defaultVariant: '请选择一个有效的默认预设',
+          variants: '预设 ID 不能重复',
         }}
         onChange={() => undefined}
       />,
     )
 
-    expect(screen.getByText('请选择 Provider')).toBeInTheDocument()
+    expect(screen.getByText('请选择供应商')).toBeInTheDocument()
     expect(screen.getByText('请填写 Model 名称')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('textbox', { name: '名称' })).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByText('上下文窗口无效')).toBeInTheDocument()
     expect(screen.getByText('最大输出长度无效')).toBeInTheDocument()
     expect(screen.getByText('请至少选择一种输入类型')).toBeInTheDocument()
     expect(screen.getByText('价格必须为非负数')).toBeInTheDocument()
-    expect(screen.getByText('请选择默认 Variant')).toBeInTheDocument()
-    expect(screen.getByText('Variant ID 不能重复')).toBeInTheDocument()
+    expect(screen.getByText('请选择一个有效的默认预设')).toBeInTheDocument()
+    expect(screen.getByText('预设 ID 不能重复')).toBeInTheDocument()
   })
 
   it('allows editing model name in edit mode while keeping provider disabled', async () => {
     const user = userEvent.setup()
     render(<EditModelFormHarness />)
 
-    const providerSelect = screen.getByLabelText('Provider')
+    const providerSelect = screen.getByLabelText('供应商')
     expect(providerSelect).toBeDisabled()
 
     const nameInput = screen.getByPlaceholderText('MiniMax-M2.7')
@@ -857,11 +858,11 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个模型' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个模型' }))
-    expect(screen.getByLabelText('Default Model')).toHaveAttribute('data-value', 'MiniMax-M2.7')
-    expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
+    expect(screen.getByLabelText('默认模型')).toHaveAttribute('data-value', 'MiniMax-M2.7')
+    expect(screen.getByLabelText('模型预设覆盖')).toHaveAttribute('data-value', '')
 
-    await selectFormOption(user, 'Default Model', 'Claude-Sonnet-4.5')
-    expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
+    await selectFormOption(user, '默认模型', 'Claude-Sonnet-4.5')
+    expect(screen.getByLabelText('模型预设覆盖')).toHaveAttribute('data-value', '')
     // 能力区默认收起：先展开 Tools 面板再确认空目录文案。
     await user.click(screen.getByText('管理工具'))
     expect(screen.getByText('目录还没有工具')).toBeInTheDocument()

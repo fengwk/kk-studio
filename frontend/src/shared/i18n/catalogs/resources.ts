@@ -40,7 +40,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.createModelDescription': {
     'en-US': 'Define model information and variants',
-    'zh-CN': '定义模型信息与 Variant',
+    'zh-CN': '定义模型信息与模型预设',
   },
   'ai.catalog.createProvider': {
     'en-US': 'Create Provider',
@@ -80,11 +80,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.card.effectiveModel': {
     'en-US': 'Effective Model',
-    'zh-CN': '生效 Model',
+    'zh-CN': '生效模型',
   },
   'ai.catalog.card.modelDefaultSuffix': {
     'en-US': ' · model default',
-    'zh-CN': ' · 模型默认',
+    'zh-CN': ' · 模型默认预设',
   },
   'ai.catalog.card.unknownVariant': {
     'en-US': 'unresolved',
@@ -94,42 +94,10 @@ export const resourcesCatalog = {
     'en-US': 'Not configured',
     'zh-CN': '未配置',
   },
-  'ai.catalog.card.tools': {
-    'en-US': 'Tools',
-    'zh-CN': 'Tools',
-  },
-  'ai.catalog.card.skills': {
-    'en-US': 'Skills',
-    'zh-CN': 'Skills',
-  },
-  'ai.catalog.card.subagents': {
-    'en-US': 'Subagents',
-    'zh-CN': 'Subagents',
-  },
-  'ai.catalog.card.modelId': {
-    'en-US': 'Model ID',
-    'zh-CN': 'Model ID',
-  },
-  'ai.catalog.card.limit': {
-    'en-US': 'Limit',
-    'zh-CN': 'Limit',
-  },
-  'ai.catalog.card.ability': {
-    'en-US': 'Ability',
-    'zh-CN': 'Ability',
-  },
   'ai.catalog.card.pricing': { 'en-US': 'Pricing', 'zh-CN': '价格' },
   'ai.catalog.card.pricingSummary': {
     'en-US': '{{input}} / 1M input · {{output}} / 1M output · cache write {{cacheWrite}}',
     'zh-CN': '输入 {{input}} / 百万 tokens · 输出 {{output}} / 百万 tokens · 缓存写入 {{cacheWrite}}',
-  },
-  'ai.catalog.card.default': {
-    'en-US': 'Default',
-    'zh-CN': 'Default',
-  },
-  'ai.catalog.card.variants': {
-    'en-US': 'Variants',
-    'zh-CN': 'Variants',
   },
   'ai.catalog.card.type': {
     'en-US': 'Type',
@@ -177,11 +145,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.card.contextLimit': {
     'en-US': 'ctx {{value}}',
-    'zh-CN': 'ctx {{value}}',
+    'zh-CN': '上下文 {{value}}',
   },
   'ai.catalog.card.outputLimit': {
     'en-US': 'out {{value}}',
-    'zh-CN': 'out {{value}}',
+    'zh-CN': '输出 {{value}}',
   },
   'ai.catalog.card.seconds': {
     'en-US': '{{value}}s',
@@ -193,19 +161,19 @@ export const resourcesCatalog = {
   },
   'ai.catalog.card.toolsAbility': {
     'en-US': 'tools',
-    'zh-CN': 'tools',
+    'zh-CN': '工具',
   },
   'ai.catalog.card.reasoningAbility': {
     'en-US': 'reasoning',
-    'zh-CN': 'reasoning',
+    'zh-CN': '推理',
   },
   'ai.catalog.form.name': {
     'en-US': 'Name',
-    'zh-CN': 'Name',
+    'zh-CN': '名称',
   },
   'ai.catalog.form.nameHint': {
     'en-US': 'Globally unique logical name shared by Models and Model Groups.',
-    'zh-CN': '全局唯一逻辑名，单 Model 与模型组共享同一名称空间。',
+    'zh-CN': '模型和模型组共用此命名空间，名称不可重复。',
   },
   'ai.catalog.form.groupNameHint': {
     'en-US': 'Globally unique logical name shared with Models.',
@@ -237,11 +205,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.groupMemberVariant': {
     'en-US': 'Member variant {{index}}',
-    'zh-CN': '成员 Variant {{index}}',
+    'zh-CN': '成员预设 {{index}}',
   },
   'ai.catalog.form.groupMemberVariantPlaceholder': {
     'en-US': 'Select a Variant',
-    'zh-CN': '选择 Variant',
+    'zh-CN': '选择模型预设',
   },
   'ai.catalog.form.moveGroupMemberUp': {
     'en-US': 'Move member up',
@@ -286,10 +254,6 @@ export const resourcesCatalog = {
   'ai.catalog.form.cooldownHint': {
     'en-US': '0: skip only for this call; no cooldown is stored.',
     'zh-CN': '0：仅本次降级，不保存冷却状态。',
-  },
-  'ai.catalog.card.provider': {
-    'en-US': 'Provider',
-    'zh-CN': 'Provider',
   },
   'ai.catalog.card.groupMembers': {
     'en-US': 'Model list',
@@ -345,7 +309,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.catalog.noVariants': {
     'en-US': 'No importable Variants',
-    'zh-CN': '无可导入 Variant',
+    'zh-CN': '无可导入的模型预设',
   },
   'ai.catalog.catalog.unsupportedPricing': {
     'en-US': 'Pricing is not fully supported; existing prices are kept.',
@@ -365,15 +329,15 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',
-    'zh-CN': 'Model ID',
+    'zh-CN': '模型 ID',
   },
   'ai.catalog.form.modelIdHint': {
     'en-US': 'Upstream model ID sent to the Provider; may differ from Name.',
-    'zh-CN': '发送给 Provider 的上游模型 ID，可与 Name 不同。',
+    'zh-CN': '发送给供应商的上游模型 ID，可以与名称不同。',
   },
   'ai.catalog.form.remoteModelsFetch': {
     'en-US': 'Fetch models from Provider',
-    'zh-CN': '从 Provider 拉取模型',
+    'zh-CN': '从供应商拉取模型',
   },
   'ai.catalog.form.remoteModelsLoading': {
     'en-US': 'Fetching models…',
@@ -381,15 +345,15 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.remoteModelsLoaded': {
     'en-US': '{{count}} models found; pick one in Model ID.',
-    'zh-CN': '找到 {{count}} 个模型，可在 Model ID 中选择。',
+    'zh-CN': '找到 {{count}} 个模型，可在模型 ID 中选择。',
   },
   'ai.catalog.form.remoteModelsEmpty': {
     'en-US': 'The Provider listed no models.',
-    'zh-CN': 'Provider 未列出任何模型。',
+    'zh-CN': '供应商未列出任何模型。',
   },
   'ai.catalog.form.description': {
     'en-US': 'Description',
-    'zh-CN': 'Description',
+    'zh-CN': '说明',
   },
   'ai.catalog.form.descriptionPlaceholder': {
     'en-US': 'Purpose or description',
@@ -401,11 +365,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.defaultModel': {
     'en-US': 'Default Model',
-    'zh-CN': 'Default Model',
+    'zh-CN': '默认模型',
   },
   'ai.catalog.form.defaultVariantOverride': {
     'en-US': 'Default Variant Override',
-    'zh-CN': 'Default Variant Override',
+    'zh-CN': '模型预设覆盖',
   },
   'ai.catalog.form.systemPrompt': {
     'en-US': 'System Prompt',
@@ -421,7 +385,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.provider': {
     'en-US': 'Provider',
-    'zh-CN': 'Provider',
+    'zh-CN': '供应商',
   },
   'ai.catalog.form.providerType': {
     'en-US': 'Provider Type',
@@ -461,7 +425,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.contextWindow': {
     'en-US': 'Context Window',
-    'zh-CN': 'Context Window',
+    'zh-CN': '上下文窗口',
   },
   'ai.catalog.form.executionDriver': {
     'en-US': 'Execution driver',
@@ -469,7 +433,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.maxOutputTokens': {
     'en-US': 'Max Output Tokens',
-    'zh-CN': 'Max Output Tokens',
+    'zh-CN': '最大输出 token 数',
   },
   'ai.catalog.form.inputLimit': {
     'en-US': 'Input Limit',
@@ -481,7 +445,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.limit': {
     'en-US': 'Limit',
-    'zh-CN': 'Limit',
+    'zh-CN': '请求限制',
   },
   'ai.catalog.form.abilities': {
     'en-US': 'Abilities',
@@ -489,11 +453,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.tools': {
     'en-US': 'Tools',
-    'zh-CN': 'Tools',
+    'zh-CN': '工具',
   },
   'ai.catalog.form.reasoning': {
     'en-US': 'Reasoning',
-    'zh-CN': 'Reasoning',
+    'zh-CN': '推理',
   },
   'ai.catalog.form.midConversationSystemMessages': {
     'en-US': 'Mid-conversation system messages',
@@ -533,15 +497,15 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.defaultVariant': {
     'en-US': 'Default Variant',
-    'zh-CN': 'Default Variant',
+    'zh-CN': '默认预设',
   },
-  'ai.catalog.form.variants': {
-    'en-US': 'Variants',
-    'zh-CN': 'Variants',
+  'ai.catalog.form.presetList': {
+    'en-US': 'Preset list',
+    'zh-CN': '预设列表',
   },
   'ai.catalog.form.variantId': {
     'en-US': 'Variant ID',
-    'zh-CN': 'Variant ID',
+    'zh-CN': '预设 ID',
   },
   'ai.catalog.form.promptCacheRetention': {
     'en-US': 'Prompt Cache Retention',
@@ -575,17 +539,9 @@ export const resourcesCatalog = {
     'en-US': 'e.g. high, max, off',
     'zh-CN': '例如 high、max、off',
   },
-  'ai.catalog.form.reasoningEffortAria': {
-    'en-US': 'Reasoning Effort',
-    'zh-CN': 'Reasoning Effort',
-  },
   'ai.catalog.form.protocolOptions': {
     'en-US': 'Protocol Options',
     'zh-CN': '原生协议选项',
-  },
-  'ai.catalog.form.protocolOptionsAria': {
-    'en-US': 'Protocol Options',
-    'zh-CN': 'Protocol Options',
   },
   'ai.catalog.form.protocolOptionsPlaceholder': {
     'en-US': '{\n  "temperature": 0.7\n}',
@@ -597,7 +553,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.useModelDefault': {
     'en-US': 'Use model default',
-    'zh-CN': '使用模型默认',
+    'zh-CN': '使用模型默认预设',
   },
   'ai.catalog.form.optionalCredential': {
     'en-US': 'Optional',
@@ -674,7 +630,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.unavailableModelVariants': {
     'en-US': 'Variant options are unavailable because the referenced Model is not loaded; the saved override is preserved.',
-    'zh-CN': '引用的 Model 未加载，Variant 选项不可用；已保存的覆盖值会保留。',
+    'zh-CN': '引用的模型未加载，无法选择模型预设；已保存的覆盖值会保留。',
   },
   'ai.catalog.form.offline': {
     'en-US': 'Offline',
@@ -683,18 +639,18 @@ export const resourcesCatalog = {
   'ai.catalog.form.variantHint': {
     'en-US':
       'A Variant carries reasoning effort and protocol options; IDs must be unique, and Default Variant must point to one of them.',
-    'zh-CN': 'Variant 承载思考强度与原生协议选项；id 唯一，Default Variant 必须指向其中一项。',
+    'zh-CN': '模型预设包含思考强度与原生协议选项。预设 ID 不可重复，默认预设必须是其中一项。',
   },
   'ai.catalog.form.reasoningHint': {
     'en-US':
       ' Leave empty to keep provider protocol default; off = explicitly disable reasoning; provider-defined values (e.g. low, medium, high, max) are passed through.',
     'zh-CN':
-      ' 留空保持 Provider 协议默认；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
+      ' 留空使用供应商协议的默认值；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
   },
   'ai.catalog.form.reasoningDisabledHint': {
     'en-US':
       ' Reasoning is disabled. To configure reasoning effort, check Reasoning above to enable it.',
-    'zh-CN': ' Reasoning 当前已关闭；若需配置思考强度，请勾选开启上方 Reasoning。',
+    'zh-CN': '推理当前已关闭；若需配置思考强度，请勾选上方的「推理」。',
   },
   'ai.catalog.form.maxOutputLimitHint': {
     'en-US': 'Model-level output budget; each request also narrows it by the remaining context.',
@@ -1041,14 +997,14 @@ export const resourcesCatalog = {
   'ai.catalog.form.promptCacheProviderManaged': { 'en-US': 'Automatic (managed by provider)', 'zh-CN': '自动（由服务商管理）' },
   'ai.catalog.form.promptCacheUnmanaged': { 'en-US': 'Determined by endpoint · Studio does not configure it', 'zh-CN': '由端点决定 · Studio 不配置' },
   'ai.catalog.form.promptCacheUnsupported': { 'en-US': 'Prompt caching is not supported', 'zh-CN': '不支持提示缓存' },
-  'ai.catalog.form.promptCachePending': { 'en-US': 'Select a provider and enter a model ID to check prompt caching', 'zh-CN': '选择服务商并填写模型 ID 后查看提示缓存能力' },
+  'ai.catalog.form.promptCachePending': { 'en-US': 'Select a provider and enter a model ID to check prompt caching', 'zh-CN': '选择供应商并填写模型 ID 后查看提示缓存能力' },
   'ai.catalog.form.deleteVariant': {
     'en-US': 'Delete Variant',
-    'zh-CN': '删除 Variant',
+    'zh-CN': '删除预设',
   },
   'ai.catalog.form.addVariant': {
     'en-US': 'Add Variant',
-    'zh-CN': '添加 Variant',
+    'zh-CN': '添加预设',
   },
   'ai.catalog.deleteProviderTitle': {
     'en-US': 'Delete Provider',
@@ -1085,27 +1041,27 @@ export const resourcesCatalog = {
   'ai.catalog.validation.reasoningEnabled': {
     'en-US':
       'Reasoning effort must not exceed 64 characters; leave empty to keep provider default.',
-    'zh-CN': '思考强度不能超过 64 个字符；留空保持 Provider 协议默认。',
+    'zh-CN': '思考强度不能超过 64 个字符；留空使用供应商协议的默认值。',
   },
   'ai.catalog.validation.variantRequired': {
     'en-US': 'Select a valid Variant',
-    'zh-CN': '请选择有效的 Variant',
+    'zh-CN': '请选择有效的模型预设',
   },
   'ai.catalog.validation.variantAddOne': {
     'en-US': 'Add at least one Variant and enter its ID',
-    'zh-CN': '请至少添加一个 Variant，并填写 ID',
+    'zh-CN': '请至少添加一个模型预设，并填写预设 ID',
   },
   'ai.catalog.validation.variantDuplicate': {
     'en-US': 'Variant IDs must be unique',
-    'zh-CN': 'Variant ID 不能重复',
+    'zh-CN': '预设 ID 不能重复',
   },
   'ai.catalog.validation.protocolOptionsInvalidJson': {
     'en-US': 'Variant "{{ id }}" protocolOptions must be valid JSON',
-    'zh-CN': 'Variant "{{ id }}" 的 protocolOptions 必须是有效的 JSON',
+    'zh-CN': '预设「{{ id }}」的原生协议选项必须是有效的 JSON',
   },
   'ai.catalog.validation.protocolOptionsNotObject': {
     'en-US': 'Variant "{{ id }}" protocolOptions must be a JSON object',
-    'zh-CN': 'Variant "{{ id }}" 的 protocolOptions 必须是 JSON 对象',
+    'zh-CN': '预设「{{ id }}」的原生协议选项必须是 JSON 对象',
   },
   'ai.catalog.validation.protocolOptionsInvalidJsonSimple': {
     'en-US': 'protocolOptions must be valid JSON',
@@ -1125,7 +1081,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.defaultVariant': {
     'en-US': 'Select a valid default Variant',
-    'zh-CN': '请选择一个有效的默认 Variant',
+    'zh-CN': '请选择一个有效的默认预设',
   },
   'ai.catalog.validation.maxOutputContext': {
     'en-US': 'Max output length cannot exceed the context window',
@@ -1145,7 +1101,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.modelId': {
     'en-US': 'Enter a Model ID',
-    'zh-CN': '请填写 Model ID',
+    'zh-CN': '请填写模型 ID',
   },
   'ai.catalog.validation.pricing': {
     'en-US': 'Check the required rates, pricing rules, and effective dates.',
@@ -1165,7 +1121,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.provider': {
     'en-US': 'Select a Provider',
-    'zh-CN': '请选择 Provider',
+    'zh-CN': '请选择供应商',
   },
   'ai.catalog.validation.providerType': {
     'en-US': 'Select a valid Provider Type',
@@ -1177,7 +1133,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.model': {
     'en-US': 'Select a Default Model',
-    'zh-CN': '请选择 Default Model',
+    'zh-CN': '请选择默认模型',
   },
   'ai.catalog.validation.baseUrl': {
     'en-US': 'Enter a Base URL',
@@ -1225,11 +1181,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.addVariant': {
     'en-US': 'Add a Variant',
-    'zh-CN': '请添加 Variant',
+    'zh-CN': '请添加预设',
   },
   'ai.catalog.validation.defaultVariantField': {
     'en-US': 'Select a default Variant',
-    'zh-CN': '请选择默认 Variant',
+    'zh-CN': '请选择默认预设',
   },
   'ai.catalog.validation.modelName': {
     'en-US': 'Enter a Model name',

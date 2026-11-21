@@ -229,7 +229,7 @@ export function ModelForm({
 
         <div className={fieldErrors.variants ? 'is-error' : undefined}>
           <VariantListEditor
-            label={t('ai.catalog.form.variants')}
+            label={t('ai.catalog.form.presetList')}
             variants={draft.variants}
             defaultVariant={defaultVariant}
             reasoning={draft.reasoning}

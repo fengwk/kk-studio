@@ -11,15 +11,16 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     const modelTabBtn = page.locator('#tab-model-btn')
     await expect(modelTabBtn).toBeVisible()
 
-    // 新建时默认 reasoning 为 false，Reasoning Effort 1 输入框始终渲染且为 disabled
-    const reasoningCheckbox = page.getByRole('checkbox', { name: 'Reasoning' })
+    // 新建时默认 reasoning 为 false，思考强度 1 输入框始终渲染且为 disabled
+    const reasoningCheckbox = page.getByRole('checkbox', { name: '推理', exact: true })
     // 共享 Checkbox 的原生 input 只承载可访问性与键盘语义（视觉隐藏），
-    // 指针点击必须落在可见的 label 上，与真实用户操作一致。
-    const reasoningToggle = page.locator('label.ui-checkbox', { hasText: 'Reasoning' })
+    // 指针点击必须落在可见的 label 上，与真实用户操作一致。hasText 用锚定正则,
+    // 否则「消息级推理强度」也会命中。
+    const reasoningToggle = page.locator('label.ui-checkbox', { hasText: /^推理$/ })
     await expect(reasoningToggle).toBeVisible()
     await expect(reasoningCheckbox).not.toBeChecked()
 
-    const effortInput = page.getByLabel('Reasoning Effort 1')
+    const effortInput = page.getByLabel('思考强度 1', { exact: true })
     await expect(effortInput).toBeVisible()
     await expect(effortInput).toBeDisabled()
 
@@ -27,11 +28,11 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     const hintId = await effortInput.getAttribute('aria-describedby')
     expect(hintId).toBeTruthy()
     const hintEl = page.locator(`#${hintId}`)
-    await expect(hintEl).toContainText('Reasoning 当前已关闭')
-    await expect(hintEl).toContainText('勾选开启上方 Reasoning')
+    await expect(hintEl).toContainText('推理当前已关闭')
+    await expect(hintEl).toContainText('请勾选上方的「推理」')
 
-    // 桌面端 editor-grid 2 列布局：Variant ID 与 Reasoning Effort 处于同一水平行
-    const variantIdInput = page.getByLabel('Variant ID 1')
+    // 桌面端 editor-grid 2 列布局：预设 ID 与思考强度处于同一水平行
+    const variantIdInput = page.getByLabel('预设 ID 1', { exact: true })
     const boxIdDesktop = (await variantIdInput.boundingBox())!
     const boxEffortDesktop = (await effortInput.boundingBox())!
     expect(Math.abs(boxIdDesktop.y - boxEffortDesktop.y)).toBeLessThanOrEqual(4)

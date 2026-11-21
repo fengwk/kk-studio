@@ -87,7 +87,7 @@ describe('VariantListEditor model cache state', () => {
       '标准 · 不可用', '关闭',
     ])
     await user.click(screen.getByRole('button', { name: '提示缓存留存 1' }))
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    await user.click(screen.getByRole('button', { name: '添加预设' }))
     expect(screen.getByLabelText('提示缓存留存 2')).toHaveAttribute('data-value', 'NONE')
   })
 

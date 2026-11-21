@@ -102,13 +102,13 @@ describe('AgentForm current contracts', () => {
     render(<Harness />)
     // 非内置执行配置不应暴露模型校验或重置入口；普通编辑不改变不透明配置。
     expect(screen.getByLabelText('执行驱动')).toHaveTextContent('future')
-    expect(screen.queryByLabelText('Default Model')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('默认模型')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '使用第一个模型' })).not.toBeInTheDocument()
     await chooseSelectOption(user, '执行驱动', 'future (不可用)')
     fireEvent.change(screen.getByPlaceholderText('用途说明'), { target: { value: 'edited' } })
     expect(toEditableAgentUpdate(latest).execution).toEqual(execution)
     await chooseSelectOption(user, '执行驱动', 'builtin')
-    expect(screen.getByLabelText('Default Model')).toBeInTheDocument()
+    expect(screen.getByLabelText('默认模型')).toBeInTheDocument()
     expect(latest.execution).toBeNull()
   })
 
@@ -116,7 +116,7 @@ describe('AgentForm current contracts', () => {
     // 独立于 catalog 是否为空，不支持的 driver 都不应显示 builtin 的配置引导。
     const draft = { ...emptyAgentDraft(), name: 'assistant', execution: { driver: 'future', settings: {} } }
     render(<AgentForm mode="edit" draft={draft} models={[]} onChange={() => undefined} />)
-    expect(screen.queryByLabelText('Default Model')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('默认模型')).not.toBeInTheDocument()
     expect(screen.queryByText('需要先创建 Model 才能配置 Agent。')).not.toBeInTheDocument()
   })
 
@@ -275,14 +275,10 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    await chooseSelectOption(user, 'Default Variant Override', 'fast')
+    await chooseSelectOption(user, '模型预设覆盖', 'fast')
     expect(drafts.at(-1)?.variant).toBe('fast')
 
-    await chooseSelectOption(
-      user,
-      'Default Variant Override',
-      /use model default|使用模型默认/i,
-    )
+    await chooseSelectOption(user, '模型预设覆盖', '使用模型默认预设')
     expect(drafts.at(-1)?.variant).toBe('')
   })
 
@@ -377,7 +373,7 @@ describe('AgentForm current contracts', () => {
     render(<Harness />)
 
     // 未配置模型时标记为必填，并允许用户一键填充第一个 model
-    const modelTrigger = screen.getByLabelText('Default Model')
+    const modelTrigger = screen.getByLabelText('默认模型')
     expect(modelTrigger).toHaveAttribute('aria-required', 'true')
     expect(modelTrigger.closest('label')?.querySelector('.field-required')).toHaveAttribute(
       'aria-hidden',

@@ -162,7 +162,7 @@ export function VariantListEditor({
                 <label className="form-group">
                   <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
                   <TextInput
-                    aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.reasoningEffort')} ${index + 1}`}
                     aria-describedby={!reasoning ? reasoningHintId : undefined}
                     disabled={!reasoning}
                     value={variant.reasoningEffort}
@@ -181,7 +181,7 @@ export function VariantListEditor({
                   <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
                   <TextArea
                     className="code-textarea"
-                    aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.protocolOptions')} ${index + 1}`}
                     value={variant.protocolOptionsJson}
                     onChange={(event) =>
                       updateVariant(index, { protocolOptionsJson: event.target.value })

@@ -99,15 +99,15 @@ export function ModelResourceCard({
         ],
       ] : [
         [
-          t('ai.catalog.card.provider'),
+          t('ai.catalog.form.provider'),
           singleModel?.providerName || t('ai.catalog.card.emptyValue'),
         ],
-        [t('ai.catalog.card.modelId'), singleModel?.modelId || t('ai.catalog.card.emptyValue')],
-        [t('ai.catalog.card.limit'), formatLimit(model)],
-        [t('ai.catalog.card.ability'), formatAbilities(model)],
+        [t('ai.catalog.form.modelId'), singleModel?.modelId || t('ai.catalog.card.emptyValue')],
+        [t('ai.catalog.form.limit'), formatLimit(model)],
+        [t('ai.catalog.form.abilities'), formatAbilities(model)],
         [t('ai.catalog.card.pricing'), formatModelPricing(model)],
-        [t('ai.catalog.card.default'), defaultVariant || t('ai.catalog.card.emptyValue')],
-        { label: t('ai.catalog.card.variants'), tags: variants, limit: 3 },
+        [t('ai.catalog.form.defaultVariant'), defaultVariant || t('ai.catalog.card.emptyValue')],
+        { label: t('ai.catalog.section.presets'), tags: variants, limit: 3 },
       ]}
       onEdit={onEdit}
       onDelete={onDelete}

@@ -231,12 +231,12 @@ describe('ai-resource-form-validation', () => {
   it('translates known backend errors into user-facing Chinese', () => {
     expect(
       toUserFacingErrorMessage(new Error('config.limit.context must be a positive integer')),
-    ).toMatch(/上下文窗口/)
+    ).toBe('请填写有效的上下文窗口，必须为正整数')
     expect(
       toUserFacingErrorMessage(new Error('config.defaultVariant must match a variant id')),
-    ).toMatch(/默认 Variant/)
-    expect(toUserFacingErrorMessage(new Error('duplicate variant id: fast'))).toMatch(/不能重复/)
-    expect(toUserFacingErrorMessage(new ApiError('Unauthorized', 401))).toMatch(/没有权限/)
+    ).toBe('请选择一个有效的默认预设')
+    expect(toUserFacingErrorMessage(new Error('duplicate variant id: fast'))).toBe('预设 ID 不能重复')
+    expect(toUserFacingErrorMessage(new ApiError('Unauthorized', 401))).toBe('没有权限执行此操作')
   })
 
   it('passes Chinese text through unchanged', () => {
@@ -246,10 +246,10 @@ describe('ai-resource-form-validation', () => {
   it('maps reasoning effort and agent variant errors to their fields', () => {
     expect(
       toUserFacingErrorMessage(new Error('variant medium reasoningEffort must not exceed 64 characters')),
-    ).toMatch(/思考强度|Reasoning/)
-    expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toMatch(/Variant/)
-    expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toMatch(
-      /Provider Type/,
+    ).toBe('思考强度不能超过 64 个字符；留空使用供应商协议的默认值。')
+    expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toBe('请选择有效的模型预设')
+    expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toBe(
+      '请选择有效的 Provider Type',
     )
   })
 
@@ -297,8 +297,7 @@ describe('ai-resource-form-validation', () => {
         },
       )
       expect(result.ok).toBe(false)
-      expect(result.message).toContain('Variant "fast"')
-      expect(result.message).toContain('protocolOptions 必须是有效的 JSON')
+      expect(result.message).toBe('预设「fast」的原生协议选项必须是有效的 JSON')
       expect(result.fields.variants).toBe(result.message)
     })
 
@@ -323,8 +322,7 @@ describe('ai-resource-form-validation', () => {
         },
       )
       expect(result.ok).toBe(false)
-      expect(result.message).toContain('Variant "fast"')
-      expect(result.message).toContain('protocolOptions 必须是 JSON 对象')
+      expect(result.message).toBe('预设「fast」的原生协议选项必须是 JSON 对象')
       expect(result.fields.variants).toBe(result.message)
     })
 
@@ -350,8 +348,7 @@ describe('ai-resource-form-validation', () => {
         },
       )
       expect(result.ok).toBe(false)
-      expect(result.message).toContain('Variant "standard"')
-      expect(result.message).toContain('protocolOptions 必须是 JSON 对象')
+      expect(result.message).toBe('预设「standard」的原生协议选项必须是 JSON 对象')
       expect(result.fields.variants).toBe(result.message)
     })
 
@@ -492,24 +489,24 @@ describe('ai-resource-form-validation', () => {
 
   describe('additional branches', () => {
     it.each([
-      ['reasoningEffort is required', /思考强度/],
-      ['variant must not be blank', /有效的 Variant/],
-      ['at least one variant is required', /至少添加一个 Variant/],
-      ['duplicate variant id', /不能重复/],
-      ['config.defaultVariant is invalid', /默认 Variant/],
-      ['maxOutputTokens must not exceed context', /不能超过上下文窗口/],
-      ['contextWindow must be positive', /上下文窗口/],
-      ['maxOutputTokens must be positive', /最大输出长度/],
-      ['input modality is required', /输入类型/],
-      ['providerName is required', /Provider/],
-      ['providerType is invalid', /Provider Type/],
-      ['pricing.inputPerMillionTokens must not be negative', /价格/],
-      ['modelName is required', /Model/],
-      ['baseUrl is invalid', /Base URL/],
-      ['tools 重名', /Tools/],
-      ['skills 去前缀后存在重名', /Skills/],
+      ['reasoningEffort is required', '思考强度不能超过 64 个字符；留空使用供应商协议的默认值。'],
+      ['variant must not be blank', '请选择有效的模型预设'],
+      ['at least one variant is required', '请至少添加一个模型预设，并填写预设 ID'],
+      ['duplicate variant id', '预设 ID 不能重复'],
+      ['config.defaultVariant is invalid', '请选择一个有效的默认预设'],
+      ['maxOutputTokens must not exceed context', '最大输出长度不能超过上下文窗口'],
+      ['contextWindow must be positive', '请填写有效的上下文窗口，必须为正整数'],
+      ['maxOutputTokens must be positive', '请填写有效的最大输出长度，必须为正整数'],
+      ['input modality is required', '请至少选择一种输入类型，建议保留 TEXT'],
+      ['providerName is required', '请选择供应商'],
+      ['providerType is invalid', '请选择有效的 Provider Type'],
+      ['pricing.inputPerMillionTokens must not be negative', '请检查价格配置：必填费率、定价规则和生效日期。'],
+      ['modelName is required', '请选择默认模型'],
+      ['baseUrl is invalid', '请填写 Base URL'],
+      ['tools 重名', 'Tools 名称冲突，请检查勾选项'],
+      ['skills 去前缀后存在重名', 'Skills 名称冲突，请检查勾选项'],
     ])('translates %s', (message, expected) => {
-      expect(toUserFacingErrorMessage(new Error(message))).toMatch(expected)
+      expect(toUserFacingErrorMessage(new Error(message))).toBe(expected)
     })
 
     // 测试意图：HTTP 失败只按结构化 status/code 分类，标题文本不参与判断。
@@ -618,8 +615,8 @@ describe('ai-resource-form-validation', () => {
         },
       )
       expect(result.ok).toBe(false)
-      expect(result.fields.variants).toBe('请至少添加一个 Variant，并填写 ID')
-      expect(result.fields.defaultVariant).toBe('请至少添加一个 Variant，并填写 ID')
+      expect(result.fields.variants).toBe('请至少添加一个模型预设，并填写预设 ID')
+      expect(result.fields.defaultVariant).toBe('请至少添加一个模型预设，并填写预设 ID')
     })
 
     it('rejects invalid base rates without defaulting an unpriced model to zero', () => {

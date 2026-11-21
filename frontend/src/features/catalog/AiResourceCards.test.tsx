@@ -79,7 +79,7 @@ describe('AI resource cards', () => {
       models={[]} onEdit={vi.fn()} onDelete={vi.fn()} deletePending={false} />)
     expect(screen.getByText('future')).toBeInTheDocument()
     expect(screen.getByText('执行驱动')).toBeInTheDocument()
-    expect(screen.queryByText('生效 Model')).not.toBeInTheDocument()
+    expect(screen.queryByText('生效模型')).not.toBeInTheDocument()
     expect(screen.queryByText('未配置')).not.toBeInTheDocument()
   })
 
@@ -93,8 +93,8 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('MiniMax (quality) · 模型默认')).toBeInTheDocument()
-    expect(screen.getByText('生效 Model')).toBeInTheDocument()
+    expect(screen.getByText('MiniMax (quality) · 模型默认预设')).toBeInTheDocument()
+    expect(screen.getByText('生效模型')).toBeInTheDocument()
     expect(screen.queryByText('执行驱动')).not.toBeInTheDocument()
     rerender(
       <AgentResourceCard
@@ -175,7 +175,7 @@ describe('AI resource cards', () => {
     )
 
     // 标签行保留 label；tag limit 沿用 2，第 3 个折叠为 +1。
-    expect(screen.getByText('Subagents')).toBeInTheDocument()
+    expect(screen.getByText('子代理')).toBeInTheDocument()
     expect(screen.getByText('helper')).toBeInTheDocument()
     expect(screen.getByText('writer')).toBeInTheDocument()
     expect(screen.queryByText('architect')).not.toBeInTheDocument()
@@ -193,7 +193,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('Subagents')).toBeInTheDocument()
+    expect(screen.getByText('子代理')).toBeInTheDocument()
     expect(screen.queryByText('+1')).not.toBeInTheDocument()
   })
 
@@ -247,8 +247,8 @@ describe('AI resource cards', () => {
     )
 
     expect(screen.getAllByText('MiniMax').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('ctx 128000 · out 8192')).toBeInTheDocument()
-    expect(screen.getByText('tools · reasoning · TEXT, IMAGE, AUDIO +1')).toBeInTheDocument()
+    expect(screen.getByText('上下文 128000 · 输出 8192')).toBeInTheDocument()
+    expect(screen.getByText('工具 · 推理 · TEXT, IMAGE, AUDIO +1')).toBeInTheDocument()
     expect(screen.getAllByText('quality')).toHaveLength(2)
     expect(screen.getByText('+1')).toBeInTheDocument()
 
