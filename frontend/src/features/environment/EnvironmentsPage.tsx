@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, CircleAlert, Download, SlidersHorizontal } from 'lucide-react'
 import {
-  filterEnvironments,
+  ENVIRONMENT_STATUS_LABEL_KEY,
+  environmentDisplayStatus,
   isEnvironmentRuntimeUnavailableError,
+  filterEnvironments,
   presentEnvironmentConfig,
   presentUpdateProgress,
+  type EnvironmentDisplayStatus,
 } from '@/features/environment/environment-utils'
 import { EnvironmentInstallModal } from '@/features/environment/EnvironmentInstallModal'
 import { EnvironmentConfigModal } from '@/features/environment/EnvironmentConfigModal'
@@ -15,6 +18,8 @@ import { EnvironmentManagementModal } from '@/features/environment/EnvironmentMa
 import { environmentRuntimeQueryOptions } from '@/features/environment/environment-runtime-query'
 import { environmentService } from '@/features/environment/environment-service'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { SearchField } from '@/shared/ui/controls/SearchField'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
@@ -77,8 +82,10 @@ function earliestStatusExpiresAt(cards: EnvironmentDTO[]): number | null {
 }
 
 /** 连接状态与配置状态是两个事实：READY 且租约有效才展示为 READY，过期租约明确降级。 */
-function connectionBadgeTone(ready: boolean, status: EnvironmentDTO['status']): 'success' | 'info' | 'warning' {
-  if (ready && status === 'READY') return 'success'
+function connectionBadgeTone(
+  status: EnvironmentDisplayStatus,
+): 'success' | 'info' | 'warning' {
+  if (status === 'READY') return 'success'
   if (status === 'CONNECTING') return 'info'
   return 'warning'
 }
@@ -92,6 +99,9 @@ export function EnvironmentsPage() {
   const [uninstallTarget, setUninstallTarget] = useState<EnvironmentDTO | null>(null)
 
   const [manageId, setManageId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  // 输入保持即时响应，过滤按延迟值进行，避免每个按键都重排卡片。
+  const deferredSearch = useDeferredValue(search)
 
   const {
     deleteTarget,
@@ -132,15 +142,17 @@ export function EnvironmentsPage() {
     syncOn: (name) => name === 'changed',
   })
 
-  const environments = useMemo(
-    () => filterEnvironments(environmentsQuery.data ?? [], ''),
-    [environmentsQuery.data],
-  )
+  // 完整列表是运行查询、状态回读、管理弹窗与刷新反馈的唯一事实来源。
+  const environments = environmentsQuery.data ?? []
 
   // 运行快照对 READY 与有效 CONNECTING 都可读；只有 OFFLINE 没有有效 owner 租约。
   const runtimeQueries = useQueries({
     queries: environments.map((environment) => environmentRuntimeQueryOptions(environment)),
   })
+
+  // 搜索与排序只改变卡片；运行快照仍按完整列表的 id 配对。
+  const runtimeById = new Map(environments.map(({ id }, index) => [id, runtimeQueries[index]]))
+  const cards = filterEnvironments(environments, deferredSearch)
 
   // 连接失效是时间事实，不是写入事实：服务端已给出每个有效状态的截止时间，这里只按最早的截止点排一次回读，
   // 不轮询、也不维护客户端过期集合。心跳续租或任何 changed 推送更新权威数据后，这个定时器会被取消并按新截止点重排；
@@ -172,6 +184,12 @@ export function EnvironmentsPage() {
     <section className="screen active">
       <div className="subbar environment-toolbar">
         <AiNavigation />
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder={t('ai.environment.searchPlaceholder')}
+          aria-label={t('ai.environment.searchLabel')}
+        />
         <div className="environment-refresh-slot">
           {environmentsQuery.isRefetchError && (
             <>
@@ -204,6 +222,9 @@ export function EnvironmentsPage() {
             {retryButton}
           </div>
         ))}
+        {environmentsQuery.data != null && deferredSearch.trim() !== '' && cards.length === 0 && (
+          <StateBlock title={t('ai.environment.empty.noMatch')} />
+        )}
         {environmentsQuery.data != null && (
           <ResourceGrid>
             <CreateCard
@@ -211,11 +232,10 @@ export function EnvironmentsPage() {
               subtitle={t('ai.environment.createDescription')}
               onClick={() => setEditor({ mode: 'create' })}
             />
-            {environments.map((environment, index) => {
+            {cards.map((environment) => {
+              const runtimeQuery = runtimeById.get(environment.id)!
+              const displayStatus = environmentDisplayStatus(environment)
               const status = environment.status
-              const ready = environment.ready === true
-              const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
-              const runtimeQuery = runtimeQueries[index]
               const runtimeUnavailable = status === 'OFFLINE' ||
                 isEnvironmentRuntimeUnavailableError(runtimeQuery.error)
               const runtime = runtimeUnavailable || runtimeQuery.isError ? undefined : runtimeQuery.data
@@ -272,7 +292,9 @@ export function EnvironmentsPage() {
                   title={environment.name}
                   subtitle={environment.note || undefined}
                   badge={
-                    <Badge tone={connectionBadgeTone(ready, status)}>{displayStatus}</Badge>
+                    <Badge tone={connectionBadgeTone(displayStatus)} title={displayStatus}>
+                      {t(ENVIRONMENT_STATUS_LABEL_KEY[displayStatus])}
+                    </Badge>
                   }
                   meta={rows}
                   actions={

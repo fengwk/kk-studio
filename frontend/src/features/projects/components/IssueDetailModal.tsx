@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import type { HashFile } from '@/shared/lib/upload-file'
 import { storageService as defaultStorageService, type StorageService } from '@/shared/api/storage-service'
 import { useI18n } from '@/shared/i18n'
@@ -14,6 +15,7 @@ import { IssueDetailHeader } from './issue-detail/IssueDetailHeader'
 import { IssueDetailTabPanels } from './issue-detail/IssueDetailTabPanels'
 import { IssueDetailTabs } from './issue-detail/IssueDetailTabs'
 import { useIssueDetail } from './issue-detail/useIssueDetail'
+import { toStateNames } from '../issue-labels'
 import './issue-detail-alerts.css'
 import type { ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
@@ -51,6 +53,7 @@ export function IssueDetailModal({
 }: IssueDetailModalProps) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const stateNames = useMemo(() => toStateNames(workflow?.states), [workflow])
   const state = useIssueDetail({
     isOpen,
     issueId,
@@ -85,6 +88,7 @@ export function IssueDetailModal({
         <IssueDetailHeader
           issueNumber={issue?.number || '...'}
           state={issue?.state || 'INIT'}
+          stateNames={stateNames}
           isBlocked={isBlocked}
           blockedReason={issue?.blockReason ?? null}
           pauseReason={issue?.pauseReason ?? null}
@@ -99,6 +103,7 @@ export function IssueDetailModal({
         isDone={isDone}
         isPaused={Boolean(issue?.pauseReason)}
         isWriteBlocked={runner.isWriteBlocked}
+        stateNames={stateNames}
         availableNextStates={availableNextStates}
         onResume={lifecycle.requestResume}
         onTransition={(toState) => void lifecycle.transition(toState)}
@@ -138,6 +143,7 @@ export function IssueDetailModal({
           activeTab={activeTab}
           detail={detail}
           issue={issue}
+          stateNames={stateNames}
           isLoading={isLoading}
           isWriteBlocked={runner.isWriteBlocked}
           isActionPending={runner.isActionPending}

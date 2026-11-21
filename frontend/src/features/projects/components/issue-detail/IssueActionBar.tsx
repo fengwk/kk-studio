@@ -1,12 +1,15 @@
 import { AlertCircle, ArrowRight, Play, RotateCcw, Square } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
+import { stateNameOf, type IssueStateNames } from '../../issue-labels'
 
 interface IssueActionBarProps {
   isBlocked: boolean
   isDone: boolean
   isPaused: boolean
   isWriteBlocked: boolean
+  /** 工作流阶段编码到名称的映射；动作以目标阶段名称表达。 */
+  stateNames: IssueStateNames
   /** 当前阶段在工作流里声明的可转移目标。 */
   availableNextStates: string[]
   onResume: () => void
@@ -27,6 +30,7 @@ export function IssueActionBar({
   isDone,
   isPaused,
   isWriteBlocked,
+  stateNames,
   availableNextStates,
   onResume,
   onTransition,
@@ -46,18 +50,21 @@ export function IssueActionBar({
           </Button>
         )}
 
-        {!isBlocked && availableNextStates.map((toState) => (
-          <Button
-            key={toState}
-            size="compact"
-            disabled={isWriteBlocked}
-            onClick={() => onTransition(toState)}
-            title={t('projects.issue.transitionStateTo', { state: toState })}
-          >
-            <span>{t('projects.issue.transitionToState', { state: toState })}</span>
-            <ArrowRight size={12} aria-hidden="true" />
-          </Button>
-        ))}
+        {!isBlocked && availableNextStates.map((toState) => {
+          const targetLabel = stateNameOf(stateNames, toState)
+          return (
+            <Button
+              key={toState}
+              size="compact"
+              disabled={isWriteBlocked}
+              onClick={() => onTransition(toState)}
+              title={t('projects.issue.transitionStateTo', { state: targetLabel })}
+            >
+              <span>{t('projects.issue.transitionToState', { state: targetLabel })}</span>
+              <ArrowRight size={12} aria-hidden="true" />
+            </Button>
+          )
+        })}
 
         {isBlocked ? (
           <Button

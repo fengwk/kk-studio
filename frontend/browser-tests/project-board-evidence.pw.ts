@@ -1,14 +1,22 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from './fixture'
-import type { IssueDetailDTO, ProjectSnapshotDTO } from '@/shared/api/generated/contracts'
+import type {
+  IssueDTO, IssueDetailDTO, IssueRunSummaryDTO, PauseReason, ProjectSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
 const PROJECT = 'a0000000-0000-0000-0000-000000000001'
 const ISSUE_INIT = 'b0000000-0000-0000-0000-000000000001'
 const ISSUE_WORK = 'b0000000-0000-0000-0000-000000000002'
 const ISSUE_BLOCKED = 'b0000000-0000-0000-0000-000000000003'
+const ISSUE_PAUSED = 'b0000000-0000-0000-0000-000000000004'
+const ISSUE_ERROR = 'b0000000-0000-0000-0000-000000000005'
+const ISSUE_WAITING = 'b0000000-0000-0000-0000-000000000006'
+const ISSUE_FAILED = 'b0000000-0000-0000-0000-000000000007'
+const ISSUE_DONE = 'b0000000-0000-0000-0000-000000000008'
 const ISSUE_DETAIL = 'a0000000-0000-0000-0000-000000000002'
 const STAMP = Date.UTC(2026, 9, 1)
+const BLOCK_REASON = 'Waiting for the settlement decision'
 
 /**
  * 切片自查截图目录：只有显式设置 KK_SLICE_SHOTS 时才写出图片。
@@ -37,6 +45,23 @@ const copy = {
     transitionToWork: '流转至 处理中',
     createIssue: '新建 Issue',
     block: '阻塞',
+    recover: '恢复',
+    // 徽标按事实命名：徽标已经表达等待/失败时，同一张卡的 Run 摘要不再重复。
+    badges: {
+      paused: '已暂停',
+      pausedOnError: '出错已暂停',
+      waiting: '等待中',
+      failed: '已失败',
+    },
+    badgeTitles: {
+      paused: '已人工暂停',
+      pausedOnError: '发生错误已暂停',
+      waiting: '等待处理',
+      failed: '执行失败',
+    },
+    running: '执行中',
+    reason: '原因: Waiting for the settlement decision',
+    recoverTitle: '恢复至 处理中',
     evidenceTab: '公开证据',
     evidenceTabEmpty: '公开证据 (0)',
     evidenceFailed: '公开证据读取失败',
@@ -49,6 +74,22 @@ const copy = {
     transitionToWork: 'Move to In progress',
     createIssue: 'New Issue',
     block: 'Block',
+    recover: 'Recover',
+    badges: {
+      paused: 'Paused',
+      pausedOnError: 'Paused on error',
+      waiting: 'Waiting',
+      failed: 'Failed',
+    },
+    badgeTitles: {
+      paused: 'Paused manually',
+      pausedOnError: 'Paused after an error',
+      waiting: 'Waiting to be processed',
+      failed: 'Execution failed',
+    },
+    running: 'Running',
+    reason: `Reason: ${BLOCK_REASON}`,
+    recoverTitle: 'Recover to In progress',
     evidenceTab: 'Public evidence',
     evidenceTabEmpty: 'Public evidence (0)',
     evidenceFailed: 'Failed to load public evidence',
@@ -57,7 +98,40 @@ const copy = {
   },
 } as const
 
+/** 卡片与详情都不能把内部状态码当正文；列头/徽标只保留可读名称。 */
+const RAW_STATE_CODES = ['INIT', 'WORK', 'BLOCKED', 'DONE', 'PAUSED', 'ERROR', 'WAITING', 'FAILED']
+
 type Locale = keyof typeof copy
+
+function issue(
+  id: string,
+  number: string,
+  title: string,
+  state: string,
+  extra: { blockedFromState?: string | null; blockReason?: string | null
+    pauseReason?: PauseReason | null; pauseDetail?: string | null } = {},
+): IssueDTO {
+  return {
+    id, projectId: PROJECT, number, title, description: '', state,
+    blockedFromState: extra.blockedFromState ?? null,
+    blockReason: extra.blockReason ?? null,
+    pauseReason: extra.pauseReason ?? null,
+    pauseDetail: extra.pauseDetail ?? null,
+    version: '1', createdAt: STAMP, updatedAt: STAMP,
+  }
+}
+
+function run(
+  ordinal: string,
+  state: string,
+  status: 'RUNNING' | 'WAITING' | 'FAILED',
+  agentName: string | null,
+): IssueRunSummaryDTO {
+  return {
+    id: `c0000000-0000-0000-0000-00000000000${ordinal}`, issueId: ISSUE_WORK, ordinal, state,
+    agentName, status, startedAt: STAMP, endedAt: status === 'RUNNING' ? null : STAMP,
+  }
+}
 
 function snapshotFor(locale: Locale): ProjectSnapshotDTO {
   const columns = copy[locale].columns
@@ -75,47 +149,47 @@ function snapshotFor(locale: Locale): ProjectSnapshotDTO {
         ],
       },
       yoloEnabled: false,
-      nextIssueNumber: '4',
+      nextIssueNumber: '9',
       version: '1',
       archivedAt: null,
       createdAt: STAMP,
       updatedAt: STAMP,
     },
+    // 看板一次覆盖全部可见事实：无标记、执行中、人工暂停、错误暂停、等待、失败、阻塞与完成。
     issues: [
+      { issue: issue(ISSUE_INIT, '1', 'Split refund callbacks', 'INIT'), currentOrLatestRun: null },
       {
-        issue: {
-          id: ISSUE_INIT, projectId: PROJECT, number: '1', title: 'Split refund callbacks',
-          description: '', state: 'INIT', blockedFromState: null, blockReason: null,
-          pauseReason: null, pauseDetail: null,
-          version: '1', createdAt: STAMP, updatedAt: STAMP,
-        },
-        currentOrLatestRun: null,
-      },
-      {
-        issue: {
-          id: ISSUE_WORK, projectId: PROJECT, number: '2', title: 'Verify settlement ledger',
-          description: '', state: 'WORK', blockedFromState: null, blockReason: null,
-          pauseReason: null, pauseDetail: null,
-          version: '1', createdAt: STAMP, updatedAt: STAMP,
-        },
+        issue: issue(ISSUE_WORK, '2', 'Verify settlement ledger', 'WORK'),
         // 当前阶段的 Run：卡片不应再重复一次当前阶段。
-        currentOrLatestRun: {
-          id: 'c0000000-0000-0000-0000-000000000001', issueId: ISSUE_WORK, ordinal: '1',
-          state: 'WORK', agentName: 'backend-dev', status: 'RUNNING',
-          startedAt: STAMP, endedAt: null,
-        },
+        currentOrLatestRun: run('1', 'WORK', 'RUNNING', 'backend-dev'),
       },
       {
-        issue: {
-          id: ISSUE_BLOCKED, projectId: PROJECT, number: '3', title: 'Replay gateway timeouts',
-          description: '', state: 'BLOCKED', blockedFromState: 'WORK',
-          blockReason: 'Waiting for the settlement decision', pauseReason: null, pauseDetail: null,
-          version: '1', createdAt: STAMP, updatedAt: STAMP,
-        },
+        issue: issue(ISSUE_PAUSED, '3', 'Reconcile payout batches', 'WORK', { pauseReason: 'USER' }),
         currentOrLatestRun: null,
       },
+      {
+        issue: issue(ISSUE_ERROR, '4', 'Retry ledger snapshots', 'WORK', {
+          pauseReason: 'ERROR', pauseDetail: 'Ledger snapshot request timed out',
+        }),
+        currentOrLatestRun: null,
+      },
+      {
+        issue: issue(ISSUE_WAITING, '5', 'Await settlement approval', 'WORK'),
+        currentOrLatestRun: run('2', 'WORK', 'WAITING', 'reviewer'),
+      },
+      {
+        issue: issue(ISSUE_FAILED, '6', 'Replay gateway timeouts', 'WORK'),
+        currentOrLatestRun: run('3', 'WORK', 'FAILED', 'reviewer'),
+      },
+      {
+        issue: issue(ISSUE_BLOCKED, '7', 'Escalate settlement decision', 'BLOCKED', {
+          blockedFromState: 'WORK', blockReason: BLOCK_REASON,
+        }),
+        currentOrLatestRun: null,
+      },
+      { issue: issue(ISSUE_DONE, '8', 'Ship refund gateway', 'DONE'), currentOrLatestRun: null },
     ],
-    referencedStateCodes: ['INIT', 'WORK', 'BLOCKED'],
+    referencedStateCodes: ['INIT', 'WORK', 'BLOCKED', 'DONE'],
   }
 }
 
@@ -184,7 +258,7 @@ async function transport(page: Page, locale: Locale): Promise<TransportState> {
 
 for (const locale of Object.keys(copy) as Locale[]) {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-    test(`board keeps stage names primary and one primary action in ${locale} at ${viewport.width}px`, async ({
+    test(`board keeps stage names primary and names every issue fact in ${locale} at ${viewport.width}px`, async ({
       page,
     }) => {
       await page.setViewportSize(viewport)
@@ -203,12 +277,16 @@ for (const locale of Object.keys(copy) as Locale[]) {
         )
         await expect(column.locator('.column-header .ui-badge')).toHaveCount(0)
       }
-      for (const code of Object.keys(copy[locale].columns)) {
+      // 状态码既不进正文，也不进徽标：它们只作为列头与卡片的 title 提示保留。
+      for (const code of RAW_STATE_CODES) {
         await expect(page.getByText(code, { exact: true })).toHaveCount(0)
       }
 
+      const card = (id: string) => page.getByTestId(`issue-card-${id}`)
+      const cardBadges = (id: string) => card(id).locator('.issue-badges-row .ui-badge')
+
       // 卡片所属列已表达当前阶段：卡头只留编号，进度动作用目标阶段名称且是次级按钮。
-      const initCard = page.getByTestId(`issue-card-${ISSUE_INIT}`)
+      const initCard = card(ISSUE_INIT)
       await expect(initCard.locator('.issue-number')).toHaveText('#1')
       await expect(initCard.locator('.ui-badge')).toHaveCount(0)
       const transition = initCard.getByRole('button', { name: copy[locale].transitionToWork })
@@ -216,11 +294,41 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await expect(transition).not.toHaveClass(/btn-primary/)
       await expect(initCard.getByRole('button', { name: copy[locale].block })).toHaveClass(/ghost-btn/)
 
-      // 当前阶段的 Run 不重复阶段名，执行状态用可读文字。
-      const workCard = page.getByTestId(`issue-card-${ISSUE_WORK}`)
+      // 当前阶段的 Run 不重复阶段名；没有徽标时执行状态仍用可读文字。
+      const workCard = card(ISSUE_WORK)
       await expect(workCard.locator('.issue-card-meta')).toContainText('#1')
       await expect(workCard.locator('.issue-card-meta')).not.toContainText(copy[locale].columns.WORK)
-      await expect(workCard.getByText('WORK', { exact: true })).toHaveCount(0)
+      await expect(workCard.locator('.issue-card-meta')).toContainText(copy[locale].running)
+      await expect(workCard.locator('.ui-badge')).toHaveCount(0)
+
+      // 暂停：人工与错误是两种事实，徽标文案与提示都本地化。
+      await expect(cardBadges(ISSUE_PAUSED)).toHaveCount(1)
+      await expect(cardBadges(ISSUE_PAUSED)).toHaveText(copy[locale].badges.paused)
+      await expect(cardBadges(ISSUE_PAUSED)).toHaveAttribute('title', copy[locale].badgeTitles.paused)
+      await expect(cardBadges(ISSUE_ERROR)).toHaveCount(1)
+      await expect(cardBadges(ISSUE_ERROR)).toHaveText(copy[locale].badges.pausedOnError)
+      await expect(cardBadges(ISSUE_ERROR)).toHaveAttribute('title', copy[locale].badgeTitles.pausedOnError)
+
+      // 等待与失败：徽标表达该事实后，Run 摘要只留序号与执行者。
+      for (const [id, badge] of [
+        [ISSUE_WAITING, 'waiting'],
+        [ISSUE_FAILED, 'failed'],
+      ] as const) {
+        await expect(cardBadges(id)).toHaveCount(1)
+        await expect(cardBadges(id)).toHaveText(copy[locale].badges[badge])
+        await expect(cardBadges(id)).toHaveAttribute('title', copy[locale].badgeTitles[badge])
+        const meta = card(id).locator('.issue-card-meta')
+        await expect(meta).toContainText('#')
+        await expect(meta).not.toContainText(copy[locale].badges[badge])
+      }
+
+      // 阻塞：徽标用保留阶段名称，原因与恢复目标在正文/提示里说明。
+      const blockedCard = card(ISSUE_BLOCKED)
+      await expect(blockedCard.locator('.ui-badge')).toHaveText(copy[locale].columns.BLOCKED)
+      await expect(blockedCard.locator('.ui-badge')).toHaveAttribute('title', BLOCK_REASON)
+      await expect(blockedCard.locator('.issue-block-reason')).toHaveText(copy[locale].reason)
+      await expect(blockedCard.getByRole('button', { name: copy[locale].recover }))
+        .toHaveAttribute('title', copy[locale].recoverTitle)
 
       // 页头「新建」是看板区域唯一主动作，卡片区没有主按钮。
       await expect(page.locator('header.project-detail-header .btn-primary')).toHaveCount(1)
@@ -230,12 +338,12 @@ for (const locale of Object.keys(copy) as Locale[]) {
       if (viewport.width < 900) {
         // 窄屏：列横向滚动，卡片操作仍完整可见、不被挤出卡片。
         const scroller = page.locator('.project-board-columns')
-        await expect(page.locator('.issue-card')).toHaveCount(3)
+        await expect(page.locator('.issue-card')).toHaveCount(8)
         const scroll = await scroller.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
         expect(scroll.scroll).toBeGreaterThan(scroll.client)
-        for (const card of await page.locator('.issue-card').all()) {
-          const box = await card.boundingBox()
-          for (const action of await card.getByRole('button').all()) {
+        for (const visible of await page.locator('.issue-card').all()) {
+          const box = await visible.boundingBox()
+          for (const action of await visible.getByRole('button').all()) {
             const actionBox = await action.boundingBox()
             await expect(action).toBeVisible()
             expect(actionBox!.x).toBeGreaterThanOrEqual(box!.x - 1)
@@ -243,7 +351,7 @@ for (const locale of Object.keys(copy) as Locale[]) {
           }
         }
         await scroller.evaluate((el) => el.scrollTo({ left: el.scrollWidth }))
-        await expect(page.getByTestId(`issue-card-${ISSUE_BLOCKED}`)).toBeInViewport()
+        await expect(card(ISSUE_DONE)).toBeInViewport()
         await scroller.evaluate((el) => el.scrollTo({ left: 0 }))
         await expect(transition).toBeInViewport()
       }

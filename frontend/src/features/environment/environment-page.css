@@ -1,6 +1,8 @@
 .environment-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 265px;
+  /* 导航占剩余宽度，搜索与刷新反馈各自按内容收窄：反馈出现时只挤压导航，不遮挡搜索。 */
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
   column-gap: 8px;
 }
 
@@ -39,11 +41,24 @@
   content: '▾' / '';
 }
 
-@media (max-width: 900px) {
+@media (max-width: 860px) {
+  /* 窄屏改为每项一行：导航 -> 搜索 -> 刷新反馈，与共享子导航的堆叠顺序一致。 */
   .environment-toolbar {
-    grid-template-columns: minmax(0, 1fr) 120px;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    row-gap: 10px;
   }
 
+  .environment-refresh-slot {
+    order: 2;
+  }
+
+  .environment-refresh-slot:empty {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
   .environment-refresh-wide {
     display: none;
   }

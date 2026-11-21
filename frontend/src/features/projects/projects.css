@@ -675,9 +675,24 @@
 
 .run-card-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 4px 8px;
   margin-bottom: 8px;
+}
+
+.run-card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.run-card-facts .ui-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .run-ordinal {

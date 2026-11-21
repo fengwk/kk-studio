@@ -178,13 +178,14 @@ describe('IssueDetailModal', () => {
     }),
   })
 
-  it('renders issue detail header, tabs, and natural state token', async () => {
-    // 测试意图：验证加载展示 Issue 标题、状态 natural token、版本号以及 Tab 分组
+  it('renders issue detail header, tabs, and the current stage by workflow name', async () => {
+    // 测试意图：头部与 Spec 元信息按工作流阶段名称展示当前阶段，内部编码只留在提示里。
     const api = createMockApi()
     renderModal(
       <IssueDetailModal
         isOpen={true}
         issueId={issueId}
+        workflow={mockWorkflow}
         onClose={vi.fn()}
         onIssueUpdated={vi.fn()}
         api={api}
@@ -193,7 +194,10 @@ describe('IssueDetailModal', () => {
     )
 
     expect(await screen.findByLabelText('Issue #12 详情')).toBeInTheDocument()
-    expect(screen.getAllByText('IN_PROGRESS').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('进行中').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('IN_PROGRESS')).toBeNull()
+    // 阶段名称旁的提示保留内部编码，便于对照工作流配置。
+    expect(screen.getAllByTitle('IN_PROGRESS').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('期望版本号:')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
     expect(screen.getByText('需求事实')).toBeInTheDocument()
@@ -202,6 +206,35 @@ describe('IssueDetailModal', () => {
     expect(screen.getByText(/阶段预算/)).toBeInTheDocument()
     expect(screen.getByText(/Agent Thread/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
+  })
+
+  it('renders run and stage budget facts with stage names and readable run status', async () => {
+    // 测试意图：Run 报告与阶段预算按阶段名称展示，Run 状态用可读文案，编码只留在提示里。
+    const api = createMockApi()
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('tab', { name: /Run 报告/ }))
+
+    expect(await screen.findByText('Run #1')).toBeInTheDocument()
+    expect(screen.getByText('执行中')).toHaveAttribute('title', 'RUNNING')
+    expect(screen.queryByText('RUNNING')).toBeNull()
+    expect(screen.queryByText('IN_PROGRESS')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: /阶段预算/ }))
+    const budget = await screen.findByText('最大额度: 5 次')
+    expect(budget.closest('.budget-card')).toHaveTextContent('进行中')
+    expect(screen.queryByText('IN_PROGRESS')).toBeNull()
   })
 
   it('posts COMMENT activity with frozen requestKey', async () => {
@@ -397,8 +430,8 @@ describe('IssueDetailModal', () => {
     })
   })
 
-  it('shows the ERROR pause badge for an unknown outcome', async () => {
-    // 测试意图：结果未知的失败收尾以 ERROR 暂停表达。
+  it('shows the localized pause badge for an unknown outcome', async () => {
+    // 测试意图：结果未知的失败收尾以「出错已暂停」表达，不暴露 ERROR 暂停原因编码。
     const failedIssueDetail: IssueDetailDTO = {
       ...mockActiveIssueDetail,
       issue: {
@@ -415,6 +448,7 @@ describe('IssueDetailModal', () => {
       <IssueDetailModal
         isOpen={true}
         issueId={issueId}
+        workflow={mockWorkflow}
         onClose={vi.fn()}
         onIssueUpdated={vi.fn()}
         api={api}
@@ -422,7 +456,42 @@ describe('IssueDetailModal', () => {
       />,
     )
 
-    expect(await screen.findByText('ERROR')).toBeInTheDocument()
+    expect(await screen.findByText('出错已暂停')).toBeInTheDocument()
+    expect(screen.queryByText('ERROR')).toBeNull()
+  })
+
+  it('keeps the blocked stage name with the block reason as its hint', async () => {
+    // 测试意图：阻塞徽标展示当前阶段名称，提示里保留阻塞原因，不并排重复业务阻塞状态码。
+    const blockedIssueDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      issue: {
+        ...mockActiveIssueDetail.issue,
+        state: 'BLOCKED',
+        blockedFromState: 'IN_PROGRESS',
+        blockReason: 'Waiting for the scope decision',
+      },
+    }
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue(blockedIssueDetail),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockBlockedWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    const badge = await screen.findByTitle('BLOCKED · Waiting for the scope decision')
+    expect(badge).toHaveTextContent('业务阻塞')
+    expect(screen.queryByText('BLOCKED')).toBeNull()
+    // 阻塞前阶段同样只展示名称。
+    expect(screen.getByTitle('IN_PROGRESS')).toHaveTextContent('进行中')
   })
 
   it('resumes a USER paused issue directly with the current version and request identity', async () => {
@@ -878,6 +947,14 @@ describe('IssueDetailModal', () => {
   const mockWorkflow: ProjectWorkflowDTO = {
     states: [
       { state: 'IN_PROGRESS', name: '进行中', next: ['REVIEW'], agent: null, environment: null, instructions: null, maxRuns: null },
+    ],
+  }
+
+  const mockBlockedWorkflow: ProjectWorkflowDTO = {
+    states: [
+      { state: 'IN_PROGRESS', name: '进行中', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
     ],
   }
 

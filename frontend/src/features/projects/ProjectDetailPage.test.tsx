@@ -277,6 +277,106 @@ describe('ProjectDetailPage', () => {
     expect(within(card).queryByText(/IN_PROGRESS|COMPLETED/)).toBeNull()
   })
 
+  it('does not repeat a waiting or failed run status the card badge already states', async () => {
+    // 徽标已表达等待/失败时，Run 摘要不再重复同一个事实，卡片只出现一次该状态。
+    const run = mockSnapshot.issues[1].currentOrLatestRun!
+    const issues: ProjectIssueSnapshotDTO[] = [
+      {
+        issue: { ...mockSnapshot.issues[1].issue, state: 'IN_PROGRESS' },
+        currentOrLatestRun: { ...run, state: 'IN_PROGRESS', status: 'WAITING' },
+      },
+      {
+        issue: { ...mockSnapshot.issues[1].issue, id: 'iss-failed', number: '3', state: 'IN_PROGRESS' },
+        currentOrLatestRun: { ...run, id: 'run-failed', state: 'IN_PROGRESS', status: 'FAILED' },
+      },
+    ]
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue({
+        ...mockSnapshot,
+        issues,
+        referencedStateCodes: ['IN_PROGRESS'],
+      }),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    const waiting = await screen.findByTestId(`issue-card-${issues[0].issue.id}`)
+    expect(within(waiting).getAllByText('等待中')).toHaveLength(1)
+    expect(waiting.querySelector('.issue-card-meta')?.textContent).toBe('#1 · backend-dev')
+    expect(within(waiting).queryByText('WAITING')).toBeNull()
+
+    const failed = screen.getByTestId('issue-card-iss-failed')
+    expect(within(failed).getAllByText('已失败')).toHaveLength(1)
+    expect(failed.querySelector('.issue-card-meta')?.textContent).toBe('#1 · backend-dev')
+    expect(within(failed).queryByText('FAILED')).toBeNull()
+  })
+
+  it('localizes pause badges instead of exposing the pause reason codes', async () => {
+    // 暂停原因编码 USER/ERROR 只留在数据里；卡片按文案展示暂停状态并保留原解释提示。
+    const issues: ProjectIssueSnapshotDTO[] = [
+      {
+        issue: { ...mockSnapshot.issues[0].issue, pauseReason: 'USER', pauseDetail: 'Stopped by user' },
+        currentOrLatestRun: null,
+      },
+      {
+        issue: {
+          ...mockSnapshot.issues[0].issue,
+          id: 'iss-error',
+          number: '2',
+          pauseReason: 'ERROR',
+          pauseDetail: 'Outcome unknown',
+        },
+        currentOrLatestRun: null,
+      },
+    ]
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue({
+        ...mockSnapshot,
+        issues,
+        referencedStateCodes: ['INIT'],
+      }),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    const paused = await screen.findByTestId(`issue-card-${issues[0].issue.id}`)
+    expect(within(paused).getByText('已暂停')).toHaveAttribute('title', '已人工暂停')
+    expect(within(paused).queryByText('PAUSED')).toBeNull()
+
+    const errored = screen.getByTestId('issue-card-iss-error')
+    expect(within(errored).getByText('出错已暂停')).toHaveAttribute('title', '发生错误已暂停')
+    expect(within(errored).queryByText('ERROR')).toBeNull()
+  })
+
+  it('shows the blocked stage name on the card and keeps the cause in its hint', async () => {
+    // 阻塞就是当前阶段的事实：徽标写阶段名称，提示与正文保留原因，不并排 BLOCKED 状态码。
+    const blockReason = 'Waiting for the scope decision'
+    const issues: ProjectIssueSnapshotDTO[] = [
+      {
+        issue: {
+          ...mockSnapshot.issues[0].issue,
+          state: 'BLOCKED',
+          blockedFromState: 'INIT',
+          blockReason,
+        },
+        currentOrLatestRun: null,
+      },
+    ]
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue({
+        ...mockSnapshot,
+        issues,
+        referencedStateCodes: ['BLOCKED', 'INIT'],
+      }),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    const card = await screen.findByTestId(`issue-card-${issues[0].issue.id}`)
+    expect(card.querySelector('.ui-badge')).toHaveTextContent('业务阻塞')
+    expect(card.querySelector('.ui-badge')).toHaveAttribute('title', blockReason)
+    expect(within(card).getByText(`原因: ${blockReason}`)).toBeInTheDocument()
+    expect(within(card).queryByText('BLOCKED')).toBeNull()
+    expect(within(card).getByRole('button', { name: '恢复' })).toBeInTheDocument()
+  })
+
   it('opens workflow immediately, preserves tab drafts and resets the initial tab on reopen', async () => {
     // 看板入口直达工作流；切换页签保留草稿，关闭重开则恢复入口页签与项目数据。
     const api = createMockApi()

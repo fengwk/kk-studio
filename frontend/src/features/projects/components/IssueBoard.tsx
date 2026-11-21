@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { IssueCard } from './IssueCard'
+import { stateNameOf, toStateNames } from '../issue-labels'
 import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueBoardProps {
@@ -37,10 +38,7 @@ export function IssueBoard({
   )
 
   // 阶段编码到名称的映射：列头、卡片与搜索都以名称为主，编码只在提示里出现。
-  const stateNames = useMemo(
-    () => new Map(states.map((st) => [st.state, st.name])),
-    [states],
-  )
+  const stateNames = useMemo(() => toStateNames(states), [states])
 
   // 状态与允许转移的映射表
   const stateNextMap = useMemo(() => {
@@ -58,7 +56,7 @@ export function IssueBoard({
       if (!q) {
         return true
       }
-      const stageName = stateNames.get(item.issue.state) ?? ''
+      const stageName = stateNameOf(stateNames, item.issue.state)
       return (
         item.issue.title.toLowerCase().includes(q) ||
         item.issue.number.includes(q) ||
