@@ -142,7 +142,7 @@ describe('useChatPageController', () => {
     // 触发删除
     act(() => result.current.chatPanelProps.onDelete(testChat))
     expect(result.current.deleteConfirmModal.modal).not.toBeNull()
-    expect(result.current.deleteConfirmModal.modal?.title).toBe('删除 Chat')
+    expect(result.current.deleteConfirmModal.modal?.title).toBe('删除对话')
     expect(result.current.deleteConfirmModal.modal?.description).toContain('Panel Chat')
 
     // 关闭删除

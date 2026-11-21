@@ -35,7 +35,7 @@ describe('subagent execution selector', () => {
     expect(container.querySelector('[data-thread-id="child"]')).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('link', { name: /Review/ })).toHaveAttribute('href', '/threads/child')
     expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('失败')
-    expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('turns: 7 · tools: 12')
+    expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('轮次：7 · 工具：12')
     expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('model (default)')
   })
 
@@ -121,7 +121,7 @@ describe('subagent execution selector', () => {
   it('retains refresh errors and retry, loading and empty states without inventing executions', () => {
     const initial = tree([])
     const host = render(<MemoryRouter><SubagentTreePanel tree={initial} /></MemoryRouter>)
-    expect(screen.getByText('暂无 subagent 执行')).toBeInTheDocument()
+    expect(screen.getByText('暂无子 Agent 执行')).toBeInTheDocument()
     fireEvent.keyDown(screen.getByRole('region'), { key: 'ArrowDown' })
     fireEvent.keyDown(screen.getByRole('region'), { key: 'Enter' })
     host.rerender(<MemoryRouter><SubagentTreePanel tree={{ ...initial, isLoading: true }} /></MemoryRouter>)

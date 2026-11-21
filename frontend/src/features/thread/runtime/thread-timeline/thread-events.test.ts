@@ -536,7 +536,7 @@ describe('buildThreadEventTimeline', () => {
     ]
     const events = build(entries)
     expect(events[2]!.details.find((row) => row.label === '推理 tokens')?.value).toBe('—')
-    expect(events[2]!.details.find((row) => row.label === 'Provider 总 tokens')?.value).toBe('—')
+    expect(events[2]!.details.find((row) => row.label === '提供商总 tokens')?.value).toBe('—')
   })
 
   it('keeps TURN_END summary as the bare outcome when the turn has no usage', () => {

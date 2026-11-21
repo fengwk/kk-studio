@@ -61,7 +61,7 @@ describe('App routes', () => {
     render(<BrowserRouter><AppProviders><App /></AppProviders></BrowserRouter>)
     await waitFor(() => expect(window.location.pathname).toBe('/chats'))
     // 路由重定向必须完成异步资源加载并渲染 Chat 控制台。
-    expect(await screen.findByRole('button', { name: '新建 Chat' }, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '新建对话' }, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
   })
 

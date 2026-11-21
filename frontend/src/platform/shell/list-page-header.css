@@ -1,0 +1,64 @@
+/* 资源列表页页头：左侧唯一主标题（可带事实计数），右侧搜索与页级动作。
+   页面容器（padding、滚动）由各页的 .screen-body 提供，这里只统一标题字号与间距。 */
+
+.list-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.list-page-header-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.list-page-header-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.list-page-header-count {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hover);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.list-page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* 窄屏：标题与控件各占一行，搜索框吃掉剩余宽度，不裁字也不横向溢出。 */
+@media (max-width: 600px) {
+  .list-page-header {
+    align-items: stretch;
+  }
+
+  .list-page-header-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .list-page-header-actions > .searchbox {
+    flex: 1 1 100%;
+    width: auto;
+  }
+}

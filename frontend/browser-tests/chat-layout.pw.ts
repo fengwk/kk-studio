@@ -351,7 +351,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     const pane1Lines = pane1Footer.locator('.thread-status-line')
     await expect(pane1Lines).toHaveCount(1)
     await expect(pane1Lines.nth(0)).toHaveText(
-      'production ∣ ctx 16k/128k ∣ ↑12k · ↓800 · R4.0k · W0 · $0.042 · cache 25.00% · 400 tok/s',
+      'production ∣ 上下文 16k/128k ∣ ↑12k · ↓800 · R4.0k · W0 · $0.042 · cache 25.00% · 400 tok/s',
     )
 
     // 超宽被省略的信息必须仍能通过 hover 完整读取，且不含内部口径说明

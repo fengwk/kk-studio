@@ -139,15 +139,15 @@ export const sharedCatalog = {
   },
   'ai.common.loadingModel': {
     'en-US': 'Loading Model',
-    'zh-CN': '正在加载 Model',
+    'zh-CN': '正在加载模型',
   },
   'ai.common.loadingProvider': {
     'en-US': 'Loading Provider',
-    'zh-CN': '正在加载 Provider',
+    'zh-CN': '正在加载提供商',
   },
   'ai.common.loadingEnvironment': {
     'en-US': 'Loading Environment',
-    'zh-CN': '正在加载 Environment',
+    'zh-CN': '正在加载环境',
   },
   'ai.common.loadingResourceEditor': {
     'en-US': 'Loading resource editor',

@@ -33,7 +33,7 @@ describe('model create kind tabs', () => {
       />,
     )
     expect(screen.getByRole('tablist', { name: '资源类型' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Model' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '模型' })).toHaveAttribute('aria-selected', 'true')
 
     view.rerender(
       <ResourceEditorModal

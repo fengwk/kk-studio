@@ -39,12 +39,12 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     const cacheRetention = model.getByRole('button', { name: '提示缓存留存 1' })
     await expect(cacheRetention).toBeEnabled()
     await expect(cacheRetention).toHaveAttribute('data-value', 'NONE')
-    await expect(model.getByLabel('供应商', { exact: true })).toBeDisabled()
+    await expect(model.getByLabel('提供商', { exact: true })).toBeDisabled()
     await expect(model.getByRole('textbox', { name: '模型 ID', exact: true }))
       .toHaveJSProperty('required', true)
     await expect(model.getByLabel('思考强度 1', { exact: true })).toBeDisabled()
     await expect(model.getByRole('button', { name: '删除预设', exact: true })).toBeDisabled()
-    // 供应商与 Agent 表单共用同一批目录标签。
+    // 提供商与 Agent 表单共用同一批目录标签。
     await expect(provider.getByRole('textbox', { name: '名称', exact: true }))
       .toHaveAttribute('readonly', '')
     await expect(provider.getByRole('textbox', { name: '说明', exact: true })).toBeVisible()

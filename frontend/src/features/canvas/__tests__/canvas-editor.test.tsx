@@ -248,7 +248,7 @@ describe('CanvasEditor state rendering', () => {
       snapshot: snapshotDTO(),
       query: { isLoading: false },
     })
-    expect(screen.getByLabelText('Canvas 资源编辑器')).toBeInTheDocument()
+    expect(screen.getByLabelText('画布资源编辑器')).toBeInTheDocument()
     expect(screen.getByText('Board')).toBeInTheDocument()
     expect(screen.getByText('已保存')).toBeInTheDocument()
     expect(screen.getByText('v3')).toBeInTheDocument()

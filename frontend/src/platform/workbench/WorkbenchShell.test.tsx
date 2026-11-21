@@ -21,7 +21,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/test',
     labelKey: 'platform.nav.ai',
     ariaKey: 'platform.nav.aiAria',
-    shortLabel: 'T',
     icon: () => null,
   },
 ]
@@ -43,7 +42,7 @@ describe('WorkbenchShell', () => {
     renderWorkbench(contributions, '/missing')
 
     const heading = screen.getByRole('heading', { name: '页面不可用' })
-    const backLink = screen.getByRole('link', { name: '返回 Chat' })
+    const backLink = screen.getByRole('link', { name: '返回对话' })
     expect(backLink).toHaveAttribute('href', '/chats')
     expect(heading.closest('.screen-body')).toContainElement(backLink)
   })

@@ -142,7 +142,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
   test('end-to-end browser flow: the Issue dock hosts an owner-free bound Thread with message and Stop', async ({
     page,
   }) => {
-    // 测试意图：真实浏览器中 Issue 只是组织容器。打开 Agent 线程后，消息走 per-thread
+    // 测试意图：真实浏览器中 Issue 只是组织容器。打开 Agent Thread 后，消息走 per-thread
     // 命令批次和 Stop 都走 per-thread 接口，且绝不触发 Issue 动作接口。
     const commandBatches: Array<Record<string, unknown>> = []
     const stopRequests: Array<Record<string, unknown>> = []
@@ -271,14 +271,14 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(issueCard).toBeVisible()
     await issueCard.click()
 
-    // 2. 详情弹窗打开，切换到 Agent 线程 Tab
+    // 2. 详情弹窗打开，切换到 Agent Thread Tab
     const dialog = page.getByRole('dialog', { name: 'Issue #1 详情' })
     await expect(dialog).toBeVisible()
-    const agentTab = dialog.getByRole('tab', { name: /Agent 线程/ })
+    const agentTab = dialog.getByRole('tab', { name: /Agent Thread/ })
     await agentTab.click()
 
     // 3. 点击打开线程视图按钮
-    const openThreadBtn = dialog.getByTitle('打开此 Agent 线程视图')
+    const openThreadBtn = dialog.getByTitle('打开此 Agent Thread 视图')
     await expect(openThreadBtn).toBeVisible()
     await openThreadBtn.click()
 
@@ -292,7 +292,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(dock.locator('.ui-badge.is-accent')).toHaveText('architect')
     // 容器标题承载 Issue 身份，设置入口展示绑定 Thread 的模型。
     await expect(dock.locator('.project-agent-dock-title')).toHaveText('Design DB schema')
-    await expect(dock.getByRole('button', { name: 'Model 与 Variant' }))
+    await expect(dock.getByRole('button', { name: '模型与预设' }))
       .toHaveText('MiniMax-M2.7 (default)')
     await expect(dock.getByText('梳理鉴权模块的现有边界')).toBeVisible()
     // ROOT 必须解析成会话开始的配置事实，而不是「配置快照不可解析」兜底。
@@ -368,7 +368,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
 
     // 验证展示安全拒绝告警
     const errorBanner = page.getByText(
-      '目标 Thread 不属于该 Issue 绑定的 Agent 线程或 Run 记录，已拒绝接入',
+      '目标 Thread 不属于该 Issue 绑定的 Agent Thread 或 Run 记录，已拒绝接入',
     )
     await expect(errorBanner).toBeVisible()
 

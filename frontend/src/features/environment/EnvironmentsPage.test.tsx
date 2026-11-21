@@ -217,7 +217,7 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     renderPage()
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '创建环境' })).toHaveClass('create-card')
+      expect(screen.getByRole('button', { name: '新建环境' })).toHaveClass('create-card')
     })
     expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
   })
@@ -264,11 +264,11 @@ describe('EnvironmentsPage', () => {
     const clipboard = installClipboard()
     const { queryClient } = renderPage()
 
-    await user.click(await screen.findByRole('button', { name: '创建环境' }))
-    const form = await screen.findByRole('dialog', { name: '创建环境' })
+    await user.click(await screen.findByRole('button', { name: '新建环境' }))
+    const form = await screen.findByRole('dialog', { name: '新建环境' })
     await user.type(within(form).getByRole('textbox', { name: /环境名称/ }), 'new-env')
     await user.type(within(form).getByRole('textbox', { name: '备注' }), 'fresh card')
-    await user.click(within(form).getByRole('button', { name: '创建环境' }))
+    await user.click(within(form).getByRole('button', { name: '创建' }))
 
     expect(environmentService.createEnvironment).toHaveBeenCalledWith({
       name: 'new-env',
@@ -281,7 +281,7 @@ describe('EnvironmentsPage', () => {
       },
     })
     expect(await screen.findByRole('dialog', { name: '安装/覆盖环境' })).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: '创建环境' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: '新建环境' })).toBeNull()
     expect(screen.queryByText('secret-token-12345')).not.toBeInTheDocument()
     expect(clipboard.writeText).not.toHaveBeenCalled()
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('secret-token-12345')
@@ -816,7 +816,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    expect(screen.getByText('正在加载 Environment')).toBeInTheDocument()
+    expect(screen.getByText('正在加载环境')).toBeInTheDocument()
     expect(screen.getAllByRole('status')).toHaveLength(1)
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
 
@@ -824,7 +824,7 @@ describe('EnvironmentsPage', () => {
       resolveListing?.([environment({ name: 'box-a' })])
     })
     expect(await screen.findByText('box-a')).toBeInTheDocument()
-    expect(screen.queryByText('正在加载 Environment')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在加载环境')).not.toBeInTheDocument()
   })
 
   /**
@@ -836,13 +836,13 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.listEnvironments).mockRejectedValueOnce(new Error('registry down'))
     renderPage()
 
-    expect(await screen.findByText('加载 Environment 失败')).toBeInTheDocument()
-    expect(screen.getByText('加载 Environment 失败')).toHaveAttribute('role', 'status')
+    expect(await screen.findByText('加载环境失败')).toBeInTheDocument()
+    expect(screen.getByText('加载环境失败')).toHaveAttribute('role', 'status')
     expect(screen.queryByText('registry down')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(1)
     // 没有权威列表时不假装空列表，也不提供创建入口。
     expect(screen.queryByRole('article')).toBeNull()
-    expect(screen.queryByRole('button', { name: '创建环境' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '新建环境' })).toBeNull()
 
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'recovered-box' }),
@@ -850,7 +850,7 @@ describe('EnvironmentsPage', () => {
     await user.click(screen.getByRole('button', { name: '重试' }))
 
     expect(await screen.findByText('recovered-box')).toBeInTheDocument()
-    expect(screen.queryByText('加载 Environment 失败')).toBeNull()
+    expect(screen.queryByText('加载环境失败')).toBeNull()
     expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
   })
 
@@ -876,9 +876,9 @@ describe('EnvironmentsPage', () => {
     expect(await screen.findAllByText('刷新失败 · 显示上次数据')).toHaveLength(2)
     expect(screen.getByText('刷新失败')).toBeInTheDocument()
     expect(screen.getByText('box-cached')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '创建环境' })).toBeInTheDocument()
-    expect(screen.queryByText('正在加载 Environment')).toBeNull()
-    expect(screen.queryByText('加载 Environment 失败')).toBeNull()
+    expect(screen.getByRole('button', { name: '新建环境' })).toBeInTheDocument()
+    expect(screen.queryByText('正在加载环境')).toBeNull()
+    expect(screen.queryByText('加载环境失败')).toBeNull()
     expect(screen.queryByText('background glitch')).toBeNull()
     // 宽/窄两种尺寸各有一个入口，指向同一次回读。
     expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(2)
@@ -891,7 +891,7 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => expect(screen.queryByText('刷新失败 · 显示上次数据')).toBeNull())
     expect(screen.getByText('box-cached')).toBeInTheDocument()
     expect(screen.getByText('1.2.1')).toBeInTheDocument()
-    expect(screen.queryByText('正在加载 Environment')).toBeNull()
+    expect(screen.queryByText('正在加载环境')).toBeNull()
   })
 
   /**
@@ -1015,9 +1015,9 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     // 验证整个页面仅有唯一个创建入口（即网格首张 CreateCard，子工具栏无重复创建按钮）
-    const createButton = await screen.findByRole('button', { name: '创建环境' })
+    const createButton = await screen.findByRole('button', { name: '新建环境' })
     expect(createButton).toHaveClass('create-card')
-    expect(screen.getAllByRole('button', { name: '创建环境' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '新建环境' })).toHaveLength(1)
 
     // 验证列表真正为空时不渲染多余的 StateBlock 文本
     expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()

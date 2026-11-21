@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useDeferredValue, useMemo, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isConflictError } from '@/shared/api/client'
 import {
@@ -11,6 +11,7 @@ import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { SearchField } from '@/shared/ui/controls/SearchField'
 import { mcpServerService } from '@/features/catalog/mcp-server-service'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -28,18 +29,21 @@ import {
   validateDiscoverEndpoint,
   validateUpdateMcpServer,
 } from './mcp-server-form-validation'
+import { filterMcpServers } from './mcp-utils'
 import { useMcpServerEditor } from './useMcpServerEditor'
 import { useMcpServerMutations } from './useMcpServerMutations'
 import './mcp-servers.css'
 import type { McpServerSummaryDTO } from '@/shared/api/generated/contracts'
 
 /**
- * MCP Server 管理页：编排列表查询、两个编辑弹窗、删除确认与冲突呈现。
+ * MCP Server 管理页：编排列表查询与搜索、两个编辑弹窗、删除确认与冲突呈现。
  * 表单状态、表单规则与写入副作用分别在 `mcp-server-forms`、`mcp-server-form-validation`
  * 与 `useMcpServerEditor` / `useMcpServerMutations` 中，本组件只负责把它们接起来。
  */
 export function McpServersPage() {
   const { t } = useI18n()
+  const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const [createForm, setCreateForm] = useState<CreateMcpServerFormState | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<McpServerSummaryDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -49,7 +53,10 @@ export function McpServersPage() {
     queryKey: queryKeys.mcpServers.list(),
     queryFn: () => mcpServerService.listServers(),
   })
-  const servers = serversQuery.data ?? []
+  const servers = useMemo(
+    () => filterMcpServers(serversQuery.data ?? [], deferredSearch),
+    [serversQuery.data, deferredSearch],
+  )
 
   const editor = useMcpServerEditor()
   const { editModal } = editor
@@ -171,6 +178,7 @@ export function McpServersPage() {
     <section className="screen active">
       <nav className="subbar">
         <AiNavigation />
+        <SearchField value={search} onChange={setSearch} />
       </nav>
 
       <div className="screen-body">

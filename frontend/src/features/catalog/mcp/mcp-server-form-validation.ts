@@ -4,6 +4,7 @@ import {
   validateMcpUrl,
   validateTimeoutMillis,
 } from './mcp-utils'
+import { translate } from '@/shared/i18n'
 import type { CreateMcpServerFormState, EditMcpServerFormState } from './mcp-server-forms'
 
 export interface ValidatedCreateMcpServer {
@@ -40,15 +41,21 @@ function validateEndpoint(
 }> {
   const urlResult = validateMcpUrl(url)
   if (!urlResult.valid) {
-    return { ok: false, message: urlResult.error ?? 'Invalid URL' }
+    return { ok: false, message: urlResult.error ?? translate('ai.mcp.validation.urlInvalid') }
   }
   const headersResult = parseAndValidateHeaders(clearHeaders ? '' : headersText)
   if (!headersResult.valid) {
-    return { ok: false, message: headersResult.error ?? 'Invalid headers' }
+    return {
+      ok: false,
+      message: headersResult.error ?? translate('ai.mcp.validation.headersInvalidJson'),
+    }
   }
   const timeoutResult = validateTimeoutMillis(timeoutMillis)
   if (!timeoutResult.valid) {
-    return { ok: false, message: timeoutResult.error ?? 'Invalid timeout' }
+    return {
+      ok: false,
+      message: timeoutResult.error ?? translate('ai.mcp.validation.timeoutPositive'),
+    }
   }
   return {
     ok: true,
@@ -66,7 +73,7 @@ export function validateCreateMcpServer(
 ): ValidationOutcome<ValidatedCreateMcpServer> {
   const nameResult = validateMcpName(form.name)
   if (!nameResult.valid) {
-    return { ok: false, message: nameResult.error ?? 'Invalid name' }
+    return { ok: false, message: nameResult.error ?? translate('ai.mcp.validation.nameRequired') }
   }
   const endpoint = validateEndpoint(form.url, form.headersText, false, form.timeoutMillis)
   if (!endpoint.ok) {
@@ -132,11 +139,11 @@ export function hasUnsavedDiscoverChanges(form: EditMcpServerFormState): boolean
 export function validateDiscoverEndpoint(form: EditMcpServerFormState): string | null {
   const headersResult = parseAndValidateHeaders(form.clearHeaders ? '' : form.headersText)
   if (!headersResult.valid) {
-    return headersResult.error ?? 'Invalid headers'
+    return headersResult.error ?? translate('ai.mcp.validation.headersInvalidJson')
   }
   const timeoutResult = validateTimeoutMillis(form.timeoutMillis)
   if (!timeoutResult.valid) {
-    return timeoutResult.error ?? 'Invalid timeout'
+    return timeoutResult.error ?? translate('ai.mcp.validation.timeoutPositive')
   }
   return null
 }

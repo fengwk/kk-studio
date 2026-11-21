@@ -133,7 +133,7 @@ describe('VariantListEditor model cache state', () => {
     )
 
     expect(screen.getByText('提示缓存')).toBeInTheDocument()
-    expect(screen.getByText('自动（由服务商管理）')).toBeInTheDocument()
+    expect(screen.getByText('自动（由提供商管理）')).toBeInTheDocument()
     expect(screen.queryByLabelText('提示缓存留存 1')).not.toBeInTheDocument()
   })
 

@@ -332,7 +332,7 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
 
   const chatApproval = page.locator('.thread-root-interactions .interaction-approval-card')
   await expect(chatApproval).toBeVisible()
-  await expect(chatApproval).not.toContainText('Chat · Cold approvals')
+  await expect(chatApproval).not.toContainText('对话 · Cold approvals')
   const approvalStyles = await chatApproval.evaluate((element) => ({
     footerDisplay: getComputedStyle(element.querySelector('.interaction-approval-footer')!).display,
     inputBorderStyle: getComputedStyle(element.querySelector('input')!).borderTopStyle,
@@ -380,7 +380,7 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   await expect(composer.locator('.composer-editor')).toHaveText('')
   await expect(composer).not.toContainText('数据迁移完成')
   // 仅有执行根时不展示活跃树；mock 的完整 tree 投影不能产生虚假的加载错误。
-  await expect(page.getByText('活跃子代理', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('活跃子 Agent', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Agent 关系加载失败', { exact: true })).toHaveCount(0)
   await expect(page.getByText('待处理交互加载失败', { exact: true })).toHaveCount(0)
   expect(recorded.every((request) => request.kind === 'snapshot')).toBe(true)

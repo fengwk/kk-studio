@@ -386,8 +386,8 @@ describe('ThreadComposer and commands', () => {
     expect(dock).not.toBeNull()
     expect(dock?.querySelector('.composer-editor')).not.toBeNull()
     expect(dock?.querySelector('.thread-dock-controls')).not.toBeNull()
-    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('Default')
-    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('默认')
+    expect(screen.getByRole('button', { name: '模型与预设' })).toHaveTextContent(
       'MiniMax (high)',
     )
   })
@@ -438,13 +438,13 @@ describe('ThreadComposer and commands', () => {
     await user.click(screen.getByRole('option', { name: 'YOLO' }))
     expect(onYoloChange).toHaveBeenCalledWith(true)
 
-    await user.click(screen.getByRole('button', { name: 'Model 与 Variant' }))
+    await user.click(screen.getByRole('button', { name: '模型与预设' }))
     const search = screen.getByRole('searchbox', { name: '搜索模型' })
     expect(search).toHaveFocus()
     await user.type(search, 'gpt')
     expect(screen.queryByRole('option', { name: 'MiniMax' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: 'gpt' }))
-    expect(screen.getByRole('listbox', { name: 'Variant 选项' })).toBeInTheDocument()
+    expect(screen.getByRole('listbox', { name: '预设选项' })).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: 'quality' }))
     expect(onModelChange).toHaveBeenCalledWith({
             modelName: 'gpt',
@@ -487,7 +487,7 @@ describe('ThreadComposer and commands', () => {
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: /^models/ }))
     expect(screen.getByRole('searchbox', { name: '搜索模型' })).toHaveFocus()
-    expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()
+    expect(screen.getByRole('listbox', { name: '模型选项' })).toBeInTheDocument()
   })
 
   describe('ThreadComposer attachment draft recovery', () => {
@@ -1280,7 +1280,7 @@ describe('ThreadWidgetStack', () => {
     )
     expect(screen.getByText('执行中')).toBeInTheDocument()
     expect(screen.getByText('稍后处理这条')).toBeInTheDocument()
-    const zone = screen.getByLabelText('会话活动')
+    const zone = screen.getByLabelText('Thread 活动')
     const zoneText = zone.textContent ?? ''
     expect(zoneText.indexOf('执行中')).toBeLessThan(zoneText.indexOf('稍后处理这条'))
 

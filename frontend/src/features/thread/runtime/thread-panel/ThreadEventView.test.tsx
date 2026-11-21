@@ -597,7 +597,7 @@ describe('ThreadEventView', () => {
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
 
       // 点击 Subagent 按钮
-      const subagentBtn = screen.getByRole('button', { name: '子代理 Explorer' })
+      const subagentBtn = screen.getByRole('button', { name: '子 Agent Explorer' })
       await user.click(subagentBtn)
 
       // 自动激活详情并显示 Subagent Inspector

@@ -60,6 +60,23 @@ describe('CanvasPage integration', () => {
     expect(screen.queryByText('threadId')).not.toBeInTheDocument()
   })
 
+  it('filters the loaded canvas cards without hiding the create entry or rereading the list', async () => {
+    const user = userEvent.setup()
+    renderPage(['/canvas'])
+
+    expect(await screen.findByText('Research board')).toBeInTheDocument()
+    const search = screen.getByRole('textbox', { name: '搜索画布' })
+    await user.type(search, 'unmatched')
+    expect(screen.queryByText('Research board')).not.toBeInTheDocument()
+    expect(screen.getByText('暂无匹配画布')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建画布' })).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, ' RESEARCH ')
+    expect(screen.getByText('Research board')).toBeInTheDocument()
+    expect(listCanvases).toHaveBeenCalledTimes(1)
+  })
+
   it('shows the shared skeleton on the canvas column template during the first read', async () => {
     vi.mocked(listCanvases).mockImplementation(() => new Promise(() => undefined))
     const { container } = renderPage(['/canvas'])
@@ -80,8 +97,8 @@ describe('CanvasPage integration', () => {
     const user = userEvent.setup()
     renderPage(['/canvas'])
 
-    await user.click(await screen.findByRole('button', { name: '创建新画布' }))
-    const dialog = await screen.findByRole('dialog', { name: '创建新画布' })
+    await user.click(await screen.findByRole('button', { name: '新建画布' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建画布' })
     const nameInput = within(dialog).getByRole('textbox', { name: '画布名称' })
     expect(nameInput).toHaveValue('')
 
@@ -97,8 +114,8 @@ describe('CanvasPage integration', () => {
     const user = userEvent.setup()
     renderPage(['/canvas'])
 
-    await user.click(await screen.findByRole('button', { name: '创建新画布' }))
-    const dialog = await screen.findByRole('dialog', { name: '创建新画布' })
+    await user.click(await screen.findByRole('button', { name: '新建画布' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建画布' })
     await user.type(within(dialog).getByRole('textbox', { name: '画布名称' }), '研究看板')
     await user.click(within(dialog).getByRole('button', { name: '创建并进入' }))
 
@@ -118,8 +135,8 @@ describe('CanvasPage integration', () => {
     )
     renderPage(['/canvas'])
 
-    await user.click(await screen.findByRole('button', { name: '创建新画布' }))
-    const dialog = await screen.findByRole('dialog', { name: '创建新画布' })
+    await user.click(await screen.findByRole('button', { name: '新建画布' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建画布' })
     const confirm = within(dialog).getByRole('button', { name: '创建并进入' })
 
     // 纯空白名称不发起请求，也不进入 pending（空值由 required 原生校验拦截）。
@@ -138,7 +155,7 @@ describe('CanvasPage integration', () => {
     await user.click(confirm)
     await user.click(within(dialog).getByRole('button', { name: '取消' }))
     expect(createCanvas).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('dialog', { name: '创建新画布' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '新建画布' })).toBeInTheDocument()
 
     resolveCreate({ ...documentFixture, title: '并发画布' })
     await waitFor(() => expect(getCanvas).toHaveBeenCalledWith(CANVAS_ID, expect.anything()))
@@ -149,8 +166,8 @@ describe('CanvasPage integration', () => {
     vi.mocked(createCanvas).mockRejectedValueOnce(new Error('画布名称已存在'))
     renderPage(['/canvas'])
 
-    await user.click(await screen.findByRole('button', { name: '创建新画布' }))
-    const dialog = await screen.findByRole('dialog', { name: '创建新画布' })
+    await user.click(await screen.findByRole('button', { name: '新建画布' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建画布' })
     const nameInput = within(dialog).getByRole('textbox', { name: '画布名称' })
     await user.type(nameInput, '重名画布')
     await user.click(within(dialog).getByRole('button', { name: '创建并进入' }))

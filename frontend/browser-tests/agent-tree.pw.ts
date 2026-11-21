@@ -178,7 +178,7 @@ async function expectNoHorizontalOverflow(widget: ReturnType<Page['getByRole']>)
  * 会话名由顶栏面包屑承载；这里校验 composer 设置来自绑定 Thread 的 branchSettings。
  */
 async function expectBoundRootIdentity(page: Page) {
-  await expect(page.getByRole('button', { name: 'Model 与 Variant' }))
+  await expect(page.getByRole('button', { name: '模型与预设' }))
     .toHaveText('minimax-m2.7 (default)')
   await expect(page.getByRole('button', { name: '环境' })).toHaveText('dev-node')
 }
@@ -231,11 +231,11 @@ test('the active subagent tree renders automatically inside the bound pane and o
   })
   await widget.getByRole('link', { name: /Child Planner/ }).click()
   await expect(page.getByText('只读查看')).toBeVisible()
-  await expect(page.getByRole('button', { name: '回到父 agent' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '回到父 Agent' })).toBeVisible()
   await expect(page).toHaveURL(/debug-preview-harness/)
   expect(popupOpened.value).toBe(false)
 
-  await page.getByRole('button', { name: '回到父 agent' }).click()
+  await page.getByRole('button', { name: '回到父 Agent' }).click()
   await expectBoundRootIdentity(page)
   await expect(widget).toBeVisible()
 })

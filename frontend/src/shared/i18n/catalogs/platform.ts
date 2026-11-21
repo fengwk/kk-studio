@@ -15,15 +15,15 @@ export const platformCatalog = {
   },
   'platform.nav.aiAria': {
     'en-US': 'AI',
-    'zh-CN': '智能 AI',
+    'zh-CN': '智能',
   },
   'platform.nav.projectsAria': {
     'en-US': 'Projects',
-    'zh-CN': '项目 Projects',
+    'zh-CN': '项目',
   },
   'platform.nav.canvasAria': {
     'en-US': 'Canvas',
-    'zh-CN': '画布 Canvas',
+    'zh-CN': '画布',
   },
   'platform.nav.settings': {
     'en-US': 'Settings',
@@ -31,7 +31,7 @@ export const platformCatalog = {
   },
   'platform.nav.settingsAria': {
     'en-US': 'Settings',
-    'zh-CN': '设置 Settings',
+    'zh-CN': '设置',
   },
   'platform.primaryNavigation': {
     'en-US': 'Primary navigation',
@@ -83,7 +83,7 @@ export const platformCatalog = {
   },
   'platform.backToChat': {
     'en-US': 'Back to Chat',
-    'zh-CN': '返回 Chat',
+    'zh-CN': '返回对话',
   },
   'platform.loadingProjects': {
     'en-US': 'Loading projects',
@@ -99,7 +99,7 @@ export const platformCatalog = {
   },
   'ai.nav.agents': {
     'en-US': 'Agent',
-    'zh-CN': '代理',
+    'zh-CN': 'Agent',
   },
   'ai.nav.models': {
     'en-US': 'Model',
@@ -118,7 +118,7 @@ export const platformCatalog = {
     'zh-CN': 'MCP 服务',
   },
   'ai.nav.skillPackages': {
-    'en-US': 'Skill Packages',
+    'en-US': 'Skill Package',
     'zh-CN': '技能包',
   },
   'ai.nav.interactions': {

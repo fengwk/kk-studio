@@ -8,7 +8,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.resourceType.model': {
     'en-US': 'Model',
-    'zh-CN': 'Model',
+    'zh-CN': '模型',
   },
   'ai.catalog.resourceType.modelGroup': {
     'en-US': 'Model Group',
@@ -16,15 +16,15 @@ export const resourcesCatalog = {
   },
   'ai.catalog.resourceType.provider': {
     'en-US': 'Provider',
-    'zh-CN': 'Provider',
+    'zh-CN': '提供商',
   },
   'ai.catalog.createAgent': {
-    'en-US': 'Create Agent',
+    'en-US': 'New Agent',
     'zh-CN': '新建 Agent',
   },
   'ai.catalog.createPrefix': {
     'en-US': 'Create',
-    'zh-CN': '新建',
+    'zh-CN': '创建',
   },
   'ai.catalog.editPrefix': {
     'en-US': 'Edit',
@@ -35,24 +35,24 @@ export const resourcesCatalog = {
     'zh-CN': '组合模型、工具、技能与策略',
   },
   'ai.catalog.createModel': {
-    'en-US': 'Create Model',
-    'zh-CN': '新建 Model',
+    'en-US': 'New Model',
+    'zh-CN': '新建模型',
   },
   'ai.catalog.createModelDescription': {
     'en-US': 'Define model information and variants',
     'zh-CN': '定义模型信息与模型预设',
   },
   'ai.catalog.createProvider': {
-    'en-US': 'Create Provider',
-    'zh-CN': '新建 Provider',
+    'en-US': 'New Provider',
+    'zh-CN': '新建提供商',
   },
   'ai.catalog.createProviderDescription': {
     'en-US': 'Configure provider and credentials',
     'zh-CN': '配置提供商与凭据',
   },
   'ai.catalog.action.createSession': {
-    'en-US': 'Start session',
-    'zh-CN': '创建会话',
+    'en-US': 'New Session',
+    'zh-CN': '新建会话',
   },
   'ai.catalog.action.enterConversation': {
     'en-US': 'Open chat',
@@ -68,7 +68,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.action.confirmCreate': {
     'en-US': 'Create',
-    'zh-CN': '确认创建',
+    'zh-CN': '创建',
   },
   'ai.catalog.action.saveChanges': {
     'en-US': 'Save changes',
@@ -76,7 +76,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.action.confirmDelete': {
     'en-US': 'Delete',
-    'zh-CN': '确认删除',
+    'zh-CN': '删除',
   },
   'ai.catalog.card.effectiveModel': {
     'en-US': 'Effective Model',
@@ -101,7 +101,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.card.type': {
     'en-US': 'Type',
-    'zh-CN': 'Type',
+    'zh-CN': '类型',
   },
   'ai.catalog.card.url': {
     'en-US': 'URL',
@@ -113,11 +113,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.card.timeout': {
     'en-US': 'Timeout',
-    'zh-CN': 'Timeout',
+    'zh-CN': '超时',
   },
   'ai.catalog.card.idle': {
     'en-US': 'Idle',
-    'zh-CN': 'Idle',
+    'zh-CN': '空闲',
   },
   'ai.catalog.card.httpRetry': {
     'en-US': 'HTTP Retry',
@@ -153,11 +153,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.card.seconds': {
     'en-US': '{{value}}s',
-    'zh-CN': '{{value}}s',
+    'zh-CN': '{{value}} 秒',
   },
   'ai.catalog.card.milliseconds': {
     'en-US': '{{value}}ms',
-    'zh-CN': '{{value}}ms',
+    'zh-CN': '{{value}} 毫秒',
   },
   'ai.catalog.card.toolsAbility': {
     'en-US': 'tools',
@@ -177,7 +177,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.groupNameHint': {
     'en-US': 'Globally unique logical name shared with Models.',
-    'zh-CN': '与单 Model 共享的全局唯一逻辑名。',
+    'zh-CN': '与模型共用的全局唯一逻辑名。',
   },
   'ai.catalog.form.modelKind': {
     'en-US': 'Resource type',
@@ -201,7 +201,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.groupMemberModelPlaceholder': {
     'en-US': 'Select a Model',
-    'zh-CN': '选择 Model',
+    'zh-CN': '选择模型',
   },
   'ai.catalog.form.groupMemberVariant': {
     'en-US': 'Member variant {{index}}',
@@ -325,7 +325,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.catalog.issue.nonTokenCostWebSearch': {
     'en-US': 'Web search surcharges are not included in token prices',
-    'zh-CN': '网页搜索附加费用未计入Token价格',
+    'zh-CN': '网页搜索附加费用未计入 Token 价格',
   },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',
@@ -333,11 +333,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.modelIdHint': {
     'en-US': 'Upstream model ID sent to the Provider; may differ from Name.',
-    'zh-CN': '发送给供应商的上游模型 ID，可以与名称不同。',
+    'zh-CN': '发送给提供商的上游模型 ID，可以与名称不同。',
   },
   'ai.catalog.form.remoteModelsFetch': {
     'en-US': 'Fetch models from Provider',
-    'zh-CN': '从供应商拉取模型',
+    'zh-CN': '从提供商拉取模型',
   },
   'ai.catalog.form.remoteModelsLoading': {
     'en-US': 'Fetching models…',
@@ -349,7 +349,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.remoteModelsEmpty': {
     'en-US': 'The Provider listed no models.',
-    'zh-CN': '供应商未列出任何模型。',
+    'zh-CN': '提供商未列出任何模型。',
   },
   'ai.catalog.form.description': {
     'en-US': 'Description',
@@ -385,23 +385,23 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.provider': {
     'en-US': 'Provider',
-    'zh-CN': '供应商',
+    'zh-CN': '提供商',
   },
   'ai.catalog.form.providerType': {
     'en-US': 'Provider Type',
-    'zh-CN': 'Provider Type',
+    'zh-CN': '提供商类型',
   },
   'ai.catalog.form.baseUrl': {
     'en-US': 'Base URL',
-    'zh-CN': 'Base URL',
+    'zh-CN': '基础 URL',
   },
   'ai.catalog.form.modelCallTimeout': {
     'en-US': 'Model Call Timeout (ms)',
-    'zh-CN': 'Model Call Timeout (ms)',
+    'zh-CN': '模型调用超时（毫秒）',
   },
   'ai.catalog.form.modelCallIdleTimeout': {
     'en-US': 'Model Call Idle Timeout (ms)',
-    'zh-CN': 'Model Call Idle Timeout (ms)',
+    'zh-CN': '模型调用空闲超时（毫秒）',
   },
   'ai.catalog.form.httpRetryPolicy': {
     'en-US': 'HTTP Retry Policy',
@@ -413,7 +413,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.httpRetryInheritHint': {
     'en-US': 'Inherits the system-wide HTTP retry status code list.',
-    'zh-CN': '当前 Provider 继承系统全局配置的 HTTP 重试状态码名单。',
+    'zh-CN': '当前提供商继承系统全局配置的 HTTP 重试状态码名单。',
   },
   'ai.catalog.form.httpRetryCustom': {
     'en-US': 'Custom status codes',
@@ -590,16 +590,16 @@ export const resourcesCatalog = {
   'ai.catalog.section.pricing': { 'en-US': 'Pricing and rates', 'zh-CN': '价格与费率' },
   'ai.catalog.section.execution': { 'en-US': 'Execution', 'zh-CN': '执行' },
   'ai.catalog.section.prompt': { 'en-US': 'System prompt', 'zh-CN': '系统提示词' },
-  'ai.catalog.section.capabilities': { 'en-US': 'Tools, skills and subagents', 'zh-CN': '工具 / 技能 / 子代理' },
+  'ai.catalog.section.capabilities': { 'en-US': 'Tools, skills and subagents', 'zh-CN': '工具 / 技能 / 子 Agent' },
   'ai.catalog.form.agentTools': { 'en-US': 'Tools', 'zh-CN': '工具' },
   'ai.catalog.form.agentSkills': { 'en-US': 'Skills', 'zh-CN': '技能' },
-  'ai.catalog.form.agentSubagents': { 'en-US': 'Subagents', 'zh-CN': '子代理' },
+  'ai.catalog.form.agentSubagents': { 'en-US': 'Subagents', 'zh-CN': '子 Agent' },
   'ai.catalog.form.manageTools': { 'en-US': 'Manage tools', 'zh-CN': '管理工具' },
   'ai.catalog.form.manageSkills': { 'en-US': 'Manage skills', 'zh-CN': '管理技能' },
-  'ai.catalog.form.manageSubagents': { 'en-US': 'Manage subagents', 'zh-CN': '管理子代理' },
+  'ai.catalog.form.manageSubagents': { 'en-US': 'Manage subagents', 'zh-CN': '管理子 Agent' },
   'ai.catalog.form.searchTools': { 'en-US': 'Search tools', 'zh-CN': '搜索工具' },
   'ai.catalog.form.searchSkills': { 'en-US': 'Search skills', 'zh-CN': '搜索技能' },
-  'ai.catalog.form.searchSubagents': { 'en-US': 'Search subagents', 'zh-CN': '搜索子代理' },
+  'ai.catalog.form.searchSubagents': { 'en-US': 'Search subagents', 'zh-CN': '搜索子 Agent' },
   'ai.catalog.form.selectedCount': { 'en-US': '{{count}} selected', 'zh-CN': '已选 {{count}}' },
   'ai.catalog.form.allCapabilities': { 'en-US': 'All', 'zh-CN': '全部' },
   'ai.catalog.form.selectedCapabilities': { 'en-US': 'Selected', 'zh-CN': '已选' },
@@ -610,11 +610,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.noCandidateSubagents': {
     'en-US': 'No subagents in the catalog yet',
-    'zh-CN': '目录还没有子代理',
+    'zh-CN': '目录还没有子 Agent',
   },
   'ai.catalog.form.needModel': {
     'en-US': 'Create a Model first to configure an Agent.',
-    'zh-CN': '需要先创建 Model 才能配置 Agent。',
+    'zh-CN': '需要先创建模型才能配置 Agent。',
   },
   'ai.catalog.form.fillFirstModel': {
     'en-US': 'Use the first model',
@@ -634,7 +634,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.offline': {
     'en-US': 'Offline',
-    'zh-CN': 'offline',
+    'zh-CN': '离线',
   },
   'ai.catalog.form.variantHint': {
     'en-US':
@@ -645,7 +645,7 @@ export const resourcesCatalog = {
     'en-US':
       ' Leave empty to keep provider protocol default; off = explicitly disable reasoning; provider-defined values (e.g. low, medium, high, max) are passed through.',
     'zh-CN':
-      ' 留空使用供应商协议的默认值；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
+      ' 留空使用提供商协议的默认值；off 表示显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
   },
   'ai.catalog.form.reasoningDisabledHint': {
     'en-US':
@@ -814,7 +814,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.form.requestBodySourceHint': {
     'en-US': 'Matches the final encoded Provider JSON. Client-controlled values can affect price by administrator choice; they do not prove the upstream tier.',
-    'zh-CN': '匹配最终编码后的 Provider JSON；客户端可控值会按管理员配置影响价格，但不代表上游实际档位。',
+    'zh-CN': '匹配最终编码后的提供商 JSON；客户端可控值会按管理员配置影响价格，但不代表上游实际档位。',
   },
   'ai.catalog.form.condition.all': {
     'en-US': 'All of',
@@ -912,10 +912,10 @@ export const resourcesCatalog = {
   'ai.catalog.form.pricingRanges': { 'en-US': 'Input length prices', 'zh-CN': '输入档位' },
   'ai.catalog.form.pricingTiers': { 'en-US': 'Service tiers', 'zh-CN': '服务档' },
   'ai.catalog.form.pricingTimes': { 'en-US': 'Time periods', 'zh-CN': '时段规则' },
-  'ai.catalog.form.pricingMillionTokens': { 'en-US': 'million tokens', 'zh-CN': '百万 token' },
+  'ai.catalog.form.pricingMillionTokens': { 'en-US': 'million tokens', 'zh-CN': '百万 tokens' },
   'ai.catalog.form.pricingBasePlan': { 'en-US': 'Base plan', 'zh-CN': '基础方案' },
   'ai.catalog.form.pricingActive': { 'en-US': 'Currently effective', 'zh-CN': '当前生效' },
-  'ai.catalog.form.pricingSelectPlan': { 'en-US': 'Price plan', 'zh-CN': '编辑价格方案' },
+  'ai.catalog.form.pricingSelectPlan': { 'en-US': 'Price plan', 'zh-CN': '价格方案' },
   'ai.catalog.form.pricingCreateDraft': { 'en-US': 'Create price change', 'zh-CN': '创建调价草稿' },
   'ai.catalog.form.pricingRemoveChange': { 'en-US': 'Remove price change', 'zh-CN': '删除调价' },
   'ai.catalog.form.pricingDuplicateDate': { 'en-US': 'This effective date already has a plan.', 'zh-CN': '该生效日期已有调价方案。' },
@@ -998,10 +998,10 @@ export const resourcesCatalog = {
   'ai.catalog.form.promptCacheRetentionSelect': { 'en-US': 'Select a supported option', 'zh-CN': '选择支持的选项' },
   'ai.catalog.form.promptCacheOptionTtl': { 'en-US': '{{seconds}} seconds', 'zh-CN': '{{seconds}} 秒' },
   'ai.catalog.form.promptCacheOptionWriteMultiplier': { 'en-US': 'write ×{{multiplier}}', 'zh-CN': '写入 ×{{multiplier}}' },
-  'ai.catalog.form.promptCacheProviderManaged': { 'en-US': 'Automatic (managed by provider)', 'zh-CN': '自动（由服务商管理）' },
+  'ai.catalog.form.promptCacheProviderManaged': { 'en-US': 'Automatic (managed by provider)', 'zh-CN': '自动（由提供商管理）' },
   'ai.catalog.form.promptCacheUnmanaged': { 'en-US': 'Determined by endpoint · Studio does not configure it', 'zh-CN': '由端点决定 · Studio 不配置' },
   'ai.catalog.form.promptCacheUnsupported': { 'en-US': 'Prompt caching is not supported', 'zh-CN': '不支持提示缓存' },
-  'ai.catalog.form.promptCachePending': { 'en-US': 'Select a provider and enter a model ID to check prompt caching', 'zh-CN': '选择供应商并填写模型 ID 后查看提示缓存能力' },
+  'ai.catalog.form.promptCachePending': { 'en-US': 'Select a provider and enter a model ID to check prompt caching', 'zh-CN': '选择提供商并填写模型 ID 后查看提示缓存能力' },
   'ai.catalog.form.deleteVariant': {
     'en-US': 'Delete Variant',
     'zh-CN': '删除预设',
@@ -1012,19 +1012,19 @@ export const resourcesCatalog = {
   },
   'ai.catalog.deleteProviderTitle': {
     'en-US': 'Delete Provider',
-    'zh-CN': '删除 Provider',
+    'zh-CN': '删除提供商',
   },
   'ai.catalog.deleteProviderDescription': {
     'en-US': 'Provider {{name}} will be deleted.',
-    'zh-CN': '将删除 Provider {{name}}。',
+    'zh-CN': '将删除提供商 {{name}}。',
   },
   'ai.catalog.deleteModelTitle': {
     'en-US': 'Delete Model',
-    'zh-CN': '删除 Model',
+    'zh-CN': '删除模型',
   },
   'ai.catalog.deleteModelDescription': {
     'en-US': 'Model {{name}} will be deleted.',
-    'zh-CN': '将删除 Model {{name}}。',
+    'zh-CN': '将删除模型 {{name}}。',
   },
   'ai.catalog.deleteAgentTitle': {
     'en-US': 'Delete Agent',
@@ -1045,7 +1045,7 @@ export const resourcesCatalog = {
   'ai.catalog.validation.reasoningEnabled': {
     'en-US':
       'Reasoning effort must not exceed 64 characters; leave empty to keep provider default.',
-    'zh-CN': '思考强度不能超过 64 个字符；留空使用供应商协议的默认值。',
+    'zh-CN': '思考强度不能超过 64 个字符；留空使用提供商协议的默认值。',
   },
   'ai.catalog.validation.variantRequired': {
     'en-US': 'Select a valid Variant',
@@ -1113,11 +1113,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.duplicateModel': {
     'en-US': 'A Model with this name already exists under the current Provider. Choose another name.',
-    'zh-CN': '当前 Provider 下已存在同名 Model，请换一个名称',
+    'zh-CN': '当前提供商下已存在同名模型，请换一个名称',
   },
   'ai.catalog.validation.duplicateProvider': {
     'en-US': 'A Provider with this name already exists. Choose another name.',
-    'zh-CN': 'Provider 名称已存在，请换一个名称',
+    'zh-CN': '提供商名称已存在，请换一个名称',
   },
   'ai.catalog.validation.duplicateAgent': {
     'en-US': 'An Agent with this name already exists. Choose another name.',
@@ -1125,11 +1125,11 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.provider': {
     'en-US': 'Select a Provider',
-    'zh-CN': '请选择供应商',
+    'zh-CN': '请选择提供商',
   },
   'ai.catalog.validation.providerType': {
     'en-US': 'Select a valid Provider Type',
-    'zh-CN': '请选择有效的 Provider Type',
+    'zh-CN': '请选择有效的提供商类型',
   },
   'ai.catalog.validation.providerTimeout': {
     'en-US': 'Model call timeouts must be whole milliseconds',
@@ -1141,15 +1141,15 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.baseUrl': {
     'en-US': 'Enter a Base URL',
-    'zh-CN': '请填写 Base URL',
+    'zh-CN': '请填写基础 URL',
   },
   'ai.catalog.validation.toolsConflict': {
     'en-US': 'Tool names conflict. Check the selected items.',
-    'zh-CN': 'Tools 名称冲突，请检查勾选项',
+    'zh-CN': '工具名称冲突，请检查勾选项',
   },
   'ai.catalog.validation.skillsConflict': {
     'en-US': 'Skill names conflict. Check the selected items.',
-    'zh-CN': 'Skills 名称冲突，请检查勾选项',
+    'zh-CN': '技能名称冲突，请检查勾选项',
   },
   'ai.catalog.validation.capabilityDuplicate': {
     'en-US': '{{kind}} names must be unique: {{names}}',
@@ -1177,7 +1177,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.providerName': {
     'en-US': 'Enter a Provider name',
-    'zh-CN': '请填写 Provider 名称',
+    'zh-CN': '请填写提供商名称',
   },
   'ai.catalog.validation.name': {
     'en-US': 'Enter a name',
@@ -1193,7 +1193,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.modelName': {
     'en-US': 'Enter a Model name',
-    'zh-CN': '请填写 Model 名称',
+    'zh-CN': '请填写模型名称',
   },
   'ai.catalog.validation.agentName': {
     'en-US': 'Enter an Agent name',
@@ -1201,7 +1201,7 @@ export const resourcesCatalog = {
   },
   'ai.catalog.validation.agentModel': {
     'en-US': 'Select a Model',
-    'zh-CN': '请选择 Model',
+    'zh-CN': '请选择模型',
   },
   'ai.catalog.validation.groupMembers': {
     'en-US': 'Add at least one model',
@@ -1212,19 +1212,19 @@ export const resourcesCatalog = {
     'zh-CN': '平台全局技能包及其定义管理',
   },
   'ai.skillPackages.create': {
-    'en-US': 'Create Package',
-    'zh-CN': '创建技能包',
+    'en-US': 'New Skill Package',
+    'zh-CN': '新建技能包',
   },
   'ai.skillPackages.edit': {
-    'en-US': 'Edit Package',
+    'en-US': 'Edit Skill Package',
     'zh-CN': '编辑技能包',
   },
   'ai.skillPackages.editTitle': {
-    'en-US': 'Edit Package: {{name}}',
+    'en-US': 'Edit Skill Package: {{name}}',
     'zh-CN': '编辑技能包：{{name}}',
   },
   'ai.skillPackages.delete': {
-    'en-US': 'Delete Package',
+    'en-US': 'Delete Skill Package',
     'zh-CN': '删除技能包',
   },
   'ai.skillPackages.deleteConfirm': {
@@ -1232,7 +1232,7 @@ export const resourcesCatalog = {
     'zh-CN': '确认删除技能包“{{name}}”？',
   },
   'ai.skillPackages.name': {
-    'en-US': 'Package Name',
+    'en-US': 'Skill Package Name',
     'zh-CN': '技能包名称',
   },
   'ai.skillPackages.descriptionLabel': {
@@ -1293,7 +1293,7 @@ export const resourcesCatalog = {
   },
   'ai.skillPackages.tokenPlaceholder': {
     'en-US': 'Personal Access Token',
-    'zh-CN': 'Personal Access Token',
+    'zh-CN': '个人访问令牌',
   },
   'ai.skillPackages.tokenCreateHint': {
     'en-US': 'Optional personal access token for private repositories. Stored encrypted and never echoed.',
@@ -1540,8 +1540,8 @@ export const resourcesCatalog = {
     'zh-CN': '检查失败',
   },
   'ai.mcp.create': {
-    'en-US': 'Create MCP Server',
-    'zh-CN': '创建 MCP 服务',
+    'en-US': 'New MCP Server',
+    'zh-CN': '新建 MCP 服务',
   },
   'ai.mcp.createDescription': {
     'en-US': 'Configure Streamable HTTP MCP Server',
@@ -1575,9 +1575,18 @@ export const resourcesCatalog = {
     'en-US': 'Server Name',
     'zh-CN': '服务名称',
   },
+  'ai.mcp.nameHint': {
+    'en-US':
+      'Lowercase letters, numbers, and underscores; must start with a letter. Pattern: ^[a-z][a-z0-9_]*$',
+    'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：^[a-z][a-z0-9_]*$',
+  },
   'ai.mcp.url': {
     'en-US': 'Endpoint URL',
     'zh-CN': '服务地址',
+  },
+  'ai.mcp.urlHint': {
+    'en-US': 'Streamable HTTP endpoint URL. Use http:// or https://.',
+    'zh-CN': 'Streamable HTTP 服务地址，使用 http:// 或 https://。',
   },
   'ai.mcp.headers': {
     'en-US': 'JSON headers',
@@ -1646,5 +1655,82 @@ export const resourcesCatalog = {
   'ai.mcp.updated': {
     'en-US': 'Updated',
     'zh-CN': '更新时间',
+  },
+  'ai.mcp.validation.nameRequired': {
+    'en-US': 'Server name must not be blank',
+    'zh-CN': '服务名称不能为空',
+  },
+  'ai.mcp.validation.namePattern': {
+    'en-US':
+      'Name must start with lowercase letter, contain only a-z, 0-9, _, and be <= 32 chars',
+    'zh-CN': '服务名称需以小写字母开头，只能包含 a-z、0-9、_，且不超过 32 个字符',
+  },
+  'ai.mcp.validation.nameTooLong': {
+    'en-US': 'Server name must not exceed {{max}} characters',
+    'zh-CN': '服务名称不能超过 {{max}} 个字符',
+  },
+  'ai.mcp.validation.urlRequired': {
+    'en-US': 'URL must not be blank',
+    'zh-CN': '服务地址不能为空',
+  },
+  'ai.mcp.validation.urlWhitespace': {
+    'en-US': 'URL must not contain surrounding whitespace',
+    'zh-CN': '服务地址首尾不能包含空白字符',
+  },
+  'ai.mcp.validation.urlTooLong': {
+    'en-US': 'URL must not exceed {{max}} characters',
+    'zh-CN': '服务地址不能超过 {{max}} 个字符',
+  },
+  'ai.mcp.validation.urlScheme': {
+    'en-US': 'URL scheme must be http or https',
+    'zh-CN': '服务地址必须使用 http 或 https',
+  },
+  'ai.mcp.validation.urlHost': {
+    'en-US': 'URL must contain a valid host',
+    'zh-CN': '服务地址必须包含有效的主机名',
+  },
+  'ai.mcp.validation.urlUserInfo': {
+    'en-US': 'URL must not contain user-info credentials',
+    'zh-CN': '服务地址不能包含用户名或密码',
+  },
+  'ai.mcp.validation.urlInvalid': {
+    'en-US': 'URL format is invalid',
+    'zh-CN': '服务地址格式无效',
+  },
+  'ai.mcp.validation.headersInvalidJson': {
+    'en-US': 'Headers must be valid JSON',
+    'zh-CN': '请求头必须是合法的 JSON',
+  },
+  'ai.mcp.validation.headersNotObject': {
+    'en-US': 'Headers must be a JSON object',
+    'zh-CN': '请求头必须是 JSON 对象',
+  },
+  'ai.mcp.validation.headerNameRequired': {
+    'en-US': 'Header names must not be blank',
+    'zh-CN': '请求头名称不能为空',
+  },
+  'ai.mcp.validation.headerNameTooLong': {
+    'en-US': 'Header name must not exceed {{max}} characters',
+    'zh-CN': '请求头名称不能超过 {{max}} 个字符',
+  },
+  'ai.mcp.validation.headerNameControl': {
+    'en-US': 'Header names must not contain control characters',
+    'zh-CN': '请求头名称不能包含控制字符',
+  },
+  'ai.mcp.validation.headerValueString': {
+    'en-US': 'Header value for "{{name}}" must be a string',
+    'zh-CN': '请求头“{{name}}”的值必须是字符串',
+  },
+  'ai.mcp.validation.headerValueTooLong': {
+    'en-US': 'Header value for "{{name}}" must not exceed {{max}} characters',
+    'zh-CN': '请求头“{{name}}”的值不能超过 {{max}} 个字符',
+  },
+  'ai.mcp.validation.headerValueControl': {
+    'en-US': 'Header value for "{{name}}" must not contain control characters',
+    'zh-CN': '请求头“{{name}}”的值不能包含控制字符',
+  },
+  'ai.mcp.validation.timeoutPositive': {
+    'en-US': 'Timeout must be a positive integer',
+    'zh-CN': '超时必须是正整数',
   },
 } satisfies LocaleCatalog

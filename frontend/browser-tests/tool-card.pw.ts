@@ -123,7 +123,7 @@ test.beforeEach(async ({ page }) => {
 test('running task header opens its durable child without a result receipt', async ({ page }) => {
   await harness(page, 'taskRunning')
   const card = page.locator('.thread-turn-tool')
-  const link = card.getByRole('link', { name: '查看 subagent 执行' })
+  const link = card.getByRole('link', { name: '查看子 Agent 执行' })
   await expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000006')
   await expect(card.locator('.thread-disclosure-body')).toHaveCount(0)
   await link.click()
@@ -144,7 +144,7 @@ for (const width of [1440, 360, 320]) {
     await expect(card.locator('.thread-tool-summary')).not.toContainText('00000000-')
     const links = card.getByRole('link')
     await expect(links).toHaveCount(1)
-    await expect(links).toHaveAccessibleName('查看 subagent 执行')
+    await expect(links).toHaveAccessibleName('查看子 Agent 执行')
     await expect(links).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
     await links.click()
     await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000005')

@@ -157,19 +157,6 @@
   flex-shrink: 0;
 }
 
-/* opencli-hub 同款双语副标：中文主标 + 英文小写技术名 */
-.topnav a small {
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  line-height: 1;
-}
-
-html[lang="en-US"] .topnav a small {
-  display: none;
-}
-
 .icon-button.nav-toggle {
   display: none;
   align-items: center;
@@ -273,12 +260,6 @@ html[lang="en-US"] .topnav a small {
     padding: 0 12px;
     border-radius: 7px;
     font-size: var(--font-size-sm);
-  }
-
-  /* 汉堡下拉内保留英文小字副标（桌面顶栏同款双语） */
-  .topnav a small {
-    display: inline;
-    margin-left: 2px;
   }
 
   .topnav a.active::after {

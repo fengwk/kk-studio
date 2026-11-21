@@ -15,7 +15,7 @@ describe('ChatCard', () => {
         <Location />
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: '进入 Chat Draft' }))
+    await user.click(screen.getByRole('button', { name: '进入对话 Draft' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/chats/chat-1')
   })
 
@@ -73,7 +73,7 @@ describe('ChatCard', () => {
         <ChatCard chat={{ ...chat(), title: '', agentName: 'missing' }} agents={[]} />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('button', { name: '进入 Chat chat-1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '进入对话 chat-1' })).toBeInTheDocument()
     expect(screen.getByText('missing')).toBeInTheDocument()
     expect(screen.getByText('已删除/缺失')).toBeInTheDocument()
     expect(screen.getByLabelText('missing 已删除/缺失')).toHaveAttribute(
@@ -177,7 +177,7 @@ describe('ChatCardsPanel', () => {
     expect(grid).toBeInTheDocument()
     expect(container.querySelector('.cards-grid')).not.toBeInTheDocument()
 
-    const createBtn = screen.getByRole('button', { name: '新建 Chat' })
+    const createBtn = screen.getByRole('button', { name: '新建对话' })
     await user.click(createBtn)
     expect(onCreate).toHaveBeenCalledOnce()
 

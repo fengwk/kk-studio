@@ -21,7 +21,7 @@ function summaryRows(server: McpServerSummaryDTO, t: ReturnType<typeof useI18n>[
     {
       pairs: [
         { label: t('ai.mcp.version'), value: String(server.version) },
-        { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
+        { label: t('ai.catalog.card.timeout'), value: t('ai.catalog.card.milliseconds', { value: server.timeoutMillis }) },
       ],
     },
     {

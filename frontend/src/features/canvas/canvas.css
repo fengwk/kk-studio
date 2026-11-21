@@ -79,25 +79,6 @@
   margin: 0;
 }
 
-.canvas-feature .library-heading {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.canvas-feature .library-heading h1 {
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.canvas-feature .library-heading p {
-  max-width: 640px;
-  color: var(--fg-muted);
-  font-size: var(--font-size-sm);
-  line-height: 1.6;
-}
-
 .canvas-feature .library-load-error {
   display: grid;
   gap: 12px;
@@ -1575,10 +1556,6 @@
 }
 
 @media (max-width: 700px) {
-  .canvas-feature .library-heading h1 {
-    font-size: var(--font-size-lg);
-  }
-
   .canvas-feature .canvas-zoom-controls button {
     min-width: 36px;
     height: 36px;

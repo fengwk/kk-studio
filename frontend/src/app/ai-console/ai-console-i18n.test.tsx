@@ -113,14 +113,14 @@ describe('AI i18n live-switch contracts', () => {
       </QueryClientProvider>,
     )
 
-    expect(screen.getByRole('form', { name: 'Create Chat' })).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: 'New Chat' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Chat name')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('form', { name: '新建 Chat' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat 名称')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认创建' })).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: '新建对话' })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('对话名称')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建' })).toBeInTheDocument()
   })
 
   it('switches Catalog resource modal labels live', () => {
@@ -149,8 +149,8 @@ describe('AI i18n live-switch contracts', () => {
     expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('form', { name: '新建 Provider' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认创建' })).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: '创建 提供商' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建' })).toBeInTheDocument()
   })
 
   it('switches the Agent selection panel labels live', () => {
@@ -173,11 +173,11 @@ describe('AI i18n live-switch contracts', () => {
     act(() => setLocale('en-US'))
     renderPage(<EnvironmentsPage />, 'environments')
 
-    expect(await screen.findByRole('button', { name: 'Create Environment' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'New Environment' })).toBeInTheDocument()
     expect(screen.getByText('Register execution environment and capabilities')).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('button', { name: '创建环境' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建环境' })).toBeInTheDocument()
     expect(screen.getByText('注册执行环境与运行时能力')).toBeInTheDocument()
   })
 })

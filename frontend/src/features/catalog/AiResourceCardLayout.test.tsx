@@ -9,7 +9,7 @@ describe('ResourceCardLayout', () => {
     const onEdit = vi.fn()
     const onDelete = vi.fn()
     render(<ResourceCardLayout icon={icon} title="resource" subtitle="detail" rows={[["Kind", icon]]} onEdit={onEdit} onDelete={onDelete} deletePending={false} />)
-    expect(screen.queryByRole('button', { name: '创建会话 resource' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建会话 resource' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 resource' }))
     await user.click(screen.getByRole('button', { name: '删除 resource' }))
     expect([onEdit, onDelete].every((action) => action.mock.calls.length === 1)).toBe(true)
@@ -30,7 +30,7 @@ describe('ResourceCardLayout', () => {
         deletePending
       />,
     )
-    await user.click(screen.getByRole('button', { name: '创建会话 resource' }))
+    await user.click(screen.getByRole('button', { name: '新建会话 resource' }))
     expect(onStart).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: '删除 resource' })).toBeDisabled()
   })

@@ -143,8 +143,8 @@ describe('ToolMessageBlock shell', () => {
     })} />)
     const disclosure = container.querySelector('.thread-block-tool')
     expect(disclosure).toHaveAttribute('data-invocation-state', 'waiting-child')
-    expect(disclosure).toHaveAttribute('title', 'task: 等待子代理结果')
-    expect(container.querySelector('.thread-tool-state-label')).toHaveTextContent('等待子代理结果')
+    expect(disclosure).toHaveAttribute('title', 'task: 等待子 Agent 结果')
+    expect(container.querySelector('.thread-tool-state-label')).toHaveTextContent('等待子 Agent 结果')
     expect(disclosure).toHaveAttribute('aria-busy', 'false')
     expect(container.querySelector('.animate-spin')).toBeNull()
 
@@ -244,7 +244,7 @@ describe('ToolMessageBlock shell', () => {
     expect(screen.getByText('Tool')).toBeInTheDocument()
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
-    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('title', 'Tool: 生成调用中')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('title', 'Tool: 准备调用中')
     expect(document.querySelector('.animate-spin')).toBeNull()
     expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
   })
@@ -1067,9 +1067,9 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
     expect(container.querySelector('.thread-tool-output')?.textContent)
       .toBe(Array.from({ length: 5 }, (_, index) => `issue-${index + 1}`).join('\n'))
-    expect(screen.getByRole('button', { name: '… 3 more lines' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '… 下方还有 3 行' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '… 3 more lines' }))
+    await user.click(screen.getByRole('button', { name: '… 下方还有 3 行' }))
     expect(container.querySelector('.thread-tool-output')).toHaveTextContent('issue-8')
 
     unmount()
@@ -1090,7 +1090,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     const truncated = long.container.querySelector('.thread-tool-output')?.textContent ?? ''
     expect(Array.from(truncated)).toHaveLength(1_500)
     expect(truncated.startsWith('start-xxx')).toBe(true)
-    expect(screen.getByRole('button', { name: '… truncated' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '… 已截断' })).toBeInTheDocument()
   })
 
   it('keeps a write preview at the last ten lines when the review settles', async () => {
@@ -1193,7 +1193,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
 
     // 导航只使用 task.result 指定的 threadId，Header 收起时不展示完整 UUID。
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
     expect(container.querySelector('.thread-tool-summary-detail')).toHaveTextContent('coder')
@@ -1274,7 +1274,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000003')
     expect(failed.container.querySelector('.thread-tool-error')).toHaveTextContent(
       'Subagent dispatch rejected: budget exceeded',
@@ -1312,7 +1312,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     const { rerender } = render(
       <MemoryRouter><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
     rerender(
       <MemoryRouter>
@@ -1322,7 +1322,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
     expect(screen.queryByText('resume pending')).not.toBeInTheDocument()
     await user.click(expandButton()!)
@@ -1339,7 +1339,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         })} />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(screen.queryByText('00000000-0000-0000-0000-000000000002')).not.toBeInTheDocument()
   })
@@ -1366,7 +1366,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000021')
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
   })
@@ -1388,7 +1388,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         })} />
       </MemoryRouter>,
     )
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
     // 调用正文与操作入口不争同一个区域：preview 为空，prompt 进详情。
@@ -1423,7 +1423,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
 
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 已完成')
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     await user.click(expandButton()!)
     expect(screen.getByText('subagent report')).toBeInTheDocument()

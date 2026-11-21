@@ -202,8 +202,8 @@ export const projectsCatalog = {
     'en-US': 'Failed to change the project archive state',
   },
   'projects.detail.threadTitle': {
-    'zh-CN': 'Agent 线程',
-    'en-US': 'Agent thread',
+    'zh-CN': 'Agent Thread',
+    'en-US': 'Agent Thread',
   },
   'projects.detail.viewIssueDetail': {
     'zh-CN': '查看完整 Issue 详情',
@@ -215,14 +215,14 @@ export const projectsCatalog = {
   },
   'projects.detail.closeAgentView': {
     'zh-CN': '关闭 Agent 视图',
-    'en-US': 'Close agent view',
+    'en-US': 'Close Agent view',
   },
   'projects.detail.loadingThread': {
-    'zh-CN': '加载 Issue 与 Agent 线程中...',
-    'en-US': 'Loading issue and agent thread…',
+    'zh-CN': '加载 Issue 与 Agent Thread 中...',
+    'en-US': 'Loading issue and Agent Thread…',
   },
   'projects.detail.threadRejected': {
-    'zh-CN': '目标 Thread 不属于该 Issue 绑定的 Agent 线程或 Run 记录，已拒绝接入',
+    'zh-CN': '目标 Thread 不属于该 Issue 绑定的 Agent Thread 或 Run 记录，已拒绝接入',
     'en-US': 'The target thread is not among this issue\'s bound agent threads or runs; access was rejected',
   },
   'projects.board.otherStates': {
@@ -474,7 +474,7 @@ export const projectsCatalog = {
     'en-US': 'Display name',
   },
   'projects.edit.reservedShape': {
-    'zh-CN': '保留状态：不配置 Agent/Environment/指令/Run 额度，也不能停用',
+    'zh-CN': '保留状态：不配置 Agent/环境/指令/Run 额度，也不能停用',
     'en-US': 'Reserved stage: no agent, environment, instructions or run budget, and it cannot be disabled',
   },
   'projects.edit.mode': {
@@ -494,7 +494,7 @@ export const projectsCatalog = {
     'en-US': 'Agent',
   },
   'projects.edit.environment': {
-    'zh-CN': 'Environment',
+    'zh-CN': '环境',
     'en-US': 'Environment',
   },
   'projects.edit.environmentUnset': {
@@ -562,7 +562,7 @@ export const projectsCatalog = {
     'en-US': 'Stage "{{state}}" needs a display name',
   },
   'projects.workflow.error.reservedBusinessFields': {
-    'zh-CN': '保留状态「{{state}}」不能配置 Agent、Environment、指令或 Run 额度',
+    'zh-CN': '保留状态「{{state}}」不能配置 Agent、环境、指令或 Run 额度',
     'en-US': 'Reserved stage "{{state}}" cannot configure an agent, environment, instructions or run budget',
   },
   'projects.workflow.error.reservedDisabled': {
@@ -574,7 +574,7 @@ export const projectsCatalog = {
     'en-US': 'Reserved stage "{{state}}" cannot declare normal transitions',
   },
   'projects.workflow.error.manualFields': {
-    'zh-CN': '人工阶段「{{state}}」不能配置 Environment 或 Run 额度',
+    'zh-CN': '人工阶段「{{state}}」不能配置环境或 Run 额度',
     'en-US': 'Manual stage "{{state}}" cannot configure an environment or run budget',
   },
   'projects.workflow.error.agentRequired': {
@@ -972,11 +972,11 @@ export const projectsCatalog = {
   },
   'projects.issue.emptyAgentThreads': {
     'zh-CN': '暂无 Agent Thread',
-    'en-US': 'No agent threads yet',
+    'en-US': 'No Agent Threads yet',
   },
   'projects.issue.openAgentThreadTitle': {
-    'zh-CN': '打开此 Agent 线程视图',
-    'en-US': 'Open this agent thread view',
+    'zh-CN': '打开此 Agent Thread 视图',
+    'en-US': 'Open this Agent Thread view',
   },
   'projects.issue.openAction': {
     'zh-CN': '打开',
@@ -1015,8 +1015,8 @@ export const projectsCatalog = {
     'en-US': 'Stage budgets ({{count}})',
   },
   'projects.issue.tabAgentThreads': {
-    'zh-CN': 'Agent 线程 ({{count}})',
-    'en-US': 'Agent threads ({{count}})',
+    'zh-CN': 'Agent Thread ({{count}})',
+    'en-US': 'Agent Threads ({{count}})',
   },
   'projects.issue.tabEvidence': {
     'zh-CN': '公开证据 ({{count}})',

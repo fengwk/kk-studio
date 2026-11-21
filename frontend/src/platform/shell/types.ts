@@ -8,7 +8,6 @@ export interface PrimaryNavItem {
   to: string
   labelKey: TranslationKey
   ariaKey: TranslationKey
-  shortLabel: string
   icon: ComponentType<{ 'aria-hidden'?: boolean | 'true' | 'false' }>
 }
 

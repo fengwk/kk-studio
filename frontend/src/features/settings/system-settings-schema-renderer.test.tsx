@@ -144,7 +144,7 @@ describe('system settings schema renderer', () => {
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const sectionElement = container.querySelector<HTMLElement>('[data-settings-section="aiRuntime"]')!
-    expect(within(sectionElement).queryByText('共享调用重试、压缩回退与子代理预算。')).toBeNull()
+    expect(within(sectionElement).queryByText('共享调用重试、压缩回退与子 Agent 预算。')).toBeNull()
   })
 
   it('renders hints as already-translated text without double translation', () => {
@@ -155,8 +155,8 @@ describe('system settings schema renderer', () => {
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     // hint 为渲染后的本地化文本，不得出现双重翻译导致的 ⟦missing: 标记。
-    expect(screen.getByText('全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。')).toBeInTheDocument()
-    expect(screen.getByText('单个子代理任务的交互轮数软预算。达到上限后提醒子代理结束当前阶段并汇报。')).toBeInTheDocument()
+    expect(screen.getByText('全系统所有会话中同时运行的子 Agent 任务总数上限。设为 0 表示不设全局上限。')).toBeInTheDocument()
+    expect(screen.getByText('单个子 Agent 任务的交互轮数软预算。达到上限后提醒子 Agent 结束当前阶段并汇报。')).toBeInTheDocument()
     expect(container.textContent).not.toContain('⟦missing:')
   })
 
@@ -197,7 +197,7 @@ describe('system settings schema renderer', () => {
     const switchRow = screen
       .getByRole('switch', { name: '代理地址' })
       .closest('.settings-row')!
-    expect(switchRow).toHaveTextContent('Backend 发起外部请求时使用的 HTTP 代理')
+    expect(switchRow).toHaveTextContent('后端发起外部请求时使用的 HTTP 代理')
   })
 
   it('fail-closes on a duplicate field path', () => {

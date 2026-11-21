@@ -117,7 +117,7 @@ describe('AgentForm current contracts', () => {
     const draft = { ...emptyAgentDraft(), name: 'assistant', execution: { driver: 'future', settings: {} } }
     render(<AgentForm mode="edit" draft={draft} models={[]} onChange={() => undefined} />)
     expect(screen.queryByLabelText('默认模型')).not.toBeInTheDocument()
-    expect(screen.queryByText('需要先创建 Model 才能配置 Agent。')).not.toBeInTheDocument()
+    expect(screen.queryByText('需要先创建模型才能配置 Agent。')).not.toBeInTheDocument()
   })
 
   it('preserves multiline description and prompt through controlled edits and serialization', () => {
@@ -305,7 +305,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    await openCapabilityPanel(user, '管理子代理')
+    await openCapabilityPanel(user, '管理子 Agent')
     const helperCheckbox = screen.getByLabelText(/helper/)
     expect(helperCheckbox).not.toBeChecked()
     await user.click(helperCheckbox)
@@ -431,6 +431,6 @@ describe('AgentForm current contracts', () => {
     expect(retrySkills).not.toHaveBeenCalled()
 
     // 只有读成功的空目录才给出「还没有候选」的结论。
-    expect(within(capabilityPanel('子代理')).getByText('目录还没有子代理')).toBeInTheDocument()
+    expect(within(capabilityPanel('子 Agent')).getByText('目录还没有子 Agent')).toBeInTheDocument()
   })
 })

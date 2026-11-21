@@ -273,7 +273,7 @@ describe('useAiConsoleResourceController', () => {
     await user.clear(screen.getByTestId('provider-name'))
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {
-      expect(screen.getByTestId('form-error')).toHaveTextContent('请填写 Provider 名称')
+      expect(screen.getByTestId('form-error')).toHaveTextContent('请填写提供商名称')
     })
     expect(screen.getByTestId('field-error')).toHaveTextContent('请填写名称')
 
@@ -281,7 +281,7 @@ describe('useAiConsoleResourceController', () => {
       rejectUpdate(new Error('provider name already exists'))
     })
     await waitFor(() => {
-      expect(screen.getByTestId('form-error')).toHaveTextContent('Provider 名称已存在')
+      expect(screen.getByTestId('form-error')).toHaveTextContent('提供商名称已存在')
     })
     // 在途 API 失败只更新总错误，不覆盖刚产生的 name 字段错误。
     expect(screen.getByTestId('field-error')).toHaveTextContent('请填写名称')
@@ -298,7 +298,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'open-provider' }))
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {
-      expect(screen.getByTestId('form-error')).toHaveTextContent('Provider 名称已存在')
+      expect(screen.getByTestId('form-error')).toHaveTextContent('提供商名称已存在')
     })
 
     // 编辑草稿即清空校验状态：同一次失败不得在这一轮重渲染里重返横幅。

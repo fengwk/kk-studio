@@ -133,10 +133,10 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   expectTouchTargets(await visibleTouchTargets(tiers))
   await expect(body).toHaveCSS('overflow-y', 'auto')
   expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
-  await expect(dialog.getByRole('button', { name: '确认创建' })).toBeInViewport()
+  await expect(dialog.getByRole('button', { name: '创建' })).toBeInViewport()
 
   // Select 的 portal 选项在弹窗内打开时也遵循同一触区。
-  await dialog.getByRole('button', { name: '供应商', exact: true }).click()
+  await dialog.getByRole('button', { name: '提供商', exact: true }).click()
   const options = page.getByRole('option')
   await expect(options.first()).toBeVisible()
   const optionHeights = await options.evaluateAll((items) =>
@@ -184,7 +184,7 @@ test('navigates model sections on desktop and reveals preset and pricing errors 
   // 跳转按钮不提交表单。
   await expectSubmitCount(page, 0)
 
-  await dialog.getByRole('button', { name: '确认创建' }).click()
+  await dialog.getByRole('button', { name: '创建' }).click()
   await expectSubmitCount(page, 1)
   const presetError = dialog.locator('#catalog-section-presets .field-error')
   await expect(presetError).toHaveText('预设 ID 不能重复')
@@ -199,7 +199,7 @@ test('navigates model sections on desktop and reveals preset and pricing errors 
   await page.goto('/browser-tests/catalog-editor-harness.html?scenario=model&errors=price')
   await expect(dialog.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
   expect(await body.evaluate((el) => el.scrollTop)).toBe(0)
-  await dialog.getByRole('button', { name: '确认创建' }).click()
+  await dialog.getByRole('button', { name: '创建' }).click()
   await expectSubmitCount(page, 1)
   const pricingError = dialog.locator('#catalog-section-pricing .field-error').first()
   await expect(pricingError).toHaveText('请检查价格：填写 0 或正数即可')
@@ -214,7 +214,7 @@ test('navigates model sections on desktop and reveals preset and pricing errors 
   // 只有当错误没有内联落点时才回落到 banner。
   await page.goto('/browser-tests/catalog-editor-harness.html?scenario=model&errors=general')
   await expect(dialog.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
-  await dialog.getByRole('button', { name: '确认创建' }).click()
+  await dialog.getByRole('button', { name: '创建' }).click()
   await expectSubmitCount(page, 1)
   const banner = dialog.getByRole('alert')
   await expect(banner).toHaveText('保存失败，请检查表单后重试')
@@ -233,9 +233,9 @@ test('manages agent capabilities and keeps save visible on narrow dialogs', asyn
     dialog.locator('fieldset.capability-picker').filter({ has: page.locator('legend', { hasText: legend }) })
   const skillsPanel = panelOf('技能')
 
-  await expect(dialog.getByRole('heading', { name: '工具 / 技能 / 子代理' })).toBeVisible()
+  await expect(dialog.getByRole('heading', { name: '工具 / 技能 / 子 Agent' })).toBeVisible()
   await expect(dialog.locator('fieldset.capability-picker > legend')).toHaveText([
-    '工具 · 已选 0', '技能 · 已选 0', '子代理 · 已选 0',
+    '工具 · 已选 0', '技能 · 已选 0', '子 Agent · 已选 0',
   ])
   // 窄屏导航变成正文顶部的横向跳转条。
   await expect(nav).toHaveCSS('flex-direction', 'row')
@@ -296,7 +296,7 @@ test('manages agent capabilities and keeps save visible on narrow dialogs', asyn
   await page.screenshot({ path: '../reports/layout/catalog-editor-agent-390.png', fullPage: true })
 
   // 保存按钮在窄屏页脚始终可见，提交走受控 fixture：只累加计数，不跳转。
-  const save = dialog.getByRole('button', { name: '确认创建' })
+  const save = dialog.getByRole('button', { name: '创建' })
   await expect(save).toBeVisible()
   await expect(save).toBeEnabled()
   await expect(save).toBeInViewport()
@@ -339,7 +339,7 @@ test('expands a collapsed capability section to reveal its submit error', async 
   await expect(dialog.locator('details.capability-selection-details[open]')).toHaveCount(0)
   await expect(dialog.locator('.field-error')).toHaveCount(0)
 
-  await dialog.getByRole('button', { name: '确认创建' }).click()
+  await dialog.getByRole('button', { name: '创建' }).click()
   await expectSubmitCount(page, 1)
 
   // 错误在收起的分组里：必须自动展开、滚动到可见并聚焦。

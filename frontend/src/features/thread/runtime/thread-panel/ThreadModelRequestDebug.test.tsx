@@ -133,7 +133,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.queryByText('· 本地')).not.toBeInTheDocument()
 
     // 元数据与缓存
-    expect(screen.getByText('子代理：')).toBeInTheDocument()
+    expect(screen.getByText('子 Agent：')).toBeInTheDocument()
     expect(screen.getByText('helper')).toBeInTheDocument()
     expect(screen.getByText('缓存：')).toBeInTheDocument()
     expect(screen.getByText(/短期 · SHORT/)).toBeInTheDocument()
@@ -319,9 +319,9 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         />,
       )
 
-      const explorerChip = screen.getByRole('button', { name: '子代理 Explorer' })
+      const explorerChip = screen.getByRole('button', { name: '子 Agent Explorer' })
       expect(explorerChip).toBeInTheDocument()
-      const helperChip = screen.getByRole('button', { name: '子代理 helper' })
+      const helperChip = screen.getByRole('button', { name: '子 Agent helper' })
       expect(helperChip).toBeInTheDocument()
 
       await user.click(explorerChip)
@@ -334,7 +334,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('Read-only exploration subagent')).toBeInTheDocument()
       expect(screen.getByText('工具')).toBeInTheDocument()
       expect(screen.getByText('技能')).toBeInTheDocument()
-      expect(screen.getByText('Subagents')).toBeInTheDocument()
+      expect(screen.getByText('子 Agent')).toBeInTheDocument()
       expect(screen.getByText('配置 JSON：')).toBeInTheDocument()
 
       const toolsTags = screen.getByTestId('subagent-tools-tags')
@@ -362,8 +362,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     it('renders factual empty text for subagents when list is empty or undefined', () => {
       render(<DebugViewHarness debug={sampleDebug({ subagents: [] })} />)
       const metaRow = screen.getByTestId('debug-meta-row')
-      expect(metaRow).toHaveTextContent('子代理： 无')
-      expect(screen.queryByRole('button', { name: /子代理 helper/ })).not.toBeInTheDocument()
+      expect(metaRow).toHaveTextContent('子 Agent： 无')
+      expect(screen.queryByRole('button', { name: /子 Agent helper/ })).not.toBeInTheDocument()
     })
 
     it('renders cache chip with clean summary, opens cache inspector with Cache Policy title and actual fields (SHORT)', async () => {
@@ -417,7 +417,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       const inspector = screen.getByTestId('thread-debug-inspector')
       expect(inspector).toHaveAttribute('aria-label', '缓存策略')
       expect(screen.getByText('NONE')).toBeInTheDocument()
-      expect(screen.getByText('(无显式缓存控制，Provider 仍可能自动缓存)')).toBeInTheDocument()
+      expect(screen.getByText('(无显式缓存控制，提供商仍可能自动缓存)')).toBeInTheDocument()
       // key 为空时如实显示 '—'
       const dashes = screen.getAllByText('—')
       expect(dashes.length).toBeGreaterThanOrEqual(1)

@@ -168,7 +168,7 @@ function reasoningRateInput(pricing: Locator): Locator {
 
 async function readModelIdentity(dialog: Locator) {
   return {
-    provider: await dialog.getByRole('button', { name: '供应商', exact: true }).textContent(),
+    provider: await dialog.getByRole('button', { name: '提供商', exact: true }).textContent(),
     name: await dialog.getByLabel('名称', { exact: true }).inputValue(),
     modelId: await dialog.getByLabel('模型 ID', { exact: true }).inputValue(),
     description: await dialog.getByLabel('说明', { exact: true }).inputValue(),
@@ -181,14 +181,14 @@ async function readModelIdentity(dialog: Locator) {
  */
 const MODEL_COPY = {
   'zh-CN': {
-    cardLabels: ['供应商', '模型 ID', '请求限制', '功能', '价格', '默认预设', '模型预设'],
+    cardLabels: ['提供商', '模型 ID', '请求限制', '功能', '价格', '默认预设', '模型预设'],
     cardLimit: '上下文 128000 · 输出 4096',
     cardAbilities: '工具 · TEXT',
     presetTags: ['standard', 'fast'],
     presetsHeading: '预设列表',
     variantHint: '模型预设包含思考强度与原生协议选项。预设 ID 不可重复，默认预设必须是其中一项。',
     fields: {
-      provider: { role: 'button', name: '供应商' },
+      provider: { role: 'button', name: '提供商' },
       name: { role: 'textbox', name: '名称' },
       // 创建态的模型 ID 带 datalist 远程候选，可访问角色是 combobox。
       modelId: { role: 'combobox', name: '模型 ID' },
@@ -264,8 +264,8 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
 
       await page.locator('.create-card').click()
       let dialog = page.getByRole('dialog')
-      await expect(dialog).toHaveAccessibleName('新建 Model')
-      await expect(dialog.getByRole('tab', { name: 'Model', exact: true })).toHaveAttribute(
+      await expect(dialog).toHaveAccessibleName('创建 模型')
+      await expect(dialog.getByRole('tab', { name: '模型', exact: true })).toHaveAttribute(
         'aria-selected',
         'true',
       )
@@ -277,10 +277,10 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       // 同一 Modal 内切换类型只切换草稿；单 Model 草稿不被组表单覆盖。
       await dialog.getByPlaceholder('MiniMax-M2.7', { exact: true }).fill('draft-model')
       await dialog.getByRole('tab', { name: '模型组', exact: true }).click()
-      await expect(dialog).toHaveAccessibleName('新建 模型组')
+      await expect(dialog).toHaveAccessibleName('创建 模型组')
       await expect(dialog.getByPlaceholder('coding')).toHaveValue('')
       await dialog.getByPlaceholder('coding').fill('draft-group')
-      await dialog.getByRole('tab', { name: 'Model', exact: true }).click()
+      await dialog.getByRole('tab', { name: '模型', exact: true }).click()
       await expect(dialog.getByPlaceholder('MiniMax-M2.7', { exact: true })).toHaveValue('draft-model')
       await dialog.getByRole('tab', { name: '模型组', exact: true }).click()
       await expect(dialog.getByPlaceholder('coding')).toHaveValue('draft-group')
@@ -315,7 +315,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(summary.locator('input, select, textarea')).toHaveCount(0)
       await expect(dialog.locator('section[aria-labelledby="model-pricing-heading"]')).toHaveCount(0)
       await expect(dialog.getByLabel('预设 ID 1', { exact: true })).toHaveCount(0)
-      await expect(dialog.getByRole('button', { name: '供应商', exact: true })).toHaveCount(0)
+      await expect(dialog.getByRole('button', { name: '提供商', exact: true })).toHaveCount(0)
 
       // 状态码复用 TagInput；冷却时间是非负整数，默认 0。
       await expect(dialog.locator('.ui-tag-item').filter({ hasText: '429' })).toBeVisible()
@@ -325,7 +325,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(cooldown).toHaveValue('30')
 
       await expectNoHorizontalOverflow(page, dialog)
-      await expect(dialog.getByRole('button', { name: '确认创建' })).toBeVisible()
+      await expect(dialog.getByRole('button', { name: '创建' })).toBeVisible()
       await page.screenshot({
         path: test.info().outputPath(`group-create-${viewport.width}.png`),
         fullPage: true,
@@ -345,9 +345,9 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         // 编辑已有资源直接进入对应表单，不显示类型 Tab。
         await page.getByRole('button', { name: '编辑 main', exact: true }).click()
         dialog = page.getByRole('dialog')
-        await expect(dialog).toHaveAccessibleName('编辑 Model')
+        await expect(dialog).toHaveAccessibleName('编辑 模型')
         await expect(dialog.getByRole('tab')).toHaveCount(0)
-        await expect(dialog.getByRole('button', { name: '供应商', exact: true })).toBeDisabled()
+        await expect(dialog.getByRole('button', { name: '提供商', exact: true })).toBeDisabled()
         await dialog.getByRole('button', { name: '关闭' }).click()
 
         await page.getByRole('button', { name: '编辑 coding', exact: true }).click()
@@ -374,17 +374,17 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await gotoHarness(page)
     await page.locator('.create-card').click()
     const dialog = page.getByRole('dialog')
-    await selectListOption(page, dialog.getByLabel('供应商', { exact: true }), 'acme')
+    await selectListOption(page, dialog.getByLabel('提供商', { exact: true }), 'acme')
     await dialog.getByLabel('名称', { exact: true }).fill('auto-cache')
     const modelId = dialog.getByLabel('模型 ID', { exact: true })
     await modelId.fill('long-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'LONG')
 
     await modelId.fill('auto-model')
-    await expect(dialog.getByText('自动（由服务商管理）')).toBeVisible()
+    await expect(dialog.getByText('自动（由提供商管理）')).toBeVisible()
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveCount(0)
-    await expect(dialog.getByRole('button', { name: '确认创建', exact: true })).toBeEnabled()
-    await dialog.getByRole('button', { name: '确认创建', exact: true }).click()
+    await expect(dialog.getByRole('button', { name: '创建', exact: true })).toBeEnabled()
+    await dialog.getByRole('button', { name: '创建', exact: true }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     expect(createBodies).toHaveLength(1)
     const submitted = createBodies[0]
@@ -403,7 +403,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await page.locator('.create-card').click()
 
     let dialog = page.getByRole('dialog')
-    await selectListOption(page, dialog.getByLabel('供应商', { exact: true }), 'acme')
+    await selectListOption(page, dialog.getByLabel('提供商', { exact: true }), 'acme')
     await dialog.getByLabel('名称', { exact: true }).fill('new-model')
     await dialog.getByLabel('模型 ID', { exact: true }).fill('acme-new-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
@@ -419,7 +419,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await expect(inputPrice).toHaveAttribute('placeholder', '未定价')
     // 统一单位提示固定在定价标题旁；空费率表示未知，不代表免费。
     await expect(pricing).toContainText('USD /')
-    await dialog.getByRole('button', { name: '确认创建', exact: true }).click()
+    await dialog.getByRole('button', { name: '创建', exact: true }).click()
 
     await expect(page.getByRole('dialog')).toHaveCount(0)
     const newModelCard = page.locator('.resource-card').filter({ hasText: 'new-model' })
@@ -601,7 +601,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await page.getByRole('button', { name: '编辑 main', exact: true }).click()
     const dialog = page.getByRole('dialog')
     const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
-    const planSelect = pricing.getByRole('button', { name: '编辑价格方案', exact: true })
+    const planSelect = pricing.getByRole('button', { name: '价格方案', exact: true })
 
     // 调价草稿从当前方案派生，基础方案本身保持不变。
     const futureDate = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10)
@@ -652,7 +652,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     const cases = [
       {
         locale: 'zh-CN',
-        title: '新建 模型组',
+        title: '创建 模型组',
         groupTab: '模型组',
         members: '模型列表',
         addMember: '添加模型',
@@ -738,7 +738,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         await dialog.getByRole('button', { name: item.addMember, exact: true }).click()
         await expect(dialog.locator('.group-member-row')).toHaveCount(2)
         await expect(dialog.getByRole('button', {
-          name: item.locale === 'zh-CN' ? '确认创建' : 'Create',
+          name: item.locale === 'zh-CN' ? '创建' : 'Create',
           exact: true,
         })).toBeVisible()
 
@@ -757,11 +757,11 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     for (const viewport of VIEWPORTS) {
       await page.setViewportSize(viewport)
       await gotoHarness(page, '?view=composer')
-      const trigger = page.getByRole('button', { name: 'Model 与 Variant', exact: true })
+      const trigger = page.getByRole('button', { name: '模型与预设', exact: true })
       await expect(trigger).toContainText('main (standard)')
       await trigger.click()
 
-      const listbox = page.getByRole('listbox', { name: 'Model 选项', exact: true })
+      const listbox = page.getByRole('listbox', { name: '模型选项', exact: true })
       await expect(listbox).toBeVisible()
       await expect(listbox.getByRole('option')).toHaveText(['main', 'backup', 'coding'])
       await expect(listbox.getByRole('option', { name: 'coding', exact: true })).toHaveText('coding')
@@ -772,7 +772,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
 
       await listbox.getByRole('option', { name: 'coding', exact: true }).click()
       await expect(page.getByRole('listbox')).toHaveCount(0)
-      await expect(page.getByRole('listbox', { name: 'Variant 选项' })).toHaveCount(0)
+      await expect(page.getByRole('listbox', { name: '预设选项' })).toHaveCount(0)
       await expect(trigger).toHaveText('coding')
       await expect(page.locator('#composer-selection')).toHaveText(
         '{"modelName":"coding","variant":null}',

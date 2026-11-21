@@ -69,7 +69,7 @@ describe('thread status formatting', () => {
   ])('formats context window %s as %s', (contextWindow, text) => {
     const context = buildThreadStatusModel({ contextWindow }, t).segments
       .find((segment) => segment.key === 'context')
-    expect(context?.text).toBe(`ctx —/${text}`)
+    expect(context?.text).toBe(`上下文 —/${text}`)
   })
 
   // 上下文占用：已知/未知必须区分，且只使用最近一次调用的估计，绝不用累计输入冒充
@@ -131,7 +131,7 @@ describe('thread status formatting', () => {
       const context = buildThreadStatusModel({ contextWindow: 256_000, branchUsage }, t)
         .segments.find((segment) => segment.key === 'context')
 
-      expect(context?.text).toBe('ctx —/256k')
+      expect(context?.text).toBe('上下文 —/256k')
       expect(branchUsage.contextInputTokens).toBe(contextInputTokens)
     },
   )

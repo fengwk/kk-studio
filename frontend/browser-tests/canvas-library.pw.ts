@@ -141,10 +141,10 @@ test.describe('Canvas library real browser regression', () => {
 
     // 窄屏单列且不横向溢出。
     await page.setViewportSize({ width: 360, height: 900 })
-    // 窄屏标题字号不超过 22px。
+    // 列表页页头标题统一使用 --font-size-xl（24px），窄屏也不放大。
     expect(await page.locator('#libraryTitle').evaluate(
       (element) => Number.parseFloat(getComputedStyle(element).fontSize),
-    )).toBeLessThanOrEqual(22)
+    )).toBeLessThanOrEqual(24)
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
@@ -159,8 +159,8 @@ test.describe('Canvas library real browser regression', () => {
   test('cancelling the create dialog writes nothing', async ({ page }) => {
     await page.goto(`${HARNESS_URL}?mode=list`)
 
-    await page.getByRole('button', { name: '创建新画布' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建新画布' })
+    await page.getByRole('button', { name: '新建画布' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建画布' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('textbox', { name: '画布名称' }).fill('取消掉的画布')
     await dialog.getByRole('button', { name: '取消' }).click()
@@ -173,8 +173,8 @@ test.describe('Canvas library real browser regression', () => {
   test('confirming the create dialog posts exactly once with the typed name and enters the new canvas', async ({ page }) => {
     await page.goto(`${HARNESS_URL}?mode=list`)
 
-    await page.getByRole('button', { name: '创建新画布' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建新画布' })
+    await page.getByRole('button', { name: '新建画布' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建画布' })
     await dialog.getByRole('textbox', { name: '画布名称' }).fill('研究看板')
     await dialog.getByRole('button', { name: '创建并进入' }).click()
 
@@ -191,8 +191,8 @@ test.describe('Canvas library real browser regression', () => {
   test('a pending create keeps a single request and blocks repeated submit and cancel', async ({ page }) => {
     await page.goto(`${HARNESS_URL}?mode=list&create=pending`)
 
-    await page.getByRole('button', { name: '创建新画布' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建新画布' })
+    await page.getByRole('button', { name: '新建画布' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建画布' })
     await dialog.getByRole('textbox', { name: '画布名称' }).fill('在途画布')
     const confirm = dialog.getByRole('button', { name: '创建并进入' })
     await confirm.click()
@@ -208,8 +208,8 @@ test.describe('Canvas library real browser regression', () => {
   test('a failed create keeps the dialog and the typed name', async ({ page }) => {
     await page.goto(`${HARNESS_URL}?mode=list&create=error`)
 
-    await page.getByRole('button', { name: '创建新画布' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建新画布' })
+    await page.getByRole('button', { name: '新建画布' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建画布' })
     const nameInput = dialog.getByRole('textbox', { name: '画布名称' })
     await nameInput.fill('重名画布')
     await dialog.getByRole('button', { name: '创建并进入' }).click()
@@ -235,8 +235,8 @@ test.describe('Canvas library real browser regression', () => {
   test('an empty library only offers the create card and never creates automatically', async ({ page }) => {
     await page.goto(`${HARNESS_URL}?mode=empty`)
 
-    await page.getByRole('button', { name: '创建新画布' }).click()
-    await page.getByRole('dialog', { name: '创建新画布' }).getByRole('button', { name: '取消' }).click()
+    await page.getByRole('button', { name: '新建画布' }).click()
+    await page.getByRole('dialog', { name: '新建画布' }).getByRole('button', { name: '取消' }).click()
 
     await expect(page.locator('.resource-card')).toHaveCount(0)
     await expect(page.locator('.create-card')).toBeVisible()

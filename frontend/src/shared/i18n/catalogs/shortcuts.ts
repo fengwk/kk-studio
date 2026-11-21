@@ -35,7 +35,7 @@ export const shortcutsCatalog = {
   },
   'ai.runtime.shortcuts.group.thread': {
     'en-US': 'Thread',
-    'zh-CN': '对话',
+    'zh-CN': 'Thread',
   },
   'ai.runtime.shortcuts.group.debug': {
     'en-US': 'Debug',

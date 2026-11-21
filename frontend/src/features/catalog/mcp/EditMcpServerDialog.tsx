@@ -153,7 +153,7 @@ export function EditMcpServerDialog({
               {t('shared.cancel')}
             </Button>
             <Button type="submit" disabled={form.discoverPending} loading={saving}>
-              {t('shared.confirm')}
+              {t('ai.catalog.action.saveChanges')}
             </Button>
           </div>
         </form>

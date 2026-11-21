@@ -26,7 +26,7 @@ describe('CatalogSetupGuide', () => {
       'pending',
       'pending',
     ])
-    expect(within(steps[0]).getByRole('link', { name: 'Add Provider' })).toHaveAttribute(
+    expect(within(steps[0]).getByRole('link', { name: 'New Provider' })).toHaveAttribute(
       'href',
       '/providers',
     )
@@ -39,7 +39,7 @@ describe('CatalogSetupGuide', () => {
     expect(within(steps[0]).getByText('Done')).toBeInTheDocument()
     expect(within(steps[1]).queryByRole('link')).not.toBeInTheDocument()
     expect(steps[2].dataset.state).toBe('current')
-    expect(within(steps[2]).getByRole('link', { name: 'Create Agent' })).toHaveAttribute(
+    expect(within(steps[2]).getByRole('link', { name: 'New Agent' })).toHaveAttribute(
       'href',
       '/agents',
     )

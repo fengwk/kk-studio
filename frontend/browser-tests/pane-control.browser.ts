@@ -342,7 +342,7 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await treeRow.click()
 
   await expect(page.getByText('只读查看')).toBeVisible()
-  const backToRootLayer = await expectBackEntryOnTop(page, '回到父 agent')
+  const backToRootLayer = await expectBackEntryOnTop(page, '回到父 Agent')
   await expect(backToRootLayer).toBeVisible()
   expect(new URL(page.url()).pathname).toBe(HARNESS_URL)
   // 上传注册表没有被卸载释放：没有 DELETE，也没有第二次 reserve。
@@ -356,7 +356,7 @@ test('root draft and uploaded attachment survive observing a child and coming ba
 
   // 只读子层无命令或顶栏入口，隐藏根上传注册表不能释放或重建。
   await expect(page.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '查看子 Agent 执行' })).toHaveCount(0)
   await expect(composer).toBeHidden()
   expect(recorded.uploadCalls).toEqual(['reserve', 'complete'])
   expect(recorded.deletedUploads).toEqual([])
@@ -388,7 +388,7 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   await editor.fill('根草稿要保留')
 
   await page.locator('.active-thread-tree').getByRole('link', { name: /worker child/ }).click()
-  await expect(page.getByRole('button', { name: '回到父 agent' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '回到父 Agent' })).toBeVisible()
 
   const hiddenLayer = page.locator('.chat-pane-layer[hidden]')
   await expect(hiddenLayer).toHaveCount(1)
@@ -416,7 +416,7 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   await expect(hiddenLayer.locator('.composer-editor')).toContainText('根草稿要保留')
 
   // 返回后根层重新可交互：焦点回到可见层，输入继续落在根草稿上。
-  await page.getByRole('button', { name: '回到父 agent' }).click()
+  await page.getByRole('button', { name: '回到父 Agent' }).click()
   await expect(composer).toBeVisible()
   expect(await page.evaluate(() => document.activeElement?.closest('[hidden]') == null)).toBe(true)
   await editor.click()
@@ -435,7 +435,7 @@ for (const scenario of ['thread-child', 'pane-child']) {
     const header = page.locator(scenario === 'thread-child'
       ? '.chat-workspace-header' : '.agent-pane-thread-heading')
     const shortId = header.locator('.workspace-view-short-id')
-    const copy = header.getByRole('button', { name: '复制 thread ID' })
+    const copy = header.getByRole('button', { name: '复制 Thread ID' })
     const title = header.locator(scenario === 'thread-child' ? 'h1' : '.agent-pane-thread-title')
 
     for (const width of [1440, 480, 390, 320]) {
@@ -449,7 +449,7 @@ for (const scenario of ['thread-child', 'pane-child']) {
       expect(await header.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
       const first = header.locator('a, button').first()
-      await expect(first).toHaveText('回到父 agent')
+      await expect(first).toHaveText('回到父 Agent')
       await expect(first).toHaveCSS('white-space', 'nowrap')
       // 复制必须与短 ID 同行，不能挤到标题上方单独占一行。
       const idBox = (await shortId.boundingBox())!
@@ -470,7 +470,7 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'worker child', level: 1 })).toBeVisible()
   await expect(page.locator('.chat-workspace-header .workspace-view-identity')).toContainText('VeryLongModelName')
   await expect(page.getByText('只读查看')).toHaveCount(0)
-  const backToRoot = await expectBackEntryOnTop(page, '回到父 agent', 'link')
+  const backToRoot = await expectBackEntryOnTop(page, '回到父 Agent', 'link')
   await expect(backToRoot).toBeVisible()
   await expect(backToRoot).toHaveAttribute('href', '/threads/' + ROOT_ID)
   // 子线程只读展示快照冻结的环境，并标明跟随主对话；执行根不可在此切换。
@@ -480,7 +480,7 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   await expect(page.getByRole('textbox')).toHaveCount(0)
   await expect(page.getByRole('link', { name: '回到对话' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '查看子 Agent 执行' })).toHaveCount(0)
   expect(recorded.uploadCalls).toEqual([])
   expect(recorded.commandRequests).toEqual([])
   expect(recorded.stopRequests).toEqual([])
@@ -525,7 +525,7 @@ test('switching environment on a root with running subagents warns it applies to
   await expect(page.locator('.active-thread-tree')).toBeVisible()
 
   const environmentTrigger = composer.getByRole('button', { name: '环境', exact: true })
-  await expect(environmentTrigger).toContainText('None')
+  await expect(environmentTrigger).toContainText('无')
   await environmentTrigger.click()
   await expect(page.locator('.thread-composer-menu-hint'))
     .toHaveText('切换对正在运行的子 Agent 同样生效')

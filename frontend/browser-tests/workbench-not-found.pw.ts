@@ -18,7 +18,7 @@ const COPY = {
   'zh-CN': {
     heading: '页面不可用',
     description: '该页面扩展不存在或已卸载。',
-    back: '返回 Chat',
+    back: '返回对话',
   },
   'en-US': {
     heading: 'Page unavailable',

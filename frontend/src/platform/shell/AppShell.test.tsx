@@ -23,7 +23,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/chats',
     labelKey: 'platform.nav.ai',
     ariaKey: 'platform.nav.aiAria',
-    shortLabel: 'AI',
     icon: Bot,
   },
   {
@@ -32,7 +31,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/interactions',
     labelKey: 'ai.nav.interactions',
     ariaKey: 'ai.nav.interactionsAria',
-    shortLabel: 'Pending',
     icon: Inbox,
   },
   {
@@ -41,7 +39,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/projects',
     labelKey: 'platform.nav.projects',
     ariaKey: 'platform.nav.projectsAria',
-    shortLabel: 'Projects',
     icon: FolderKanban,
   },
   {
@@ -50,7 +47,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/canvas',
     labelKey: 'platform.nav.canvas',
     ariaKey: 'platform.nav.canvasAria',
-    shortLabel: 'Canvas',
     icon: Grid2X2,
   },
   {
@@ -59,7 +55,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/settings',
     labelKey: 'platform.nav.settings',
     ariaKey: 'platform.nav.settingsAria',
-    shortLabel: 'Settings',
     icon: Settings,
   },
 ]
@@ -159,17 +154,18 @@ describe('AppShell secondary AI routes header activation', () => {
     renderShell(path, <div>AI Sub-route</div>)
 
     expect(screen.getByRole('banner')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能' })).toHaveClass('active')
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
   })
 })
 
 describe('AppShell settings navigation', () => {
-  it('renders the Gear link in the top navigation for desktop and mobile panels', () => {
+  it('renders the settings link with only the current-language label for desktop and mobile panels', () => {
     renderShell('/chats', <div>Content</div>)
-    const settingsLink = screen.getByRole('link', { name: '设置 Settings' })
+    const settingsLink = screen.getByRole('link', { name: '设置' })
     expect(settingsLink).toHaveAttribute('href', '/settings')
-    expect(settingsLink.querySelector('small')?.textContent).toBe('Settings')
+    // 主导航只渲染当前语言的标签，不再附带英文副标。
+    expect(settingsLink).toHaveTextContent(/^设置$/)
     // 与 AI/Canvas/Tools 同级，移动端汉堡面板复用同一组链接。
     expect(settingsLink.closest('nav')).toBe(screen.getByRole('navigation'))
   })
@@ -179,28 +175,29 @@ describe('AppShell settings navigation', () => {
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(document.querySelector('.app-frame')).not.toHaveClass('workspace-immersive')
     // settings 激活时 AI/Projects/Canvas 一律不误激活。
-    expect(screen.getByRole('link', { name: '设置 Settings' })).toHaveClass('active')
-    expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
-    expect(screen.getByRole('link', { name: '项目 Projects' })).not.toHaveClass('active')
-    expect(screen.getByRole('link', { name: '画布 Canvas' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '设置' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '项目' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '画布' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '待处理事项' })).not.toHaveClass('active')
   })
 
   it('does not mis-activate Settings on AI, Projects or Canvas routes', () => {
     renderShell('/chats', <div>Content</div>)
-    expect(screen.getByRole('link', { name: '设置 Settings' })).not.toHaveClass('active')
-    expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: '设置' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能' })).toHaveClass('active')
   })
 })
 
 describe('AppShell platform feature navigation', () => {
   it.each([
-    ['/projects', '项目 Projects', '/projects'],
+    ['/projects', '项目', '/projects'],
   ])('activates the feature link and keeps the brand in that feature for %s', (path, label, href) => {
     renderShell(path, <div>Feature content</div>)
 
     expect(screen.getByRole('link', { name: label })).toHaveClass('active')
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', href)
-    expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能' })).not.toHaveClass('active')
   })
 
   it('uses the immersive workspace shell for a project board', () => {
@@ -375,6 +372,8 @@ describe('AppShell locale selector', () => {
     ])
     expect(localStorage.getItem('kk-studio.locale')).toBe('en-US')
     expect(screen.getByRole('link', { name: 'AI' })).toBeInTheDocument()
+    // en-US 同样只渲染当前语言标签，不再叠加中文副标。
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveTextContent(/^Settings$/)
 
     await user.click(englishTriggers[0]!)
     expect(screen.getByRole('listbox', { name: 'Language' })).toBeInTheDocument()
@@ -420,7 +419,7 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
 
     renderShell('/chats')
     await waitFor(() => {
-      const badge = screen.getByLabelText('7 pending')
+      const badge = screen.getByLabelText('7 项待处理')
       expect(badge).toBeInTheDocument()
       expect(badge).toHaveTextContent('7')
     })
@@ -435,7 +434,7 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
 
     const { sockets } = renderShell('/chats')
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(1))
-    expect(screen.queryByLabelText('3 pending')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('3 项待处理')).not.toBeInTheDocument()
     const socket = sockets.openLatest()
 
     act(() => {
@@ -448,7 +447,7 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByLabelText('3 pending')).toBeInTheDocument()
+      expect(screen.getByLabelText('3 项待处理')).toBeInTheDocument()
     })
     expect(listSpy).toHaveBeenCalledTimes(2)
   })
@@ -468,14 +467,14 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
     await user.click(toggle)
     expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
 
-    const aiLink = screen.getByRole('link', { name: '智能 AI' })
+    const aiLink = screen.getByRole('link', { name: '智能' })
     await user.click(aiLink)
     expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
   })
 
   it('handles root path / and unmatched routes gracefully', () => {
     renderShell('/')
-    expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能' })).toHaveClass('active')
 
     // Empty pages fallback route matching
     renderShell('/unknown-nonexistent-path', <div>404</div>, { pages: [] })

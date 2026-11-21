@@ -857,7 +857,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, ' duplicate ')
     await chooseDestination(user, 3)
     await confirmBranch(user)
-    expect(await screen.findByText('此 Session 已有同名 thread 或草稿，请换一个名称。')).toBeInTheDocument()
+    expect(await screen.findByText('此会话已有同名 Thread 或草稿，请换一个名称。')).toBeInTheDocument()
     expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{ ...summary, kind: 'SUBAGENT', parentThreadId: 'root' }])
     await confirmBranch(user)
@@ -886,7 +886,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await chooseDestination(user, destination)
     await confirmBranch(user)
     if (conflict) {
-      expect(await screen.findByText('此 Session 已有同名 thread 或草稿，请换一个名称。')).toBeInTheDocument()
+      expect(await screen.findByText('此会话已有同名 Thread 或草稿，请换一个名称。')).toBeInTheDocument()
       expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
     } else {
       await waitFor(() => expect(document.querySelector('.new-branch-dialog')).toBeNull())
@@ -903,7 +903,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'safe')
     await chooseDestination(user, 3)
     await confirmBranch(user)
-    expect(await screen.findByText('无法检查 thread 名称，请重试打开草稿。')).toBeInTheDocument()
+    expect(await screen.findByText('无法检查 Thread 名称，请重试打开草稿。')).toBeInTheDocument()
     let resolve!: (threads: []) => void
     vi.mocked(harnessService.listSessionThreads).mockImplementationOnce(() => new Promise((done) => { resolve = done }))
     await confirmBranch(user)
@@ -956,7 +956,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
     renderWorkspace()
     await user.click(await screen.findByTestId('thread-turn-end-branch'))
-    expect(await screen.findByRole('dialog', { name: '新的 thread 分支' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新的 Thread 分支' })).toBeInTheDocument()
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
@@ -1045,7 +1045,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.click(screen.getByRole('button', { name: '保存' }))
     if (['root', 'local', 'offline'].includes(scenario)) {
       expect(await screen.findByRole('alert')).toHaveTextContent(scenario === 'offline'
-        ? '无法检查 thread 名称' : '此 Session 已有同名')
+        ? '无法检查 Thread 名称' : '此会话已有同名')
       expect(name).toHaveValue(proposed)
       expect(storedPaneTarget('pane-1')).toMatchObject({ threadName: 'original' })
       expect(screen.queryByText('private network detail')).not.toBeInTheDocument()

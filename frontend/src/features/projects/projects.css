@@ -3,37 +3,7 @@
 
 /* ---------- 项目列表 ---------- */
 
-.projects-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow-y: auto;
-  padding: 24px;
-  box-sizing: border-box;
-}
-
-.projects-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.projects-title {
-  margin: 0;
-  font-size: var(--font-size-xl);
-  font-weight: 600;
-  color: var(--fg);
-}
-
-.projects-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
+/* 页头与页面容器由 platform/shell 的 ListPageHeader 与共享 .screen-body 提供。 */
 
 .projects-status {
   display: flex;

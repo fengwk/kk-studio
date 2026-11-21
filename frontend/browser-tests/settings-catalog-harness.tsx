@@ -7,7 +7,9 @@ import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-tes
 import { setLocale } from '@/shared/i18n'
 import '@/styles.css'
 
-setLocale('zh-CN')
+setLocale(
+  new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN',
+)
 let settings = makeSettingsDto()
 systemSettingsService.get = async () => settings
 systemSettingsService.getSchema = async () => makeSettingsSchema()

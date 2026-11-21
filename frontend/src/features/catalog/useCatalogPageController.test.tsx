@@ -118,7 +118,7 @@ describe('useCatalogPageController', () => {
     })
     act(() => result.current.providerPanelProps.onDelete(provider()))
     expect(result.current.resourceDeleteConfirmModal.modal?.title).toBe(
-      '删除 Provider',
+      '删除提供商',
     )
 
     act(() => result.current.modelPanelProps.onCreate())
@@ -142,7 +142,7 @@ describe('useCatalogPageController', () => {
       ),
     )
     expect(result.current.resourceDeleteConfirmModal.modal?.title).toBe(
-      '删除 Model',
+      '删除模型',
     )
 
     act(() => result.current.agentPanelProps.onCreate())

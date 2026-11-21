@@ -95,7 +95,7 @@ test('provider and system settings retry controls render correct theme, borders,
     await expect(retrySelectTrigger).toHaveAttribute('data-value', 'inherit')
     await expect(providerSection.locator('.ui-tag-input')).not.toBeVisible()
     await expect(
-      providerSection.getByText('当前 Provider 继承系统全局配置的 HTTP 重试状态码名单。'),
+      providerSection.getByText('当前提供商继承系统全局配置的 HTTP 重试状态码名单。'),
     ).toBeVisible()
 
     // Switch back to custom

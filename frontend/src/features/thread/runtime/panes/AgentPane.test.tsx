@@ -161,7 +161,7 @@ function TestAgentPane({
 
 /**
  * 根控制面与上传注册表的挂载探针：包装真实实现，只统计挂载/卸载次数，不改变行为。
- * 用于实测「子代理目标 / 身份未确认时根控制 Hook 与上传注册表根本没有创建」，
+ * 用于实测「子 Agent 目标 / 身份未确认时根控制 Hook 与上传注册表根本没有创建」，
  * 以及「绑定新根时根控制面没有被卸载重挂」，而不是只看 DOM 上有没有被禁用的按钮。
  */
 const { controlMounts, uploadMounts } = vi.hoisted(() => ({
@@ -728,7 +728,7 @@ describe('AgentPane orchestration', () => {
     await screen.findByRole('alert')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('已打开 thread 草稿，发送消息开始此 thread。')).toBeInTheDocument()
+    expect(await screen.findByText('已打开 Thread 草稿，发送消息开始此 Thread。')).toBeInTheDocument()
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
@@ -737,7 +737,7 @@ describe('AgentPane orchestration', () => {
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByRole('alert')).toHaveTextContent('所选历史不完整，请重新加载后再发送。')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
-    expect(screen.queryByText('已打开 thread 草稿，发送消息开始此 thread。')).not.toBeInTheDocument()
+    expect(screen.queryByText('已打开 Thread 草稿，发送消息开始此 Thread。')).not.toBeInTheDocument()
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
@@ -755,7 +755,7 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/rename-session{Enter}')
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(failure === 'error' ? 'Session summaries offline' : 'Session')
+    expect(alert).toHaveTextContent(failure === 'error' ? 'Session summaries offline' : '会话')
     expect(screen.getByRole('textbox', { name: '名称' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.getByText('Selected ancestor text')).toBeInTheDocument()
@@ -820,7 +820,7 @@ describe('AgentPane orchestration', () => {
     await user.type(name, 'late-name')
     await user.click(screen.getByRole('button', { name: '保存' }))
     if (scenario === 'missing-host') {
-      expect(await screen.findByRole('alert')).toHaveTextContent('无法检查 thread 名称')
+      expect(await screen.findByRole('alert')).toHaveTextContent('无法检查 Thread 名称')
       expect(name).toHaveValue('late-name')
     } else {
       view.unmount()
@@ -1780,8 +1780,8 @@ describe('AgentPane orchestration', () => {
     await user.click(emptyComposer)
     await user.keyboard('/thread{Enter}')
     // 复用 ai.chat.* 既有 key，而不是未注册的 ai.runtime.* 缺失消息。
-    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
-    expect(screen.getByText('暂无 Session')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '选择会话' })).toBeInTheDocument()
+    expect(screen.getByText('暂无会话')).toBeInTheDocument()
     emptyPane.unmount()
 
     loadSessionsMock.mockResolvedValue([{
@@ -1800,7 +1800,7 @@ describe('AgentPane orchestration', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
-    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '选择会话' })).toBeInTheDocument()
     expect(document.querySelector('.thread-composer')).toHaveAttribute('hidden')
     await user.click(await screen.findByRole('option', { name: /session-1/ }))
     expect(await screen.findByRole('region', { name: '选择 Thread' })).toBeInTheDocument()
@@ -1831,7 +1831,7 @@ describe('AgentPane orchestration', () => {
     expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
-    await screen.findByRole('region', { name: '重命名 thread' })
+    await screen.findByRole('region', { name: '重命名 Thread' })
     const input = screen.getByRole('textbox', { name: '名称' })
     expect(input).toHaveValue('thread-name')
     await user.clear(input)
@@ -1840,7 +1840,7 @@ describe('AgentPane orchestration', () => {
 
     await waitFor(() =>
       expect(harnessService.renameThread).toHaveBeenCalledWith(THREAD_ID, { name: 'renamed thread' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
     expect(composer).toBeInTheDocument()
     expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID, { signal: expect.any(AbortSignal) })
   })
@@ -1888,7 +1888,7 @@ describe('AgentPane orchestration', () => {
       THREAD_ID,
       { signal: expect.any(AbortSignal) },
     ))
-    expect(await screen.findByRole('region', { name: '活跃子代理' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '活跃子 Agent' })).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toBeInTheDocument()
     bound.unmount()
@@ -1914,12 +1914,12 @@ describe('AgentPane orchestration', () => {
       THREAD_ID,
       { signal: expect.any(AbortSignal) },
     ))
-    expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '活跃子 Agent' })).not.toBeInTheDocument()
     idle.unmount()
 
     const draft = renderPane({ kind: 'CHAT', id: 'chat-draft' })
     await screen.findByLabelText('给 AI 发送消息')
-    expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '活跃子 Agent' })).not.toBeInTheDocument()
     draft.unmount()
   })
 
@@ -2012,7 +2012,7 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
 
-    await screen.findByRole('region', { name: '重命名 thread' })
+    await screen.findByRole('region', { name: '重命名 Thread' })
     const input = screen.getByRole('textbox', { name: '名称' })
     expect(input).toHaveValue('old name')
     await user.clear(input)
@@ -2021,7 +2021,7 @@ describe('AgentPane orchestration', () => {
 
     await waitFor(() =>
       expect(harnessService.renameThread).toHaveBeenCalledWith(THREAD_ID, { name: 'slash renamed' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
   })
 
   it('keeps the rename input and shows the error when a rename request fails', async () => {
@@ -2043,7 +2043,7 @@ describe('AgentPane orchestration', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('rename rejected')
     expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('keep me')
-    expect(screen.getByRole('region', { name: '重命名 thread' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '重命名 Thread' })).toBeInTheDocument()
   })
 
   it('renames the parent Session from a NEW_THREAD_DRAFT via /rename-session', async () => {
@@ -2090,7 +2090,7 @@ describe('AgentPane orchestration', () => {
       'session-1',
       { name: 'renamed parent session' },
     ))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Session' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名会话' })).not.toBeInTheDocument())
   })
 
   it('consumes the canonical Session name returned by the server in the loaded picker cache', async () => {
@@ -2136,7 +2136,7 @@ describe('AgentPane orchestration', () => {
     ))
     // 面板关闭返回 Session picker：行标题立即显示服务端权威规范化名称
     //（大写化 + 单空格），而不是用户输入的原始字符串。
-    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '选择会话' })).toBeInTheDocument()
     expect(await screen.findByRole('option', { name: /RENAMED SESSION/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /renamed {3}session/ })).not.toBeInTheDocument()
   })
@@ -2222,15 +2222,15 @@ describe('AgentPane orchestration', () => {
 
     // PUT 在途：Escape 与关闭按钮都无效，面板保持打开。
     await user.keyboard('{Escape}')
-    expect(screen.getByRole('region', { name: '重命名 Session' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '重命名会话' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
 
     // PUT 返回权威名称：面板关闭、picker 行立即展示服务端规范化名称。
     canonicalName = 'RENAMED SESSION'
     resolveRename({ sessionId: 'session-1', name: canonicalName, createdAt: 0 })
     await waitFor(() =>
-      expect(screen.queryByRole('region', { name: '重命名 Session' })).not.toBeInTheDocument())
-    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: '重命名会话' })).not.toBeInTheDocument())
+    expect(await screen.findByRole('region', { name: '选择会话' })).toBeInTheDocument()
     expect(await screen.findByRole('option', { name: /RENAMED SESSION/ })).toBeInTheDocument()
   })
 
@@ -2272,9 +2272,9 @@ describe('AgentPane orchestration', () => {
       'session-1',
       { name: 'session one' },
     ))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Session' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名会话' })).not.toBeInTheDocument())
     // 会话选择面板重新展示（返回原交互）。
-    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '选择会话' })).toBeInTheDocument()
 
     await user.click(await screen.findByRole('option', { name: /session one/ }))
     const threadRow = await screen.findByRole('option', { name: /thread one/ })
@@ -2290,7 +2290,7 @@ describe('AgentPane orchestration', () => {
       THREAD_ID,
       { name: 'thread renamed' },
     ))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
     expect(await screen.findByRole('region', { name: '选择 Thread' })).toBeInTheDocument()
   })
 
@@ -2596,7 +2596,7 @@ describe('AgentPane orchestration', () => {
     })
     const pending = renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
-    expect(screen.getByText('尚未取得这些执行已退出的证据。停止会话后才能选择是否放弃等待。'))
+    expect(screen.getByText('尚未取得这些执行已退出的证据。停止 Thread 后才能选择是否放弃等待。'))
       .toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^放弃等待/ })).not.toBeInTheDocument()
 
@@ -3229,7 +3229,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     expect(rows[2]?.getAttribute('data-can-fork')).toBe('true')
     expect(forkSessionButton).toBeEnabled()
     // 两种分叉在界面上给出各自的结果说明：同会话的 thread 分支 vs 复制到独立新会话。
-    expect(branchButton).toHaveAttribute('title', '在当前会话中从此处新建 thread 分支，它与原 thread 同属这个会话的历史树。')
+    expect(branchButton).toHaveAttribute('title', '在当前会话中从此处新建 Thread 分支，它与原 Thread 同属这个会话的历史树。')
     expect(forkSessionButton).toHaveAttribute('title', '把截至此处的历史复制到一个独立的新会话。')
     await user.click(forkSessionButton)
 
@@ -4514,7 +4514,7 @@ describe('AgentPane root control and child observation', () => {
     const targetBeforeNavigation = localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
     )
-    const source = await screen.findByRole('link', { name: '打开 subagent' })
+    const source = await screen.findByRole('link', { name: '打开子 Agent' })
     expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
 
     await user.click(source)
@@ -4541,7 +4541,7 @@ describe('AgentPane root control and child observation', () => {
 
     await screen.findByRole('button', { name: '允许' })
     expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull()
-    expect(screen.queryByRole('link', { name: '打开 subagent' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '打开子 Agent' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'root thread' })).toBeNull()
   })
 
@@ -4756,7 +4756,7 @@ describe('AgentPane root control mounting', () => {
   })
 
   it('never mounts root control for an unconfirmed bound target', async () => {
-    // 绑定目标的身份还没确认时可能是子代理：不接受任何草稿、上传与人工执行 Hook。
+    // 绑定目标的身份还没确认时可能是子 Agent：不接受任何草稿、上传与人工执行 Hook。
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(new Promise(() => {}))
 
@@ -5149,7 +5149,7 @@ describe('AgentPane root control mounting', () => {
 
     expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull()
     expect(screen.queryByText(unknownSourceId)).toBeNull()
-    const source = await screen.findByRole('link', { name: '打开 subagent' })
+    const source = await screen.findByRole('link', { name: '打开子 Agent' })
     expect(source).toHaveAttribute('href', `/threads/${unknownSourceId}`)
     expect(source).not.toHaveTextContent(unknownSourceId)
   })
@@ -5173,14 +5173,14 @@ describe('AgentPane root control mounting', () => {
     const user = userEvent.setup()
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    await waitFor(() => expect(screen.getAllByRole('link', { name: '打开 subagent' })).toHaveLength(1))
-    expect(screen.getByRole('link', { name: '打开 subagent' }))
+    await waitFor(() => expect(screen.getAllByRole('link', { name: '打开子 Agent' })).toHaveLength(1))
+    expect(screen.getByRole('link', { name: '打开子 Agent' }))
       .toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     await user.click(screen.getByRole('button', { name: '加载更多' }))
 
     // 第二页追加而不是替换；两个 subagent 来源链接均可用，翻页入口随之消失。
-    await waitFor(() => expect(screen.getAllByRole('link', { name: '打开 subagent' })).toHaveLength(2))
-    expect(screen.getAllByRole('link', { name: '打开 subagent' }).map((link) => link.getAttribute('href')))
+    await waitFor(() => expect(screen.getAllByRole('link', { name: '打开子 Agent' })).toHaveLength(2))
+    expect(screen.getAllByRole('link', { name: '打开子 Agent' }).map((link) => link.getAttribute('href')))
       .toEqual([`/threads/${CHILD_THREAD_ID}`, `/threads/${secondSourceId}`])
     await waitFor(() => expect(screen.getAllByRole('button', { name: '允许' })).toHaveLength(2))
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
@@ -5204,13 +5204,13 @@ describe('AgentPane root control mounting', () => {
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await screen.findByRole('button', { name: '允许' })
-    expect(screen.getByRole('link', { name: '打开 subagent' }))
+    expect(screen.getByRole('link', { name: '打开子 Agent' }))
       .toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     await user.click(screen.getByRole('button', { name: '加载更多' }))
 
     // 翻页失败必须被呈现（不是静默丢弃），已取回的卡片与来源链接仍可用，重试入口保留。
     expect(await screen.findByRole('alert')).toHaveTextContent('待处理交互加载失败')
-    expect(screen.getByRole('link', { name: '打开 subagent' }))
+    expect(screen.getByRole('link', { name: '打开子 Agent' }))
       .toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
@@ -5294,7 +5294,7 @@ describe('AgentPane root control mounting', () => {
   })
 
   it('unmounts the previous root control when the pane target switches to an unconfirmed child', async () => {
-    // 意图 A（换目标）：绑定本身变成子代理目标，旧根控制面必须卸载，草稿靠既有持久记录保留。
+    // 意图 A（换目标）：绑定本身变成子 Agent 目标，旧根控制面必须卸载，草稿靠既有持久记录保留。
     const user = userEvent.setup()
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
@@ -5319,7 +5319,7 @@ describe('AgentPane root control mounting', () => {
     expect(controlMounts.unmount).not.toHaveBeenCalled()
     expect(uploadMounts.mount).not.toHaveBeenCalled()
     expect(uploadMounts.unmount).not.toHaveBeenCalled()
-    // 子代理目标不会覆盖或清掉根自己的草稿记录。
+    // 子 Agent 目标不会覆盖或清掉根自己的草稿记录。
     expect((await loadThreadDraft(THREAD_ID))?.parts)
       .toEqual([expect.objectContaining({ type: 'text', text: 'root draft stays' })])
     second.unmount()

@@ -104,13 +104,13 @@ describe('ActiveThreadTree', () => {
     vi.mocked(harnessService.getThreadTree).mockReturnValue(new Promise((_, reject) => { rejectTree = reject }))
     renderTree(ROOT_ID, undefined, true)
     expect(screen.getByRole('status')).toBeInTheDocument()
-    expect(screen.queryByText('暂无 subagent 执行')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无子 Agent 执行')).not.toBeInTheDocument()
     await act(async () => { rejectTree(new Error('offline')) })
     expect(await screen.findByRole('alert')).toHaveTextContent('加载失败')
-    expect(screen.queryByText('暂无 subagent 执行')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无子 Agent 执行')).not.toBeInTheDocument()
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([treeNode(ROOT_ID, null, false, 'root')])
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('暂无 subagent 执行')).toBeInTheDocument()
+    expect(await screen.findByText('暂无子 Agent 执行')).toBeInTheDocument()
   })
 
   it('subscribes to the response root from a bound child and reads back its own cached key', async () => {
@@ -121,7 +121,7 @@ describe('ActiveThreadTree', () => {
     ])
     const { sockets, queryClient } = renderTree(WORKER_ID, WORKER_ID, true)
     const link = await screen.findByRole('link', { name: /Explorer/ })
-    expect(link).toHaveTextContent('turns: 7 · tools: 12')
+    expect(link).toHaveTextContent('轮次：7 · 工具：12')
     expect(screen.getByRole('link', { name: /Reviewer/ })).toHaveTextContent('失败')
     expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
     const socket = sockets.openLatest()
@@ -162,7 +162,7 @@ describe('ActiveThreadTree', () => {
     ])
     await act(async () => { await queryClient.invalidateQueries({ queryKey: ['threads', 'tree', ROOT_ID] }) })
     expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
-    expect(screen.getByRole('link', { name: /worker/ })).toHaveTextContent('turns: 1')
+    expect(screen.getByRole('link', { name: /worker/ })).toHaveTextContent('轮次：1')
   })
 
   beforeEach(() => {
