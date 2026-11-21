@@ -2,9 +2,9 @@ import { translate } from '@/shared/i18n'
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
-import type {
-  DialogueMessage,
-  ToolDialogueMessage,
+import {
+  modelToolCardKey,
+  type DialogueMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { createModelAttemptFailureMessage } from '@/features/thread/runtime/thread-timeline/model-attempt-failure'
 import type {
@@ -82,21 +82,29 @@ export function projectModelStream(
       status: stream.status,
     })
   }
-  projectStreamingToolCalls(messages, stream)
+  const output = activeAssistantOutput?.generationId === stream.invocationId
+    ? activeAssistantOutput : null
+  if (!output?.resultEntryId && (output == null || stream.attempt >= output.attempt)) {
+    projectStreamingToolCalls(messages, stream, output?.requestHeadEntryId)
+  }
 }
 
-function projectStreamingToolCalls(messages: DialogueMessage[], stream: RealtimeModelStream): void {
+function projectStreamingToolCalls(
+  messages: DialogueMessage[],
+  stream: RealtimeModelStream,
+  requestHeadEntryId?: string,
+): void {
   if (stream.toolCalls.length === 0) {
     return
   }
   const existing = new Set(
     messages
-      .filter((message): message is ToolDialogueMessage => message.role === 'tool')
-      .map((message) => message.toolCallId)
-      .filter(Boolean),
+      .flatMap((message) => message.role === 'tool' && message.cardKey ? [message.cardKey] : []),
   )
   for (const draft of stream.toolCalls) {
-    if (draft.id && existing.has(draft.id)) {
+    const cardKey = requestHeadEntryId
+      ? modelToolCardKey(requestHeadEntryId, stream.attempt, draft.index) : undefined
+    if (cardKey && existing.has(cardKey)) {
       continue
     }
     const toolName = draft.name.trim() || 'Tool'
@@ -106,6 +114,7 @@ function projectStreamingToolCalls(messages: DialogueMessage[], stream: Realtime
       phase: 'call',
       subjectEntryId: null,
       toolCallId: draft.id,
+      cardKey,
       toolName,
       rendererKey: draft.name.trim(),
       arguments: draft.argumentsJson,

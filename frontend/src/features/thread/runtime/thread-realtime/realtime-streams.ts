@@ -97,7 +97,8 @@ export function reconcileSnapshotStreams(
   activeOutputRef.current = activeAssistantOutput
   toolInvocationsRef.current = toolInvocations
   generationFailuresRef.current = generationFailures
-  const snapshot = snapshotModelStream(threadId, activeAssistantOutput)
+  const current = modelStreamRef.current
+  const snapshot = snapshotModelStream(threadId, activeAssistantOutput, current)
   snapshotModelStreamRef.current = snapshot
   const attemptFailed =
     activeAssistantOutput != null
@@ -109,16 +110,13 @@ export function reconcileSnapshotStreams(
   if (attemptFailed) {
     clearModelRecovery()
   }
-  const current = modelStreamRef.current
   let next = current
   if (snapshot == null) {
     clearModelRecovery()
     next = null
   } else if (snapshot.status !== 'streaming') {
-    // 持久化终态边界：result/error 投影无条件
-    // 取代任何更高 sequence 的 lossy realtime overlay（流式 seq8 绝不能压过
-    // 持久化 seq7 的结果）。resultEntryId == null 时投影保持可见，直到
-    // 持久化 Entry 到达；期间事件处理器 fence 拒绝后续 delta。
+    // 持久正文/错误替换旧流；尚未物化的成功快照只桥接同一 attempt 的工具草稿。
+    // 期间事件处理器仍拒绝迟到的 delta。
     clearModelRecovery()
     next = snapshot
   } else {

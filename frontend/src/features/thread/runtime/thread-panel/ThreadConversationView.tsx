@@ -1,19 +1,19 @@
 import type { RefObject } from 'react'
 import { ThreadTranscript } from '@/features/thread/runtime/thread-panel/ThreadTranscript'
-import { transcriptStreamRevision } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 /**
  * Conversation 主视图：实际挂载的滚动容器（与 Event 视图互斥，各自拥有独立的
  * 自动贴底生命周期——切到 Event 时本视图卸载，切回时重新挂载并重新绑定
- * 滚动与阅读意图监听）。
+ * 滚动与手势监听）。
  *
- * - `initialScrollTop` 非空时挂载即恢复该位置（重新进入 conversation），stick
- *   状态由恢复后的位置按 210px 阈值决定；
- * - `resetKey`（threadId）变化时重置 stick 并重新贴底（Thread 重绑后首次进入）；
- * - 只有流式正文更新与消息增长会贴底；内层只读区域回看/交互会冒泡阅读意图暂停
- *   跟随，直到用户把外层自己滚回底部。
+ * 跟随状态与定位都在 `useChatTranscriptAutoScroll` 里：只有几何变化会触发贴底，
+ * 只有真实用户滚动会翻转跟随。
+ *
+ * - `initialScrollTop` 非空时挂载即恢复该位置（重新进入 conversation），跟随
+ *   状态由恢复后的位置按 32px 阈值决定；
+ * - `resetKey`（threadId）变化时重置跟随并重新贴底（Thread 重绑后首次进入）。
  */
 export function ThreadConversationView({
   messages,
@@ -25,7 +25,6 @@ export function ThreadConversationView({
   bodyRef,
   initialScrollTop = null,
   resetKey = null,
-  eventCount = 0,
 }: {
   messages: DialogueMessage[]
   loading: boolean
@@ -36,22 +35,10 @@ export function ThreadConversationView({
   bodyRef: RefObject<HTMLDivElement | null>
   /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
   initialScrollTop?: number | null
-  /** 变化时重置 stick 并重新贴底（Thread 重绑后新线程首次进入）。 */
+  /** 变化时重置跟随并重新贴底（Thread 重绑后新线程首次进入）。 */
   resetKey?: string | number | null
-  /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
-  eventCount?: number
 }) {
-  // 自动贴底只认显式信号：流式正文更新（stream revision）与消息数量增长。
-  // 布局尺寸变化（展开卡片、图片加载、思考样式切换）绝不触发贴底。
-  const streamRevision = transcriptStreamRevision(messages)
-  useChatTranscriptAutoScroll(
-    bodyRef,
-    messages.length,
-    eventCount,
-    initialScrollTop,
-    resetKey,
-    streamRevision,
-  )
+  useChatTranscriptAutoScroll(bodyRef, initialScrollTop, resetKey)
   return (
     <ThreadTranscript
       messages={messages}

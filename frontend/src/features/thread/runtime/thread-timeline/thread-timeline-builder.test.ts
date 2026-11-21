@@ -414,12 +414,11 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
-  it('deduplicates realtime streaming tool-call drafts against the durable tool_call message', () => {
-    // 活跃 attempt 的流式 toolCall draft 与已物化的 durable assistant tool_call
-    // 拥有相同 toolCallId：draft 不得产生第二条 tool call 消息（L244-250 跳过分支）。
+  it('matches a draft without a provider id to its materialized retry slot, not a reused id in history', () => {
     const timeline = buildThreadTimeline(
       [
-        entry(
+        { ...entry('failed-attempt', 'MODEL_ATTEMPT_FAILURE', {}), parentEntryId: 'head-1' },
+        { ...entry(
           'assistant-1',
           'MESSAGE',
           messagePayload('ASSISTANT', [
@@ -431,55 +430,39 @@ describe('thread timeline edge branches', () => {
               argumentsJson: '{"command":"ls"}',
             },
           ]),
-        ),
+        ), parentEntryId: 'failed-attempt' },
       ],
       [],
       [],
       {
         threadId: 't1',
         invocationId: 'm1',
-        attempt: 1,
+        attempt: 2,
         sequence: 3,
         text: '',
         thinking: '',
         toolCalls: [
-          { index: 0, id: 'call-dedup', name: 'bash', argumentsJson: '{"command":"ls"}' },
+          { index: 0, id: '', name: 'bash', argumentsJson: '{"command":"ls"}' },
+          { index: 1, id: 'call-dedup', name: 'bash', argumentsJson: '{}' },
         ],
         createdAt: Date.parse('2026-01-01T00:00:00Z'),
         status: 'streaming',
+      },
+      null,
+      [],
+      {
+        generationId: 'm1', turnStartEntryId: 'turn-1', requestHeadEntryId: 'head-1',
+        status: 'RUNNING', attempt: 2, sequence: '3', contents: [], error: null,
+        resultEntryId: null, createdAt: 1767225600000, updatedAt: 1767225600000,
       },
     )
     const toolCalls = timeline.messages.filter(
       (message) => message.role === 'tool' && message.phase === 'call',
     )
-    expect(toolCalls).toHaveLength(1)
-    expect(toolCalls[0]).toMatchObject({
-      subjectEntryId: 'assistant-1',
-      toolCallId: 'call-dedup',
-      status: 'done',
-    })
-    // 不同 id 的 draft 仍然会追加（existing 集合按 toolCallId 精确匹配）。
-    const extra = buildThreadTimeline(
-      [],
-      [],
-      [],
-      {
-        threadId: 't1',
-        invocationId: 'm1',
-        attempt: 1,
-        sequence: 3,
-        text: '',
-        thinking: '',
-        toolCalls: [
-          { index: 0, id: 'call-new', name: 'write', argumentsJson: '{}' },
-        ],
-        createdAt: Date.parse('2026-01-01T00:00:00Z'),
-        status: 'streaming',
-      },
-    )
-    expect(
-      extra.messages.filter((message) => message.role === 'tool' && message.phase === 'call'),
-    ).toHaveLength(1)
+    expect(toolCalls).toMatchObject([
+      { subjectEntryId: 'assistant-1', cardKey: 'model-tool:head-1:2:0', status: 'done' },
+      { subjectEntryId: null, cardKey: 'model-tool:head-1:2:1', status: 'streaming' },
+    ])
   })
 
   it('skips overlay projection for non-tool-call messages and malformed approvals', () => {

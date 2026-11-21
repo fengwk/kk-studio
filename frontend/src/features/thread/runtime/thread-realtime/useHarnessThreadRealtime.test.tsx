@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { useLayoutEffect, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 function sleep(ms: number): Promise<void> {
@@ -10,6 +10,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import * as apiClient from '@/shared/api/client'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/thread/runtime/thread-realtime/useHarnessThreadRealtime'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline-builder'
 import type { RealtimeFrameSchedulerOptions } from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import type {
   HarnessActiveAssistantOutputDTO,
@@ -36,11 +37,15 @@ interface RealtimeProps {
   schedulerOptions?: Partial<RealtimeFrameSchedulerOptions>
 }
 
-function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
+function renderRealtime(
+  client: QueryClient,
+  initialProps: RealtimeProps = {},
+  onCommit?: (state: ReturnType<typeof useHarnessThreadRealtime>, props: RealtimeProps) => void,
+) {
   const sockets = new FakeWebSocketHarness()
   const rendered = renderHook(
-    (props: RealtimeProps) =>
-      useHarnessThreadRealtime(
+    (props: RealtimeProps) => {
+      const state = useHarnessThreadRealtime(
         props.threadId ?? THREAD_ID,
         props.enabled ?? true,
         props.version ?? '42',
@@ -48,7 +53,10 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
         props.invocations ?? [],
         props.generationFailures ?? [],
         props.schedulerOptions,
-      ),
+      )
+      useLayoutEffect(() => { onCommit?.(state, props) })
+      return state
+    },
     {
       initialProps,
       wrapper: ({ children }: { children: ReactNode }) => (
@@ -242,6 +250,63 @@ describe('useHarnessThreadRealtime', () => {
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('recovered'))
     expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['same attempt', 'inv-1', 1, true],
+    ['new generation', 'inv-2', 1, false],
+    ['different attempt', 'inv-1', 2, false],
+    ['invalid attempt', 'inv-1', -1, false],
+  ] as const)('hands off a WS tool draft on success: %s', async (_, generationId, attempt, keepDraft) => {
+    const client = new QueryClient()
+    const commits: Array<{ keys: Array<string | undefined>; text?: string; thinking?: string }> = []
+    const { result, rerender, sockets } = renderRealtime(client, {}, ({ modelStream }, props) => {
+      const output = props.activeAssistantOutput ?? activeAssistantOutput()
+      const entries = output.resultEntryId ? [{
+        entryId: output.resultEntryId, parentEntryId: output.requestHeadEntryId, sessionId: 'session',
+        entryType: 'MESSAGE' as const, createdAt: output.createdAt, usageCost: null,
+        payload: { message: { role: 'ASSISTANT', contents: [{
+          type: 'tool_call', toolCallId: 'frozen-call', toolName: 'bash', rendererKey: 'bash', argumentsJson: '{}',
+        }] } },
+      }] : []
+      const timeline = buildThreadTimeline(entries, [], [], modelStream, null, [], output)
+      commits.push({
+        keys: timeline.messages.flatMap((message) => message.role === 'tool' ? [message.cardKey] : []),
+        text: modelStream?.text,
+        thinking: modelStream?.thinking,
+      })
+    })
+    sockets.openLatest()
+    emitRealtime(sockets, realtime(1, 'old streamed text'))
+    emitRealtime(sockets, JSON.stringify({
+      threadId: THREAD_ID, subjectKind: 'MODEL_INVOCATION', subjectId: 'inv-1', attempt: 1, sequence: 2,
+      type: 'MODEL_DELTA', payload: { kind: 'TOOL_CALL_DELTA', index: 0, id: null, name: 'bash', argumentsJson: '{}' },
+      createdAt: '2026-01-01T00:00:00Z',
+    }))
+    await waitFor(() => expect(result.current.modelStream?.toolCalls[0]?.id).toBe(''))
+    const [draftKey] = commits.at(-1)!.keys
+    expect(draftKey).toBe('model-tool:entry-1:1:0')
+
+    // Inspect every commit, including the one before the snapshot reconciliation effect.
+    commits.length = 0
+    const success = activeAssistantOutput(generationId, {
+      status: 'SUCCEEDED', attempt, sequence: '2', contents: [{ type: 'thinking', text: 'settled thought' }],
+    })
+    rerender({ activeAssistantOutput: success })
+    expect(commits.length).toBeGreaterThan(0)
+    expect(commits).toEqual(commits.map(() => ({
+      keys: keepDraft ? [draftKey] : [],
+      text: attempt < 0 ? undefined : '',
+      thinking: attempt < 0 ? undefined : 'settled thought',
+    })))
+
+    if (keepDraft) {
+      commits.length = 0
+      rerender({ activeAssistantOutput: { ...success, resultEntryId: 'assistant-result' } })
+      expect(commits.length).toBeGreaterThan(0)
+      expect(commits.every(({ keys }) => keys.length === 1 && keys[0] === draftKey)).toBe(true)
+      expect(result.current.modelStream).toBeNull()
+    }
   })
 
   it('rejects late MODEL_DELTA after a durable terminal result and after the Entry lands', async () => {

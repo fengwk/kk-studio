@@ -73,6 +73,7 @@ export function projectInvocationOverlays(
         candidate.assistantEntryId === invocation.assistantEntryId
         && candidate.toolCallId === invocation.queuedBehindToolCallId,
       ) ?? null
+    const hasFinalResult = terminalResult != null || hasDurableToolResult(messages, message)
     const projected: ToolDialogueMessage = {
       ...message,
       callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
@@ -95,10 +96,10 @@ export function projectInvocationOverlays(
       threadId: threadId || undefined,
       // 终态结果已经可见时，partial 不能盖过正文和错误。
       partialContents:
-        terminalResult == null && overlay?.text
+        !hasFinalResult && overlay?.text
           ? [{ type: 'text', text: overlay.text }]
           : undefined,
-      partialErrorText: terminalResult == null ? overlay?.errorText : undefined,
+      partialErrorText: hasFinalResult ? undefined : overlay?.errorText,
       approval: approval?.required ? approval : undefined,
       editReview: effectiveEditReview,
       errorMessage: failed ? failureText ?? undefined : message.errorMessage,
@@ -154,7 +155,9 @@ function terminalInvocationResult(
       status: 'error',
     }
   }
-  return null
+  return invocation.status === 'SUCCEEDED'
+    ? { arguments: call.arguments, contents: [], status: 'done' }
+    : null
 }
 
 function isFailedInvocationStatus(status: string): boolean {

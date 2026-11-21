@@ -1,12 +1,10 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 
 /**
- * 重新贴底阈值：约 2 次常见桌面滚轮行程（deltaY≈100）。
- * 用户向历史方向滚动时立即停止跟随；主动滚回该阈值内再恢复。
+ * 回底阈值（CSS px）：用户向历史方向滚动并离开该距离即停止跟随，主动滚回该距离内
+ * 才恢复。不做成设置；程序定位、浏览器钳制与布局变化都不改跟随状态。
  */
-const CHAT_RESTICK_TO_BOTTOM_THRESHOLD_PX = 210
-const CHAT_BOTTOM_EPSILON_PX = 1
+const FOLLOW_THRESHOLD_PX = 32
 
 /** 浏览器原生滚动键：键盘滚动同样属于明确的用户滚动意图。 */
 const USER_SCROLL_KEYS = new Set([
@@ -19,6 +17,9 @@ const USER_SCROLL_KEYS = new Set([
   ' ',
   'Spacebar',
 ])
+
+/** 明确向历史方向滚动的键：按下即作废已排队的贴底帧，避免抵消正在进行的回看手势。 */
+const TOWARD_HISTORY_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
 
 /**
  * 滚动条判定条带宽度。overlay 滚动条不占 clientWidth（经典滚动条占用宽度时用实际
@@ -42,200 +43,181 @@ function isScrollbarPointer(element: HTMLElement, event: PointerEvent): boolean 
     || event.clientY - rect.top >= rect.height - gutterY
 }
 
-function isNearBottom(element: HTMLElement, thresholdPx = CHAT_RESTICK_TO_BOTTOM_THRESHOLD_PX): boolean {
-  return distanceFromBottom(element) <= thresholdPx
-}
-
-function scrollToBottom(element: HTMLElement) {
-  element.scrollTop = element.scrollHeight
-}
-
-function growthSignature(messageCount: number, eventCount?: number): string {
-  return `${eventCount ?? 0}:${messageCount}`
-}
-
-/** 布局后调度：浏览器在下一帧（布局已完成）执行；无 rAF 的环境（jsdom）同步执行。 */
-function afterLayout(callback: () => void): () => void {
-  if (typeof requestAnimationFrame !== 'function') {
-    callback()
-    return () => {}
-  }
-  const frame = requestAnimationFrame(callback)
-  return () => cancelAnimationFrame(frame)
-}
-
 /**
- * 对话流增长时自动贴底；用户向历史方向滚动后停止跟随，主动滚回底部阈值内
- * 才恢复跟随，避免打断回看历史。
+ * 对话流跟随输出：一个布尔值（stickToBottomRef）决定是否贴底。
  *
- * `initialScrollTop`：非空时挂载即恢复该位置（不再贴底），并让 stick 状态跟随
- * 恢复后的位置——恢复位置仍在 210px 阈值内时，后续内容增长继续贴底；
- * 超过阈值则保持不跟随（挂载时的初始定位由本 hook 完成，内容计数与流式
- * revision 的变化只对挂载之后的实际变化生效）。
+ * - 跟随只由几何驱动：内容与视口的实际尺寸变化、内容增删都调度一次「布局后贴底」，
+ *   不看消息数、事件数或流式 revision —— 那些不是「是否跟随」的依据。每帧最多安排
+ *   一次定位，执行前再确认跟随，因此同一帧内的上滚可以作废已排队的贴底。
+ * - 翻转跟随只认真实用户滚动：向历史方向离开阈值即停止跟随，用明确的滚动意图
+ *   （滚轮 / 滚动键 / 触控 / 滚动条拖拽）带回阈值内才恢复。程序定位、布局收缩时
+ *   浏览器把 scrollTop 钳制到底部、以及本 hook 自己的写入都不翻转。
+ * - 不跟随时交由原生滚动锚定保留视口内的阅读位置（包括在上方补历史）。
+ * - 用变化前的状态决定动作：变高之前跟随就滚到变高之后的底部，不重新计算
+ *   「现在已经离底几百像素」。不使用平滑滚动。
  *
- * `resetKey`：变化时重新贴底并重置 stick（Thread 重绑后新线程首次进入必须贴底，
+ * `initialScrollTop`：非空时挂载即恢复该位置（不再贴底），并按同一阈值初始化跟随
+ * 状态——恢复位置仍在阈值内就继续跟随，超过阈值则保持不跟随。
+ *
+ * `resetKey`：变化时重置跟随并重新贴底（Thread 重绑后新线程首次进入必须贴底，
  * 不能沿用旧线程恢复位置时留下的 stick=false）。
- *
- * `streamRevision`：流式正文的显式更新签名（见 transcript-reading.ts）。只有它变化
- * 才贴底——媒体加载完成、图片解码、展开/收起等布局尺寸变化都不是流式信号，
- * 绝不触发滚动。
- *
- * 暂停跟随只有三条来源：外层向历史滚动、用户输入、子只读区域冒泡阅读意图
- * （`TRANSCRIPT_READING_INTENT_EVENT`）；恢复只有一条路径——用户用明确的滚动意图
- * （滚轮 / 滚动键 / 触控 / 滚动条拖拽）把 transcript 自己滚回贴底阈值内。
- * 布局尺寸变化、程序化定位（包括布局收缩时浏览器把 scrollTop 钳制到底部）
- * 既不重开跟随，也不改变跟随态。
  */
 export function useChatTranscriptAutoScroll(
   bodyRef: RefObject<HTMLDivElement | null>,
-  messageCount: number,
-  eventCount?: number,
-  initialScrollTop?: number | null,
+  initialScrollTop: number | null = null,
   resetKey?: string | number | null,
-  streamRevision: string | null = null,
 ) {
   const stickToBottomRef = useRef(true)
   const lastScrollTopRef = useRef(0)
-  // 明确的用户滚动意图：只有它允许「恢复跟随」。布局收缩导致的原生 scrollTop
-  // 钳制、子区域阅读意图、程序化定位都不设置它。
-  const userScrollIntentRef = useRef(false)
-  // 已处理的增长签名：挂载/重绑时由初始定位 effect 记录，增长 effect 只对
-  // 之后的计数变化生效，绝不把挂载时恢复的历史位置拉回底部。
-  const lastGrowthSignatureRef = useRef<string | null>(null)
-  // 待执行的贴底帧：阅读意图会直接取消它，绝不留到下一帧再贴底。
-  const cancelPendingScrollRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    // resetKey 变化（Thread 重绑）时先重置 stick：即使容器此刻尚未挂载
-    // （重绑发生在 events 视图内），随后的内容增长也会重新贴底。
+    // resetKey 变化（Thread 重绑）时先重置跟随：即使容器此刻尚未挂载（重绑发生在
+    // Event 视图内），随后的几何变化也会重新贴底。
     stickToBottomRef.current = true
     const chatBody = bodyRef.current
     if (!chatBody) {
       return
     }
 
-    const onScroll = () => {
-      const scrollTop = chatBody.scrollTop
-      const movedTowardHistory = scrollTop < lastScrollTopRef.current
-      const reachedBottom = distanceFromBottom(chatBody) <= CHAT_BOTTOM_EPSILON_PX
-      const movedTowardBottom = scrollTop > lastScrollTopRef.current
-      if (movedTowardHistory) {
-        // 向上移动：回看历史，立即暂停跟随。
-        if (!reachedBottom) {
-          stickToBottomRef.current = false
-        }
-        // 位置变小却仍然到底：只可能是布局收缩时浏览器把 scrollTop 钳制到新的底部
-        // （卡片收起、图片尺寸变动）。这不是用户手势，既不重开跟随也不改变跟随态。
-        userScrollIntentRef.current = false
-      } else if (
-        userScrollIntentRef.current
-        && (reachedBottom || (movedTowardBottom && isNearBottom(chatBody)))
-      ) {
-        // 只有明确的用户滚动意图回到贴底阈值内才恢复跟随。
-        stickToBottomRef.current = true
-        userScrollIntentRef.current = false
+    // Avoid leaving a gesture armed when a wheel/key event did not scroll this viewport.
+    let intent: { direction: number; expiresAt: number } | null = null
+    const setFollowing = (following: boolean) => {
+      stickToBottomRef.current = following
+      chatBody.dataset.following = String(following)
+    }
+    let frame: number | null = null
+    const cancelPendingScroll = () => {
+      if (frame == null) {
+        return
       }
-      lastScrollTopRef.current = scrollTop
+      cancelAnimationFrame(frame)
+      frame = null
     }
-
-    // 明确的用户滚动意图接线：滚轮、滚动键、触控滚动，以及抓住原生滚动条拖动。
-    // 键盘滚动只在容器内（或其后代）按键时才算，避免全局快捷键误判。
-    const markUserScrollIntent = () => {
-      userScrollIntentRef.current = true
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (USER_SCROLL_KEYS.has(event.key)) {
-        markUserScrollIntent()
-      }
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      if (isScrollbarPointer(chatBody, event)) {
-        markUserScrollIntent()
-      }
-    }
-
-    // 首次进入（无保存位置）贴底；恢复历史位置时 stick 状态跟随该位置。
-    // 这里同步读取一次 scrollHeight，强制得到已经确定的布局。
-    if (initialScrollTop != null) {
-      chatBody.scrollTop = initialScrollTop
-      stickToBottomRef.current = isNearBottom(chatBody)
-    } else {
-      scrollToBottom(chatBody)
-    }
-    lastScrollTopRef.current = chatBody.scrollTop
-    userScrollIntentRef.current = false
-    chatBody.addEventListener('scroll', onScroll, { passive: true })
-    chatBody.addEventListener('wheel', markUserScrollIntent, { passive: true })
-    chatBody.addEventListener('touchstart', markUserScrollIntent, { passive: true })
-    chatBody.addEventListener('touchmove', markUserScrollIntent, { passive: true })
-    chatBody.addEventListener('keydown', onKeyDown)
-    chatBody.addEventListener('pointerdown', onPointerDown)
-    // 子只读区域的回看/交互意图：暂停跟随并撤销待执行的贴底帧；恢复只有
-    // 「用户自己用滚动意图把 transcript 滚回底部」一条路径。
-    const onReadingIntent = () => {
-      stickToBottomRef.current = false
-      // 用户正在读内容：作废尚未兑现的滚动意图，避免它稍后重开跟随。
-      userScrollIntentRef.current = false
-      cancelPendingScrollRef.current?.()
-      cancelPendingScrollRef.current = null
-    }
-    chatBody.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
-    // 初始定位由本 effect 完成；增长 effect 从下次计数变化开始生效。
-    lastGrowthSignatureRef.current = growthSignature(messageCount, eventCount)
-    return () => {
-      chatBody.removeEventListener('scroll', onScroll)
-      chatBody.removeEventListener('wheel', markUserScrollIntent)
-      chatBody.removeEventListener('touchstart', markUserScrollIntent)
-      chatBody.removeEventListener('touchmove', markUserScrollIntent)
-      chatBody.removeEventListener('keydown', onKeyDown)
-      chatBody.removeEventListener('pointerdown', onPointerDown)
-      chatBody.removeEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
-    }
-    // 初始定位只发生在挂载/重绑；计数变化由增长 effect 单独处理，
-    // 重跑本 effect 会把恢复的历史位置覆盖掉。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bodyRef, initialScrollTop, resetKey])
-
-  /**
-   * 显式信号触发的贴底：调度到布局完成后的下一帧执行，写入前再次确认用户仍在跟随
-   * （同一帧内的外层上滚或阅读意图会阻止它执行）。
-   */
-  const scheduleScrollToBottom = (chatBody: HTMLDivElement): (() => void) => {
-    cancelPendingScrollRef.current?.()
-    const cancel = afterLayout(() => {
-      cancelPendingScrollRef.current = null
+    // 布局后定位：执行前再确认跟随，同一帧内的上滚可以作废它。
+    const scrollToBottom = () => {
+      frame = null
       if (!stickToBottomRef.current || bodyRef.current !== chatBody) {
         return
       }
-      scrollToBottom(chatBody)
+      chatBody.scrollTop = chatBody.scrollHeight
+      // 自身写入后同步基线：随后的 scroll 事件位置差为 0，不会被误读成用户手势。
       lastScrollTopRef.current = chatBody.scrollTop
-    })
-    cancelPendingScrollRef.current = cancel
-    return cancel
-  }
+    }
+    const scheduleScrollToBottom = () => {
+      if (frame == null && stickToBottomRef.current) {
+        frame = requestAnimationFrame(scrollToBottom)
+      }
+    }
 
-  useEffect(() => {
-    const chatBody = bodyRef.current
-    if (!chatBody || !stickToBottomRef.current) {
-      return
+    const onScroll = () => {
+      const scrollTop = chatBody.scrollTop
+      const previous = lastScrollTopRef.current
+      lastScrollTopRef.current = scrollTop
+      if (scrollTop === previous) {
+        return
+      }
+      const direction = Math.sign(scrollTop - previous)
+      if (!intent || performance.now() > intent.expiresAt
+        || (intent.direction !== 0 && intent.direction !== direction)) {
+        return
+      }
+      const nearBottom = distanceFromBottom(chatBody) <= FOLLOW_THRESHOLD_PX
+      if (direction < 0 && !nearBottom) {
+        setFollowing(false)
+        cancelPendingScroll()
+      } else if (direction > 0 && nearBottom) {
+        setFollowing(true)
+      }
     }
-    const signature = growthSignature(messageCount, eventCount)
-    if (lastGrowthSignatureRef.current === signature) {
-      return
-    }
-    lastGrowthSignatureRef.current = signature
-    return scheduleScrollToBottom(chatBody)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bodyRef, eventCount, messageCount])
 
-  // 流式正文更新：只有显式 stream revision 变化才贴底。模型/工具文本更新是唯一
-  // 信号；媒体加载、图片解码、懒渲染与用户交互都不参与。
-  useEffect(() => {
-    const chatBody = bodyRef.current
-    if (!chatBody || streamRevision == null || !stickToBottomRef.current) {
-      return
+    const markUserScrollIntent = (direction: number) => {
+      intent = { direction, expiresAt: performance.now() + 250 }
+      if (direction <= 0) {
+        cancelPendingScroll()
+      }
     }
-    return scheduleScrollToBottom(chatBody)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bodyRef, streamRevision])
+    const onTouchMove = () => markUserScrollIntent(0)
+    const onScrollEnd = () => { intent = null }
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0) {
+        markUserScrollIntent(Math.sign(event.deltaY))
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!USER_SCROLL_KEYS.has(event.key)) {
+        return
+      }
+      const towardHistory = TOWARD_HISTORY_KEYS.has(event.key)
+        || (event.shiftKey && (event.key === ' ' || event.key === 'Spacebar'))
+      markUserScrollIntent(towardHistory ? -1 : 1)
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (isScrollbarPointer(chatBody, event)) {
+        markUserScrollIntent(0)
+      }
+    }
+
+    // 首次进入（无保存位置）贴底；恢复历史位置时跟随状态由该位置按阈值决定。
+    // 这里同步读取一次 scrollHeight，强制得到已经确定的布局。
+    if (initialScrollTop != null) {
+      chatBody.scrollTop = initialScrollTop
+      setFollowing(distanceFromBottom(chatBody) <= FOLLOW_THRESHOLD_PX)
+    } else {
+      setFollowing(true)
+      chatBody.scrollTop = chatBody.scrollHeight
+    }
+    lastScrollTopRef.current = chatBody.scrollTop
+    chatBody.addEventListener('scroll', onScroll, { passive: true })
+    chatBody.addEventListener('wheel', onWheel, { passive: true })
+    chatBody.addEventListener('touchmove', onTouchMove, { passive: true })
+    chatBody.addEventListener('scrollend', onScrollEnd)
+    chatBody.addEventListener('keydown', onKeyDown)
+    chatBody.addEventListener('pointerdown', onPointerDown)
+
+    // 几何信号：视口自身的尺寸变化（分屏、窗口缩放）与内容盒子的尺寸变化
+    // （正文流式增长、卡片变高、媒体落地）都只表示「内容变了」，是否贴底由
+    // 当前跟随状态决定。
+    const resizeObserver = new ResizeObserver(scheduleScrollToBottom)
+    const observedElements = new Set<Element>()
+    const observe = (element: Element) => {
+      if (observedElements.has(element)) {
+        return
+      }
+      observedElements.add(element)
+      resizeObserver.observe(element)
+    }
+    const syncObservedElements = () => {
+      observe(chatBody)
+      for (const child of Array.from(chatBody.children)) {
+        observe(child)
+      }
+      for (const element of observedElements) {
+        if (element === chatBody || chatBody.contains(element)) {
+          continue
+        }
+        observedElements.delete(element)
+        resizeObserver.unobserve(element)
+      }
+      scheduleScrollToBottom()
+    }
+    // 直接子节点增删（新事件行、加载/错误状态切换）不一定改变已观察盒子的尺寸，
+    // 因此同时重新挂接观察并调度一次定位。
+    const childListObserver = new MutationObserver(syncObservedElements)
+    syncObservedElements()
+    childListObserver.observe(chatBody, { childList: true })
+
+    return () => {
+      cancelPendingScroll()
+      resizeObserver.disconnect()
+      childListObserver.disconnect()
+      observedElements.clear()
+      chatBody.removeEventListener('scroll', onScroll)
+      chatBody.removeEventListener('wheel', onWheel)
+      chatBody.removeEventListener('touchmove', onTouchMove)
+      chatBody.removeEventListener('scrollend', onScrollEnd)
+      delete chatBody.dataset.following
+      chatBody.removeEventListener('keydown', onKeyDown)
+      chatBody.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [bodyRef, initialScrollTop, resetKey])
 }

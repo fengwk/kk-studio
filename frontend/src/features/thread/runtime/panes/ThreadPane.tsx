@@ -115,7 +115,6 @@ export function ThreadPane({
     bodyRef: projection.bodyRef,
     initialScrollTop: views.initialConversationScrollTop,
     resetKey: projection.threadId,
-    eventCount: projection.entries.length + projection.queuedCommands.length,
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: workPhase.kind !== 'none',

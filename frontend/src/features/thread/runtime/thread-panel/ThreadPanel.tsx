@@ -31,10 +31,8 @@ export interface ThreadPanelTranscriptInput {
   bodyRef: RefObject<HTMLDivElement | null>
   /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
   initialScrollTop?: number | null
-  /** 变化时重置 stick 并重新贴底（Thread 重绑后新线程首次进入）。 */
+  /** 变化时重置跟随并重新贴底（Thread 重绑后新线程首次进入）。 */
   resetKey?: string | number | null
-  /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
-  eventCount?: number
 }
 
 /**
@@ -137,7 +135,6 @@ export function ThreadPanel({ transcript, mainView, controls, activity, slots, h
             bodyRef={transcript.bodyRef}
             initialScrollTop={transcript.initialScrollTop}
             resetKey={transcript.resetKey}
-            eventCount={transcript.eventCount}
           />
         )}
         {mainView?.debug == null ? <ThreadWidgetStack

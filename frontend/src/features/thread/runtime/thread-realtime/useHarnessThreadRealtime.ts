@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import type { RealtimeFrameSchedulerOptions } from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import {
+  snapshotModelStream,
   type RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
 import {
@@ -192,7 +193,14 @@ export function useHarnessThreadRealtime(
     clearOverlays,
   })
 
-  const visibleModelStream = modelStream?.threadId === threadId ? modelStream : null
+  const visibleModelStream = useMemo(() => {
+    if (activeAssistantOutput?.status === 'SUCCEEDED') {
+      // Use the successful snapshot on the same render as the Entries, before reconciliation.
+      return snapshotModelStream(threadId, activeAssistantOutput, modelStream)
+    }
+    return modelStream?.threadId === threadId && modelStream.invocationId === activeAssistantOutput?.generationId
+      ? modelStream : null
+  }, [activeAssistantOutput, modelStream, threadId])
   // toolStreams 可能仍持有上一个 Thread 的条目；过滤结果按输入身份缓存，使
   // 未变化时下游 timeline/events 的 useMemo 与 effect 保持稳定引用。
   const visibleToolStreams = useMemo(

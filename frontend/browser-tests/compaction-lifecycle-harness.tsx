@@ -9,7 +9,6 @@ import { MessageList } from '@/features/thread/runtime/thread-panel/messages/Mes
 import { CompactionActionsContext } from '@/features/thread/runtime/thread-panel/compaction-actions-context'
 import { CompactionBranchView } from '@/features/thread/runtime/panes/CompactionBranchView'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
-import { transcriptStreamRevision } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -133,14 +132,7 @@ function TranscriptRoute() {
   const [retries, setRetries] = useState(0)
   const bodyRef = useRef<HTMLDivElement>(null)
   const messages = buildThreadTimeline(HARNESS_ENTRIES, [], []).messages
-  useChatTranscriptAutoScroll(
-    bodyRef,
-    messages.length,
-    HARNESS_ENTRIES.length,
-    undefined,
-    'compaction-lifecycle-harness',
-    transcriptStreamRevision(messages),
-  )
+  useChatTranscriptAutoScroll(bodyRef, undefined, 'compaction-lifecycle-harness')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <output id="retry-count" data-testid="retry-count" hidden>{retries}</output>
