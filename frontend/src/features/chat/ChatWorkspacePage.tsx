@@ -39,7 +39,7 @@ interface ChatWorkspaceContentProps {
 }
 
 /**
- * Chat workspace 拥有 1..9 个目标 pane。deep-link 与新建分支草稿都通过同一条
+ * Chat workspace 拥有 1..8 个目标 pane。deep-link 与新建分支草稿都通过同一条
  * `initialTarget` + `onTargetConsumed` 队列落到目标 pane，绝不由一个 pane 直接写
  * 另一个 pane 的存储。这里只做编排：状态、命名流程、IDE 开关与呈现都在各自 hook。
  */
@@ -69,7 +69,7 @@ function ChatWorkspaceContent({ chat, agents, environments }: ChatWorkspaceConte
   const mountedPanes = paneState.paneState.panes.filter(
     (pane) => visiblePaneIds.has(pane.id) || paneReports.paneReports[pane.id]?.pending,
   )
-  const destinations = paneState.paneState.panes.slice(0, 9).map((pane) => {
+  const destinations = paneState.paneState.panes.map((pane) => {
     const report = paneReports.paneReports[pane.id]
     return { value: pane.id, label: destinationLabel(pane.id, report, t) }
   })

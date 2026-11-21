@@ -20,7 +20,6 @@ export type ChatLayout =
   | 'grid-6'
   | 'grid-7'
   | 'grid-8'
-  | 'grid-9'
 
 export interface ChatPane {
   id: string
@@ -55,10 +54,9 @@ const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   'grid-6': 6,
   'grid-7': 7,
   'grid-8': 8,
-  'grid-9': 9,
 }
 
-const CHAT_PANE_COUNT = 9
+const CHAT_PANE_COUNT = 8
 
 /**
  * 本 tab 的 sessionStorage 与全局最后状态的持久化键。
@@ -258,18 +256,18 @@ export function visibleChatPanes(state: ChatPaneState): ChatPane[] {
   return state.panes.slice(0, CHAT_LAYOUT_CAPACITY[state.layout])
 }
 
-/** 面板序号（1 起）。id 不是 `pane-N` 时返回 null（未知位置）。 */
+/** 返回规范槽位的序号（1–8）；其他 id 不是有效目的地。 */
 export function chatPanePosition(paneId: string): number | null {
-  const matched = /^pane-(\d+)$/.exec(paneId)
+  const matched = /^pane-([1-9])$/.exec(paneId)
   if (matched == null) {
     return null
   }
   const position = Number(matched[1])
-  return Number.isInteger(position) && position >= 1 ? position : null
+  return position <= CHAT_PANE_COUNT ? position : null
 }
 
 /**
- * 容纳 `count` 个面板的最小布局；count 超出 9 时取 grid-9。
+ * 容纳 `count` 个面板的最小布局；count 超出 8 时取 grid-8。
  *
  * 只有 `revealChatPane` 调用它；下界钳制（count ≤ 0）没有生产入口可达，
  * 因此保留导出，让测试能固定这条边界。

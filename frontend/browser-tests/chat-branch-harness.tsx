@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
 /**
  * 新建分支真实浏览器基座。
  *
- * 挂载真实 `ChatWorkspacePage`（1..9 目标路由、顶栏面包屑、历史树与回合 footer 入口），
+ * 挂载真实 `ChatWorkspacePage`（1..8 目标路由、顶栏面包屑、历史树与回合 footer 入口），
  * 后端全部由 Playwright `page.route` 提供；不启动后端、模型或任何主机服务。
  *
  * `?scenario=` 选择入口：

@@ -18,8 +18,8 @@ async function selectLayoutOption(page: Page, value: string, label: string) {
   await expect(trigger).toHaveAttribute('data-value', value)
 }
 
-test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () => {
-  test('Layout switcher supports 1-9 panes with accurate CSS grid bounding boxes and responsive stacking', async ({
+test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () => {
+  test('Layout switcher supports 1-8 panes with accurate CSS grid bounding boxes and responsive stacking', async ({
     page,
   }) => {
     // 宽屏视口 1920x1080
@@ -89,22 +89,27 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     const rightCol7CombinedHeight = (box5_g7.y + box5_g7.height) - box2_g7.y
     expect(Math.abs(box1_g7.height - rightCol7CombinedHeight)).toBeLessThanOrEqual(4)
 
-    // 4. 通过组件下拉切换到 9 布局：3x3 均匀网格
-    await selectLayoutOption(page, 'grid-9', '9')
+    // 4. 通过组件下拉切换到 8 布局：4x2 均匀网格（第 5 个 pane 落在第二行首列）
+    await selectLayoutOption(page, 'grid-8', '8')
 
     const pane8 = page.locator('[data-testid="pane-item-8"]')
-    const pane9 = page.locator('[data-testid="pane-item-9"]')
     await expect(pane8).toBeVisible()
-    await expect(pane9).toBeVisible()
+    // 槽位只有 1-8：不渲染第 9 个 pane。
+    await expect(page.locator('[data-testid="pane-item-9"]')).toHaveCount(0)
 
-    const box1_g9 = (await pane1.boundingBox())!
-    const box2_g9 = (await pane2.boundingBox())!
-    const box9_g9 = (await pane9.boundingBox())!
+    const box1_g8 = (await pane1.boundingBox())!
+    const box2_g8 = (await pane2.boundingBox())!
+    const box5_g8 = (await pane5.boundingBox())!
+    const box8_g8 = (await pane8.boundingBox())!
 
-    expect(Math.abs(box1_g9.width - box2_g9.width)).toBeLessThanOrEqual(2)
-    expect(Math.abs(box1_g9.height - box2_g9.height)).toBeLessThanOrEqual(2)
-    expect(box9_g9.x).toBeGreaterThan(box1_g9.x)
-    expect(box9_g9.y).toBeGreaterThan(box1_g9.y)
+    // 同行等宽等高，第二行与第一行同样对齐首列
+    expect(Math.abs(box1_g8.width - box2_g8.width)).toBeLessThanOrEqual(2)
+    expect(Math.abs(box1_g8.height - box2_g8.height)).toBeLessThanOrEqual(2)
+    expect(Math.abs(box1_g8.height - box5_g8.height)).toBeLessThanOrEqual(2)
+    expect(Math.abs(box1_g8.x - box5_g8.x)).toBeLessThanOrEqual(2)
+    expect(box5_g8.y).toBeGreaterThan(box1_g8.y)
+    expect(box8_g8.x).toBeGreaterThan(box5_g8.x)
+    expect(Math.abs(box8_g8.y - box5_g8.y)).toBeLessThanOrEqual(2)
 
     // 5. 窄屏自适应测试 (768px): 切换为单列纵向排列，取消跨行
     await page.setViewportSize({ width: 768, height: 900 })
@@ -553,10 +558,10 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(attachmentsMarginTop).toBe('0px')
   })
 
-  test('Compact layout selector: exact 80px menu width, 28px option min-height, all 9 items fit without scrollbar when height >= 350, scrollable on ultra-short screen, 320px non-overflowing', async ({
+  test('Compact layout selector: exact 80px menu width, 28px option min-height, all 8 items fit without scrollbar when height >= 350, scrollable on ultra-short screen, 320px non-overflowing', async ({
     page,
   }) => {
-    // 1. 验证高度 >= 350px (例如 500x350): 菜单宽度严格为 80px，option 最小高度为 28px，全部 9 项无滚动条
+    // 1. 验证高度 >= 350px (例如 500x350): 菜单宽度严格为 80px，option 最小高度为 28px，全部 8 项无滚动条
     await page.setViewportSize({ width: 500, height: 350 })
     await page.goto('/browser-tests/chat-layout-harness.html')
 
@@ -569,15 +574,15 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     // 宽度必须严格等于 80px (误差 <= 1px，避免 148px)
     expect(Math.abs(menuBox.width - 80)).toBeLessThanOrEqual(1)
 
-    // 验证所有 9 个选项的 min-height 且高度 >= 28px
+    // 验证所有 8 个选项的 min-height 且高度 >= 28px
     const options = listbox.locator('.ui-select-option')
-    await expect(options).toHaveCount(9)
-    for (let i = 0; i < 9; i++) {
+    await expect(options).toHaveCount(8)
+    for (let i = 0; i < 8; i++) {
       const optBox = (await options.nth(i).boundingBox())!
       expect(optBox.height).toBeGreaterThanOrEqual(27.5)
     }
 
-    // 验证 9 项不需要滚动：scrollHeight <= clientHeight + 1
+    // 验证 8 项不需要滚动：scrollHeight <= clientHeight + 1
     const scrollInfo = await listbox.evaluate((el) => ({
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,

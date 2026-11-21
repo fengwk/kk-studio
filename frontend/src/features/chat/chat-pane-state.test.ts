@@ -59,12 +59,12 @@ function loadStoredPaneState(snapshot: unknown): ChatPaneState {
 }
 
 describe('Chat tab presentation storage', () => {
-  it('creates nine canonical pane slots with safe draft targets', () => {
+  it('creates eight canonical pane slots with safe draft targets', () => {
     const state = createDefaultChatPaneState()
     expect(state.layout).toBe('single')
     expect(state.focusedPaneId).toBe('pane-1')
-    expect(state.panes).toHaveLength(9)
-    expect(state.panes[8]).toEqual({ id: 'pane-9', target: { kind: 'NEW_SESSION_DRAFT' } })
+    expect(state.panes).toHaveLength(8)
+    expect(state.panes[7]).toEqual({ id: 'pane-8', target: { kind: 'NEW_SESSION_DRAFT' } })
   })
 
   it('initializes from session, then last state, then defaults; only session is written', () => {
@@ -148,8 +148,10 @@ describe('Chat tab presentation storage', () => {
     const malformed: unknown[] = [
       { ...base, extra: true },
       { ...base, layout: 'tiles-16' },
+      { ...base, layout: 'grid-9' },
+      { ...base, panes: [...base.panes, { ...base.panes[0], id: 'pane-9' }] },
       { ...base, focusedPaneId: 'pane-9' },
-      { ...base, panes: base.panes.slice(0, 8) },
+      { ...base, panes: base.panes.slice(0, 7) },
       {
         ...base,
         panes: [{ ...base.panes[0], id: 'pane-x' }, ...base.panes.slice(1)],
@@ -265,9 +267,10 @@ describe('Chat pane layout helpers', () => {
     expect(focusPane(state, 'pane-4')).toBe(state)
   })
 
-  it('maps pane ids to positions 1..9 and rejects unknown ids', () => {
+  it('maps pane ids to positions 1..8 and rejects unknown ids', () => {
     expect(chatPanePosition('pane-1')).toBe(1)
-    expect(chatPanePosition('pane-9')).toBe(9)
+    expect(chatPanePosition('pane-8')).toBe(8)
+    expect(chatPanePosition('pane-9')).toBeNull()
     expect(chatPanePosition('pane-0')).toBeNull()
     expect(chatPanePosition('pane-x')).toBeNull()
     expect(chatPanePosition('thread-1')).toBeNull()
@@ -278,9 +281,9 @@ describe('Chat pane layout helpers', () => {
     expect(chatLayoutForPaneCount(2)).toBe('split-2')
     expect(chatLayoutForPaneCount(3)).toBe('split-3')
     expect(chatLayoutForPaneCount(4)).toBe('grid-4')
-    expect(chatLayoutForPaneCount(9)).toBe('grid-9')
+    expect(chatLayoutForPaneCount(8)).toBe('grid-8')
     expect(chatLayoutForPaneCount(0)).toBe('single')
-    expect(chatLayoutForPaneCount(12)).toBe('grid-9')
+    expect(chatLayoutForPaneCount(12)).toBe('grid-8')
   })
 
   it('reveals a hidden destination pane by expanding the layout', () => {
@@ -296,8 +299,9 @@ describe('Chat pane layout helpers', () => {
       'pane-5',
     ])
     expect(revealChatPane(revealed, 'pane-2')).toBe(revealed)
-    const nine = revealChatPane(revealed, 'pane-9')
-    expect(nine.layout).toBe('grid-9')
-    expect(revealChatPane(nine, 'unknown')).toBe(nine)
+    const eight = revealChatPane(revealed, 'pane-8')
+    expect(eight.layout).toBe('grid-8')
+    expect(revealChatPane(revealed, 'pane-9')).toBe(revealed)
+    expect(revealChatPane(eight, 'unknown')).toBe(eight)
   })
 })

@@ -195,7 +195,7 @@ Entry 列表按 keyset 分页传输；控制层在打开历史树或草稿历史
 
 命名分支有两个等价入口并汇入同一次命名与目标选择：`/history` 面板底部对选中行的“从此处分支”，
 以及对话中已关闭 TURN_END 回合 footer 的分支按钮。弹窗要求一个按后端规则规范化的名称，
-并选择目标位置 1..9；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
+并选择目标位置 1..8；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
 焦点随之移动），名称是创建 target 的必需事实，此处不预创建 Thread。目标有在途操作时拒绝路由，
 已有未发送草稿时要求二次确认覆盖，用户输入的本地草稿按 pane 作用域持久化。
 面板底部另提供“从此处新建会话”（`FORK_SESSION_DRAFT`）：把选中 ROOT 或已关闭 TURN_END 处的有效上下文
@@ -223,6 +223,9 @@ queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明�
 已计划但尚未执行的 Composer 聚焦也在 pane 失去 workspace 焦点时取消。
 pane 与布局的存储键分别以 owner 身份和 pane 隔离，
 ISSUE_AGENT 与独立地址不落 Chat target 存储。
+本地快照只保存布局与各 pane 的视图绑定；与当前槽位或格式不兼容的旧快照整份丢弃并回到默认状态，
+不迁移其中的布局与目标。服务端已保存的对话不随之丢失：空白 pane 用 `/thread` 选择既有 Session/Thread
+重开，`/history` 继续查看并延续该对话的完整历史。
 
 PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、

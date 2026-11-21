@@ -11,7 +11,6 @@ const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [
   { value: 'grid-6', label: '6' },
   { value: 'grid-7', label: '7' },
   { value: 'grid-8', label: '8' },
-  { value: 'grid-9', label: '9' },
 ]
 
 interface ChatLayoutSelectorProps {
