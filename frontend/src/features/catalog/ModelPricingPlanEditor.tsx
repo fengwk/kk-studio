@@ -12,8 +12,8 @@ import { Select } from '@/shared/ui/controls/Select'
 import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
 import { PricingTtlInputs } from './PricingTtlInputs'
 import {
-  clonePricingDefinitionDraft, createPricingDraftKey, findPricingConflicts, hasConfiguredPricing,
-  normalizePricingDraft, splitCrossMidnightPeriod,
+  clonePricingDefinitionDraft, createPricingDraftKey, findPricingConflicts, findPricingRangeOverrideIssues,
+  hasConfiguredPricing, normalizePricingDraft, splitCrossMidnightPeriod,
   type ModelPricingDraft, type PricingDefinitionDraft, type PricingFactorsDraft,
   type PricingRateField, type TimePeriodDraft,
 } from './model-pricing-draft'
@@ -111,19 +111,20 @@ export function ModelPricingPlanEditor({ value, onChange, pricingImportNotice }:
   const [newDate, setNewDate] = useState<string | null>(null)
   const sectionRef = useRef<HTMLElement>(null)
   const duplicateDate = (date: string, except?: string) => changes.some((change) => change.from === date && change.draftKey !== except)
-  const conflictPlan = [
+  const invalidPlan = [
     { draftKey: BASE, definition: value.definition }, ...value.changes,
-  ].find(({ definition }) => findPricingConflicts(definition).length)?.draftKey
+  ].find(({ definition }) => findPricingConflicts(definition).length > 0
+    || findPricingRangeOverrideIssues(definition).length > 0)?.draftKey
 
   useEffect(() => {
     const form = sectionRef.current?.closest('form')
-    if (!form || !conflictPlan) return
-    // The enclosing form still owns validation and saving. Reveal the conflicting plan
-    // before its existing first-error scroll runs, including conflicts in another plan.
-    const revealConflict = () => setSelection(conflictPlan)
-    form.addEventListener('submit', revealConflict, true)
-    return () => form.removeEventListener('submit', revealConflict, true)
-  }, [conflictPlan])
+    if (!form || !invalidPlan) return
+    // The enclosing form still owns validation and saving. Reveal the plan that needs attention
+    // before its existing first-error scroll runs, including rows in another plan.
+    const revealInvalidPlan = () => setSelection(invalidPlan)
+    form.addEventListener('submit', revealInvalidPlan, true)
+    return () => form.removeEventListener('submit', revealInvalidPlan, true)
+  }, [invalidPlan])
 
   function updateDefinition(definition: PricingDefinitionDraft) {
     onChange(selected ? { ...value, changes: value.changes.map((change) => change === selected ? { ...change, definition } : change) }
@@ -198,6 +199,7 @@ function DefinitionEditor({ definition, configured, onChange }: {
   const { t } = useI18n()
   const { base, inputTokenRanges, serviceTiers, timePeriods } = definition
   const conflicts = findPricingConflicts(definition)
+  const overrideIssues = findPricingRangeOverrideIssues(definition)
   const [newRule, setNewRule] = useState('')
   const inherit = t('ai.catalog.form.pricingTtlInherit')
   const required = t('ai.catalog.form.pricingRateRequired')
@@ -216,6 +218,7 @@ function DefinitionEditor({ definition, configured, onChange }: {
       .flatMap((conflict) => conflict.keys.filter((other) => other !== key))
       .map((other) => definition[group].findIndex((row) => row.draftKey === other) + 1)
     const reason = group === 'inputTokenRanges' ? 'pricingOverlapTokens' : group === 'serviceTiers' ? 'pricingDuplicateTier' : 'pricingOverlapTime'
+    const overrideRequired = group === 'inputTokenRanges' && overrideIssues.includes(key)
     return (
       <div key={key} className="pricing-plan-row" data-conflict={peerRows.length > 0 || undefined}>
         <details className="pricing-rule-details" open={newRule === key || undefined}>
@@ -226,6 +229,7 @@ function DefinitionEditor({ definition, configured, onChange }: {
           </div>
         </details>
         {!!peerRows.length && <span className="field-error" role="alert">{t(`ai.catalog.form.${reason}`, { rows: peerRows.join(', ') })}</span>}
+        {overrideRequired && <span className="field-error" role="alert">{t('ai.catalog.form.pricingRangeOverrideRequired')}</span>}
       </div>
     )
   }

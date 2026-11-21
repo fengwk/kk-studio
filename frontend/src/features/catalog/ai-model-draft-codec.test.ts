@@ -383,6 +383,10 @@ describe('ai-model-draft-codec', () => {
     base.pricing.definition.base.cacheRead = '0.1'
     base.pricing.definition.base.cacheWriteByTtl = [{ draftKey: 'ttl', seconds: '0', rate: '1' }]
     expect(() => buildModelConfig(base)).toThrow(/cacheWriteByTtl keys must be positive integer seconds/)
+    // 一个费率都不覆盖的档位在保存路径上同样本地失败，不再等到服务端拒绝。
+    base.pricing.definition.base.cacheWriteByTtl = []
+    base.pricing.definition.inputTokenRanges[0]!.rates = {}
+    expect(() => buildModelConfig(base)).toThrow(/must override at least one fee rate/)
   })
 
   /** 缺失的 model 不会凭空生成 Variant ID。 */

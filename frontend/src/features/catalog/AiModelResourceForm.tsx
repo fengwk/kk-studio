@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
@@ -9,7 +9,7 @@ import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
 import { getModelCapabilities } from '@/features/catalog/ai-model-capabilities'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
-import type { ModelCapabilitiesDTO } from '@/shared/api/generated/contracts'
+import type { ModelCapabilitiesDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 import {
   ModelAbilityToggles,
   ModelInputModalityField,
@@ -26,7 +26,6 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { useI18n } from '@/shared/i18n'
 import { RemoteModelIdPicker } from '@/features/catalog/AiRemoteModelIdPicker'
-import type { ProviderDTO } from '@/shared/api/generated/contracts'
 import './capability-picker.css'
 import './catalog-form-layout.css'
 import './ai-model-resource-form.css'
@@ -50,54 +49,49 @@ export function ModelForm({
   const [catalogOpen, setCatalogOpen] = useState(false)
   const variantOptions = variantOptionsFromDraft(draft.variants)
   const provider = providerOptionsFor(providers, draft, mode, t('ai.catalog.form.unavailable'))
-  const [modelCapabilities, setModelCapabilities] = useState<ModelCapabilitiesDTO | null>(null)
-  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false)
-  const [capabilitiesError, setCapabilitiesError] = useState<string | undefined>()
-  const draftRef = useRef(draft)
-  const onChangeRef = useRef(onChange)
-  useLayoutEffect(() => {
-    draftRef.current = draft
-    onChangeRef.current = onChange
-  }, [draft, onChange])
+  const providerName = draft.providerName.trim()
+  const modelId = draft.modelId.trim()
+  const activeProvider = providers.find((item) => item.name === providerName)
+  const [attempt, setAttempt] = useState(0)
+  const requestKey = activeProvider && modelId ? JSON.stringify([
+    providerName, activeProvider.createdAt, activeProvider.version,
+    activeProvider.providerType, activeProvider.baseUrl, modelId, attempt,
+  ]) : null
+  const [result, setResult] = useState<({ key: string } & (
+    { capabilities: ModelCapabilitiesDTO; error?: never } | { capabilities?: never; error: string }
+  )) | null>(null)
+  const currentResult = result?.key === requestKey ? result : null
+  const modelCapabilities = currentResult?.capabilities
 
-  useEffect(() => {
-    const { providerName, modelId } = draftRef.current
-    if (!providerName.trim() || !modelId.trim()) {
-      setModelCapabilities(null)
-      setCapabilitiesLoading(false)
-      setCapabilitiesError(undefined)
-      return
-    }
+  // Invalidate in the same commit as the identity change, including when the model ID is cleared.
+  useLayoutEffect(() => {
+    setResult(null)
+    if (!requestKey) return
     const controller = new AbortController()
-    setModelCapabilities(null)
-    setCapabilitiesLoading(true)
-    setCapabilitiesError(undefined)
-    const isCurrent = () => !controller.signal.aborted
-      && draftRef.current.providerName === providerName
-      && draftRef.current.modelId === modelId
-    void getModelCapabilities(providerName.trim(), modelId.trim(), controller.signal).then((capabilities) => {
-      if (!isCurrent()) return
-      setModelCapabilities(capabilities)
-      const defaultRetention = capabilities.defaultPromptCacheRetention
-      if (mode === 'create' && defaultRetention != null) {
-        const current = draftRef.current
-        const supported = new Set(capabilities.promptCacheOptions.map((option) => option.retention))
-        const variants = current.variants.map((variant) =>
-          variant.promptCacheRetention === '' || !supported.has(variant.promptCacheRetention)
-            ? { ...variant, promptCacheRetention: defaultRetention }
-            : variant,
-        )
-        if (variants.some((variant, index) => variant !== current.variants[index])) {
-          onChangeRef.current({ ...current, variants })
-        }
-      }
+    void getModelCapabilities(providerName, modelId, controller.signal).then((capabilities) => {
+      if (!controller.signal.aborted) setResult({ key: requestKey, capabilities })
     }).catch((error: unknown) => {
-      if (isCurrent()) setCapabilitiesError(toUserFacingErrorMessage(error))
-    }).finally(() => {
-      if (isCurrent()) setCapabilitiesLoading(false)
+      if (!controller.signal.aborted) setResult({ key: requestKey, error: toUserFacingErrorMessage(error) })
     })
     return () => controller.abort()
-  }, [draft.providerName, draft.modelId, mode])
+  }, [requestKey, providerName, modelId])
+
+  useLayoutEffect(() => {
+    if (!modelCapabilities || modelCapabilities.defaultPromptCacheRetention == null) return
+    const defaultRetention = modelCapabilities.defaultPromptCacheRetention
+    const supported = new Set(modelCapabilities.promptCacheOptions.map((option) => option.retention))
+    const variants = draft.variants.map((variant) => {
+      const retention = variant.promptCacheRetention
+      // Edit mode only initializes new, unset variants; stored selections need an explicit change.
+      const needsDefault = retention === '' || (mode === 'create' && !supported.has(retention))
+      return needsDefault && retention !== defaultRetention
+        ? { ...variant, promptCacheRetention: defaultRetention }
+        : variant
+    })
+    if (variants.some((variant, index) => variant !== draft.variants[index])) {
+      onChange({ ...draft, variants })
+    }
+  }, [modelCapabilities, draft, mode, onChange])
   const defaultVariant = selectedDefaultVariant(draft)
 
   /** 新建时 Name 跟随 Model ID，直到用户单独编辑 Name。 */
@@ -234,8 +228,9 @@ export function ModelForm({
             defaultVariant={defaultVariant}
             reasoning={draft.reasoning}
             capabilities={modelCapabilities}
-            capabilitiesLoading={capabilitiesLoading}
-            capabilitiesError={capabilitiesError}
+            capabilitiesLoading={requestKey !== null && !currentResult}
+            capabilitiesError={currentResult?.error}
+            onRetryCapabilities={() => setAttempt((value) => value + 1)}
             onChange={(nextVariants, preferred) =>
               onChange({ ...draft, ...variantSelection(draft, nextVariants, preferred) })
             }
