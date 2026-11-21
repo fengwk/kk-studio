@@ -7,6 +7,8 @@ import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { ApplicationEventConnectionState } from '@/shared/app-events/connection'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { CANONICAL_POSITIVE_DECIMAL } from '@/features/environment/ide/ide-decimal'
 import { isIdeDirectory } from '@/features/environment/ide/ide-tab-state'
 import { isSameBinding, type IdeViewState } from '@/features/environment/ide/ide-view-state'
 import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
@@ -53,6 +55,13 @@ const COMMAND_MESSAGES: Record<string, TranslationKey> = {
   'close-result-unknown': 'ai.ide.commandResultUnknown',
   'close-control-unavailable': 'ai.ide.closeControlUnavailable',
   'close-failed': 'ai.ide.error',
+}
+
+// 恢复或清理失败不一定丢失绑定；仍可用该绑定显式关闭标签。
+function canCloseView(view: IdeViewState | undefined): boolean {
+  return (view?.status === 'ready' || view?.status === 'error')
+    && view.bindingEpoch != null && CANONICAL_POSITIVE_DECIMAL.test(view.bindingEpoch)
+    && isCanonicalUuid(view.daemonInstanceId)
 }
 
 /** 收起和切换标签只改变可见性，不卸载已有的 Workbench。 */
@@ -126,7 +135,7 @@ export function IdeOverlayPanel({
 
   const forceCloseViewId = isOpen && forceClose != null
     && forceClose.binding.environmentId === selectedEnvironmentId
-    && views[forceClose.binding.viewId]?.status === 'ready'
+    && canCloseView(views[forceClose.binding.viewId])
     && isSameBinding(views[forceClose.binding.viewId], forceClose.binding) ? forceClose.binding.viewId : null
 
   async function handleClose(view: IdeViewState, discard = false) {
@@ -143,8 +152,9 @@ export function IdeOverlayPanel({
       if (selectionRef.current !== selection) {
         return
       }
-      if (!result.ok && result.requiresForceConfirmation && view.bindingEpoch != null
-        && viewsRef.current[viewId]?.status === 'ready' && isSameBinding(viewsRef.current[viewId], view)) {
+      const currentView = viewsRef.current[viewId]
+      if (!result.ok && result.requiresForceConfirmation
+        && canCloseView(currentView) && isSameBinding(currentView, view)) {
         setForceClose({
           binding: view,
           reason: result.message === 'close-control-unavailable' ? 'control-unavailable' : 'unknown',
@@ -270,7 +280,7 @@ export function IdeOverlayPanel({
                   size="compact"
                   onClick={() => { void handleClose(view) }}
                   loading={view.closeInFlight === true}
-                  disabled={view.status !== 'ready' || view.bindingEpoch == null}
+                  disabled={!canCloseView(view)}
                   aria-label={`${t('ai.ide.close')} · ${label}`}
                   title={t('ai.ide.close')}
                   data-testid="ide-close-btn"

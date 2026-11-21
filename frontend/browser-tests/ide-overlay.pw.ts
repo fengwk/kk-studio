@@ -931,6 +931,31 @@ test.describe('Chat-scoped persistent IDE host', () => {
     expect(state.closeCalls).toHaveLength(1)
   })
 
+  test('explicitly closes a bound cleanup error after refresh', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    const viewId = await openA(page, state)
+    const { bindingEpoch, daemonInstanceId } = state.views[viewId]!
+    // 刷新后纯读返回 CLOSING，恢复的标签没有可操作的 Workbench。
+    state.views[viewId]!.state = 'CLOSING'
+    await page.reload()
+    await expect(page.getByTestId('ide-error-banner')).toBeVisible()
+    await expect(activeFrame(page)).toHaveCount(0)
+
+    state.failNextClose = 'IDE_CONTROL_UNAVAILABLE'
+    await tabFor(page, viewId).getByTestId('ide-close-btn').click()
+    const dialog = page.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
+    await expect(dialog).toBeVisible()
+    const binding = { bindingEpoch, expectedDaemonInstanceId: daemonInstanceId }
+    expect(state.closeCalls).toMatchObject([{ environmentId: ENV_A, viewId, body: { ...binding, discard: false } }])
+
+    await dialog.getByRole('button', { name: '强制关闭' }).click()
+    await expect(tabFor(page, viewId)).toHaveCount(0)
+    await expect(dialog).toHaveCount(0)
+    expect(state.closeCalls).toHaveLength(2)
+    expect(state.closeCalls[1]).toMatchObject({ environmentId: ENV_A, viewId, body: { ...binding, discard: true } })
+  })
+
   test('maps native Close Workspace to the normal close, keeps the toolbar and never reopens the last view', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)
