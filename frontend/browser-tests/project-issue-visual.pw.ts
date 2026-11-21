@@ -9,6 +9,13 @@ const STAMP = Date.UTC(2026, 9, 1)
 const SIDECAR_STAMP = '2026-10-01T00:00:00Z'
 const STORAGE_KEY = `kk-studio.projects.pending-action:${ISSUE}`
 const PAUSE_DETAIL = '外部支付请求结果未知，请核查交易是否已完成。'
+/**
+ * 详情头部与 Run/阶段页签的文案事实：阶段取工作流名称，状态取产品文案，内部状态码不进正文。
+ * 夹具见 `project-workflow-harness.tsx` 的 `detailWorkflow`。
+ */
+const STAGE = { init: '待开始', work: '处理中', done: '完成', blocked: '业务阻塞' }
+const BADGE = { paused: '已暂停', pausedOnError: '出错已暂停' }
+const RUN_STATUS = { completed: '已完成' }
 const detail: IssueDetailDTO = {
   issue: {
     id: ISSUE, projectId: PROJECT, number: '12', title: 'Offline visual issue',
@@ -125,6 +132,13 @@ for (const width of [320, 1280]) {
     await page.goto('/browser-tests/project-workflow-harness.html?issue')
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Offline visual issue', { exact: true })).toBeVisible()
+    // 头部阶段徽标与需求事实页签都只写工作流名称，不写内部状态码。
+    const headerLeft = dialog.locator('.issue-detail-header-left')
+    await expect(headerLeft).toContainText(STAGE.work)
+    await expect(headerLeft).not.toContainText('WORK')
+    const specMeta = dialog.locator('.spec-meta-grid')
+    await expect(specMeta).toContainText(STAGE.work)
+    await expect(specMeta).not.toContainText('WORK')
     const banner = dialog.locator('.issue-detail-alert-warning')
     await expect(banner).toHaveCSS('background-color', await token(banner, 'backgroundColor', '--warning-soft'))
     await expect(banner).toHaveCSS('border-top-color', await token(banner, 'borderColor', '--warning-border'))
@@ -141,10 +155,28 @@ for (const width of [320, 1280]) {
     await banner.getByRole('button', { name: '确认放弃' }).click()
     await expect(banner).toHaveCount(0)
     await dialog.getByRole('tab', { name: /Run/ }).click()
+    // Run 报告里的阶段与状态都按名称展示：交接目标用目标阶段名称。
     const next = dialog.locator('.run-detail-row strong')
-    await expect(next).toHaveText('DONE')
+    await expect(next).toHaveText(STAGE.done)
     await expect(next).toHaveCSS('color', await token(next, 'color', '--accent'))
+    const runHeader = dialog.locator('.run-card-header')
+    await expect(runHeader).toContainText(STAGE.work)
+    await expect(runHeader).toContainText(RUN_STATUS.completed)
+    await expect(runHeader).not.toContainText('WORK')
+    await expect(runHeader).not.toContainText('COMPLETED')
+    // 长文案可以换行，不能挤到时长上或超出卡片头部。
+    await expect.poll(() => runHeader.evaluate((header) => {
+      const bounds = header.getBoundingClientRect()
+      const time = header.lastElementChild!.getBoundingClientRect()
+      return [time, ...Array.from(header.querySelectorAll('.ui-badge'), (badge) =>
+        badge.getBoundingClientRect(),
+      )].every((box) => box.right <= bounds.right + 1 && (
+        box === time || box.right <= time.left || box.bottom <= time.top
+      ))
+    })).toBe(true)
     await dialog.getByRole('tab', { name: '阶段预算' }).click()
+    // 阶段预算卡的标题也只写阶段名称，不写内部状态码。
+    await expect(dialog.locator('.budget-card .ui-badge')).toHaveText([STAGE.work, STAGE.done])
     const budgets = dialog.locator('.budget-card')
     const positive = budgets.nth(0).locator('.budget-stats > div').nth(1).locator('strong')
     const exhausted = budgets.nth(1).locator('.budget-stats > div').nth(1).locator('strong')
@@ -216,7 +248,8 @@ for (const width of [320, 1280]) {
     const state = await transport(page, 'ERROR')
     await page.goto('/browser-tests/project-workflow-harness.html?issue')
     const issueDialog = page.getByRole('dialog', { name: 'Issue #12 详情' })
-    await expect(issueDialog.getByText('ERROR', { exact: true })).toBeVisible()
+    await expect(issueDialog.getByText(BADGE.pausedOnError, { exact: true })).toBeVisible()
+    await expect(issueDialog.locator('.issue-detail-header-left')).toContainText(STAGE.work)
     const resume = issueDialog.getByRole('button', { name: '继续', exact: true })
     await resume.click()
     const confirmation = page.getByRole('dialog', { name: '继续执行' })
@@ -241,7 +274,7 @@ for (const width of [320, 1280]) {
     expect(state.resumeRequests[0].requestKey).not.toBe('')
     await expect(confirmation).toHaveCount(0)
     await expect(resume).toHaveCount(0)
-    await expect(issueDialog.getByText('ERROR', { exact: true })).toHaveCount(0)
+    await expect(issueDialog.getByText(BADGE.pausedOnError, { exact: true })).toHaveCount(0)
     expect(state.issueReads).toBeGreaterThanOrEqual(2)
   })
 }
@@ -253,14 +286,14 @@ test('USER pause continues directly and refreshes the issue', async ({ page }, i
   await page.goto('/browser-tests/project-workflow-harness.html?issue')
   const issueDialog = page.getByRole('dialog', { name: 'Issue #12 详情' })
   const resume = issueDialog.getByRole('button', { name: '继续', exact: true })
-  await expect(issueDialog.getByText('PAUSED', { exact: true })).toBeVisible()
+  await expect(issueDialog.getByText(BADGE.paused, { exact: true })).toBeVisible()
   await page.screenshot({ path: info.outputPath('resume-user-1280.png') })
   await resume.click()
   await expect.poll(() => state.resumeRequests.length).toBe(1)
   expect(state.resumeRequests[0]).toEqual({ expectedVersion: '1', requestKey: expect.any(String) })
   await expect(page.getByRole('dialog', { name: '继续执行' })).toHaveCount(0)
   await expect(resume).toHaveCount(0)
-  await expect(issueDialog.getByText('PAUSED', { exact: true })).toHaveCount(0)
+  await expect(issueDialog.getByText(BADGE.paused, { exact: true })).toHaveCount(0)
   expect(state.issueReads).toBeGreaterThanOrEqual(2)
 })
 

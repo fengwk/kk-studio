@@ -186,6 +186,34 @@ export const environmentCatalog = {
     'en-US': 'Failed to create terminal',
     'zh-CN': '创建终端失败',
   },
+  'ai.environment.status.ready': {
+    'en-US': 'Ready',
+    'zh-CN': '就绪',
+  },
+  'ai.environment.status.connecting': {
+    'en-US': 'Connecting',
+    'zh-CN': '连接中',
+  },
+  'ai.environment.status.offline': {
+    'en-US': 'Offline',
+    'zh-CN': '离线',
+  },
+  'ai.environment.status.unavailable': {
+    'en-US': 'Unavailable',
+    'zh-CN': '不可用',
+  },
+  'ai.environment.searchLabel': {
+    'en-US': 'Search environments',
+    'zh-CN': '搜索环境',
+  },
+  'ai.environment.searchPlaceholder': {
+    'en-US': 'Search environment name or ID',
+    'zh-CN': '搜索环境名称或 ID',
+  },
+  'ai.environment.empty.noMatch': {
+    'en-US': 'No matching environments',
+    'zh-CN': '暂无匹配环境',
+  },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',
     'zh-CN': '正在加载环境',

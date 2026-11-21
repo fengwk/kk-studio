@@ -1,22 +1,14 @@
 import { AlertCircle, ArrowRight, Clock, RotateCcw, XCircle } from 'lucide-react'
 import { Badge } from '@/shared/ui/data/Badge'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
-import type { IssueRunStatus, ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
-
-/** Run 状态按执行事实命名；卡片不直接展示内部枚举码。 */
-const RUN_STATUS_LABEL_KEY: Record<IssueRunStatus, TranslationKey> = {
-  RUNNING: 'projects.issue.running',
-  WAITING: 'projects.issue.runStatus.waiting',
-  COMPLETED: 'projects.issue.runStatus.completed',
-  FAILED: 'projects.issue.runStatus.failed',
-  CANCELLED: 'projects.issue.runStatus.cancelled',
-}
+import { RUN_STATUS_LABEL_KEY, stateNameOf, type IssueStateNames } from '../issue-labels'
+import type { ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueCardProps {
   item: ProjectIssueSnapshotDTO
   /** 工作流阶段编码到名称的映射；卡片已在所属列中，阶段只按名称出现。 */
-  stateNames: ReadonlyMap<string, string>
+  stateNames: IssueStateNames
   availableNextStates?: string[]
   onClick: () => void
   onTransition?: (toState: string) => void
@@ -29,8 +21,9 @@ export interface IssueCardProps {
  * 看板 Issue 卡：非交互外壳 + 显式标题导航按钮，快捷动作是彼此平级的共享 Button，
  * 不在卡片级 button 里嵌套动作，也不使用 feature 私有按钮皮肤。
  *
- * <p>卡片所属列已经表达当前阶段，因此卡头只留编号；阶段编码只作为诊断信息保留在提示里，
- * 动作用目标阶段名称表达，外观是次级/无框按钮，主动作留在页头。
+ * <p>卡片所属列已经表达当前阶段，因此卡头只留编号；阻塞是当前阶段的事实，徽标写保留阶段名称、
+ * 提示写阻塞原因。阶段编码只作为诊断信息保留在提示里，动作用目标阶段名称表达，外观是次级/无框按钮，
+ * 主动作留在页头。
  */
 export function IssueCard({
   item,
@@ -49,22 +42,22 @@ export function IssueCard({
   const isFailed = currentOrLatestRun?.status === 'FAILED'
   const isDone = issue.state === 'DONE'
 
-  const stateName = (state: string) => stateNames.get(state) ?? state
+  const stateName = (state: string) => stateNameOf(stateNames, state)
 
   // Run 摘要：只在与当前阶段不同时补出该 Run 的阶段名称，避免重复显示当前阶段。
   const runStage =
     currentOrLatestRun && currentOrLatestRun.state !== issue.state
       ? stateName(currentOrLatestRun.state)
       : null
+  // 徽标已经表达等待/失败时，Run 摘要不再重复同一个事实。
+  const runStatusLabel =
+    currentOrLatestRun && !isWaiting && !isFailed
+      ? t(RUN_STATUS_LABEL_KEY[currentOrLatestRun.status])
+      : null
   const runFacts = currentOrLatestRun
-    ? [
-      `#${currentOrLatestRun.ordinal}`,
-      runStage,
-      currentOrLatestRun.agentName,
-      t(RUN_STATUS_LABEL_KEY[currentOrLatestRun.status]),
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    ? [`#${currentOrLatestRun.ordinal}`, runStage, currentOrLatestRun.agentName, runStatusLabel]
+        .filter(Boolean)
+        .join(' · ')
     : null
 
   return (
@@ -78,26 +71,31 @@ export function IssueCard({
         </div>
 
         <div className="issue-badges-row">
+          {isBlocked && (
+            <Badge tone="danger" title={issue.blockReason ?? stateName(issue.state)}>
+              {stateName(issue.state)}
+            </Badge>
+          )}
           {issue.pauseReason === 'USER' && (
             <Badge tone="warning" title={t('projects.issue.pausedBadgeTitle')}>
-              PAUSED
+              {t('projects.issue.pauseStatus.paused')}
             </Badge>
           )}
           {issue.pauseReason === 'ERROR' && (
             <Badge tone="danger" title={t('projects.issue.errorBadgeTitle')}>
-              ERROR
+              {t('projects.issue.pauseStatus.error')}
             </Badge>
           )}
           {isWaiting && (
             <Badge tone="warning" title={t('projects.issue.waitingBadgeTitle')}>
               <Clock size={12} aria-hidden="true" />
-              WAITING
+              {t('projects.issue.runStatus.waiting')}
             </Badge>
           )}
           {isFailed && (
             <Badge tone="danger" title={t('projects.issue.failedBadgeTitle')}>
               <XCircle size={12} aria-hidden="true" />
-              FAILED
+              {t('projects.issue.runStatus.failed')}
             </Badge>
           )}
         </div>

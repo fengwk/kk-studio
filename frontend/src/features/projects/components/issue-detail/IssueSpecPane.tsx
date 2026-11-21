@@ -4,12 +4,15 @@ import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { stateNameOf, type IssueStateNames } from '../../issue-labels'
 import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 type Issue = IssueDetailDTO['issue']
 
 interface IssueSpecPaneProps {
   issue: Issue
+  /** 工作流阶段编码到名称的映射；元信息以阶段名称为主，编码留在提示里。 */
+  stateNames: IssueStateNames
   isEditing: boolean
   draftTitle: string
   draftDescription: string
@@ -25,6 +28,7 @@ interface IssueSpecPaneProps {
 /** Spec tab：只读事实与编辑草稿。版本冲突与保存由父级统一裁决。 */
 export function IssueSpecPane({
   issue,
+  stateNames,
   isEditing,
   draftTitle,
   draftDescription,
@@ -72,19 +76,26 @@ export function IssueSpecPane({
           </div>
         </form>
       ) : (
-        <IssueSpecView issue={issue} editDisabled={isWriteBlocked} onEdit={onStartEdit} />
+        <IssueSpecView
+          issue={issue}
+          stateNames={stateNames}
+          editDisabled={isWriteBlocked}
+          onEdit={onStartEdit}
+        />
       )}
     </div>
   )
 }
 
-/** Spec 只读视图：标题、描述与状态元数据。 */
+/** Spec 只读视图：标题、描述与阶段/版本元数据。 */
 function IssueSpecView({
   issue,
+  stateNames,
   editDisabled,
   onEdit,
 }: {
   issue: Issue
+  stateNames: IssueStateNames
   editDisabled: boolean
   onEdit: () => void
 }) {
@@ -115,7 +126,9 @@ function IssueSpecView({
       <div className="spec-meta-grid">
         <div className="meta-item">
           <span className="meta-label">{t('projects.issue.currentStageLabel')}</span>
-          <span className="meta-value"><code>{issue.state}</code></span>
+          <span className="meta-value" title={issue.state}>
+            {stateNameOf(stateNames, issue.state)}
+          </span>
         </div>
         <div className="meta-item">
           <span className="meta-label">{t('projects.issue.expectedVersionLabel')}</span>
@@ -124,7 +137,9 @@ function IssueSpecView({
         {issue.blockedFromState && (
           <div className="meta-item">
             <span className="meta-label">{t('projects.issue.blockedFromStageLabel')}</span>
-            <span className="meta-value">{issue.blockedFromState}</span>
+            <span className="meta-value" title={issue.blockedFromState}>
+              {stateNameOf(stateNames, issue.blockedFromState)}
+            </span>
           </div>
         )}
         {issue.blockReason && (

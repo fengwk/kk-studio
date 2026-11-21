@@ -9,6 +9,7 @@ import type { IssueDetailTabKey } from './IssueDetailTabs'
 import { IssueEvidencePane } from './IssueEvidencePane'
 import { IssueSpecPane } from './IssueSpecPane'
 import { IssueAgentThreadsPane, IssueRunsPane, IssueStageBudgetList } from './IssueTabPanes'
+import type { IssueStateNames } from '../../issue-labels'
 
 type Issue = IssueDetailDTO['issue']
 type ActivityKind = 'COMMENT' | 'INSTRUCTION'
@@ -17,6 +18,8 @@ interface IssueDetailTabPanelsProps {
   activeTab: IssueDetailTabKey
   detail: IssueDetailDTO | undefined
   issue: Issue | undefined
+  /** 工作流阶段编码到名称的映射；阶段一律按名称展示。 */
+  stateNames: IssueStateNames
   isLoading: boolean
   isWriteBlocked: boolean
   isActionPending: boolean
@@ -62,6 +65,7 @@ export function IssueDetailTabPanels({
   activeTab,
   detail,
   issue,
+  stateNames,
   isLoading,
   isWriteBlocked,
   isActionPending,
@@ -94,6 +98,7 @@ export function IssueDetailTabPanels({
       {activeTab === 'spec' && (
         <IssueSpecPane
           issue={issue}
+          stateNames={stateNames}
           isEditing={spec.isEditing}
           draftTitle={spec.draftTitle}
           draftDescription={spec.draftDescription}
@@ -122,7 +127,7 @@ export function IssueDetailTabPanels({
 
       {activeTab === 'runs' && (
         <div className="tab-pane">
-          <IssueRunsPane runs={detail.runs ?? []} />
+          <IssueRunsPane runs={detail.runs ?? []} stateNames={stateNames} />
         </div>
       )}
 
@@ -135,7 +140,7 @@ export function IssueDetailTabPanels({
             </Button>
           </div>
 
-          <IssueStageBudgetList stageBudgets={detail.stageBudgets ?? []} />
+          <IssueStageBudgetList stageBudgets={detail.stageBudgets ?? []} stateNames={stateNames} />
         </div>
       )}
 

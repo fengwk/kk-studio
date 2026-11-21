@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { formatBackendDate } from '@/shared/lib/date-format'
 import {
+  environmentDisplayStatus,
   environmentProxyText,
+  filterEnvironments,
   formatTimestamp,
   isEnvironmentRuntimeUnavailableError,
   presentEnvironmentConfig,
@@ -64,6 +66,23 @@ describe('update progress formatting', () => {
   })
 })
 
+describe('card search and display status', () => {
+  // 测试意图：卡片搜索只按名称或 id 匹配，且 READY 但租约已失效的卡片降级为不可用。
+  it('matches cards by name or id and degrades a stale READY lease to unavailable', () => {
+    const stale = testEnvironment({ id: 'env-1', name: 'local-dev', status: 'READY', ready: false })
+    const other = testEnvironment({ id: 'env-2', name: 'remote-box' })
+
+    expect(filterEnvironments([other, stale], 'local').map(({ name }) => name)).toEqual(['local-dev'])
+    expect(filterEnvironments([other, stale], 'ENV-1')).toEqual([stale])
+    expect(filterEnvironments([other, stale], '')).toEqual([stale, other])
+
+    expect(environmentDisplayStatus(stale)).toBe('UNAVAILABLE')
+    expect(environmentDisplayStatus(other)).toBe('READY')
+    expect(environmentDisplayStatus(testEnvironment({ status: 'OFFLINE', ready: false }))).toBe(
+      'OFFLINE',
+    )
+  })
+})
 
 describe('configuration status', () => {
   // 测试意图：只有当前 owner 快照的 appliedVersion 与卡片版本相等才是已应用，并明确区分直连与未知。

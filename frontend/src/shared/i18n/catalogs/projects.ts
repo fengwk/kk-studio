@@ -245,13 +245,13 @@ export const projectsCatalog = {
     'zh-CN': '完成',
     'en-US': 'Done',
   },
-  'projects.issue.blockedBadgeTitle': {
-    'zh-CN': '阻塞原因: {{reason}}',
-    'en-US': 'Blocked reason: {{reason}}',
+  'projects.issue.pauseStatus.paused': {
+    'zh-CN': '已暂停',
+    'en-US': 'Paused',
   },
-  'projects.issue.reasonUnspecified': {
-    'zh-CN': '未说明',
-    'en-US': 'unspecified',
+  'projects.issue.pauseStatus.error': {
+    'zh-CN': '出错已暂停',
+    'en-US': 'Paused on error',
   },
   'projects.issue.pausedBadgeTitle': {
     'zh-CN': '已人工暂停',
@@ -300,10 +300,6 @@ export const projectsCatalog = {
   'projects.issue.actionBlockTitle': {
     'zh-CN': '设置业务阻塞原因',
     'en-US': 'Set a business blocked reason',
-  },
-  'projects.issue.transitionTo': {
-    'zh-CN': '流转到 {{state}}',
-    'en-US': 'Transition to {{state}}',
   },
   'projects.edit.title': {
     'zh-CN': '编辑项目配置',

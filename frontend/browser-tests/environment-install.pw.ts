@@ -15,6 +15,42 @@ test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
 const HARNESS_URL = '/browser-tests/environment-install-harness.html'
 
 const token = 'browser-private-token'
+/**
+ * 环境卡与页级搜索的双语文案：卡片以状态名称为主，内部状态码只留在诊断事件里。
+ * 文案跟随 `frontend/src/shared/i18n/catalogs/environment.ts`。
+ */
+const environmentPageCopy = {
+  'zh-CN': {
+    ready: '就绪',
+    connecting: '连接中',
+    offline: '离线',
+    unavailable: '不可用',
+    searchLabel: '搜索环境',
+    searchPlaceholder: '搜索环境名称或 ID',
+    noMatch: '暂无匹配环境',
+    refreshFailed: '刷新失败',
+    refreshStale: '刷新失败 · 显示上次数据',
+    create: '新建环境',
+    close: '关闭',
+    manage: (name: string) => `管理 ${name}`,
+    manageDialog: (name: string) => `管理环境：${name}`,
+  },
+  'en-US': {
+    ready: 'Ready',
+    connecting: 'Connecting',
+    offline: 'Offline',
+    unavailable: 'Unavailable',
+    searchLabel: 'Search environments',
+    searchPlaceholder: 'Search environment name or ID',
+    noMatch: 'No matching environments',
+    refreshFailed: 'Refresh failed',
+    refreshStale: 'Refresh failed · Showing last data',
+    create: 'New Environment',
+    close: 'Close',
+    manage: (name: string) => `Manage ${name}`,
+    manageDialog: (name: string) => `Manage Environment: ${name}`,
+  },
+} as const
 const savedConfig = testDaemonConfig({
   studioUrl: 'https://saved.example.com',
   bashExecutable: '/bin/bash',
@@ -360,7 +396,9 @@ test('keeps event history and config details inside the collapsible diagnostics'
   await page.goto(HARNESS_URL)
   const cardLocator = page.locator('.environment-card')
   await expect(cardLocator).toBeVisible({ timeout: 15000 })
-  await expect(cardLocator.getByText('READY', { exact: true })).toBeVisible()
+  // 卡片状态按名称为主：徽标写「就绪」，不写 READY。
+  await expect(cardLocator.locator('.resource-card-badge .ui-badge'))
+    .toHaveText(environmentPageCopy['zh-CN'].ready)
   await expect(cardLocator.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
   await expect(cardLocator.getByText('1.2.3', { exact: true })).toBeVisible()
   await expect(cardLocator.getByText('无进行中的更新', { exact: true })).toBeVisible()
@@ -553,7 +591,8 @@ for (const width of [1280, 390]) {
     await page.goto(HARNESS_URL)
     const cards = page.locator('.environment-card')
     await expect(cards).toBeVisible({ timeout: 15000 })
-    await expect(cards.getByText('READY', { exact: true })).toBeVisible()
+    await expect(cards.locator('.resource-card-badge .ui-badge'))
+      .toHaveText(environmentPageCopy['zh-CN'].ready)
 
     const wide = page.locator('.environment-refresh-wide')
     const narrow = page.locator('.environment-refresh-narrow')
@@ -869,6 +908,135 @@ for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
       const box = await modal.boundingBox()
       expect(box!.x).toBeGreaterThanOrEqual(0)
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
+      await expectNoHorizontalOverflow(page, viewport.width)
+    })
+  }
+}
+
+/** 卡片状态徽标：共享卡的状态槽，卡内只有这一个 Badge。 */
+function statusBadge(page: Page, name: string) {
+  return page.locator('.environment-card').filter({ hasText: name })
+    .locator('.resource-card-badge .ui-badge')
+}
+
+for (const [locale, labels] of Object.entries(environmentPageCopy)) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    test(`environment cards name the connection state in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      // 四种可见连接状态：就绪、租约过期降级、连接中、离线。
+      const cards = [
+        testEnvironment({ id: 'env-ready', name: 'ready-box', status: 'READY', ready: true }),
+        testEnvironment({ id: 'env-stale', name: 'stale-box', status: 'READY', ready: false }),
+        testEnvironment({ id: 'env-connecting', name: 'connecting-box', status: 'CONNECTING', ready: false }),
+        testEnvironment({ id: 'env-offline', name: 'offline-box', status: 'OFFLINE', ready: false }),
+      ]
+      await page.route('**/api/platform/environments**', async route => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/runtime')) return route.fulfill({ json: testRuntimeStatus() })
+        return route.fulfill({ json: cards })
+      })
+
+      await page.goto(`${HARNESS_URL}?locale=${locale}`)
+      await expect(page.locator('.environment-card')).toHaveCount(4, { timeout: 15000 })
+      await expect(statusBadge(page, 'ready-box')).toHaveText(labels.ready)
+      await expect(statusBadge(page, 'stale-box')).toHaveText(labels.unavailable)
+      await expect(statusBadge(page, 'connecting-box')).toHaveText(labels.connecting)
+      await expect(statusBadge(page, 'offline-box')).toHaveText(labels.offline)
+      // 内部状态码只留在诊断事件里：卡片正文不出现 READY/CONNECTING/OFFLINE/UNAVAILABLE。
+      for (const code of ['READY', 'CONNECTING', 'OFFLINE', 'UNAVAILABLE']) {
+        await expect(page.getByText(code, { exact: true })).toHaveCount(0)
+      }
+      await expectNoHorizontalOverflow(page, viewport.width)
+      await sliceShot(page, `environment-cards-${locale}-${viewport.width}`)
+    })
+
+    test(`environment search sits after the AI navigation and only filters cards in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      const alpha = testEnvironment({
+        id: 'env-alpha', name: 'alpha-box', version: '2', daemonVersion: '2.0.0',
+        // 状态截止点会触发一次权威回读，这次回读失败：缓存卡片、搜索与反馈都必须保留。
+        statusExpiresAt: Date.now() + 600,
+      })
+      const beta = testEnvironment({ id: 'env-beta', name: 'beta-box', daemonVersion: '1.0.0' })
+      const runtime = testRuntimeStatus({ revision: '2', daemonVersion: '2.0.0' })
+      let listCalls = 0
+      await page.route('**/api/platform/environments**', async route => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+        if (path.endsWith('/events')) return route.fulfill({ json: [] })
+        if (path === '/api/platform/environments/env-alpha') return route.fulfill({ json: alpha })
+        if (path === '/api/platform/environments/env-beta') return route.fulfill({ json: beta })
+        if (path !== '/api/platform/environments') {
+          return route.fulfill({ status: 404, json: { code: 'not_found' } })
+        }
+        listCalls += 1
+        if (listCalls === 2) {
+          return route.fulfill({
+            status: 500,
+            contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 500, code: 'internal_error', title: 'boom' },
+          })
+        }
+        return route.fulfill({ json: [beta, alpha] })
+      })
+
+      await page.goto(`${HARNESS_URL}?locale=${locale}`)
+      const cards = page.locator('.environment-card')
+      await expect(cards).toHaveCount(2, { timeout: 15000 })
+
+      // 搜索是子导航右侧的页级搜索框；窄屏与共享子导航一致堆叠在导航之后。
+      const navBox = (await page.locator('.environment-toolbar .subnav').boundingBox())!
+      const search = page.locator('.environment-toolbar input.ui-search-input')
+      await expect(search).toBeVisible()
+      await expect(search).toHaveAttribute('aria-label', labels.searchLabel)
+      await expect(search).toHaveAttribute('placeholder', labels.searchPlaceholder)
+      const searchBox = (await search.boundingBox())!
+      expect(
+        searchBox.x >= navBox.x + navBox.width - 1
+        || searchBox.y >= navBox.y + navBox.height - 1,
+      ).toBe(true)
+
+      // 只过滤卡片：名称匹配留下目标卡，另一张离开网格。
+      await search.fill('alpha')
+      await expect(cards).toHaveCount(1)
+      await expect(cards.first()).toContainText('alpha-box')
+
+      // 管理弹窗绑定完整列表：弹窗打开后过滤条件变化不会让它的目标卡失效。
+      await page.getByRole('button', { name: labels.manage('alpha-box'), exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: labels.manageDialog('alpha-box') })
+      await expect(dialog).toBeVisible()
+      await search.fill('beta')
+      await expect(cards).toHaveCount(1)
+      await expect(cards.first()).toContainText('beta-box')
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole('button', { name: labels.close, exact: true }).last().click()
+      await expect(dialog).toHaveCount(0)
+
+      // 无匹配是搜索空态，不是加载失败；新建入口仍留在列表里。
+      await search.fill('no-such-environment')
+      await expect(cards).toHaveCount(0)
+      await expect(page.locator('.state-block')).toHaveText(labels.noMatch)
+      await expect(page.getByRole('button', { name: labels.create, exact: true })).toBeVisible()
+      await sliceShot(page, `environment-search-no-match-${locale}-${viewport.width}`)
+
+      // 刷新反馈同样来自完整列表：过滤生效时权威回读失败仍要在工具栏说明并保留卡片。
+      await search.fill('alpha')
+      await expect(cards).toHaveCount(1)
+      if (viewport.width > 900) {
+        await expect(page.locator('.environment-refresh-wide'))
+          .toContainText(labels.refreshStale, { timeout: 15000 })
+      } else {
+        await expect(page.locator('.environment-refresh-narrow summary'))
+          .toHaveText(labels.refreshFailed, { timeout: 15000 })
+      }
+      await expect(cards).toHaveCount(1)
+      await expect(cards.first()).toContainText('alpha-box')
+      expect(listCalls).toBeGreaterThanOrEqual(2)
+      await sliceShot(page, `environment-search-refresh-failed-${locale}-${viewport.width}`)
       await expectNoHorizontalOverflow(page, viewport.width)
     })
   }

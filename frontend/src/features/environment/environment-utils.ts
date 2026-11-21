@@ -2,25 +2,46 @@ import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import { ApiError } from '@/shared/api/client'
 import { formatBackendDate } from '@/shared/lib/date-format'
 import { formatByteCount } from '@/shared/lib/format-bytes'
+import type { TranslationKey } from '@/shared/i18n'
 import type {
   EnvironmentDTO,
   EnvironmentEventLevel,
   EnvironmentRuntimeDTO,
   EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateProgressDTO,
+  EnvironmentStatus,
 } from '@/shared/api/generated/contracts'
 import { compareEnvironmentVersions } from '@/features/environment/environment-config-codec'
 
 type RuntimeConfiguration = EnvironmentRuntimeDTO['configuration']
 type RuntimeConfigurationError = NonNullable<RuntimeConfiguration['error']>
 
+/**
+ * 卡片展示的连接状态。`UNAVAILABLE` 不是服务端枚举：READY 但租约已过期时由客户端降级，
+ * 不能继续宣称就绪。
+ */
+export type EnvironmentDisplayStatus = EnvironmentStatus | 'UNAVAILABLE'
+
+/** 连接状态以用户可读名称呈现；内部状态码只留在诊断事件里。 */
+export const ENVIRONMENT_STATUS_LABEL_KEY: Record<EnvironmentDisplayStatus, TranslationKey> = {
+  READY: 'ai.environment.status.ready',
+  CONNECTING: 'ai.environment.status.connecting',
+  OFFLINE: 'ai.environment.status.offline',
+  UNAVAILABLE: 'ai.environment.status.unavailable',
+}
+
 export function filterEnvironments(
   environments: EnvironmentDTO[],
   search: string,
 ): EnvironmentDTO[] {
   return environments
-    .filter((environment) => includesSearch(environment.name, search) || includesSearch(environment.id, search))
+    .filter(({ name, id }) => includesSearch(name, search) || includesSearch(id, search))
     .sort((left, right) => naturalNameCompare(left.name, right.name))
+}
+
+/** READY 且租约有效才是就绪；过期租约明确降级为不可用。 */
+export function environmentDisplayStatus(environment: EnvironmentDTO): EnvironmentDisplayStatus {
+  return environment.status === 'READY' && !environment.ready ? 'UNAVAILABLE' : environment.status
 }
 
 /** 事件级别是封闭枚举，因此 class 映射只在这里定义一次，避免遗漏样式。 */

@@ -4,6 +4,7 @@ import { formatBackendDate } from '@/shared/lib/date-format'
 import { Button } from '@/shared/ui/controls/Button'
 import { Badge } from '@/shared/ui/data/Badge'
 import { EmptyState } from '@/shared/ui/feedback/EmptyState'
+import { RUN_STATUS_LABEL_KEY, stateNameOf, type IssueStateNames } from '../../issue-labels'
 import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 /** 活动事实流：区分 Agent、人与系统三类行为者。 */
@@ -47,8 +48,14 @@ export function IssueActivityTimeline({ activities }: { activities: IssueDetailD
   )
 }
 
-/** Run 执行事实与区间报告。 */
-export function IssueRunsPane({ runs }: { runs: IssueDetailDTO['runs'] }) {
+/** Run 执行事实与区间报告：阶段按工作流名称展示，编码留在提示里。 */
+export function IssueRunsPane({
+  runs,
+  stateNames,
+}: {
+  runs: IssueDetailDTO['runs']
+  stateNames: IssueStateNames
+}) {
   const { t } = useI18n()
   if (runs.length === 0) {
     return <EmptyState title={t('projects.issue.emptyRuns')} />
@@ -58,16 +65,16 @@ export function IssueRunsPane({ runs }: { runs: IssueDetailDTO['runs'] }) {
       {runs.map((r) => (
         <div key={r.id} className="run-card">
           <div className="run-card-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="run-card-facts">
               <span className="run-ordinal">Run #{r.ordinal}</span>
-              <Badge tone="info" mono>{r.state}</Badge>
+              <Badge tone="info" title={r.state}>{stateNameOf(stateNames, r.state)}</Badge>
               {r.agentName && (
                 <Badge tone="accent">
                   <Bot size={12} aria-hidden="true" />
                   {r.agentName}
                 </Badge>
               )}
-              <Badge mono>{r.status}</Badge>
+              <Badge title={r.status}>{t(RUN_STATUS_LABEL_KEY[r.status])}</Badge>
             </div>
             <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
               {t('projects.issue.durationRemaining', { ms: r.remainingExecutionMs })}
@@ -88,7 +95,9 @@ export function IssueRunsPane({ runs }: { runs: IssueDetailDTO['runs'] }) {
             {r.nextState && (
               <div className="run-detail-row">
                 <span>{t('projects.issue.handoverTargetLabel')}</span>
-                <strong style={{ color: 'var(--accent)' }}>{r.nextState}</strong>
+                <strong style={{ color: 'var(--accent)' }} title={r.nextState}>
+                  {stateNameOf(stateNames, r.nextState)}
+                </strong>
               </div>
             )}
             {r.error && (
@@ -104,8 +113,14 @@ export function IssueRunsPane({ runs }: { runs: IssueDetailDTO['runs'] }) {
   )
 }
 
-/** 各阶段的运行预算与余量。 */
-export function IssueStageBudgetList({ stageBudgets }: { stageBudgets: IssueDetailDTO['stageBudgets'] }) {
+/** 各阶段的运行预算与余量；阶段以工作流名称展示。 */
+export function IssueStageBudgetList({
+  stageBudgets,
+  stateNames,
+}: {
+  stageBudgets: IssueDetailDTO['stageBudgets']
+  stateNames: IssueStateNames
+}) {
   const { t } = useI18n()
   if (stageBudgets.length === 0) {
     return <EmptyState title={t('projects.issue.emptyBudgets')} />
@@ -115,7 +130,7 @@ export function IssueStageBudgetList({ stageBudgets }: { stageBudgets: IssueDeta
       {stageBudgets.map((b) => (
         <div key={b.state} className="budget-card">
           <div className="budget-card-title">
-            <Badge tone="info" mono>{b.state}</Badge>
+            <Badge tone="info" title={b.state}>{stateNameOf(stateNames, b.state)}</Badge>
             <span>{t('projects.issue.maxRunsBudget', { max: b.maxRuns })}</span>
           </div>
           <div className="budget-stats">

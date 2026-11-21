@@ -165,11 +165,14 @@ describe('EnvironmentsPage', () => {
 
     expect(await screen.findByText('local-dev')).toBeInTheDocument()
     expect(screen.getAllByRole('article')).toHaveLength(5)
-    // 状态徽标如实展示连接状态；stale-box 必须显示 UNAVAILABLE 而非 READY。
-    expect(screen.getAllByText('READY')).toHaveLength(1)
-    expect(screen.getByText('UNAVAILABLE')).toBeInTheDocument()
-    expect(screen.getByText('CONNECTING')).toBeInTheDocument()
-    expect(screen.getAllByText('OFFLINE')).toHaveLength(2)
+    // 状态徽标以可读名称展示连接状态；stale-box 必须显示不可用而非就绪，卡面不出现英文枚举码。
+    expect(screen.getAllByText('就绪')).toHaveLength(1)
+    expect(screen.getByText('不可用')).toBeInTheDocument()
+    expect(screen.getByText('连接中')).toBeInTheDocument()
+    expect(screen.getAllByText('离线')).toHaveLength(2)
+    for (const code of ['READY', 'CONNECTING', 'OFFLINE', 'UNAVAILABLE']) {
+      expect(screen.queryByText(code)).toBeNull()
+    }
 
     // 备注是副标题；UUID、能力清单与最近活动只在诊断详情里出现。
     const localDev = await cardFor('local-dev')
@@ -220,6 +223,60 @@ describe('EnvironmentsPage', () => {
       expect(screen.getByRole('button', { name: '新建环境' })).toHaveClass('create-card')
     })
     expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
+    // 空列表不是“没有匹配”：搜索框存在也不渲染无匹配空态。
+    expect(screen.queryByText('暂无匹配环境')).not.toBeInTheDocument()
+  })
+
+  /**
+   * 测试意图：搜索只过滤卡片，并按名称或 id 匹配；卡片与运行快照先配对再过滤，
+   * 因此剩下的卡片仍展示自己的快照，运行读取也仍覆盖完整列表。
+   */
+  it('filters only the cards by name or id and keeps runtime pairing on the full list', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-zeta', name: 'zeta-box', status: 'READY', ready: true }),
+      environment({ id: 'env-alpha', name: 'alpha-box', status: 'READY', ready: true }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockImplementation(async (id: string) =>
+      testRuntimeStatus({ daemonVersion: id === 'env-zeta' ? '9.9.9' : '1.1.1' }),
+    )
+    renderPage()
+
+    expect(await screen.findByText('alpha-box')).toBeInTheDocument()
+    expect(screen.getAllByRole('article')).toHaveLength(2)
+    expect(within(await cardFor('alpha-box')).getByText('1.1.1')).toBeInTheDocument()
+    expect(await screen.findByText('9.9.9')).toBeInTheDocument()
+
+    const search = screen.getByRole('textbox', { name: '搜索环境' })
+    await user.type(search, 'zeta')
+    await waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(1))
+    // 配对未被过滤打乱：留下的卡片只展示自己的运行版本。
+    const zeta = await cardFor('zeta-box')
+    expect(within(zeta).getByText('9.9.9')).toBeInTheDocument()
+    expect(within(zeta).queryByText('1.1.1')).toBeNull()
+
+    // id 与名称一样可搜索。
+    await user.clear(search)
+    await user.type(search, 'env-alpha')
+    await waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(1))
+    expect(screen.getByRole('heading', { name: 'alpha-box' })).toBeInTheDocument()
+
+    // 运行读取仍按完整列表发出，过滤没有取消或增加运行查询。
+    expect(
+      vi.mocked(environmentService.getEnvironmentRuntime).mock.calls.map(([id]) => id).sort(),
+    ).toEqual(['env-alpha', 'env-zeta'])
+
+    // 无匹配时使用共享空态，新建入口保留。
+    await user.clear(search)
+    await user.type(search, 'no-such-env')
+    expect(await screen.findByText('暂无匹配环境')).toBeInTheDocument()
+    expect(screen.queryAllByRole('article')).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '新建环境' })).toBeInTheDocument()
+
+    // 清空关键字后恢复完整列表。
+    await user.clear(search)
+    await waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(2))
+    expect(screen.queryByText('暂无匹配环境')).not.toBeInTheDocument()
   })
 
   it('refetches the registry on a committed environment change event instead of polling', async () => {
@@ -1050,9 +1107,10 @@ describe('EnvironmentsPage', () => {
 
     expect(await screen.findByText('recovered-box')).toBeInTheDocument()
 
-    // 卡片显示当前 READY 状态，不回显事件文本。
+    // 卡片只显示当前状态名称，不回显事件文本或裸枚举码。
     const card = await cardFor('recovered-box')
-    expect(within(card).getByText('READY')).toBeInTheDocument()
+    expect(within(card).getByText('就绪')).toBeInTheDocument()
+    expect(within(card).queryByText('READY')).not.toBeInTheDocument()
     expect(within(card).queryByText('daemon connection lost')).not.toBeInTheDocument()
 
     const management = await openManagement(user, 'recovered-box')
@@ -1141,7 +1199,7 @@ describe('EnvironmentsPage', () => {
         await vi.advanceTimersByTimeAsync(2000)
       })
       expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
-      expect(screen.getByText('OFFLINE')).toBeInTheDocument()
+      expect(screen.getByText('离线')).toBeInTheDocument()
 
       // 已无截止点，之后不再有任何定时回读。
       await act(async () => {
@@ -1233,7 +1291,7 @@ describe('EnvironmentsPage', () => {
         await vi.advanceTimersByTimeAsync(11000)
       })
       expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
-      expect(screen.getByText('OFFLINE')).toBeInTheDocument()
+      expect(screen.getByText('离线')).toBeInTheDocument()
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(120000)

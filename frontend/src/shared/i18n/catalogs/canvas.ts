@@ -9,10 +9,6 @@ export const canvasCatalog = {
     'en-US': 'Your canvases',
     'zh-CN': '你的画布',
   },
-  'canvas.library.description': {
-    'en-US': 'Organize assets and run image or video Functions.',
-    'zh-CN': '整理素材，并运行图片或视频 Function。',
-  },
   'canvas.library.searchLabel': {
     'en-US': 'Search canvases',
     'zh-CN': '搜索画布',
@@ -132,10 +128,6 @@ export const canvasCatalog = {
   'canvas.editor.retry': {
     'en-US': 'Retry',
     'zh-CN': '重试',
-  },
-  'canvas.editor.version': {
-    'en-US': 'Canvas version',
-    'zh-CN': '画布版本',
   },
   'canvas.stage.ariaLabel': {
     'en-US': 'Infinite canvas. Drag resources, connect them to Function nodes, and drop media files to upload.',
