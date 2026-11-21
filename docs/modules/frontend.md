@@ -542,7 +542,7 @@ Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 
 
 ### Mermaid 图
 
-闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，按所在容器的宽度排版，宽度变化后重新排版。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图的源码按普通代码块显示。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
+闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；SVG 裁到图形范围并与正文左对齐。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
 
 ### Resource URI 预览
 

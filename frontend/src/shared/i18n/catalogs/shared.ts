@@ -85,6 +85,18 @@ export const sharedCatalog = {
     'en-US': 'Mermaid diagram',
     'zh-CN': 'Mermaid 图表',
   },
+  'shared.mermaidRenderFailed': {
+    'en-US': "Can't render this diagram.",
+    'zh-CN': '无法渲染此图。',
+  },
+  'shared.mermaidRenderFailedAt': {
+    'en-US': "Can't render this diagram. Line {{line}}: {{detail}}",
+    'zh-CN': '无法渲染此图。第 {{line}} 行：{{detail}}',
+  },
+  'shared.mermaidRenderFailedWith': {
+    'en-US': "Can't render this diagram. {{detail}}",
+    'zh-CN': '无法渲染此图。{{detail}}',
+  },
   'shared.requestFailed': {
     'en-US': 'Request failed',
     'zh-CN': '请求失败',

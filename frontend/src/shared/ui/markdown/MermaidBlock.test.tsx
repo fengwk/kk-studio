@@ -1,9 +1,9 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DiagramOptions } from '@fengwk/kchart'
+import type { DiagramDiagnostic, DiagramOptions } from '@fengwk/kchart'
 
 const kchart = vi.hoisted(() => ({
-  diagram: vi.fn<(source: string, options: DiagramOptions) => Promise<{ svg: string | null }>>(),
+  diagram: vi.fn<(source: string, options: DiagramOptions) => Promise<{ svg: string | null; diagnostics: DiagramDiagnostic[] }>>(),
   themes: { terminal: { id: 'terminal', fg2: '#bdd7c4', style: { radius: 0, smallRadius: 0, soft: 0.12 } } },
 }))
 
@@ -14,6 +14,7 @@ beforeEach(() => {
   kchart.diagram.mockReset()
   kchart.diagram.mockImplementation(async (source, options) => ({
     svg: `<svg data-source="${source}" data-width="${options.width}" aria-labelledby="${options.prefix}-title"><title id="${options.prefix}-title">Diagram</title></svg>`,
+    diagnostics: [],
   }))
 })
 
@@ -22,7 +23,7 @@ afterEach(() => {
 })
 
 describe('MermaidBlock', () => {
-  it('renders the trimmed source at the container width in the app theme', async () => {
+  it('renders the trimmed source with compact layout and the app theme', async () => {
     // test-setup 的 ResizeObserver 立即报告 1200px；主题以 Terminal 为底、应用调色板覆盖，测量走 canvas。
     const { MermaidBlock } = await loadMermaidBlock()
     const view = render(<MermaidBlock code="  graph TD; A-->B  " />)
@@ -32,7 +33,8 @@ describe('MermaidBlock', () => {
     const [source, options] = kchart.diagram.mock.calls[0]
     expect(source).toBe('graph TD; A-->B')
     expect(options).toMatchObject({
-      width: 1200,
+      width: 720,
+      compact: true,
       frame: false,
       theme: { id: 'kk-studio', fg1: '#edf2ed', fg2: '#bdd7c4', style: { radius: 8, smallRadius: 6, soft: 0.12 } },
     })
@@ -70,8 +72,8 @@ describe('MermaidBlock', () => {
     expect(kchart.diagram).toHaveBeenCalledTimes(1)
   })
 
-  it('redraws for a new container width and waits while the container has none', async () => {
-    // 隐藏容器宽度为 0 时不成图；宽度变化后按新宽度重绘，同宽度的重复通知不重复渲染。
+  it('redraws and caches by layout width, without mounting again above 720px', async () => {
+    // 验证隐藏、窄容器与宽容器的转换；宽容器之间保持同一 SVG 节点和缓存。
     const callbacks: ResizeObserverCallback[] = []
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) {
@@ -97,14 +99,22 @@ describe('MermaidBlock', () => {
     await expectSvg(view.container, 'data-width="640"')
     resize(640)
     resize(900)
-    await expectSvg(view.container, 'data-width="900"')
+    await expectSvg(view.container, 'data-width="720"')
+    const wideSvg = view.container.querySelector('svg[data-width="720"]')
+    resize(1200)
+    await flushPromises()
+    expect(view.container.querySelector('svg[data-width="720"]')).toBe(wideSvg)
 
-    expect(kchart.diagram.mock.calls.map(([, options]) => options.width)).toEqual([640, 900])
+    view.unmount()
+    const next = render(<MermaidBlock code="graph TD; A-->B" />)
+    resize(1000)
+    await expectSvg(next.container, 'data-width="720"')
+    expect(kchart.diagram.mock.calls.map(([, options]) => options.width)).toEqual([640, 720])
   })
 
   it('opens diagram links in a new tab without opener or referrer', async () => {
     // 与 Markdown 链接一致，图内链接不能在当前页离开应用。
-    kchart.diagram.mockResolvedValueOnce({ svg: '<svg><a href="https://example.com/docs"><text>Docs</text></a></svg>' })
+    kchart.diagram.mockResolvedValueOnce({ svg: '<svg><a href="https://example.com/docs"><text>Docs</text></a></svg>', diagnostics: [] })
     const { MermaidBlock } = await loadMermaidBlock()
     const view = render(<MermaidBlock code="graph TD; A-->B" />)
 
@@ -128,32 +138,70 @@ describe('MermaidBlock', () => {
   })
 
   it.each([
-    ['the diagram is invalid', () => kchart.diagram.mockResolvedValueOnce({ svg: null })],
-    ['rendering rejects', () => kchart.diagram.mockRejectedValueOnce(new Error('layout failed'))],
-  ])('falls back to source when %s', async (_name, fail) => {
-    // 无法成图的源码保留原文，不能留下空图容器。
-    fail()
+    ['zh-CN', '无法渲染此图。第 2 行：'],
+    ['en-US', "Can't render this diagram. Line 2: "],
+  ] as const)('keeps the first error as literal text with a %s UI lead-in', async (locale, lead) => {
+    // 诊断自身不随 UI 语言翻译，只按其语言补句末标点；警告和后续错误不显示，标签按纯文本转义。
+    const { setLocale } = await import('@/shared/i18n')
+    setLocale(locale)
+    const diagnostic = { code: 'invalid', line: 2, column: 1, topic: 'flowchart', severity: 'error', message: '语法错误 <b>节点</b>', fix: '请补全 <em>节点</em>' } as const
+    kchart.diagram.mockResolvedValueOnce({
+      svg: null,
+      diagnostics: [
+        { ...diagnostic, severity: 'warning', message: 'warning' },
+        diagnostic,
+        { ...diagnostic, message: 'later error' },
+      ],
+    })
+    const { MermaidBlock } = await loadMermaidBlock()
+    const view = render(<MermaidBlock code={'flowchart TD\nnot a graph'} />)
+
+    const note = await screen.findByText(`${lead}${diagnostic.message}。${diagnostic.fix}。`)
+    expect(note.querySelector('b, em')).toBeNull()
+    expect(view.container.querySelector('code.language-mermaid')).toHaveTextContent('not a graph')
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('joins an English diagnostic as sentences after the lead-in', async () => {
+    // 西文诊断补句点并以空格分隔，与中文界面的前导语直接相接。
+    const { setLocale } = await import('@/shared/i18n')
+    setLocale('zh-CN')
+    kchart.diagram.mockResolvedValueOnce({
+      svg: null,
+      diagnostics: [{ code: 'BAD_DIAGRAM', line: 7, column: 1, topic: 'block', severity: 'error', message: 'Composite block is missing end', fix: 'Put end on its own line' }],
+    })
+    const { MermaidBlock } = await loadMermaidBlock()
+    render(<MermaidBlock code="block-beta" />)
+
+    expect(await screen.findByText('无法渲染此图。第 7 行：Composite block is missing end. Put end on its own line.')).toBeInTheDocument()
+  })
+
+  it('retains the source and shows only the lead-in when rendering rejects', async () => {
+    // 运行异常不是 KChart 诊断，不向用户显示内部异常文本。
+    kchart.diagram.mockRejectedValueOnce(new Error('layout failed'))
     const { MermaidBlock } = await loadMermaidBlock()
     const view = render(<MermaidBlock code="not a graph" />)
 
     await waitFor(() => {
       expect(view.container.querySelector('code.language-mermaid')).toHaveTextContent('not a graph')
     })
+    expect(screen.getByText('无法渲染此图。', { exact: true })).toBeInTheDocument()
+    expect(screen.queryByText('layout failed', { exact: false })).not.toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Mermaid 图表' })).not.toBeInTheDocument()
   })
 
   it('does not cache or write SVG after unmount cancellation', async () => {
     // 未完成渲染的组件卸载后不得写 DOM/cache；后续挂载必须重新渲染。
-    const deferred = createDeferred<{ svg: string }>()
+    const deferred = createDeferred<{ svg: string; diagnostics: DiagramDiagnostic[] }>()
     kchart.diagram
       .mockReturnValueOnce(deferred.promise)
-      .mockResolvedValueOnce({ svg: '<svg data-source="second"></svg>' })
+      .mockResolvedValueOnce({ svg: '<svg data-source="second"></svg>', diagnostics: [] })
     const { MermaidBlock } = await loadMermaidBlock()
     const first = render(<MermaidBlock code="graph TD; A-->B" />)
     await waitFor(() => expect(kchart.diagram).toHaveBeenCalledTimes(1))
     first.unmount()
 
-    deferred.resolve({ svg: '<svg data-source="cancelled"></svg>' })
+    deferred.resolve({ svg: '<svg data-source="cancelled"></svg>', diagnostics: [] })
     await flushPromises()
 
     const second = render(<MermaidBlock code="graph TD; A-->B" />)
