@@ -7,67 +7,85 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Resolves prompt-cache behavior from the active wire protocol, endpoint, and model id. */
+/**
+ * Resolves prompt-cache behavior from the active wire protocol, endpoint, and model id.
+ *
+ * <p>{@link PromptCacheState} only states whether Studio can influence the upstream cache; options
+ * and default retention keep each protocol's existing encoding contract, and unverified routes are
+ * never reported as {@link PromptCacheState#UNSUPPORTED}.
+ */
 public record PromptCacheCapabilities(
     List<PromptCacheOption> options,
     PromptCacheRetention defaultRetention,
-    boolean automaticCache) {
+    PromptCacheState promptCacheState) {
 
   public PromptCacheCapabilities {
     options = List.copyOf(options);
   }
 
+  /** Whether the upstream manages the cache itself, so no cache intent is sent on the wire. */
+  public boolean automaticCache() {
+    return promptCacheState == PromptCacheState.PROVIDER_MANAGED;
+  }
+
   public static PromptCacheCapabilities resolve(
       ProviderType protocol, String endpoint, String modelId) {
     List<PromptCacheOption> options = new ArrayList<>();
-    boolean automatic = false;
-    switch (protocol) {
-      case OPENAI, OPENAI_RESPONSES -> {
-        boolean official = OpenAiBackendCapabilities.isOfficialEndpoint(endpoint);
-        boolean responses = protocol == ProviderType.OPENAI_RESPONSES;
-        boolean modern = official && OpenAiBackendCapabilities.supportsExplicitCache(modelId);
-        if (modern) {
-          options.add(option(PromptCacheRetention.NONE, null, null));
-          options.add(option(PromptCacheRetention.SHORT, 1800L, 1.25));
-          if (responses) {
-            options.add(option(PromptCacheRetention.LONG, 43200L, 2.5));
+    PromptCacheState state =
+        switch (protocol) {
+          case OPENAI, OPENAI_RESPONSES -> {
+            boolean official = OpenAiBackendCapabilities.isOfficialEndpoint(endpoint);
+            boolean responses = protocol == ProviderType.OPENAI_RESPONSES;
+            boolean modern = official && OpenAiBackendCapabilities.supportsExplicitCache(modelId);
+            if (modern) {
+              options.add(option(PromptCacheRetention.NONE, null, null));
+              options.add(option(PromptCacheRetention.SHORT, 1800L, 1.25));
+              if (responses) {
+                options.add(option(PromptCacheRetention.LONG, 43200L, 2.5));
+              }
+              yield PromptCacheState.CONFIGURABLE;
+            }
+            if (official) {
+              options.add(option(PromptCacheRetention.SHORT, null, null));
+              if (OpenAiBackendCapabilities.supportsLegacyLongCache(modelId)) {
+                options.add(option(PromptCacheRetention.LONG, 86400L, null));
+              }
+              yield PromptCacheState.CONFIGURABLE;
+            }
+            if (responses) {
+              // Compatible Responses endpoints keep the existing Pi-aligned SHORT key and headers.
+              options.add(option(PromptCacheRetention.SHORT, null, null));
+              yield PromptCacheState.CONFIGURABLE;
+            }
+            // Compatible Chat endpoints expose no verifiable cache intent: Studio controls nothing.
+            yield PromptCacheState.UNMANAGED;
           }
-        } else if (official) {
-          options.add(option(PromptCacheRetention.SHORT, null, null));
-          if (OpenAiBackendCapabilities.supportsLegacyLongCache(modelId)) {
-            options.add(option(PromptCacheRetention.LONG, 86400L, null));
+          case ANTHROPIC -> {
+            if (isMiniMaxStable(endpoint, modelId)) {
+              yield PromptCacheState.PROVIDER_MANAGED;
+            }
+            if (isOfficialAnthropic(endpoint)) {
+              options.add(option(PromptCacheRetention.NONE, null, null));
+              options.add(option(PromptCacheRetention.SHORT, 300L, 1.25));
+              options.add(option(PromptCacheRetention.LONG, 3600L, 2.0));
+              yield PromptCacheState.CONFIGURABLE;
+            }
+            // Preview and other compatible routes retain SHORT without a TTL guarantee.
+            options.add(option(PromptCacheRetention.NONE, null, null));
+            options.add(option(PromptCacheRetention.SHORT, null, null));
+            yield PromptCacheState.CONFIGURABLE;
           }
-        } else if (responses) {
-          // Compatible Responses endpoints keep the existing Pi-aligned SHORT key and headers.
-          options.add(option(PromptCacheRetention.SHORT, null, null));
-        } else {
-          automatic = true;
-        }
-      }
-      case ANTHROPIC -> {
-        if (isMiniMaxStable(endpoint, modelId)) {
-          automatic = true;
-        } else if (isOfficialAnthropic(endpoint)) {
-          options.add(option(PromptCacheRetention.NONE, null, null));
-          options.add(option(PromptCacheRetention.SHORT, 300L, 1.25));
-          options.add(option(PromptCacheRetention.LONG, 3600L, 2.0));
-        } else {
-          // Preview and other compatible routes retain SHORT without a TTL guarantee.
-          options.add(option(PromptCacheRetention.NONE, null, null));
-          options.add(option(PromptCacheRetention.SHORT, null, null));
-        }
-      }
-      case GOOGLE -> automatic = true;
-    }
+          case GOOGLE -> PromptCacheState.PROVIDER_MANAGED;
+        };
+    // Without a selectable retention the persisted default stays NONE, matching the encoder's
+    // silence.
     PromptCacheRetention defaultRetention =
-        automatic
-            ? PromptCacheRetention.NONE
-            : options.stream()
-                .map(PromptCacheOption::retention)
-                .filter(retention -> retention != PromptCacheRetention.NONE)
-                .findFirst()
-                .orElse(null);
-    return new PromptCacheCapabilities(options, defaultRetention, automatic);
+        options.stream()
+            .map(PromptCacheOption::retention)
+            .filter(retention -> retention != PromptCacheRetention.NONE)
+            .findFirst()
+            .orElse(PromptCacheRetention.NONE);
+    return new PromptCacheCapabilities(options, defaultRetention, state);
   }
 
   public boolean supports(PromptCacheRetention retention) {

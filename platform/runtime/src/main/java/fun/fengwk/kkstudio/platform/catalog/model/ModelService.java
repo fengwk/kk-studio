@@ -102,7 +102,7 @@ public class ModelService {
                 })
             .toList());
     dto.setDefaultPromptCacheRetention(capabilities.defaultRetention());
-    dto.setAutomaticCache(capabilities.automaticCache());
+    dto.setPromptCacheState(capabilities.promptCacheState());
     return dto;
   }
 

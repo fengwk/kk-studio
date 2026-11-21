@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
@@ -78,6 +79,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
     ModelCapabilitiesDTO capabilities =
         agentModelService.capabilities(providerDTO.getName(), "gpt-5.6");
     assertEquals(PromptCacheRetention.SHORT, capabilities.getDefaultPromptCacheRetention());
+    assertEquals(PromptCacheState.CONFIGURABLE, capabilities.getPromptCacheState());
     assertTrue(
         capabilities.getPromptCacheOptions().stream()
             .anyMatch(option -> option.getTtlSeconds() != null && option.getTtlSeconds() == 1800L));

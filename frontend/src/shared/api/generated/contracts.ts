@@ -1903,7 +1903,7 @@ export interface ModelAbilitiesDTO {
 export interface ModelCapabilitiesDTO {
   promptCacheOptions: PromptCacheOptionDTO[]
   defaultPromptCacheRetention?: PromptCacheRetention | null
-  automaticCache: boolean
+  promptCacheState: PromptCacheState
 }
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogAbilitiesDTO */
@@ -2359,6 +2359,20 @@ export const PROMPT_CACHE_RETENTION_VALUES: readonly PromptCacheRetention[] = [
   'NONE',
   'SHORT',
   'LONG',
+]
+
+/** Java：fun.fengwk.kkstudio.harness.model.cache.PromptCacheState */
+export type PromptCacheState =
+  | 'CONFIGURABLE'
+  | 'PROVIDER_MANAGED'
+  | 'UNMANAGED'
+  | 'UNSUPPORTED'
+
+export const PROMPT_CACHE_STATE_VALUES: readonly PromptCacheState[] = [
+  'CONFIGURABLE',
+  'PROVIDER_MANAGED',
+  'UNMANAGED',
+  'UNSUPPORTED',
 ]
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO */

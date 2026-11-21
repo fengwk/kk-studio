@@ -12,7 +12,7 @@ test('resource forms preserve native semantics, shared geometry and controlled e
       await route.fulfill({ json: {
         promptCacheOptions: [{ retention: 'NONE' }],
         defaultPromptCacheRetention: 'NONE',
-        automaticCache: false,
+        promptCacheState: 'CONFIGURABLE',
       } })
       return
     }

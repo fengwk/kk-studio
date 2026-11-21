@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheState;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCapabilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.PromptCacheOptionDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelPricingPreviewService;
@@ -29,11 +30,11 @@ class ModelControllerTest {
           .build();
 
   @Test
-  void returnsCanonicalNoneForAutomaticCachingWithoutSelectableOptions() throws Exception {
+  void returnsProviderManagedStateWithoutSelectableOptions() throws Exception {
     ModelCapabilitiesDTO capabilities = new ModelCapabilitiesDTO();
     capabilities.setPromptCacheOptions(List.of());
     capabilities.setDefaultPromptCacheRetention(PromptCacheRetention.NONE);
-    capabilities.setAutomaticCache(true);
+    capabilities.setPromptCacheState(PromptCacheState.PROVIDER_MANAGED);
     when(modelService.capabilities("gemini", "gemini-2.5-pro")).thenReturn(capabilities);
 
     mvc.perform(
@@ -43,7 +44,7 @@ class ModelControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.promptCacheOptions").isEmpty())
         .andExpect(jsonPath("$.defaultPromptCacheRetention").value("NONE"))
-        .andExpect(jsonPath("$.automaticCache").value(true));
+        .andExpect(jsonPath("$.promptCacheState").value("PROVIDER_MANAGED"));
 
     verify(modelService).capabilities("gemini", "gemini-2.5-pro");
   }
@@ -57,6 +58,7 @@ class ModelControllerTest {
     ModelCapabilitiesDTO capabilities = new ModelCapabilitiesDTO();
     capabilities.setPromptCacheOptions(List.of(option));
     capabilities.setDefaultPromptCacheRetention(PromptCacheRetention.SHORT);
+    capabilities.setPromptCacheState(PromptCacheState.CONFIGURABLE);
     when(modelService.capabilities("p", "gpt-5.6")).thenReturn(capabilities);
 
     mvc.perform(
@@ -68,7 +70,7 @@ class ModelControllerTest {
         .andExpect(jsonPath("$.promptCacheOptions[0].ttlSeconds").value(1800))
         .andExpect(jsonPath("$.promptCacheOptions[0].writeMultiplier").value(1.25))
         .andExpect(jsonPath("$.defaultPromptCacheRetention").value("SHORT"))
-        .andExpect(jsonPath("$.automaticCache").value(false));
+        .andExpect(jsonPath("$.promptCacheState").value("CONFIGURABLE"));
 
     verify(modelService).capabilities("p", "gpt-5.6");
   }
