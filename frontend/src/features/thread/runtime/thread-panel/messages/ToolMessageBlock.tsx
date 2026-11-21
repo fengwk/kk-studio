@@ -25,6 +25,7 @@ import {
   withoutExactError,
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-content'
 import { buildToolMessageView } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
+import { useApprovalReviewVisibleElsewhere } from '@/features/thread/runtime/interactions/approval-review-context'
 import { parseTaskReceipt } from '@/features/thread/runtime/state/task-tool-parser'
 import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
@@ -57,6 +58,8 @@ export function ToolMessageBlock({
   })
   const previewLines = toolPreviewLines(view.toolName)
   const [expanded, setExpanded] = useState(false)
+  // 同一调用是否已有一张可见审批卡；只有该调用自己的卡片影响去重。
+  const approvalCardVisible = useApprovalReviewVisibleElsewhere(message.invocationId)
   const summary = formatToolCallSummary(view.toolName, view.arguments, { expanded })
 
   const normalizedName = view.toolName.trim().toLowerCase()
@@ -103,7 +106,13 @@ export function ToolMessageBlock({
   const textWindow = isBash
     ? (showErrorBlock ? discloseText(text, previewLines, 'end', previewMaxChars) : bashWindow)
     : isMcp ? discloseText(text, previewLines, 'start', previewMaxChars) : null
-  const mutation = isMutation
+  // 同一调用已有可见审批卡时，冻结审查材料只在审批卡里出现一次：工具卡退化为
+  // 名称 + 目标 + 等待审批。未加载的审批卡和只读视图不会让工具卡丢失 diff。
+  const reviewShownInApprovalCard = isMutation
+    && view.executionState === 'approval'
+    && approvalCardVisible
+  const summaryDetail = reviewShownInApprovalCard ? view.preview?.path : summary.detail
+  const mutation = isMutation && !reviewShownInApprovalCard
     ? windowMutationPreview(view.preview, previewLines, previewMaxChars)
     : null
   const mutationHint = mutation?.window ? disclosureHint(mutation.window, 'end') : null
@@ -262,10 +271,10 @@ export function ToolMessageBlock({
         tone="neutral"
         expanded={expanded}
         onExpandedChange={setExpanded}
-        hasDetails={hasBody || mcpDetails}
-        error={error}
-        preview={mainPreview.length > 0 ? <>{mainPreview}</> : undefined}
-        body={body}
+        hasDetails={!reviewShownInApprovalCard && (hasBody || mcpDetails)}
+        error={reviewShownInApprovalCard ? undefined : error}
+        preview={!reviewShownInApprovalCard && mainPreview.length > 0 ? <>{mainPreview}</> : undefined}
+        body={reviewShownInApprovalCard ? undefined : body}
         label={`${summary.name}: ${stateLabel}`}
         header={(
           <span className="thread-tool-summary">
@@ -277,11 +286,11 @@ export function ToolMessageBlock({
                   {' · '}{t('ai.runtime.tool.waitingForPreviousFileChange')}
                 </span>
               ) : null}
-            {summary.detail ? (
+            {summaryDetail ? (
               <>
                 {' '}
                 <span className="thread-tool-summary-detail" tabIndex={0}>
-                  {summary.detail}
+                  {summaryDetail}
                 </span>
               </>
             ) : null}

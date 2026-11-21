@@ -17,7 +17,8 @@ import './tool-card.css'
  *
  * - `variant="approval"`：保留路径行与有界内部滚动，审批卡片行为不变；
  * - `variant="transcript"`：由调用方传入短窗口或完整详情，Header 已有路径时不重复路径行；
- * - write 审批默认看到待写正文，可另外查看后端冻结 diff。
+ * - write 审批默认看到待写正文，可另外查看后端冻结 diff；只读记录在等待审批期间直接
+ *   展示这份 diff，终态仍沿用待写正文这一既有展示。
  *
  * 分支只决定「渲染哪一段正文」，各段正文在 ToolCallPreviewSections。
  */
@@ -47,27 +48,45 @@ export function ToolCallPreview({
   }
 
   if (preview.kind === 'write') {
-    const review = variant === 'approval' && preview.review
-      ? <WriteReviewSection preview={preview} />
-      : null
-    if (!preview.hasContent && review == null) {
+    // 审批卡是冻结材料的交互位：完整正文 + 可展开的审查 diff。
+    if (variant === 'approval') {
+      const review = preview.review ? <WriteReviewSection preview={preview} /> : null
+      if (!preview.hasContent && review == null) {
+        return null
+      }
+      return (
+        <div className="thread-tool-call-body">
+          {showTarget && preview.path ? (
+            <PreviewTarget path={preview.path} workdir={preview.workdir} />
+          ) : null}
+          <LossyDecodeWarning lossyDecode={preview.review?.lossyDecode} />
+          {preview.hasContent ? (
+            <WriteContentSection preview={preview} streaming={streaming} bounded={bounded} />
+          ) : null}
+          {review != null && preview.hasContent ? (
+            <details className="thread-tool-approval-review">
+              <summary>{t('ai.runtime.mutation.reviewDiff')}</summary>
+              {review}
+            </details>
+          ) : review}
+        </div>
+      )
+    }
+    // 只读记录（等待审批期间）：冻结审查 diff 就是权威材料，不把正文再摊一遍。
+    if (preview.review != null) {
+      return (
+        <div className="thread-tool-call-body">
+          <LossyDecodeWarning lossyDecode={preview.review.lossyDecode} />
+          <WriteReviewSection preview={preview} bounded={false} />
+        </div>
+      )
+    }
+    if (!preview.hasContent) {
       return null
     }
     return (
       <div className="thread-tool-call-body">
-        {showTarget && preview.path ? (
-          <PreviewTarget path={preview.path} workdir={preview.workdir} />
-        ) : null}
-        {variant === 'approval' ? <LossyDecodeWarning lossyDecode={preview.review?.lossyDecode} /> : null}
-        {preview.hasContent ? (
-          <WriteContentSection preview={preview} streaming={streaming} bounded={bounded} />
-        ) : null}
-        {review != null && preview.hasContent ? (
-          <details className="thread-tool-approval-review">
-            <summary>{t('ai.runtime.mutation.reviewDiff')}</summary>
-            {review}
-          </details>
-        ) : review}
+        <WriteContentSection preview={preview} streaming={streaming} bounded={bounded} />
       </div>
     )
   }

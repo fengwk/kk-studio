@@ -20,12 +20,16 @@ const WRITE_REVIEW_DIFF = LONG_WRITE_CONTENT.split('\n').slice(0, -1)
   .map((line, index) => `+${index + 1}|${line}`).join('\n')
 
 type HarnessApi = {
+  setLocale(locale: 'zh-CN' | 'en-US'): void
   renderWritePending(): void
+  renderWriteReviewedPending(): void
+  renderWriteApproved(): void
   renderWriteSuccess(): void
   renderEditStreaming(): void
   renderEditStreamingMultiEntry(): void
   renderEditPreparing(): void
   renderEditReviewed(): void
+  renderEditReviewedReadonly(): void
   renderEditConflict(): void
   renderEditSuccess(): void
   renderMutationFailure(tool?: 'write' | 'edit'): void
@@ -35,13 +39,13 @@ type HarnessApi = {
   renderEditDurableHistory(): void
 }
 
-function harness(page: Page, action: keyof HarnessApi, arg?: 'write' | 'edit'): Promise<void> {
+function harness(page: Page, action: keyof HarnessApi, arg?: 'write' | 'edit' | 'zh-CN' | 'en-US'): Promise<void> {
   return page.evaluate(
-    ([act, param]) => {
-      const api = window.mutationReviewHarness
-      api[act as keyof HarnessApi](param as 'write' | 'edit' | undefined)
+    ({ act, param }) => {
+      const api = window.mutationReviewHarness as unknown as Record<string, (value?: string) => void>
+      api[act](param)
     },
-    [action, arg] as const,
+    { act: action, param: arg },
   )
 }
 
@@ -223,8 +227,8 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
-    await harness(page, 'renderWritePending')
-    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('write-pending')
+    await harness(page, 'renderWriteReviewedPending')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('write-reviewed-pending')
 
     const approvalPane = page.locator('[data-testid="approval-card-pane"]')
     await expect(approvalPane).toBeVisible()
@@ -235,6 +239,13 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     const denyBtn = approvalPane.getByRole('button', { name: '拒绝' })
     await expect(allowBtn).toBeEnabled()
     await expect(denyBtn).toBeEnabled()
+
+    // 同一调用已有可见审批卡：时间线工具卡只剩名称、目标与等待审批，不再重复冻结材料。
+    const toolPane = page.locator('[data-testid="tool-message-pane"]')
+    await expect(toolPane.locator('.thread-tool-state-label')).toContainText('等待审批')
+    await expect(toolPane.locator('.thread-tool-summary-detail')).toHaveText('/workspace/src/LongService.java')
+    await expect(toolPane.locator('.thread-tool-preview-body')).toHaveCount(0)
+    await expect(toolPane.locator('.thread-disclosure-toggle')).toHaveCount(0)
 
     // 默认看完整待写正文（保证审批材料不是从流式前缀推出来的）。
     const writeBody = approvalPane.locator('.thread-tool-preview-body.is-write')
@@ -288,6 +299,10 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     // edit 审批材料是完整权威 diff，不折叠、也不混入 write 正文。
     await expect(approvalPane.locator('details')).toHaveCount(0)
     await expect(approvalPane.locator('.thread-tool-preview-body.is-write')).toHaveCount(0)
+    // 同一调用已有可见审批卡：时间线不再展开同一份 diff。
+    const toolPane = page.locator('[data-testid="tool-message-pane"]')
+    await expect(toolPane.locator('.thread-tool-preview-body')).toHaveCount(0)
+    await expect(toolPane.locator('.thread-disclosure-toggle')).toHaveCount(0)
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-approval-unchanged.png') })
   })
@@ -375,9 +390,9 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-preparing.png') })
 
-    // 阶段 C: 后端冻结多 hunk diff 到达，时间线仍是尾部 10 行，详情才是完整 diff。
-    await harness(page, 'renderEditReviewed')
-    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed')
+    // 阶段 C: 后端冻结多 hunk diff 到达；没有审批卡可见时时间线仍保留尾部 10 行。
+    await harness(page, 'renderEditReviewedReadonly')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed-readonly')
     await expect(toolPane.locator('.thread-tool-summary-detail')).toContainText('/src/App.tsx')
     await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveCount(0)
     const editPreview = previewPane.locator('.thread-tool-preview-body.is-edit')
@@ -406,6 +421,17 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-reviewed.png') })
 
+    // 阶段 C2: 同一调用出现审批卡时，时间线让出同一份 diff，材料只在审批卡里出现一次。
+    await harness(page, 'renderEditReviewed')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed')
+    await expect(toolPane.locator('.thread-tool-state-label')).toContainText('等待审批')
+    await expect(toolPane.locator('.thread-tool-summary-detail')).toContainText('/src/App.tsx')
+    await expect(toolPane.locator('.thread-tool-preview-body')).toHaveCount(0)
+    await expect(toolPane.locator('.thread-disclosure-toggle')).toHaveCount(0)
+    const approvalPane = page.locator('[data-testid="approval-card-pane"]')
+    await expect(approvalPane.locator('.thread-tool-preview-body.is-edit')).toHaveText(MULTI_HUNK_DIFF)
+    await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-reviewed-dedup.png') })
+
     // 阶段 D: 审批快照与终态结果详情冲突时，严格优先展示审批快照。
     await harness(page, 'renderEditConflict')
     await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-conflict')
@@ -416,17 +442,20 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane.locator('.thread-tool-details')).toHaveCount(0)
     await expect(toolPane.locator('.thread-disclosure-toggle')).toHaveCount(0)
 
-    // 移动视口 390px：时间线短窗口不造内部滚动，审批材料仍有界且不撑宽。
+    // 移动视口 390px：只读记录短窗口不造内部滚动，审批材料仍有界且不撑宽。
     await page.setViewportSize({ width: 390, height: 800 })
-    await harness(page, 'renderEditReviewed')
-    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed')
+    await harness(page, 'renderEditReviewedReadonly')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed-readonly')
     await expectPreviewWindow(previewPane.locator('.thread-tool-preview-body.is-edit'))
     expect(await previewPane.locator('.thread-tool-preview-body.is-edit').textContent()).toBe(EDIT_TAIL)
+    await harness(page, 'renderEditReviewed')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed')
     const approvalEditDiff = page.locator(
       '[data-testid="approval-card-pane"] .thread-tool-preview-body.is-edit',
     )
     await expectBoundedSurface(approvalEditDiff)
     expect(await approvalEditDiff.textContent()).toBe(MULTI_HUNK_DIFF)
+    await expect(toolPane.locator('.thread-tool-preview-body')).toHaveCount(0)
     await page.screenshot({ path: path.join(REPORTS_DIR, 'mobile-edit-reviewed.png') })
   })
 
@@ -619,4 +648,82 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-durable-history.png') })
   })
+
+test('Case 9: 待审批 edit/write 的冻结材料只出现在审批卡，审批后回到时间线', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const toolPane = page.locator('[data-testid="tool-message-pane"]')
+  const approvalPane = page.locator('[data-testid="approval-card-pane"]')
+
+  // edit 待审批：审批卡持有权威 diff，时间线只剩名称、目标与等待审批。
+  await harness(page, 'renderEditReviewed')
+  await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed')
+  await expect(toolPane.locator('.thread-tool-state-label')).toContainText('等待审批')
+  await expect(toolPane.locator('.thread-tool-preview-body')).toHaveCount(0)
+  await expect(toolPane.locator('.thread-disclosure-toggle')).toHaveCount(0)
+  await expect(approvalPane.locator('.thread-tool-preview-body.is-edit')).toHaveText(MULTI_HUNK_DIFF)
+  await expect(toolPane.locator('.thread-tool-summary-detail')).toHaveText('/canonical/src/App.tsx')
+
+  // write 待审批：审批卡持有冻结正文与可展开 diff，时间线不再重复同一调用。
+  await harness(page, 'renderWriteReviewedPending')
+  await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('write-reviewed-pending')
+  await expect(toolPane.locator('.thread-tool-state-label')).toContainText('等待审批')
+  await expect(toolPane.locator('.thread-tool-preview-body')).toHaveCount(0)
+  await expect(toolPane.locator('.thread-disclosure-toggle')).toHaveCount(0)
+  await expect(approvalPane.locator('.thread-tool-preview-body.is-write')).toHaveText(LONG_WRITE_CONTENT)
+  await expect(toolPane.locator('.thread-tool-summary-detail')).toHaveText('/workspace/src/LongService.java')
+
+  // 允许并完成：审批卡消失后，edit 工具卡按既有规则展示结果 diff。
+  await harness(page, 'renderEditSuccess')
+  await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-success')
+  await expect(approvalPane).toHaveCount(0)
+  expect(await toolPane.locator('.thread-tool-preview-body.is-edit').textContent()).toBe(EDIT_TAIL)
+
+  // 允许并完成的 write：终态沿用既有待写正文展示，冻结 diff 不再顶替正文。
+  await harness(page, 'renderWriteApproved')
+  await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('write-approved')
+  await expect(approvalPane).toHaveCount(0)
+  expect(await toolPane.locator('.thread-tool-preview-body.is-write').textContent()).toBe(WRITE_TAIL)
+  await expect(toolPane.locator('.thread-tool-preview-body.is-edit')).toHaveCount(0)
+  await expect(toolPane.locator('.thread-tool-state-label')).toHaveCount(0)
+
+  await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-dedup-lifecycle.png') })
+})
+
+/** 双语自查截图：仅在设置 KK_MUTATION_SHOTS_DIR 时执行，产物写入该目录。 */
+const SHOTS_DIR = process.env.KK_MUTATION_SHOTS_DIR ?? null
+const SCREENSHOT_LOCALES = ['zh-CN', 'en-US'] as const
+const SCREENSHOT_VIEWPORTS = [
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'mobile', width: 390, height: 844 },
+] as const
+const SCREENSHOT_SCENARIOS = [
+  { file: 'edit-pending', action: 'renderEditReviewed', scenario: 'edit-reviewed' },
+  { file: 'edit-after', action: 'renderEditSuccess', scenario: 'edit-success' },
+  { file: 'write-pending', action: 'renderWriteReviewedPending', scenario: 'write-reviewed-pending' },
+  { file: 'write-after', action: 'renderWriteApproved', scenario: 'write-approved' },
+] as const satisfies ReadonlyArray<{ file: string; action: keyof HarnessApi; scenario: string }>
+
+test.describe('mutation review 中英双语自查截图', () => {
+  test.skip(SHOTS_DIR == null, '设置 KK_MUTATION_SHOTS_DIR 后生成 edit/write 待审批与审批后截图')
+
+  for (const locale of SCREENSHOT_LOCALES) {
+    for (const viewport of SCREENSHOT_VIEWPORTS) {
+      test(`${locale} ${viewport.name}`, async ({ page }) => {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await harness(page, 'setLocale', locale)
+        await expect(page.locator('[data-testid="active-locale"]')).toHaveText(locale)
+
+        for (const scenario of SCREENSHOT_SCENARIOS) {
+          await harness(page, scenario.action)
+          await expect(page.locator('[data-testid="active-scenario"]')).toHaveText(scenario.scenario)
+          await expect(page.locator('.mutation-harness-content')).toBeVisible()
+          await page.screenshot({
+            path: path.join(SHOTS_DIR!, `${locale}-${viewport.name}-${scenario.file}.png`),
+            fullPage: true,
+          })
+        }
+      })
+    }
+  }
+})
 })

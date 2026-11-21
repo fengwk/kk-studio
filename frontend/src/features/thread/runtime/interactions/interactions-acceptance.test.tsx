@@ -68,8 +68,8 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       { wrapper },
     )
 
-    // 推荐项不默认选中：1080P 按钮不带 is-selected
-    const btn1080 = screen.getByRole('button', { name: /1080P/ })
+    // 推荐项不默认选中：1080P 单选钮为 aria-checked=false
+    const btn1080 = screen.getByRole('radio', { name: /1080P/ })
     expect(btn1080).not.toHaveClass('is-selected')
 
     // 第 1 题（单选）：选择预置项 1080P
@@ -77,7 +77,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     expect(btn1080).toHaveClass('is-selected')
 
     // 第 2 题（多选）：选择 "成片" 并追加自定义文本 "工程源文件"
-    const btnFilm = screen.getByRole('button', { name: /成片/ })
+    const btnFilm = screen.getByRole('checkbox', { name: /成片/ })
     fireEvent.click(btnFilm)
     expect(btnFilm).toHaveClass('is-selected')
 
@@ -156,7 +156,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     )
 
     // 选择选项并提交
-    fireEvent.click(screen.getByRole('button', { name: /快速/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /快速/ }))
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
 
     // 首次失败，展示错误及重试按钮
@@ -203,7 +203,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       { wrapper },
     )
 
-    const optA = screen.getByRole('button', { name: /方案A/ })
+    const optA = screen.getByRole('radio', { name: /方案A/ })
     fireEvent.click(optA)
 
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
@@ -301,7 +301,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       { wrapper },
     )
 
-    const darkBtn = screen.getByRole('button', { name: /深色模式/ })
+    const darkBtn = screen.getByRole('radio', { name: /深色模式/ })
     fireEvent.click(darkBtn)
     expect(darkBtn).toHaveClass('is-selected')
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,14 +6,29 @@ import '@/styles.css'
 import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 import '@/features/thread/runtime/interactions/interaction-cards.css'
 import { ApplicationEventProvider } from '@/shared/app-events/context'
-import { setLocale } from '@/shared/i18n'
+import { setLocale, useI18n } from '@/shared/i18n'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
-import { ApprovalCard, type ApprovalCardProps } from '@/features/thread/runtime/interactions/ApprovalCard'
+import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
+import {
+  ApprovalReviewProvider,
+  visibleApprovalInvocationIds,
+} from '@/features/thread/runtime/interactions/approval-review-context'
+import type { InteractionApproval } from '@/shared/api/generated/contracts'
 import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import { LONG_WRITE_CONTENT, MULTI_HUNK_DIFF, VALID_SHA } from './mutation-review-fixtures'
 
 setLocale('zh-CN')
+
+/** 审批卡入口参数：与根控制区/待处理页一致，由交互主体包装成真实 DTO。 */
+interface HarnessApproval {
+  threadId: string
+  invocationId: string
+  toolName: string
+  argumentsJson?: string
+  approval?: unknown
+  queuedSameFileCount?: number
+}
 
 interface HarnessState {
   scenario: string
@@ -21,7 +36,25 @@ interface HarnessState {
     message: ToolDialogueMessage
     result?: ToolDialogueMessage
   } | null
-  approvalCard?: ApprovalCardProps | null
+  approval?: HarnessApproval | null
+}
+
+/** 审批条目必须走真实渲染入口：它挂载时才把该调用登记为唯一审查位。 */
+function approvalItem(props: HarnessApproval): InteractionApproval {
+  return {
+    type: 'APPROVAL',
+    toolInvocationId: props.invocationId,
+    threadId: props.threadId,
+    sessionId: 'sess-mutation-harness',
+    rootThreadId: props.threadId,
+    owner: { kind: 'CHAT', id: 'chat-mutation-harness', title: 'Mutation review harness' },
+    toolCallId: props.invocationId,
+    toolName: props.toolName,
+    argumentsJson: props.argumentsJson ?? '',
+    approval: props.approval,
+    queuedSameFileCount: props.queuedSameFileCount ?? 0,
+    createdAt: Date.parse('2026-10-19T00:00:00Z'),
+  }
 }
 
 const queryClient = new QueryClient({
@@ -36,6 +69,16 @@ export function MutationReviewHarnessApp() {
   const [state, setState] = useState<HarnessState>({
     scenario: 'init',
   })
+  const { locale } = useI18n()
+  // 与执行根 pane 一致：审批条目的调用 ID 就是时间线让出 diff 的依据。
+  const approval = useMemo(
+    () => (state.approval == null ? null : approvalItem(state.approval)),
+    [state.approval],
+  )
+  const approvalIds = useMemo(
+    () => (approval == null ? [] : visibleApprovalInvocationIds([approval])),
+    [approval],
+  )
 
   const release = useCallback((next: HarnessState) => {
     setState(next)
@@ -55,26 +98,29 @@ export function MutationReviewHarnessApp() {
           <div className="mutation-harness-bar">
             <span>Mutation Review Harness (Active Scenario: </span>
             <strong data-testid="active-scenario">{state.scenario}</strong>
-            <span>)</span>
+            <span>)  locale: </span>
+            <strong data-testid="active-locale">{locale}</strong>
           </div>
 
-          <div className="mutation-harness-content">
-            {state.toolBlock ? (
-              <div className="mutation-pane" data-testid="tool-message-pane">
-                <ToolMessageBlock
-                  key={state.toolBlock.message.callIdentity ?? state.toolBlock.message.toolCallId}
-                  message={state.toolBlock.message}
-                  result={state.toolBlock.result}
-                />
-              </div>
-            ) : null}
+          <ApprovalReviewProvider toolInvocationIds={approvalIds}>
+            <div className="mutation-harness-content">
+              {state.toolBlock ? (
+                <div className="mutation-pane" data-testid="tool-message-pane">
+                  <ToolMessageBlock
+                    key={state.toolBlock.message.callIdentity ?? state.toolBlock.message.toolCallId}
+                    message={state.toolBlock.message}
+                    result={state.toolBlock.result}
+                  />
+                </div>
+              ) : null}
 
-            {state.approvalCard ? (
-              <div className="mutation-approval-pane" data-testid="approval-card-pane">
-                <ApprovalCard {...state.approvalCard} />
-              </div>
-            ) : null}
-          </div>
+              {approval ? (
+                <div className="mutation-approval-pane" data-testid="approval-card-pane">
+                  <InteractionCardBody item={approval} />
+                </div>
+              ) : null}
+            </div>
+          </ApprovalReviewProvider>
         </div>
       </MemoryRouter>
     </QueryClientProvider>
@@ -82,24 +128,17 @@ export function MutationReviewHarnessApp() {
 }
 
 const mutationReviewHarness = {
+  /** 自查截图：切换中英文案，保持当前组件重新渲染。 */
+  setLocale(locale: 'zh-CN' | 'en-US') {
+    setLocale(locale)
+  },
+  /** 待审批 write（没有审批卡可见）：只读记录继续展示待写正文短窗口。 */
   renderWritePending() {
     const rawArgs = JSON.stringify({
       path: '/workspace/src/LongService.java',
       workdir: '/workspace/root',
       content: LONG_WRITE_CONTENT,
     })
-    const approval = {
-      required: true,
-      decision: null,
-      decisionId: null,
-      reason: 'Permission rules require approval',
-      editReview: {
-        path: '/workspace/src/LongService.java',
-        diff: LONG_WRITE_CONTENT.split('\n').slice(0, -1)
-          .map((line, index) => `+${index + 1}|${line}`).join('\n'),
-        sha256: null,
-      },
-    }
 
     const callMsg: ToolDialogueMessage = {
       id: 'call-write-pending',
@@ -113,6 +152,7 @@ const mutationReviewHarness = {
       contents: [],
       createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
+      invocationId: 'inv-write-pending',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
         required: true,
@@ -125,13 +165,116 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'write-pending',
       toolBlock: { message: callMsg },
-      approvalCard: {
+      approval: null,
+    })
+  },
+
+  /** 待审批 write（审批卡可见）：冻结材料只在审批卡里出现一次。 */
+  renderWriteReviewedPending() {
+    const rawArgs = JSON.stringify({
+      path: '/workspace/src/LongService.java',
+      workdir: '/workspace/root',
+      content: LONG_WRITE_CONTENT,
+    })
+    const review = {
+      path: '/workspace/src/LongService.java',
+      diff: LONG_WRITE_CONTENT.split('\n').slice(0, -1)
+        .map((line, index) => `+${index + 1}|${line}`).join('\n'),
+      sha256: null,
+    }
+    const approval = {
+      required: true,
+      decision: null,
+      decisionId: null,
+      reason: 'Permission rules require approval',
+      editReview: review,
+    }
+
+    const callMsg: ToolDialogueMessage = {
+      id: 'call-write-reviewed',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-write-reviewed',
+      toolName: 'write',
+      rendererKey: 'write',
+      arguments: rawArgs,
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'done',
+      invocationId: 'inv-write-reviewed',
+      invocationStatus: 'WAITING_APPROVAL',
+      approval,
+      editReview: review,
+    }
+
+    updateState({
+      scenario: 'write-reviewed-pending',
+      toolBlock: { message: callMsg },
+      approval: {
         threadId: 'thread-1',
-        invocationId: 'inv-write-1',
+        invocationId: 'inv-write-reviewed',
         toolName: 'write',
         argumentsJson: rawArgs,
         approval,
       },
+    })
+  },
+
+  /** 允许并完成后的 write：终态按既有规则展示待写正文，不拿冻结 diff 顶替。 */
+  renderWriteApproved() {
+    const rawArgs = JSON.stringify({
+      path: '/workspace/src/LongService.java',
+      workdir: '/workspace/root',
+      content: LONG_WRITE_CONTENT,
+    })
+    const review = {
+      path: '/workspace/src/LongService.java',
+      diff: LONG_WRITE_CONTENT.split('\n').slice(0, -1)
+        .map((line, index) => `+${index + 1}|${line}`).join('\n'),
+      sha256: null,
+    }
+    const callMsg: ToolDialogueMessage = {
+      id: 'call-write-approved',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-write-approved',
+      toolName: 'write',
+      rendererKey: 'write',
+      arguments: rawArgs,
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'done',
+      invocationId: 'inv-write-approved',
+      invocationStatus: 'SUCCEEDED',
+      approval: {
+        required: true,
+        decision: 'ALLOWED',
+        decisionId: 'dec-write-approved',
+        reason: null,
+        editReview: review,
+      },
+      editReview: review,
+    }
+    const resultMsg: ToolDialogueMessage = {
+      id: 'result-write-approved',
+      role: 'tool',
+      phase: 'result',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-write-approved',
+      toolName: 'write',
+      rendererKey: 'write',
+      arguments: rawArgs,
+      contents: [{ type: 'text', text: 'File written successfully.' }],
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
+      status: 'done',
+    }
+
+    updateState({
+      scenario: 'write-approved',
+      toolBlock: { message: callMsg, result: resultMsg },
+      approval: null,
     })
   },
 
@@ -172,7 +315,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'write-success',
       toolBlock: { message: callMsg, result: resultMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -197,7 +340,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'edit-streaming',
       toolBlock: { message: callMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -223,7 +366,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'edit-streaming-multi',
       toolBlock: { message: callMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -257,7 +400,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'edit-preparing',
       toolBlock: { message: callMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -294,6 +437,7 @@ const mutationReviewHarness = {
       contents: [],
       createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
+      invocationId: 'inv-edit-1',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
         required: true,
@@ -302,18 +446,65 @@ const mutationReviewHarness = {
         reason: null,
         editReview: reviewData,
       },
+      editReview: reviewData,
     }
 
     updateState({
       scenario: 'edit-reviewed',
       toolBlock: { message: callMsg },
-      approvalCard: {
+      approval: {
         threadId: 'thread-1',
         invocationId: 'inv-edit-1',
         toolName: 'edit',
         argumentsJson: rawArgs,
         approval,
       },
+    })
+  },
+
+  /** 待审批 edit（没有审批卡可见）：冻结 diff 仍留在时间线记录里。 */
+  renderEditReviewedReadonly() {
+    const rawArgs = JSON.stringify({
+      path: '/src/App.tsx',
+      edits: [
+        { old_string: 'const a = 1;', new_string: 'const a = 100;' },
+        { old_string: 'const b = 2;', new_string: 'const b = 200;' },
+      ],
+    })
+    const reviewData = {
+      path: '/canonical/src/App.tsx',
+      diff: MULTI_HUNK_DIFF,
+      sha256: VALID_SHA,
+    }
+
+    updateState({
+      scenario: 'edit-reviewed-readonly',
+      toolBlock: {
+        message: {
+          id: 'call-edit-reviewed-readonly',
+          role: 'tool',
+          phase: 'call',
+          subjectEntryId: 'asst-1',
+          toolCallId: 'call-edit-reviewed-readonly',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          arguments: rawArgs,
+          contents: [],
+          createdAt: Date.parse('2026-10-19T00:00:00Z'),
+          status: 'done',
+          invocationId: 'inv-edit-readonly',
+          invocationStatus: 'WAITING_APPROVAL',
+          approval: {
+            required: true,
+            decision: null,
+            decisionId: null,
+            reason: null,
+            editReview: reviewData,
+          },
+          editReview: reviewData,
+        },
+      },
+      approval: null,
     })
   },
 
@@ -370,7 +561,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'edit-conflict',
       toolBlock: { message: callMsg, result: resultMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -412,7 +603,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'edit-success',
       toolBlock: { message: callMsg, result: resultMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -456,7 +647,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'mutation-failure',
       toolBlock: { message: callMsg, result: resultMsg },
-      approvalCard: null,
+      approval: null,
     })
   },
 
@@ -464,7 +655,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'approval-missing-review',
       toolBlock: null,
-      approvalCard: {
+      approval: {
         threadId: 'thread-1',
         invocationId: 'inv-missing-review',
         toolName: 'edit',
@@ -481,7 +672,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'approval-malformed-review',
       toolBlock: null,
-      approvalCard: {
+      approval: {
         threadId: 'thread-1',
         invocationId: 'inv-malformed-review',
         toolName: 'edit',
@@ -505,7 +696,7 @@ const mutationReviewHarness = {
     updateState({
       scenario: 'approval-valid',
       toolBlock: null,
-      approvalCard: {
+      approval: {
         threadId: 'thread-1',
         invocationId: 'inv-valid-review',
         toolName: 'edit',
@@ -596,7 +787,7 @@ const mutationReviewHarness = {
       updateState({
         scenario: 'edit-durable-history',
         toolBlock: { message: callMsg, result: resultMsg },
-        approvalCard: null,
+        approval: null,
       })
     }
   },

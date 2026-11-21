@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import { Check, RotateCw } from 'lucide-react'
-import { useMemo } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
@@ -48,6 +49,10 @@ export function QuestionnaireCard({
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
   const draft = useInteractionDraft(interactionId)
+  const questionLabelIdBase = useId()
+  /** 单选组只保留一个 Tab 停靠点：记录每题最近聚焦的选项。 */
+  const [focusedOption, setFocusedOption] = useState<Record<number, number>>({})
+  const optionRefs = useRef<Record<number, Array<HTMLButtonElement | null>>>({})
 
   const questionnaire = useMemo(
     () => parseQuestionnaire(argumentsJson),
@@ -93,8 +98,37 @@ export function QuestionnaireCard({
       return
     }
     interactionDraftStore.updateQuestionDraft(interactionId, qIdx, (prev) =>
-      toggleSingleOrMultiOption(prev, label, multiple),
+      !multiple && prev.selectedLabels.includes(label)
+        ? prev
+        : toggleSingleOrMultiOption(prev, label, multiple),
     )
+  }
+
+  /** 方向键在单选组内移动焦点；选择仍由空格/回车（原生按钮激活）完成。 */
+  const handleOptionsKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    qIdx: number,
+    optionCount: number,
+  ) => {
+    if (locked || event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) {
+      return
+    }
+    const { key } = event
+    const isPrevious = key === 'ArrowLeft' || key === 'ArrowUp'
+    const isNext = key === 'ArrowRight' || key === 'ArrowDown'
+    if (!isPrevious && !isNext && key !== 'Home' && key !== 'End') {
+      return
+    }
+    const buttons = optionRefs.current[qIdx] ?? []
+    const focusedIndex = buttons.findIndex((button) => button === document.activeElement)
+    const position = focusedIndex >= 0 ? focusedIndex : (focusedOption[qIdx] ?? 0)
+    const nextIndex = key === 'Home'
+      ? 0
+      : key === 'End'
+        ? optionCount - 1
+        : (position + (isNext ? 1 : -1) + optionCount) % optionCount
+    event.preventDefault()
+    buttons[nextIndex]?.focus()
   }
 
   const handleCustomTextChange = (qIdx: number, text: string, multiple: boolean) => {
@@ -140,12 +174,23 @@ export function QuestionnaireCard({
             customText: '',
           }
           const isMultiple = Boolean(q.multiple)
+          const optionCount = q.options?.length ?? 0
+          const selectedIndex = isMultiple
+            ? -1
+            : (q.options ?? []).findIndex((opt) => qDraft.selectedLabels.includes(opt.label))
+          // 单选组只有一个 Tab 停靠点：已选项优先，否则停在最近聚焦的选项。
+          const singleTabStop = selectedIndex >= 0
+            ? selectedIndex
+            : Math.max(0, Math.min(focusedOption[qIdx] ?? 0, optionCount - 1))
+          const questionLabelId = `${questionLabelIdBase}-q${qIdx}`
 
           return (
             <div key={qIdx} className="interaction-question-item">
               <div className="interaction-question-title">
                 <span className="interaction-question-idx">{qIdx + 1}.</span>
-                <span className="interaction-question-text">{q.question}</span>
+                <span className="interaction-question-text" id={questionLabelId}>
+                  {q.question}
+                </span>
                 <span className="interaction-question-type-tag">
                   {isMultiple
                     ? t('ai.interaction.multipleChoice')
@@ -153,21 +198,54 @@ export function QuestionnaireCard({
                 </span>
               </div>
 
-              {q.options && q.options.length > 0 ? (
-                <div className="interaction-options-grid">
-                  {q.options.map((opt, optIdx) => {
+              {optionCount > 0 ? (
+                <div
+                  className="interaction-options-grid"
+                  role={isMultiple ? 'group' : 'radiogroup'}
+                  aria-labelledby={questionLabelId}
+                  onKeyDown={(event) => handleOptionsKeyDown(event, qIdx, optionCount)}
+                >
+                  {(q.options ?? []).map((opt, optIdx) => {
                     const isSelected = qDraft.selectedLabels.includes(opt.label)
                     return (
                       <button
                         key={optIdx}
+                        ref={(element) => {
+                          const refs = optionRefs.current[qIdx] ?? []
+                          refs[optIdx] = element
+                          optionRefs.current[qIdx] = refs
+                        }}
                         type="button"
+                        // 单选呈现为单选组，多选呈现为复选框；选中态经 aria-checked 暴露给读屏。
+                        role={isMultiple ? 'checkbox' : 'radio'}
+                        aria-checked={isSelected}
+                        tabIndex={
+                          isMultiple ? undefined : (optIdx === singleTabStop ? 0 : -1)
+                        }
                         className={`interaction-option-btn ${isSelected ? 'is-selected' : ''}`}
                         disabled={locked}
+                        onFocus={
+                          isMultiple
+                            ? undefined
+                            : () =>
+                                setFocusedOption((prev) =>
+                                  prev[qIdx] === optIdx ? prev : { ...prev, [qIdx]: optIdx },
+                                )
+                        }
                         onClick={() => handleSelectOption(qIdx, opt.label, isMultiple)}
                       >
                         <span className="interaction-option-label-row">
-                          <span className="interaction-option-indicator">
-                            {isSelected ? <Check size={12} /> : null}
+                          <span
+                            className={`interaction-option-indicator ${isMultiple ? 'is-checkbox' : 'is-radio'}`}
+                            aria-hidden="true"
+                          >
+                            {isSelected ? (
+                              isMultiple ? (
+                                <Check size={12} />
+                              ) : (
+                                <span className="interaction-option-dot" />
+                              )
+                            ) : null}
                           </span>
                           <span className="interaction-option-label">{opt.label}</span>
                           {opt.recommended ? (

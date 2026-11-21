@@ -10,7 +10,7 @@ import '@/features/thread/runtime/thread-panel/messages/meta-message-block.css'
  * 特殊 entry / 回合摘要：左对齐，与正文同列，用图标区分。
  *
  * 当消息绑定到真正的 TURN_END（`endEntryId` 非空）时，它是一次已关闭回合的 footer：
- * 没有 usage 时展示 '-' 占位与「从此处分支」入口，不以回合状态替代用量。入口走会话里唯一的
+ * 没有 usage 时展示本地化的「无用量」与「从此处分支」入口，不以回合状态替代用量。入口走会话里唯一的
  * 分支 Context（由根控制面注入，与 `/tree` 共用同一条命名/目标流程）；
  * 无该能力时（只读子代理视图、非 Chat 宿主、分支禁用）不渲染按钮，绝不在此自造流程。
  *
@@ -24,6 +24,9 @@ export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) 
   const title = message.turnUsage != null
     ? formatUsageDetails(message.turnUsage, t)
     : undefined
+  // 回合 footer 的 kind 只有 turn_usage；缺失 usage 事实时投影的 text 为空，
+  // 文案在这里本地化，避免把占位符写进时间线数据。
+  const text = message.turnUsage == null ? t('ai.runtime.message.noUsage') : message.text
   const endEntryId = message.endEntryId ?? null
   const canBranch = endEntryId != null && requestBranch != null
   const branchLabel = t('ai.chat.branch.fromHere')
@@ -38,7 +41,7 @@ export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) 
           <Coins />
         </span>
         <div className="thread-block-body thread-meta-text" title={title}>
-          {message.text}
+          {text}
         </div>
         {canBranch ? (
           <IconButton

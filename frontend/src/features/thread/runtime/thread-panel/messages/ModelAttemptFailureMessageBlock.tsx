@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ThinkingBlock } from '@/features/thread/runtime/thread-panel/messages/ThinkingBlock'
 import { retryCountdownSeconds } from '@/features/thread/runtime/thread-panel/messages/retry-countdown'
+import { summarizeModelFailure } from '@/features/thread/runtime/thread-timeline/model-failure-summary'
 import type {
   ModelAttemptFailureDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
@@ -9,6 +10,10 @@ import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { useI18n } from '@/shared/i18n'
 import './message-blocks.css'
 
+/**
+ * 模型请求失败卡：主文案是失败类别的本地化说明加供应商错误信息，HTTP 状态作为辅助信息，
+ * 完整原始错误文本放入默认折叠的详情并可复制；partial 正文与思考仍按普通消息展示。
+ */
 export function ModelAttemptFailureMessageBlock({
   message,
 }: {
@@ -21,6 +26,8 @@ export function ModelAttemptFailureMessageBlock({
   const liveRetry = message.generationId != null
   const retry = useRetryCountdown(liveRetry ? message.retryAt : null)
   const errorCode = message.errorCode.trim()
+  const failure = summarizeModelFailure(message.errorCode, message.errorMessage)
+  const kindLabel = failure.kindKey == null ? null : t(failure.kindKey)
 
   return (
     <div className="thread-turn thread-turn-model-attempt-failure">
@@ -66,8 +73,37 @@ export function ModelAttemptFailureMessageBlock({
         </section>
       ) : null}
       <section className="thread-block thread-block-model-attempt-failure-error">
-        {errorCode ? <code>{errorCode}</code> : null}
-        <pre className="thread-error-raw">{message.errorMessage}</pre>
+        <div className="thread-attempt-failure-summary">
+          <div className="thread-attempt-failure-headline">
+            {kindLabel == null ? null : (
+              <strong className="thread-attempt-failure-kind">{kindLabel}</strong>
+            )}
+            {errorCode ? <code>{errorCode}</code> : null}
+            {failure.httpStatus == null ? null : (
+              <span className="thread-attempt-failure-http">
+                {t('ai.runtime.message.modelFailureHttpStatus', {
+                  status: failure.httpStatus,
+                })}
+              </span>
+            )}
+          </div>
+          {failure.summary ? (
+            <p className="thread-attempt-failure-detail">{failure.summary}</p>
+          ) : null}
+        </div>
+        {failure.rawResponse == null ? null : (
+          <details className="thread-attempt-failure-raw">
+            <summary>{t('ai.runtime.message.modelFailureRawResponse')}</summary>
+            <div className="thread-attempt-failure-raw-body">
+              <CopyButton
+                source={failure.rawResponse}
+                className="thread-attempt-failure-copy"
+                label={t('ai.runtime.message.modelFailureCopyRawResponse')}
+              />
+              <pre className="thread-error-raw">{failure.rawResponse}</pre>
+            </div>
+          </details>
+        )}
       </section>
     </div>
   )

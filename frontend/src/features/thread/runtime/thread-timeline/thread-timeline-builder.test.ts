@@ -1191,7 +1191,7 @@ describe('Turn usage after TURN_END', () => {
       'end-1',
       'end-2',
     ])
-    expect(metas.map((message) => message.text)).toEqual(['-', '-'])
+    expect(metas.map((message) => message.text)).toEqual(['', ''])
     for (const meta of metas) {
       expect(meta).not.toHaveProperty('turnUsage')
       expect(meta).not.toHaveProperty('details')
@@ -1203,8 +1203,9 @@ describe('Turn usage after TURN_END', () => {
 
   it.each(['FAILED', 'STOPPED', 'COMPLETED'])('uses a placeholder without usage for %s', (outcome) => {
     const timeline = buildThreadTimeline([turnStart(), turnEnd('end-1', outcome)], [], [])
+    // 投影不写占位符号；「无用量」由渲染层本地化。
     expect(timeline.messages.at(-1)).toMatchObject({
-      text: '-', endEntryId: 'end-1', kind: 'turn_usage',
+      text: '', endEntryId: 'end-1', kind: 'turn_usage',
     })
     expect(timeline.messages.at(-1)).not.toHaveProperty('turnUsage')
   })

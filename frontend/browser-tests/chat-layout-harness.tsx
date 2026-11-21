@@ -28,7 +28,9 @@ import type {
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
-setLocale('zh-CN')
+setLocale(
+  new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN',
+)
 
 const INITIAL_PANE_STATE: ChatPaneState = applyChatLayout(createDefaultChatPaneState(), 'split-2')
 
@@ -305,11 +307,66 @@ function TurnUsageHarness() {
   )
 }
 
+/** 审查环境 mock 返回的真实 HTTP 400 响应体，逐字保留（含字段顺序与无空格格式）。 */
+const REVIEW_MODEL_FAILURE_BODY =
+  '{"error":{"message":"mock: maximum context length exceeded","type":"invalid_request_error","code":"context_length_exceeded"}}'
+
+/** 后端把客户端所见错误格式化为 `HTTP <status>\n<body>`；失败卡摘要只取其中的类别与供应商信息。 */
+const REVIEW_MODEL_FAILURE_MESSAGE = `HTTP 400\n${REVIEW_MODEL_FAILURE_BODY}`
+
+/** 失败回合：真实持久 Entry 经 timeline 投影，覆盖失败卡折叠/展开与无用量 footer。 */
+function ModelFailureHarness() {
+  const [forkEntryId, setForkEntryId] = useState('')
+  const entries: HarnessSessionEntryDTO[] = []
+  const append = (
+    entryId: string,
+    entryType: HarnessSessionEntryDTO['entryType'],
+    payload: Record<string, unknown>,
+  ) => {
+    entries.push({
+      entryId,
+      entryType,
+      sessionId: 'failure-session',
+      parentEntryId: entries.at(-1)?.entryId ?? null,
+      payload,
+      createdAt: 1785232800,
+      usageCost: null,
+    })
+  }
+  append('start-failure', 'TURN_START', {
+    reason: 'USER_MESSAGE',
+    settings: {
+      agentName: 'coding',
+      execution: { driver: 'builtin', settings: { modelName: 'gpt-mock-large', variant: 'default' } },
+      environmentName: null,
+    },
+  })
+  append('error-failure', 'ASSISTANT_ERROR', {
+    attempt: { attempt: 1, sequence: 0, text: '', thinking: '' },
+    error: { code: 'CONTEXT_LIMIT', message: REVIEW_MODEL_FAILURE_MESSAGE },
+  })
+  append('end-failure', 'TURN_END', { outcome: 'FAILED', continueModel: false })
+  const timeline = buildThreadTimeline(entries, [], [])
+  return (
+    <main style={{ padding: 24, maxWidth: 720 }}>
+      <output data-testid="fork-entry-id">{forkEntryId}</output>
+      <div data-testid="model-failure-timeline">
+        <EntryBranchContext.Provider value={setForkEntryId}>
+          <MessageList messages={timeline.messages} />
+        </EntryBranchContext.Provider>
+      </div>
+    </main>
+  )
+}
+
 const rootElement = document.getElementById('root')
 if (rootElement) {
+  const scenario = new URLSearchParams(window.location.search).get('scenario')
   createRoot(rootElement).render(
-    new URLSearchParams(window.location.search).get('scenario') === 'turn-usage'
+    scenario === 'turn-usage'
       ? <TurnUsageHarness />
-      : <ChatLayoutHarnessApp />,
+      : scenario === 'model-failure'
+        ? <ModelFailureHarness />
+        : <ChatLayoutHarnessApp />,
   )
 }

@@ -143,7 +143,7 @@ it('审批参数逐字段可读；默认审批原因隐藏且拒绝输入有双�
   expect(screen.getByText('3000')).toBeInTheDocument()
   expect(screen.queryByText(args)).not.toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: '拒绝原因（可选）' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('ghost-btn', 'is-compact')
+  expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('ghost-btn', 'danger', 'is-compact')
   expect(screen.getByRole('button', { name: '允许' })).toHaveClass('btn-primary')
   setLocale('en-US')
   rerender(<ApprovalCard {...props} />)
@@ -191,6 +191,7 @@ it('409 围栏不可重试且保留参数和拒绝按钮的 danger 语义', asyn
   fireEvent.click(screen.getByRole('button', { name: '允许' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled())
   await waitFor(() => expect(document.querySelector('.is-non-recoverable')).toBeInTheDocument())
+  expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('danger')
   expect(document.querySelector('pre.is-command')?.textContent).toBe('pwd\nls -la')
 })
 

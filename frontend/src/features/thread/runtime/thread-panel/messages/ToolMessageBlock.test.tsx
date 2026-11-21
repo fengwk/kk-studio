@@ -747,6 +747,78 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
   })
 
+  it('keeps the frozen write review diff in the read-only record instead of only the body', async () => {
+    const user = userEvent.setup()
+    const diff = Array.from({ length: 14 }, (_, index) => `+${index + 1}|line-${index + 1}`).join('\n')
+    const tail = Array.from({ length: 10 }, (_, index) => `+${index + 5}|line-${index + 5}`).join('\n')
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'write',
+          rendererKey: 'write',
+          arguments: JSON.stringify({ path: 'App.java', content: 'body-one\nbody-two' }),
+          editReview: {
+            path: 'App.java',
+            diff,
+            sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          },
+        })}
+      />,
+    )
+
+    // 冻结审查是权威材料：只读记录直接展示 diff，不退化成只有正文。
+    const preview = container.querySelector('.thread-tool-preview-body')
+    expect(preview).toHaveClass('is-edit')
+    expect(preview?.textContent).toBe(tail)
+    expect(container.querySelector('.thread-tool-preview-body.is-write')).toBeNull()
+    expect(screen.getByText('… 上方还有 4 行')).toBeInTheDocument()
+
+    // 完整冻结 diff 由 Header 的 chevron 打开，不再叠一份正文。
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-details .thread-tool-preview-body')?.textContent)
+      .toBe(diff)
+    expect(container.querySelector('.thread-tool-details .thread-tool-preview-body.is-write')).toBeNull()
+  })
+
+  it('falls back to the write body once the reviewed call is terminal, including failures', () => {
+    const contentLines = Array.from({ length: 14 }, (_, index) => `line-${index + 1}`)
+    const content = contentLines.join('\n')
+    const tail = contentLines.slice(-10).join('\n')
+    const call = message({
+      phase: 'call',
+      toolName: 'write',
+      rendererKey: 'write',
+      arguments: JSON.stringify({ path: 'App.java', content }),
+      editReview: {
+        path: 'App.java',
+        diff: contentLines.map((line, index) => `+${index + 1}|${line}`).join('\n'),
+        sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      },
+    })
+    const { container, rerender } = render(<ToolMessageBlock message={call} />)
+
+    // 等待审批期间冻结 diff 就是时间线材料。
+    expect(container.querySelector('.thread-tool-preview-body')).toHaveClass('is-edit')
+
+    // 终态（含失败）沿用既有待写正文展示，不让 diff 顶替正文。
+    for (const invocationStatus of ['SUCCEEDED', 'FAILED'] as const) {
+      rerender(
+        <ToolMessageBlock
+          message={{
+            ...call,
+            invocationStatus,
+            status: invocationStatus === 'FAILED' ? 'error' : 'done',
+          }}
+        />,
+      )
+      const preview = container.querySelector('.thread-tool-preview-body')
+      expect(preview).toHaveClass('is-write')
+      expect(preview?.textContent).toBe(tail)
+      expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
+    }
+  })
+
   it('shows the pre-execution edit diff when editReview is present', () => {
     const { container } = render(
       <ToolMessageBlock

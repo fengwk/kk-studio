@@ -6,6 +6,7 @@ import {
 } from '@/features/thread/runtime/thread-panel'
 import { ThreadPane } from '@/features/thread/runtime/panes/ThreadPane'
 import { RootThreadControlArea } from '@/features/thread/runtime/panes/RootThreadControlArea'
+import { RootInteractionsProvider } from '@/features/thread/runtime/interactions/root-interactions'
 import { ActiveThreadTree } from '@/features/thread/runtime/panes/ActiveThreadTree'
 import { useThreadPresentation, type ThreadPresentation } from './thread-presentation'
 import { renderPaneInteraction } from '@/features/thread/runtime/panes/root-agent-pane-interactions'
@@ -172,39 +173,44 @@ export function RootAgentPane({
   }
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
-      <ThreadPane
-        projection={pane.controller}
-        environments={environments}
-        activity={{
-          actionError: pane.interaction === 'agent' && interactionPanel != null ? null : pane.error,
-          onDismissActionError,
-          onStop: () => { void pane.controller.stopThread() },
-          stopPending: pane.controller.stopPending || pane.controller.stopReplayPending,
-          widgets: boundIsRoot && boundThreadId != null && !debugActive
-            ? (
-              <ActiveThreadTree
-                tree={tree}
-                currentThreadId={navigation.activeThreadId ?? boundThreadId}
-              />
-            )
-            : undefined,
-        }}
-        controls={boundThreadId == null
-          ? null
-          : (
-            <RootThreadControlArea
-                rootThreadId={boundThreadId}
-                composer={composer}
-                messages={pane.controller.timeline.messages}
-                queuedMessages={pane.controller.timeline.queuedMessages}
-                hidden={debugActive}
-              />
-          )}
-        views={{
-          mainView: pane.boundViews.mainView,
-          initialConversationScrollTop: pane.boundViews.initialConversationScrollTop,
-        }}
-      />
+      <RootInteractionsProvider
+        rootThreadId={pane.target.threadId}
+        approvalsVisible={!debugActive}
+      >
+        <ThreadPane
+          projection={pane.controller}
+          environments={environments}
+          activity={{
+            actionError: pane.interaction === 'agent' && interactionPanel != null ? null : pane.error,
+            onDismissActionError,
+            onStop: () => { void pane.controller.stopThread() },
+            stopPending: pane.controller.stopPending || pane.controller.stopReplayPending,
+            widgets: boundIsRoot && boundThreadId != null && !debugActive
+              ? (
+                <ActiveThreadTree
+                  tree={tree}
+                  currentThreadId={navigation.activeThreadId ?? boundThreadId}
+                />
+              )
+              : undefined,
+          }}
+          controls={boundThreadId == null
+            ? null
+            : (
+              <RootThreadControlArea
+                  rootThreadId={boundThreadId}
+                  composer={composer}
+                  messages={pane.controller.timeline.messages}
+                  queuedMessages={pane.controller.timeline.queuedMessages}
+                  hidden={debugActive}
+                />
+            )}
+          views={{
+            mainView: pane.boundViews.mainView,
+            initialConversationScrollTop: pane.boundViews.initialConversationScrollTop,
+          }}
+        />
+      </RootInteractionsProvider>
     )
     : (
       <ThreadPanel
