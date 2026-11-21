@@ -42,7 +42,6 @@ const NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/chats',
     labelKey: 'platform.nav.ai',
     ariaKey: 'platform.nav.aiAria',
-    shortLabel: 'AI',
     icon: Bot,
   },
   {
@@ -51,7 +50,6 @@ const NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/projects',
     labelKey: 'platform.nav.projects',
     ariaKey: 'platform.nav.projectsAria',
-    shortLabel: 'Projects',
     icon: FolderKanban,
   },
 ]

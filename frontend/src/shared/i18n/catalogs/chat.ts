@@ -224,7 +224,7 @@ export const chatCatalog = {
   },
   'ai.chat.sessionsLoadFailed': {
     'en-US': 'Could not load Sessions',
-    'zh-CN': '读取 Session 列表失败',
+    'zh-CN': '读取会话列表失败',
   },
   'ai.chat.selectThread': {
     'en-US': 'Select Thread',
@@ -247,8 +247,8 @@ export const chatCatalog = {
     'zh-CN': '{{count}} 个 Thread',
   },
   'ai.chat.continueConversation': {
-    'en-US': 'Continue a conversation',
-    'zh-CN': '继续已有对话',
+    'en-US': 'Continue an existing Session',
+    'zh-CN': '继续已有会话',
   },
   'ai.chat.selection.search': {
     'en-US': 'Search',
@@ -1937,7 +1937,7 @@ export const chatCatalog = {
   },
   'ai.runtime.debug.frozenNotice': {
     'en-US': 'Frozen canonical ProviderRequest for this invocation, not the provider HTTP body. It is readable at READY and does not prove a request has been sent.',
-    'zh-CN': '当前调用冻结的 canonical ProviderRequest，不是提供商 HTTP 请求体；READY 阶段即可读取，不证明请求已经发送。',
+    'zh-CN': '当前调用冻结的规范化 ProviderRequest，不是提供商 HTTP 请求体；READY 阶段即可读取，不证明请求已经发送。',
   },
   'ai.runtime.debug.httpOriginalUnavailable': {
     'en-US': 'Raw HTTP wire payload is not captured',

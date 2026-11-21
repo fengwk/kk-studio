@@ -1834,8 +1834,8 @@ describe('AgentPane orchestration', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
-    const panel = await screen.findByRole('region', { name: '选择 Session' })
-    expect(await within(panel).findByRole('alert')).toHaveTextContent('读取 Session 列表失败')
+    const panel = await screen.findByRole('region', { name: '选择会话' })
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('读取会话列表失败')
     // 失败不是空：不得用“暂无 Session”掩盖查询错误。
     expect(within(panel).queryByText('暂无 Session')).not.toBeInTheDocument()
     expect(within(panel).queryByRole('option')).not.toBeInTheDocument()
@@ -1885,11 +1885,11 @@ describe('AgentPane orchestration', () => {
       firstMessagePreview: null, threadCount: 1,
     }])
     renderPane({ kind: 'CHAT', id: CHAT_ID })
-    const action = await screen.findByRole('button', { name: '继续已有对话' })
+    const action = await screen.findByRole('button', { name: '继续已有会话' })
     await user.click(action)
     // 与 `/thread` 同一个面板；入口在面板打开后不再重复出现。
-    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '继续已有对话' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '选择会话' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续已有会话' })).not.toBeInTheDocument()
   })
 
   it('hides the continue action when the Chat has no Sessions', async () => {
@@ -1899,7 +1899,7 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(loadSessionsMock).toHaveBeenCalled())
     // 等待首个探测页落地后再断言入口不存在（否则断言会在查询完成前空转通过）。
     await act(async () => {})
-    expect(screen.queryByRole('button', { name: '继续已有对话' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续已有会话' })).not.toBeInTheDocument()
   })
 
   it('renames the bound Thread from the palette since identity moved to the workspace topbar', async () => {

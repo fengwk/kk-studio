@@ -37,7 +37,7 @@ export function RootThreadControlArea({
   composer: ThreadPanelComposerInput
   messages: DialogueMessage[]
   queuedMessages: QueuedThreadMessage[]
-  /** 输入框上方的轻量入口/提示（如空白草稿 pane 的“继续已有对话”），不参与 composer 状态。 */
+  /** 输入框上方的轻量入口/提示（如空白草稿 pane 的“继续已有会话”），不参与 composer 状态。 */
   notice?: ReactNode
   /**
    * Debug 主视图激活时为真：整个输入/审批/分支控制区保持挂载但完全隐藏且惰性

@@ -348,7 +348,7 @@ async function installChatApi(
     }
     if (path === `/api/chat/chats/${CHAT_ID}/sessions`) {
       // 归属 Session 摘要按 keyset 分页返回（ChatSessionPageDTO），首屏无下一页。
-      // 空白 pane 的“继续已有对话”入口只看 owner 是否已有会话，所以这里也用它表达空列表。
+      // 空白 pane 的“继续已有会话”入口只看 owner 是否已有会话，所以这里也用它表达空列表。
       await route.fulfill({
         json: {
             items: options.sessions === 'empty' ? [] : [{
@@ -1394,7 +1394,7 @@ for (const locale of LOCALES) {
         .toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
       await captureShot(page, testInfo, shotName(locale, viewport, 'thread-selection'))
 
-      // 选中 Thread 就是继续已有对话：绑定真实目标并渲染历史，不提交任何命令。
+      // 选中 Thread 就是继续已有会话：绑定真实目标并渲染历史，不提交任何命令。
       await threadRow.click()
       await expect(pane.getByText('Real selected ancestor', { exact: true })).toBeVisible()
       await expect.poll(() => readPaneTarget(page, 'pane-1'))

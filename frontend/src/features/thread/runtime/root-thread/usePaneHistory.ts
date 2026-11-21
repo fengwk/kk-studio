@@ -74,7 +74,7 @@ export function usePaneNavigationQueries(options: {
       && (
         interaction === 'thread-sessions'
         || interaction === 'rename-session'
-        // 空白草稿 pane 先要知道 owner 是否已有会话，才能给出“继续已有对话”入口；
+        // 空白草稿 pane 先要知道 owner 是否已有会话，才能给出“继续已有会话”入口；
         // 与面板共用同一 queryKey，不因此多出请求。
         || (owner.kind === 'CHAT' && target.kind === 'NEW_SESSION_DRAFT')
       ),
