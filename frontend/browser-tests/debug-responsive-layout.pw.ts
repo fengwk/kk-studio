@@ -493,14 +493,24 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
       }
       const row = page.locator('[data-event-id="ev-2"]')
       await row.click()
-      if (width < 1100) await page.getByRole('tab', { name: '事件', exact: true }).click()
-      await page.locator('.thread-events').evaluate((el) => { el.scrollTop = 97 })
+      const events = page.locator('.thread-events')
+      if (width < 1100) {
+        await page.getByRole('tab', { name: '事件', exact: true }).click()
+        // 页签重新显示时会贴底。用真实滚轮退出跟随，再切走保存阅读位置。
+        await events.hover()
+        await expect.poll(() => events.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBe(0)
+        await page.mouse.wheel(0, await events.evaluate((el) => 97 - el.scrollTop))
+        await expect(events).toHaveAttribute('data-following', 'false')
+        await expect.poll(() => events.evaluate((el) => el.scrollTop)).toBe(97)
+      } else {
+        await events.evaluate((el) => { el.scrollTop = 97 })
+      }
       await page.getByRole('button', { name: 'Conversation', exact: true }).click()
       await expect(page.locator('.thread-events-shell')).toHaveCount(0)
       await page.getByRole('button', { name: 'Debug', exact: true }).click()
       await expect(row).toHaveAttribute('aria-selected', 'true')
       if (width < 1100) await page.getByRole('tab', { name: '事件', exact: true }).click()
-      await expect.poll(() => page.locator('.thread-events').evaluate((el) => el.scrollTop)).toBe(97)
+      await expect.poll(() => events.evaluate((el) => el.scrollTop)).toBe(97)
       if (width < 1100) await page.getByRole('tab', { name: '详情', exact: true }).click()
       await page.getByRole('button', { name: '关闭事件详情' }).click()
       await page.getByRole('button', { name: 'Refresh history' }).click()
