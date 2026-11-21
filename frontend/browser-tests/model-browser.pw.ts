@@ -145,6 +145,27 @@ async function selectListOption(page: Page, trigger: Locator, optionName: string
   await page.getByRole('option', { name: optionName, exact: true }).click()
 }
 
+/**
+ * 基础费率标签按中英双语匹配（zh-CN 输入/输出/缓存读取/缓存写入，en-US Input/Output/Cache Read/Cache Write），
+ * 并限定在基础价格分组的第一行内，避免与 TTL 行或档位行的同名标签混用。
+ */
+const RATE_LABELS = {
+  input: /^(输入|input)$/i,
+  output: /^(输出|output)$/i,
+  cacheRead: /^(缓存读取|cache read)$/i,
+  cacheWrite: /^(缓存写入|cache write)$/i,
+} as const
+
+function baseRateInput(pricing: Locator, field: keyof typeof RATE_LABELS): Locator {
+  return pricing.locator('.pricing-plan-section').first().locator('.form-grid-2').first()
+    .getByLabel(RATE_LABELS[field])
+}
+
+/** 推理费率单独成行（zh-CN 推理费率 / en-US Reasoning rate）。 */
+function reasoningRateInput(pricing: Locator): Locator {
+  return pricing.locator('.pricing-plan-section').first().getByLabel(/^(推理费率|reasoning rate)$/i)
+}
+
 async function readModelIdentity(dialog: Locator) {
   return {
     provider: await dialog.getByRole('button', { name: 'Provider', exact: true }).textContent(),
@@ -333,10 +354,11 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await expect(advancedOptions.getByLabel('Protocol Options 1')).toBeVisible()
 
     const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
-    const inputPrice = pricing.getByLabel('Input USD per million tokens', { exact: true })
+    const inputPrice = baseRateInput(pricing, 'input')
     await expect(inputPrice).toHaveValue('')
     await expect(inputPrice).toHaveAttribute('placeholder', '未定价')
-    await expect(pricing).toContainText('价格单位为 USD / 百万 tokens。留空表示未知，不代表免费。')
+    // 统一单位提示固定在定价标题旁；空费率表示未知，不代表免费。
+    await expect(pricing).toContainText('USD /')
     await dialog.getByRole('button', { name: '确认创建', exact: true }).click()
 
     await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -354,7 +376,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     dialog = page.getByRole('dialog')
     await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('new-model')
     const reopenedPricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
-    await expect(reopenedPricing.getByLabel('Input USD per million tokens', { exact: true })).toHaveValue('')
+    await expect(baseRateInput(reopenedPricing, 'input')).toHaveValue('')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
     await dialog.getByRole('button', { name: '关闭', exact: true }).click()
   })
@@ -362,7 +384,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
   test('catalog rows preview without writing draft; fill applies limits/abilities/pricing/variants only', async ({
     page,
   }) => {
-    const { previewBodies } = await installFakeCatalogServer(page)
+    const { calls, previewBodies } = await installFakeCatalogServer(page)
 
     for (const viewport of VIEWPORTS) {
       await page.setViewportSize(viewport)
@@ -418,7 +440,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(page.locator('.catalog-candidate-list')).toHaveCount(0)
       await expect(contextWindow).toHaveValue('32768')
       const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
-      await expect(pricing.getByLabel('Input USD per million tokens')).toHaveValue('1')
+      await expect(baseRateInput(pricing, 'input')).toHaveValue('1')
       await expect(pricing).toContainText('目录价格无法等价导入，原有价格已保留。')
       await pricing.getByText('查看目录价格', { exact: true }).click()
       await expect(pricing.locator('.pricing-import-notice')).toContainText('目录没有可导入的完整价格。')
@@ -439,23 +461,35 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       )
       await expect(dialog.getByLabel('Variant ID 1', { exact: true })).toHaveValue('turbo')
       await expect(dialog.getByLabel('Variant ID 2', { exact: true })).toHaveValue('thinking')
-      await expect(pricing.getByLabel('Input USD per million tokens')).toHaveValue('3')
-      await expect(pricing.getByLabel('Output USD per million tokens')).toHaveValue('15')
-      await expect(pricing.getByLabel('Cache Read USD per million tokens')).toHaveValue('0.3')
-      await expect(pricing.getByLabel('Cache Write USD per million tokens')).toHaveValue('3.75')
+      // 基础价格四项费率标签可见，零价/未定价仅在值上区分。
+      await expect(baseRateInput(pricing, 'input')).toHaveValue('3')
+      await expect(baseRateInput(pricing, 'output')).toHaveValue('15')
+      await expect(baseRateInput(pricing, 'cacheRead')).toHaveValue('0.3')
+      await expect(baseRateInput(pricing, 'cacheWrite')).toHaveValue('3.75')
       await expect(pricing.getByRole('heading', { name: '输入档位' })).toBeVisible()
       await expect(pricing.getByRole('heading', { name: '服务档' })).toBeVisible()
       await expect(pricing.getByRole('heading', { name: '时段规则' })).toBeVisible()
       await expect(pricing.getByLabel('TTL 秒数', { exact: true })).toHaveValue('3600')
-      await expect(pricing.getByRole('textbox', { name: 'Reasoning', exact: true }).first()).toHaveValue('9')
+      await expect(reasoningRateInput(pricing)).toHaveValue('9')
       await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
 
+      // 既有规则默认折叠：摘要保留范围/档位/时段与倍率，点摘要才展开字段。
       const rangeGroup = pricing.locator('.pricing-plan-section').nth(1)
       await expect(rangeGroup.locator('.pricing-plan-row')).toHaveCount(1)
-      await expect(rangeGroup.getByLabel('输入 tokens 起')).toHaveValue('200001')
+      await expect(rangeGroup.locator('.pricing-rule-details')).not.toHaveAttribute('open', '')
+      await expect(rangeGroup.locator('.pricing-rule-details > summary')).toContainText('200001')
+      await rangeGroup.locator('.pricing-rule-details > summary').click()
+      await expect(rangeGroup.locator('.pricing-rule-details')).toHaveAttribute('open', '')
+      // Start (inclusive) / End (exclusive) 是区间行的两个边界字段，上限留空即为无上限。
+      const rangeBounds = rangeGroup.locator('.pricing-rule-details')
+      await expect(rangeBounds.getByLabel(/^(起点（含）|start \(inclusive\))$/i)).toHaveValue('200001')
+      await expect(rangeBounds.getByLabel(/^(终点（不含）|end \(exclusive\))$/i)).toHaveValue('')
       const tierGroup = pricing.locator('.pricing-plan-section').nth(2)
+      await tierGroup.locator('.pricing-rule-details > summary').click()
       await expect(tierGroup.getByLabel('服务档名称')).toHaveValue('priority')
       const timeGroup = pricing.locator('.pricing-plan-section').nth(3)
+      await expect(timeGroup.getByLabel('时区')).toHaveValue('UTC')
+      await timeGroup.locator('.pricing-rule-details > summary').click()
       await expect(timeGroup.getByLabel('开始时间')).toHaveValue('00:00')
       await expect(timeGroup.getByLabel('结束时间')).toHaveValue('24:00')
       await timeGroup.getByLabel('时区').fill('Europe/Paris')
@@ -469,14 +503,18 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       })
 
       // 试算使用后端返回的价格与命中规则，而不是浏览器按浮点数本地计算。
+      await expect(pricing.getByRole('heading', { name: '费率试算' })).toBeVisible()
       await pricing.getByLabel('输入 tokens', { exact: true }).fill('250000')
       await pricing.getByLabel('请求开始时间（UTC）', { exact: true }).fill('2027-01-05T02:00')
       await pricing.getByLabel('实际返回服务档', { exact: true }).fill('priority')
+      const beforePreview = calls.length
       await pricing.getByRole('button', { name: '试算价格', exact: true }).click()
       const previewResult = pricing.locator('.pricing-preview-result')
       await expect(previewResult).toContainText('$3.20')
       await expect(previewResult).toContainText('priority · ×2')
       await expect(previewResult).toContainText('2027-01-01')
+      expect(calls.slice(beforePreview).filter((call) => !call.startsWith('GET ')))
+        .toEqual(['POST /api/platform/models/pricing-preview'])
       expect(previewBodies.at(-1)).toMatchObject({
         inputTokens: 250000,
         requestedAt: Date.parse('2027-01-05T02:00:00Z'),
@@ -493,6 +531,51 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
 
       await dialog.getByRole('button', { name: '关闭' }).click()
     }
+  })
+
+  test('switches back to the conflicting price plan on save instead of hiding the overlap', async ({ page }) => {
+    const { calls, createBodies } = await installFakeCatalogServer(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await gotoHarness(page)
+    await page.getByRole('button', { name: '编辑 main', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
+    const planSelect = pricing.getByRole('button', { name: '编辑价格方案', exact: true })
+
+    // 调价草稿从当前方案派生，基础方案本身保持不变。
+    const futureDate = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10)
+    await pricing.getByRole('button', { name: '添加调价', exact: true }).click()
+    await pricing.getByLabel('生效日期（UTC）', { exact: true }).fill(futureDate)
+    await pricing.getByRole('button', { name: '创建调价草稿', exact: true }).click()
+    await expect(planSelect).toHaveText(futureDate)
+
+    // 同一草稿内两条区间重叠：行内直接报冲突，不靠保存时才提示。
+    const rangeGroup = pricing.locator('.pricing-plan-section').nth(1)
+    for (const [min, max] of [['0', '1000'], ['500', '2000']]) {
+      await rangeGroup.getByRole('button', { name: '添加输入档位', exact: true }).click()
+      const row = rangeGroup.locator('.pricing-rule-details').last()
+      await expect(row).toHaveAttribute('open', '')
+      await row.getByLabel(/^(起点（含）|start \(inclusive\))$/i).fill(min)
+      await row.getByLabel(/^(终点（不含）|end \(exclusive\))$/i).fill(max)
+    }
+    await expect(rangeGroup.getByRole('alert')).toHaveCount(2)
+
+    // 切回基础方案后保存：冲突的方案必须被重新选中并显示，而不是静默提交。
+    await selectListOption(page, planSelect, '基础方案 · 当前生效')
+    await expect(rangeGroup.locator('.pricing-rule-details')).toHaveCount(0)
+    await dialog.getByRole('button', { name: '保存修改', exact: true }).click()
+    await expect(planSelect).toHaveText(futureDate)
+    await expect(pricing.getByRole('alert').filter({ hasText: '输入区间与规则' })).toHaveCount(2)
+    await expect(rangeGroup.locator('.pricing-rule-details')).toHaveCount(2)
+    expect(createBodies).toEqual([])
+    await page.screenshot({
+      path: test.info().outputPath('pricing-conflict-on-save.png'),
+      fullPage: true,
+    })
+
+    // 冲突在保存阶段被拒绝：整份定价不会被提交，弹窗保持打开。
+    expect(calls.filter((call) => call.startsWith('PUT ') || call.startsWith('POST '))).toEqual([])
+    await expect(dialog).toBeVisible()
   })
 
   test('new labels are readable in zh-CN and en-US at 1280 and 390 without overflow', async ({

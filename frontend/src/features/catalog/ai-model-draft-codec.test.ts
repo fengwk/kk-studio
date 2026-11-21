@@ -377,11 +377,11 @@ describe('ai-model-draft-codec', () => {
     base.pricing.definition.base.output = '2'
     base.pricing.definition.inputTokenRanges.push({
       draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100', rates: { input: '0.5' },
-      cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
+      cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
     })
     expect(() => buildModelConfig(base)).toThrow(/pricing\.base\.cacheRead/)
     base.pricing.definition.base.cacheRead = '0.1'
-    base.pricing.definition.base.cacheWriteByTtl = { '0': '1' }
+    base.pricing.definition.base.cacheWriteByTtl = [{ draftKey: 'ttl', seconds: '0', rate: '1' }]
     expect(() => buildModelConfig(base)).toThrow(/cacheWriteByTtl keys must be positive integer seconds/)
   })
 

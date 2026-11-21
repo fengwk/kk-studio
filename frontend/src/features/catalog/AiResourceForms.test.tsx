@@ -324,12 +324,13 @@ describe('AiResourceForms', () => {
     expect(screen.getByRole('heading', { name: 'Limit' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Name' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '功能' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Pricing' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^(Pricing|价格)$/ })).toBeInTheDocument()
     expect(screen.getByLabelText('Tools')).toBeChecked()
     expect(screen.getByLabelText('Reasoning')).toBeChecked()
     expect(screen.getByLabelText('TEXT')).toBeChecked()
     expect(screen.queryByText('Capabilities')).not.toBeInTheDocument()
-    expect(screen.getByText(/USD \/ 百万 tokens/)).toBeInTheDocument()
+    // 定价单位提示固定在价格标题旁；空费率表示未知，不代表免费。
+    expect(screen.getByText(/USD \/ 百万 token/)).toBeInTheDocument()
     expect(screen.getByLabelText('Reasoning Effort 1')).toBeInTheDocument()
     expect(screen.getByText('思考强度')).toBeInTheDocument()
     // 空值即协议默认：思考强度不强必填，默认空
@@ -638,12 +639,12 @@ describe('AiResourceForms', () => {
     await user.type(maxOutputInput, '7.5')
     expect(maxOutputInput).toHaveValue('75')
 
-    const inputPrice = screen.getByLabelText('Input USD per million tokens')
+    const inputPrice = screen.getByLabelText(/^(输入|Input)$/)
     await user.clear(inputPrice)
     await user.type(inputPrice, '1.2.3')
     expect(inputPrice).toHaveValue('1.23')
 
-    const outputPrice = screen.getByLabelText('Output USD per million tokens')
+    const outputPrice = screen.getByLabelText(/^(输出|Output)$/)
     await user.clear(outputPrice)
     await user.type(outputPrice, '4.5.6')
     expect(outputPrice).toHaveValue('4.56')

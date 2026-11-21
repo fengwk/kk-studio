@@ -36,7 +36,7 @@ function draft(): ModelDraft {
       ...emptyModelPricingDraft(),
       definition: {
         ...emptyModelPricingDraft().definition,
-        base: { input: '9', output: '9', cacheRead: '9', cacheWrite: '9', cacheWriteByTtl: {}, reasoning: null },
+        base: { input: '9', output: '9', cacheRead: '9', cacheWrite: '9', cacheWriteByTtl: [], reasoning: null },
       },
     },
     defaultVariant: 'manual',
@@ -146,7 +146,7 @@ describe('applyCatalogCandidate', () => {
     const before = draft()
     const source = candidate({ pricingSupported: true, pricing: pricing('1') })
     const applied = applyCatalogCandidate(before, source)
-    applied.pricing.definition.base.cacheWriteByTtl['7200'] = '6'
+    applied.pricing.definition.base.cacheWriteByTtl.push({ draftKey: 'ttl-7200', seconds: '7200', rate: '6' })
     expect(before.pricing.definition.base.input).toBe('9')
     expect(source.pricing?.base.cacheWriteByTtl).toEqual({})
   })

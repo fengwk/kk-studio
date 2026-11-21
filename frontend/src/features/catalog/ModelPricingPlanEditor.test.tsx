@@ -1,105 +1,256 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelPricingPlanEditor } from '@/features/catalog/ModelPricingPlanEditor'
-import { emptyModelPricingDraft, type ModelPricingDraft } from '@/features/catalog/model-pricing-draft'
+import {
+  createPricingDraftKey,
+  emptyModelPricingDraft,
+  type PricingChangeDraft,
+  type ModelPricingDraft,
+  type PricingDefinitionDraft,
+  type PricingFactorsDraft,
+} from '@/features/catalog/model-pricing-draft'
+import type {
+  ModelPricingPreviewDTO,
+  ModelRateSetDTO,
+} from '@/shared/api/generated/contracts'
 import { setLocale } from '@/shared/i18n'
+
+const DAY_MILLIS = 24 * 60 * 60 * 1000
+
+/** 相对今天的 UTC 日期，用来验证“当前生效”按 UTC 日期而非本地时区判断。 */
+function utcDate(offsetDays: number): string {
+  return new Date(Date.now() + offsetDays * DAY_MILLIS).toISOString().slice(0, 10)
+}
+
+function factors(): PricingFactorsDraft {
+  return {
+    factor: '1', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '',
+  }
+}
+
+function pricingDefinition(input: string): PricingDefinitionDraft {
+  return {
+    base: { input, output: '3', cacheRead: '0.1', cacheWrite: '0.2', cacheWriteByTtl: [], reasoning: undefined },
+    inputTokenRanges: [],
+    serviceTiers: [],
+    timePeriods: [],
+  }
+}
+
+function pricedDraft(changes: PricingChangeDraft[] = []): ModelPricingDraft {
+  return { definition: pricingDefinition('1'), changes }
+}
+
+function change(draftKey: string, from: string, input: string): PricingChangeDraft {
+  return { draftKey, from, definition: pricingDefinition(input) }
+}
+
+function readDraft(): ModelPricingDraft {
+  return JSON.parse(screen.getByTestId('draft').textContent!) as ModelPricingDraft
+}
+
+/** 服务端试算回执；费率一律由服务端给出，前端不得自行推算。 */
+function previewResponse(
+  rates: Partial<ModelRateSetDTO> | null,
+  overrides: Partial<ModelPricingPreviewDTO> = {},
+): Response {
+  const body: ModelPricingPreviewDTO = {
+    rates: rates
+      ? { input: '1', output: '3', cacheRead: '0.1', cacheWrite: null, cacheWriteByTtl: {}, reasoning: null, ...rates }
+      : null,
+    activeFrom: null,
+    matchedRules: [],
+    ...overrides,
+  }
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+}
 
 function Harness({ initial = emptyModelPricingDraft() }: { initial?: ModelPricingDraft }) {
   const [value, setValue] = useState(initial)
   return <><output data-testid="draft">{JSON.stringify(value)}</output><ModelPricingPlanEditor value={value} onChange={setValue} /></>
 }
 
+beforeEach(() => setLocale('en-US'))
 afterEach(() => vi.unstubAllGlobals())
 
 describe('ModelPricingPlanEditor', () => {
-  it('presents blank prices as unpriced and only exposes the fixed three rule groups', () => {
-    setLocale('en-US')
+  it('presents unpriced rates and the fixed price sections', () => {
     render(<Harness />)
-    expect(screen.getByLabelText('Input USD per million tokens')).toHaveValue('')
-    expect(screen.getByText('Prices are USD per million tokens. Blank prices are unknown, not zero.')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Input length prices' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Service tiers' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Time periods' })).toBeInTheDocument()
-    expect(screen.queryByText(/override|multiplier|condition/i)).not.toBeInTheDocument()
+    const input = screen.getByLabelText('Input')
+    expect(input).toHaveValue('')
+    expect(input).toHaveAttribute('placeholder', 'Unpriced')
+    expect(screen.getByText('USD / million tokens')).toBeInTheDocument()
+    for (const heading of ['Base prices', 'Input length prices', 'Service tiers', 'Time periods', 'Rate preview']) {
+      expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+    }
   })
 
-  it('shows that the default reasoning rate follows output and accepts an explicit independent zero', () => {
-    setLocale('en-US')
-    render(<Harness />)
-    const mode = screen.getByRole('button', { name: 'Independent reasoning pricing' })
-    expect(mode).toHaveTextContent('Follow output price')
-    fireEvent.click(mode)
-    fireEvent.click(screen.getByRole('option', { name: 'Independent price' }))
-    expect(screen.getByLabelText('Reasoning')).toHaveValue('')
-    fireEvent.change(screen.getByLabelText('Reasoning'), { target: { value: '0' } })
-    expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.base.reasoning).toBe('0')
-    fireEvent.click(mode)
-    fireEvent.click(screen.getByRole('option', { name: 'Follow output price' }))
-    expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.base.reasoning).toBeNull()
+  it('selects the plan that is currently effective in UTC and edits one plan at a time', () => {
+    const past = utcDate(-5)
+    const today = utcDate(0)
+    const future = utcDate(5)
+    render(<Harness initial={{
+      definition: pricingDefinition('9'),
+      changes: [
+        change('past', past, '1'),
+        change('today', today, '2'),
+        change('future', future, '3'),
+      ],
+    }} />)
+
+    // 默认选中“生效日期已到、且日期最晚”的调价，而不是基础方案或未来调价。
+    const plan = screen.getByRole('button', { name: 'Price plan' })
+    expect(plan).toHaveAttribute('data-value', 'today')
+    expect(plan).toHaveTextContent(`${today} · Currently effective`)
+    expect(screen.getByLabelText('Input')).toHaveValue('2')
+
+    // 同一时刻只渲染一个方案编辑器。
+    expect(screen.getAllByRole('heading', { name: 'Base prices' })).toHaveLength(1)
+    expect(screen.getAllByLabelText('Input')).toHaveLength(1)
+
+    // 切换方案后仍然只有一个编辑器，内容换成所选方案自己的费率。
+    fireEvent.click(plan)
+    fireEvent.click(screen.getByRole('option', { name: future }))
+    expect(screen.getAllByRole('heading', { name: 'Base prices' })).toHaveLength(1)
+    expect(screen.getAllByLabelText('Input')).toHaveLength(1)
+    expect(screen.getByLabelText('Input')).toHaveValue('3')
   })
 
-  it('splits a cross-midnight interval at the next-day boundary when editing ends', () => {
-    setLocale('en-US')
-    const initial = emptyModelPricingDraft()
+  it('clones the nearest preceding plan into a new change and keeps both plans isolated', () => {
+    const past = utcDate(-5)
+    const first = change('first', '2027-03-01', '2')
+    first.definition.base.cacheWriteByTtl = [{ draftKey: 'source-ttl', seconds: '300', rate: '0.25' }]
+    render(<Harness initial={{
+      definition: pricingDefinition('1'),
+      changes: [change('past', past, '7'), first],
+    }} />)
+
+    // 初始显示的是“当前生效”的历史调价，它的基础价不是新调价的克隆来源。
+    expect(screen.getByLabelText('Input')).toHaveValue('7')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
+    fireEvent.change(screen.getByLabelText('Effective from (UTC)'), { target: { value: '2027-06-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create price change' }))
+
+    // 克隆的是“早于新日期且最晚”的调价方案，而不是当前显示的历史方案或基础方案。
+    expect(screen.getByLabelText('Input')).toHaveValue('2')
+
+    // 编辑克隆方案不会影响来源方案。
+    fireEvent.change(screen.getByLabelText('Input'), { target: { value: '4' } })
+    const draft = readDraft()
+    expect(draft.definition.base.input).toBe('1')
+    expect(draft.changes.map(({ from, definition }) => [from, definition.base.input]))
+      .toEqual([[past, '7'], ['2027-03-01', '2'], ['2027-06-01', '4']])
+    expect(draft.changes[2]!.definition.base.cacheWriteByTtl).toMatchObject([{ seconds: '300', rate: '0.25' }])
+    expect(draft.changes[2]!.definition.base.cacheWriteByTtl[0]!.draftKey)
+      .not.toBe(draft.changes[1]!.definition.base.cacheWriteByTtl[0]!.draftKey)
+
+    // 早于全部调价的日期（早于当前生效的那条历史调价）从基础方案克隆。
+    fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
+    fireEvent.change(screen.getByLabelText('Effective from (UTC)'), { target: { value: utcDate(-30) } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create price change' }))
+    expect(screen.getByLabelText('Input')).toHaveValue('1')
+  })
+
+  it('blocks duplicate effective dates for new drafts and for edited plans', () => {
+    render(<Harness initial={pricedDraft([change('first', '2027-03-01', '2'), change('second', '2027-06-01', '3')])} />)
+
+    // 新建调价：日期重复时不能创建，并就地提示。
+    fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
+    const createDate = screen.getByLabelText('Effective from (UTC)')
+    fireEvent.change(createDate, { target: { value: '2027-03-01' } })
+    expect(screen.getByRole('button', { name: 'Create price change' })).toBeDisabled()
+    expect(screen.getByText('This effective date already has a plan.')).toBeInTheDocument()
+    fireEvent.change(createDate, { target: { value: '2027-09-01' } })
+    expect(screen.getByRole('button', { name: 'Create price change' })).toBeEnabled()
+    expect(screen.queryByText('This effective date already has a plan.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
+
+    // 已存在的调价改成占用别的生效日期时同样提示。
+    fireEvent.click(screen.getByRole('button', { name: 'Price plan' }))
+    fireEvent.click(screen.getByRole('option', { name: '2027-06-01' }))
+    const editDate = screen.getByLabelText('Effective from (UTC)')
+    expect(editDate).toHaveValue('2027-06-01')
+    fireEvent.change(editDate, { target: { value: '2027-03-01' } })
+    expect(screen.getByText('This effective date already has a plan.')).toBeInTheDocument()
+    expect(readDraft().changes.map(({ from }) => from)).toEqual(['2027-03-01', '2027-03-01'])
+  })
+
+  it('keeps TTL row focus while typing and reports duplicate or blank prices inline', () => {
+    render(<Harness initial={pricedDraft()} />)
+    const ttlRows = () => {
+      // 基础价格区最后是 TTL 行：费率标签与基础 Cache Write 同名，按 DOM 顺序取 TTL 部分。
+      const rates = screen.getAllByLabelText('Cache Write').slice(1)
+      return screen.getAllByLabelText('TTL seconds').map((seconds, index) => ({ seconds, rate: rates[index]! }))
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add TTL price' }))
+    expect(ttlRows()).toHaveLength(1)
+    const [firstRow] = ttlRows()
+    expect(firstRow!.seconds).toHaveValue('')
+    expect(screen.getByText('Enter a positive whole number of seconds.')).toBeInTheDocument()
+
+    // 受控行以 draftKey 作为 key：输入时不重挂载，焦点与已输入内容都留在原输入框。
+    firstRow!.seconds.focus()
+    fireEvent.change(firstRow!.seconds, { target: { value: '300' } })
+    expect(document.activeElement).toBe(firstRow!.seconds)
+    expect(firstRow!.seconds).toHaveValue('300')
+    expect(screen.queryByText('Enter a positive whole number of seconds.')).not.toBeInTheDocument()
+    expect(screen.getByText('Enter a rate, or 0 for a zero rate.')).toBeInTheDocument()
+
+    fireEvent.change(ttlRows()[0]!.rate, { target: { value: '0.25' } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // 重复秒数在两行同时提示，而不是静默合并。
+    fireEvent.click(screen.getByRole('button', { name: 'Add TTL price' }))
+    fireEvent.change(ttlRows()[1]!.seconds, { target: { value: '300' } })
+    expect(screen.getAllByText('This TTL duration is repeated.')).toHaveLength(2)
+
+    // 空白价按“未知”提示，且不会被当成 0。
+    fireEvent.change(ttlRows()[1]!.seconds, { target: { value: '600' } })
+    expect(screen.queryByText('This TTL duration is repeated.')).not.toBeInTheDocument()
+    expect(screen.getByText('Enter a rate, or 0 for a zero rate.')).toBeInTheDocument()
+    expect(readDraft().definition.base.cacheWriteByTtl.map(({ seconds, rate }) => [seconds, rate]))
+      .toEqual([['300', '0.25'], ['600', '']])
+  })
+
+  it('offers an explicit cross-midnight split instead of silently rewriting the interval', () => {
+    const initial = pricedDraft()
     initial.definition.timePeriods = [{
-      draftKey: 'night', weekdays: [7], start: '22:00', end: '24:00', timezone: 'UTC',
-      factors: { factor: '1', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '' },
+      draftKey: 'night', weekdays: [5], start: '22:00', end: '01:00', timezone: 'UTC', factors: factors(),
     }]
     render(<Harness initial={initial} />)
-    const end = screen.getByLabelText('End time')
-    fireEvent.change(end, { target: { value: '01:00' } })
-    fireEvent.blur(end)
-    expect(screen.getAllByLabelText('Start time')).toHaveLength(2)
-    expect(screen.getAllByLabelText('End time').map((input) => input.getAttribute('value')))
-      .toEqual(['24:00', '01:00'])
-    expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.timePeriods.map((period: { weekdays: number[] }) => period.weekdays))
-      .toEqual([[7], [1]])
+
+    expect(screen.getByText(/Across midnight, this becomes: Fri · 22:00–24:00 \/ Sat · 00:00–01:00/))
+      .toBeInTheDocument()
+    // 确认前草稿仍是单个跨午夜区间。
+    expect(screen.getAllByLabelText('Start time')).toHaveLength(1)
+    expect(readDraft().definition.timePeriods).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm split' }))
+    const starts = screen.getAllByLabelText('Start time') as HTMLInputElement[]
+    const ends = screen.getAllByLabelText('End time') as HTMLInputElement[]
+    expect(starts.map((input) => input.value)).toEqual(['22:00', '00:00'])
+    expect(ends.map((input) => input.value)).toEqual(['24:00', '01:00'])
+    const periods = readDraft().definition.timePeriods
+    expect(periods.map(({ weekdays, start, end }) => [weekdays, start, end]))
+      .toEqual([[[5], '22:00', '24:00'], [[6], '00:00', '01:00']])
+    expect(new Set(periods.map(({ draftKey }) => draftKey)).size).toBe(2)
+    expect(screen.queryByRole('button', { name: 'Confirm split' })).not.toBeInTheDocument()
   })
 
-  it('copies a price definition to a UTC change and allows editing its independent rates', () => {
-    setLocale('en-US')
-    render(<Harness />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
-    fireEvent.change(screen.getByLabelText('Effective from (UTC)'), { target: { value: '2027-01-01' } })
-    const changedInput = screen.getByLabelText('2027-01-01 Input')
-    fireEvent.change(changedInput, { target: { value: '0.25' } })
-    const draft = JSON.parse(screen.getByTestId('draft').textContent!)
-    expect(draft.changes[0]).toMatchObject({ from: '2027-01-01', definition: { base: { input: '0.25' } } })
-    expect(draft.changes[0].draftKey).toBeTruthy()
-  })
-
-  it('shows duplicate service tier conflicts immediately and removes only the chosen draft row', () => {
-    setLocale('en-US')
-    render(<Harness />)
-    const add = screen.getByRole('button', { name: 'Add service tier' })
-    fireEvent.click(add)
-    fireEvent.click(add)
-    const names = screen.getAllByRole('textbox', { name: 'Service tier' })
-    fireEvent.change(names[0]!, { target: { value: 'priority' } })
-    fireEvent.change(names[1]!, { target: { value: 'priority' } })
-    expect(screen.getAllByRole('alert', { name: '' })).toHaveLength(2)
-    expect(screen.getAllByText('Conflicts with another row')).toHaveLength(2)
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Remove rule' })[0]!)
-    expect(screen.getAllByRole('textbox', { name: 'Service tier' })).toHaveLength(1)
-    expect(screen.queryByText('Conflicts with another row')).not.toBeInTheDocument()
-    expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.serviceTiers).toHaveLength(1)
-  })
-
-  it('uses the server preview request and renders the server-computed rates and matches', async () => {
-    setLocale('en-US')
-    const transport = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({
-      rates: { input: '3.20', output: '9.60', cacheRead: '0.1', cacheWrite: null, cacheWriteByTtl: {}, reasoning: null },
-      activeFrom: '2027-01-01',
-      matchedRules: [{ type: 'service_tier_multiplier', serviceTier: 'priority', factor: '2' }],
-    }), { headers: { 'content-type': 'application/json' } }))
+  it('previews the whole draft on the server instead of computing prices locally', async () => {
+    const transport = vi.fn(async (_url: string, _init: RequestInit) => previewResponse(
+      { input: '3.20', output: '9.60', cacheRead: '0.1', cacheWrite: '0.2', cacheWriteByTtl: { '600': '0.4' } },
+      { activeFrom: '2027-01-01', matchedRules: [{ type: 'service_tier_multiplier', serviceTier: 'priority', factor: '2' }] },
+    ))
     vi.stubGlobal('fetch', transport)
-    const initial = emptyModelPricingDraft()
-    initial.definition.base.input = '1'
-    initial.definition.base.output = '3'
-    initial.definition.base.cacheRead = '0.1'
+    const initial = pricedDraft([change('later', '2027-01-01', '2')])
+    initial.definition.base.cacheWriteByTtl = [{ draftKey: createPricingDraftKey(), seconds: '600', rate: '0.2' }]
     render(<Harness initial={initial} />)
+    // 正在编辑的是基础方案，但试算必须覆盖整份草稿（含调价）。
+    expect(screen.getByLabelText('Input')).toHaveValue('1')
 
     fireEvent.change(screen.getByLabelText('Input tokens'), { target: { value: '250000' } })
     fireEvent.change(screen.getByLabelText('Request start time (UTC)'), { target: { value: '2027-01-05T02:00' } })
@@ -113,9 +264,135 @@ describe('ModelPricingPlanEditor', () => {
       inputTokens: 250000,
       requestedAt: Date.parse('2027-01-05T02:00:00Z'),
       serviceTier: 'priority',
-      pricing: { base: { input: '1', output: '3' } },
+      pricing: {
+        base: { input: '1', output: '3', cacheRead: '0.1', cacheWrite: '0.2', cacheWriteByTtl: { '600': '0.2' } },
+        rules: [],
+        changes: [{ from: '2027-01-01', base: { input: '2' }, rules: [] }],
+      },
     })
-    expect(await screen.findByText(/Input \$3.20 · Output \$9.60/)).toBeInTheDocument()
-    expect(screen.getByText(/priority · ×2/)).toBeInTheDocument()
+
+    // 展示的费率来自服务端回执（$3.20），而不是本地按草稿倍率算出的价格。
+    expect(await screen.findByText('Effective prices')).toBeInTheDocument()
+    expect(screen.getByText(/Input \$3\.20 · Output \$9\.60 · Cache Read \$0\.1 · Cache Write \$0\.2/))
+      .toBeInTheDocument()
+    expect(screen.getByText('Price effective from 2027-01-01 (UTC)')).toBeInTheDocument()
+    expect(screen.getByText('priority · ×2')).toBeInTheDocument()
+  })
+
+  it('drops an in-flight preview once the inputs change and ignores its late response', async () => {
+    const pending: Array<{ resolve: (response: Response) => void; signal: AbortSignal }> = []
+    const transport = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((resolve) => {
+      pending.push({ resolve, signal: init.signal as AbortSignal })
+    }))
+    vi.stubGlobal('fetch', transport)
+    render(<Harness initial={pricedDraft()} />)
+    const tokens = screen.getByLabelText('Input tokens')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
+    await waitFor(() => expect(pending).toHaveLength(1))
+    fireEvent.change(tokens, { target: { value: '2000' } })
+    await waitFor(() => expect(pending[0]!.signal.aborted).toBe(true))
+
+    // 迟到的旧回执不得覆盖新输入对应的结果。
+    pending[0]!.resolve(previewResponse({ input: '9.99' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
+    await waitFor(() => expect(pending).toHaveLength(2))
+    pending[1]!.resolve(previewResponse({ input: '1.11' }))
+    expect(await screen.findByText(/Input \$1\.11/)).toBeInTheDocument()
+    expect(screen.queryByText(/\$9\.99/)).not.toBeInTheDocument()
+  })
+
+  it('does not revive an earlier preview result when inputs go A → B → A', async () => {
+    let call = 0
+    const transport = vi.fn(async () => {
+      call += 1
+      return previewResponse({ input: call === 1 ? '5.55' : '6.66' })
+    })
+    vi.stubGlobal('fetch', transport)
+    render(<Harness initial={pricedDraft()} />)
+    const tokens = screen.getByLabelText('Input tokens')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
+    expect(await screen.findByText(/Input \$5\.55/)).toBeInTheDocument()
+
+    // A → B：结果立即失效。
+    fireEvent.change(tokens, { target: { value: '2000' } })
+    expect(screen.queryByText(/Input \$5\.55/)).not.toBeInTheDocument()
+
+    // B → A：回到相同输入也不复用旧结果，必须重新试算。
+    fireEvent.change(tokens, { target: { value: '1000' } })
+    expect(screen.queryByText(/Input \$5\.55/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Effective prices')).not.toBeInTheDocument()
+    expect(transport).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
+    expect(await screen.findByText(/Input \$6\.66/)).toBeInTheDocument()
+  })
+
+  it('asks for missing preview facts instead of falling back to base or free rates', async () => {
+    const transport = vi.fn(async () => previewResponse(null))
+    vi.stubGlobal('fetch', transport)
+    render(<Harness initial={pricedDraft()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
+    expect(await screen.findByText('Unable to determine rates.')).toBeInTheDocument()
+    expect(screen.queryByText('Effective prices')).not.toBeInTheDocument()
+
+    const time = screen.getByLabelText('Request start time (UTC)')
+    const tier = screen.getByLabelText('Returned service tier')
+    fireEvent.click(screen.getByRole('button', { name: 'Enter request time' }))
+    expect(document.activeElement).toBe(time)
+    fireEvent.click(screen.getByRole('button', { name: 'Enter service tier' }))
+    expect(document.activeElement).toBe(tier)
+  })
+
+  it('sends an unconfigured draft as null pricing and reports it as unconfigured, not free', async () => {
+    const transport = vi.fn(async (_url: string, _init: RequestInit) => previewResponse(null))
+    vi.stubGlobal('fetch', transport)
+    render(<Harness />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
+    await waitFor(() => expect(transport).toHaveBeenCalledOnce())
+    // 基础价格区与试算区都报告“未配置价格”，不存在 0 价或免费兜底。
+    await waitFor(() => expect(screen.getAllByText('No pricing configured')).toHaveLength(2))
+    expect(screen.queryByText('Effective prices')).not.toBeInTheDocument()
+    expect(JSON.parse(String(transport.mock.calls[0]![1]!.body)).pricing).toBeNull()
+  })
+
+  it('keeps reasoning on output price by default and accepts an explicit independent zero', () => {
+    render(<Harness initial={pricedDraft()} />)
+    const mode = screen.getByRole('button', { name: 'Independent reasoning pricing' })
+    expect(mode).toHaveTextContent('Follow output price')
+
+    fireEvent.click(mode)
+    fireEvent.click(screen.getByRole('option', { name: 'Independent price' }))
+    expect(readDraft().definition.base.reasoning).toBe('')
+    fireEvent.change(screen.getByLabelText('Reasoning rate'), { target: { value: '0' } })
+    expect(readDraft().definition.base.reasoning).toBe('0')
+
+    fireEvent.click(mode)
+    fireEvent.click(screen.getByRole('option', { name: 'Follow output price' }))
+    expect(readDraft().definition.base.reasoning).toBeNull()
+  })
+
+  it('shows duplicate service tier conflicts immediately and removes only the chosen row', () => {
+    render(<Harness initial={pricedDraft()} />)
+    const add = screen.getByRole('button', { name: 'Add service tier' })
+    fireEvent.click(add)
+    fireEvent.click(add)
+    const names = screen.getAllByRole('textbox', { name: 'Service tier' })
+    fireEvent.change(names[0]!, { target: { value: 'priority' } })
+    fireEvent.change(names[1]!, { target: { value: 'priority' } })
+    expect(screen.getAllByText('Same service tier as rule 1.')).toHaveLength(1)
+    expect(screen.getAllByText('Same service tier as rule 2.')).toHaveLength(1)
+    const [, keptKey] = readDraft().definition.serviceTiers.map(({ draftKey }) => draftKey)
+
+    // 两行都存在删除入口；删除第一行只影响它自己。
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove rule' })[0]!)
+
+    expect(screen.getAllByRole('textbox', { name: 'Service tier' })).toHaveLength(1)
+    expect(screen.queryByText('Same service tier as rule 1.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Same service tier as rule 2.')).not.toBeInTheDocument()
+    expect(readDraft().definition.serviceTiers.map(({ draftKey }) => draftKey)).toEqual([keptKey])
   })
 })
