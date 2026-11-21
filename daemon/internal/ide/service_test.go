@@ -1646,23 +1646,31 @@ func TestCancelledChangeDirectoryReconcilesOnReplacementHost(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cancelled directory request did not stop waiting")
 	}
+	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	assertResumeBusy := func() {
+		t.Helper()
+		if reply := service.HandleCommand(ctx, resume); reply.GetOk() || reply.GetCode() != "BUSY" {
+			t.Fatalf("resume during directory transition=%v", reply)
+		}
+	}
+	assertResumeBusy() // Rebinding would discard the pending transition.
+	confirmed := make(chan func(), 1)
+	bridge.OnDirectoryReconciled(func(viewID string, epoch int64, operationID, directory string) {
+		confirmed <- func() { service.reconcileDirectoryChange(viewID, epoch, operationID, directory) }
+	})
 	newStream, newReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
 	defer newStream.Body.Close()
 	if _, err := newReader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		service.mu.Lock()
-		viewDirectory := service.views[opened.GetViewId()].directory
-		service.mu.Unlock()
-		if viewDirectory == next {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("service directory did not reconcile: %q", viewDirectory)
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case reconcile := <-confirmed:
+		assertResumeBusy() // Bridge has confirmed, but service metadata is not yet committed.
+		reconcile()
+	case <-time.After(time.Second):
+		t.Fatal("missing late directory confirmation")
 	}
 	bridge.mu.Lock()
 	binding := bridge.views[opened.GetViewId()]
@@ -1682,6 +1690,10 @@ func TestCancelledChangeDirectoryReconcilesOnReplacementHost(t *testing.T) {
 	}
 	if err != nil || len(workspace.Folders) != 1 || workspace.Folders[0].Path != next {
 		t.Fatalf("workspace=%q err=%v", workspaceBytes, err)
+	}
+	resume.Directory = stringPointer(next)
+	if reply := service.HandleCommand(ctx, resume); !reply.GetOk() || reply.GetBindingEpoch() <= opened.GetBindingEpoch() {
+		t.Fatalf("resume after directory reconciliation=%v", reply)
 	}
 }
 
@@ -2685,6 +2697,18 @@ func TestCreateWithoutDirectoryKeepsZeroFolders(t *testing.T) {
 
 // Verifies a native directory confirmation moves a zero-folder view to exactly one root.
 func TestZeroFolderViewSwitchesToNativeDirectory(t *testing.T) {
+	testZeroFolderDirectoryChange(t, "")
+}
+
+// Both synchronous persistence failures keep a closing snapshot and require explicit discard.
+func TestConfirmedDirectoryPersistenceFailure(t *testing.T) {
+	for _, failure := range []string{"workspace write", "revision commit"} {
+		t.Run(failure, func(t *testing.T) { testZeroFolderDirectoryChange(t, failure) })
+	}
+}
+
+func testZeroFolderDirectoryChange(t *testing.T, failure string) {
+	t.Helper()
 	next, err := CanonicalDirectory(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -2694,7 +2718,8 @@ func TestZeroFolderViewSwitchesToNativeDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2726,6 +2751,20 @@ func TestZeroFolderViewSwitchesToNativeDirectory(t *testing.T) {
 	if nativeCommand.Op != "changeDirectory" || nativeCommand.Directory != next {
 		t.Fatalf("native directory command=%+v", nativeCommand)
 	}
+	switch failure {
+	case "workspace write":
+		path := opened.GetWorkspacePath()
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	case "revision commit":
+		service.mu.Lock()
+		service.revision = math.MaxInt64
+		service.mu.Unlock()
+	}
 	// Only the replacement host that reports the target folder confirms the transition.
 	newStream, newReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
 	defer newStream.Body.Close()
@@ -2734,6 +2773,17 @@ func TestZeroFolderViewSwitchesToNativeDirectory(t *testing.T) {
 	}
 	select {
 	case changed := <-resultChannel:
+		if failure != "" {
+			views := changed.GetViews()
+			if changed.GetOk() || changed.GetCode() != "CLEANUP_FAILED" || len(views) != 1 || views[0].GetState() != protocol.IdeViewState_CLOSING || views[0].GetDirectory() != "" {
+				t.Fatalf("failed directory change snapshot=%v", changed)
+			}
+			close := service.HandleCommand(ctx, viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+			if close.GetCode() != "CONTROL_UNAVAILABLE" || manager.closeCalls != 0 {
+				t.Fatalf("unconfirmed close=%v native closes=%d", close, manager.closeCalls)
+			}
+			return
+		}
 		if !changed.GetOk() || len(changed.GetViews()) != 1 || changed.GetViews()[0].GetDirectory() != next {
 			t.Fatalf("zero-folder change reply=%v", changed)
 		}
