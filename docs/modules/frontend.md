@@ -314,7 +314,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件。等待审批�
   （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不在成功结果中重复回显文件正文或 diff；
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
 - **来源优先级与持久化结构**：优先从持久化的 `approval.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，edit 从持久化结果的 `details.editReview`、write 从 `details.writeReview` 读取真实变更；不从旧/新参数在前端伪造 diff。
-- **有损解码提示**：审查 JSON 携带 `lossyDecode`（原文件以 `encoding` 解码时替换了 `invalidSequences` 处非法字节序列）时，审批卡片与工具卡片的 diff 上方按单复数显示本地化警示，说明仍含 U+FFFD 的位置保存后会写成 U+FFFD、原始字节无法恢复；字段缺失不显示，出现但非法时整个审查无效（禁用允许）。
+- **有损解码提示**：审查 JSON 携带 `lossyDecode`（原文件以 `encoding` 解码时替换了 `invalidSequences` 处非法字节序列）时，审批卡片与工具卡片的 diff 上方按单复数显示本地化警示：write 说明仍含 U+FFFD 的位置保存后会写成 U+FFFD、原始字节无法恢复；edit 说明未修改的内容保留原始字节，只有替换内容中的 U+FFFD 会写入；字段缺失不显示，出现但非法时整个审查无效（禁用允许）。
 
 工具调用、系统提醒、压缩摘要与 subagent 回执共用 `ThreadDisclosure` 只读容器：
 header 放名称、关键参数及独立操作，preview 放首要内容，body 放补充内容。

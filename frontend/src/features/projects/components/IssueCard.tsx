@@ -21,9 +21,8 @@ export interface IssueCardProps {
  * 看板 Issue 卡：非交互外壳 + 显式标题导航按钮，快捷动作是彼此平级的共享 Button，
  * 不在卡片级 button 里嵌套动作，也不使用 feature 私有按钮皮肤。
  *
- * <p>卡片所属列已经表达当前阶段，因此卡头只留编号；阻塞是当前阶段的事实，徽标写保留阶段名称、
- * 提示写阻塞原因。阶段编码只作为诊断信息保留在提示里，动作用目标阶段名称表达，外观是次级/无框按钮，
- * 主动作留在页头。
+ * <p>卡片所属列已经表达当前阶段（包括业务阻塞），因此卡头只留编号，阻塞原因写在正文。
+ * 阶段编码只作为诊断信息保留在提示里，动作用目标阶段名称表达，外观是次级/无框按钮，主动作留在页头。
  */
 export function IssueCard({
   item,
@@ -71,11 +70,6 @@ export function IssueCard({
         </div>
 
         <div className="issue-badges-row">
-          {isBlocked && (
-            <Badge tone="danger" title={issue.blockReason ?? stateName(issue.state)}>
-              {stateName(issue.state)}
-            </Badge>
-          )}
           {issue.pauseReason === 'USER' && (
             <Badge tone="warning" title={t('projects.issue.pausedBadgeTitle')}>
               {t('projects.issue.pauseStatus.paused')}

@@ -32,27 +32,27 @@ export function PreviewTarget({
   )
 }
 
-/** 有损解码警示：只在审查 JSON 声明 lossyDecode 时显示在 diff 上方。 */
+/**
+ * 有损解码警示：只在审查 JSON 声明 lossyDecode 时显示在 diff 上方。
+ * write 整体重写，仍保留的 � 都会写成 U+FFFD；edit 只重编码替换片段，未修改的字节保持原样。
+ */
 export function LossyDecodeWarning({
+  tool,
   lossyDecode,
 }: {
+  tool: 'edit' | 'write'
   lossyDecode?: EditReviewLossyDecode
 }) {
   const { t } = useI18n()
   if (!lossyDecode) {
     return null
   }
+  const values = { count: lossyDecode.invalidSequences, encoding: lossyDecode.encoding }
+  const plural = lossyDecode.invalidSequences === 1 ? 'one' : 'other'
   return (
     <div className="thread-tool-lossy-warning" role="note">
       <AlertTriangle size={14} aria-hidden="true" />
-      <span>
-        {lossyDecode.invalidSequences === 1
-          ? t('ai.runtime.mutation.lossyDecode.one', { encoding: lossyDecode.encoding })
-          : t('ai.runtime.mutation.lossyDecode.other', {
-            count: lossyDecode.invalidSequences,
-            encoding: lossyDecode.encoding,
-          })}
-      </span>
+      <span>{t(`ai.runtime.mutation.lossyDecode.${tool}.${plural}`, values)}</span>
     </div>
   )
 }
@@ -201,7 +201,7 @@ export function EditDiffSection({
   }
   return (
     <>
-      <LossyDecodeWarning lossyDecode={preview.lossyDecode} />
+      <LossyDecodeWarning tool="edit" lossyDecode={preview.lossyDecode} />
       <ToolOutputViewport
         bounded={bounded}
         className={[

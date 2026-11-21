@@ -59,7 +59,7 @@ export function ToolCallPreview({
           {showTarget && preview.path ? (
             <PreviewTarget path={preview.path} workdir={preview.workdir} />
           ) : null}
-          <LossyDecodeWarning lossyDecode={preview.review?.lossyDecode} />
+          <LossyDecodeWarning tool="write" lossyDecode={preview.review?.lossyDecode} />
           {preview.hasContent ? (
             <WriteContentSection preview={preview} streaming={streaming} bounded={bounded} />
           ) : null}
@@ -76,7 +76,7 @@ export function ToolCallPreview({
     if (preview.review != null) {
       return (
         <div className="thread-tool-call-body">
-          <LossyDecodeWarning lossyDecode={preview.review.lossyDecode} />
+          <LossyDecodeWarning tool="write" lossyDecode={preview.review.lossyDecode} />
           <WriteReviewSection preview={preview} bounded={false} />
         </div>
       )

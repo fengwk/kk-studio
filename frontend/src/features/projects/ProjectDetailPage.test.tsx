@@ -370,8 +370,8 @@ describe('ProjectDetailPage', () => {
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
     const card = await screen.findByTestId(`issue-card-${issues[0].issue.id}`)
-    expect(card.querySelector('.ui-badge')).toHaveTextContent('业务阻塞')
-    expect(card.querySelector('.ui-badge')).toHaveAttribute('title', blockReason)
+    // 所在列已表达业务阻塞，卡片不再重复阶段徽标，原因写在正文。
+    expect(card.querySelector('.ui-badge')).toBeNull()
     expect(within(card).getByText(`原因: ${blockReason}`)).toBeInTheDocument()
     expect(within(card).queryByText('BLOCKED')).toBeNull()
     expect(within(card).getByRole('button', { name: '恢复' })).toBeInTheDocument()

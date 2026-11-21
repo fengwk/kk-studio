@@ -29,11 +29,15 @@ export function useChatIdeToggle(
   const { t } = useI18n()
   const idePanel = useOptionalIdePanel()
   const chatEnvironment = environments.find((environment) => environment.name === chat.environmentName)
+  // 只按环境事实（id、名称、就绪）变化重建，列表回读带来的新对象不得重复激活面板。
+  const environmentId = chatEnvironment && isCanonicalUuid(chatEnvironment.id) ? chatEnvironment.id : null
+  const environmentName = chatEnvironment?.name
+  const environmentReady = chatEnvironment?.ready === true
   const ideEnvironment = useMemo(() => (
-    chatEnvironment && isCanonicalUuid(chatEnvironment.id)
-      ? { id: chatEnvironment.id, name: chatEnvironment.name, ready: chatEnvironment.ready }
+    environmentId != null && environmentName != null
+      ? { id: environmentId, name: environmentName, ready: environmentReady }
       : null
-  ), [chatEnvironment?.id, chatEnvironment?.name, chatEnvironment?.ready])
+  ), [environmentId, environmentName, environmentReady])
   const hint = ideEnvironment != null
     ? t('ai.ide.toggle')
     : t(chat.environmentName ? 'ai.ide.chatEnvironmentUnavailable' : 'ai.ide.selectChatEnvironment')
@@ -47,7 +51,7 @@ export function useChatIdeToggle(
     }
     activatedIdeEnvironmentRef.current = key
     idePanel?.activateChatEnvironment(ideEnvironment)
-  }, [ideEnvironment?.id, ideEnvironment?.name, ideEnvironment?.ready, idePanel])
+  }, [ideEnvironment, idePanel])
 
   return {
     hint,

@@ -1000,6 +1000,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(within(preview as HTMLElement).getByText('-six')).toBeInTheDocument()
   })
 
+  // 测试意图：edit 只重编码替换片段，警示不能沿用 write 「整个文件仍保留的 � 都会丢失」的表述。
   it('shows the localized lossy-decode warning above the edit diff', () => {
     setLocale('zh-CN')
     const reviewFor = (invalidSequences: number) => ({
@@ -1023,7 +1024,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     const warning = container.querySelector('.thread-tool-lossy-warning')
     expect(warning).toHaveTextContent(
-      '原文件有 1 处字节序列不是有效的 GB18030，显示为 �；保存后若仍保留，该位置会写为 U+FFFD，原始字节无法恢复。',
+      '原文件有 1 处字节序列不是有效的 GB18030，显示为 �；未修改的内容保留原始字节，替换内容中的 � 会写为 U+FFFD。',
     )
     expect(warning?.nextElementSibling).toHaveClass('thread-tool-preview-body', 'is-edit')
 
@@ -1031,7 +1032,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     rerender(<ToolMessageBlock message={message(reviewFor(3))} />)
     expect(container.querySelector('.thread-tool-lossy-warning')).toHaveTextContent(
       'The original file contains 3 byte sequences that are not valid GB18030, shown as �.'
-        + ' Those still present are saved as U+FFFD, so their original bytes cannot be recovered.',
+        + ' Unchanged text keeps its original bytes; any � in the replacement text is saved as U+FFFD.',
     )
   })
 

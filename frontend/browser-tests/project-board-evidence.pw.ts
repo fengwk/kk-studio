@@ -322,10 +322,10 @@ for (const locale of Object.keys(copy) as Locale[]) {
         await expect(meta).not.toContainText(copy[locale].badges[badge])
       }
 
-      // 阻塞：徽标用保留阶段名称，原因与恢复目标在正文/提示里说明。
+      // 阻塞：所在列已表达业务阻塞，卡片不重复阶段徽标；原因与恢复目标在正文/提示里说明。
       const blockedCard = card(ISSUE_BLOCKED)
-      await expect(blockedCard.locator('.ui-badge')).toHaveText(copy[locale].columns.BLOCKED)
-      await expect(blockedCard.locator('.ui-badge')).toHaveAttribute('title', BLOCK_REASON)
+      await expect(page.locator('.project-board-column[data-state="BLOCKED"]')).toContainText(copy[locale].columns.BLOCKED)
+      await expect(blockedCard.locator('.ui-badge')).toHaveCount(0)
       await expect(blockedCard.locator('.issue-block-reason')).toHaveText(copy[locale].reason)
       await expect(blockedCard.getByRole('button', { name: copy[locale].recover }))
         .toHaveAttribute('title', copy[locale].recoverTitle)

@@ -1116,17 +1116,29 @@ export const chatCatalog = {
     'en-US': 'Edit review missing or invalid; cannot allow.',
     'zh-CN': '未获取到有效的编辑审查信息，无法允许。',
   },
-  'ai.runtime.mutation.lossyDecode.one': {
+  'ai.runtime.mutation.lossyDecode.write.one': {
     'en-US': 'The original file contains 1 byte sequence that is not valid {{encoding}},'
       + ' shown as �. If it is still present, it is saved as U+FFFD, so its original bytes'
       + ' cannot be recovered.',
     'zh-CN': '原文件有 1 处字节序列不是有效的 {{encoding}}，显示为 �；保存后若仍保留，该位置会写为 U+FFFD，原始字节无法恢复。',
   },
-  'ai.runtime.mutation.lossyDecode.other': {
+  'ai.runtime.mutation.lossyDecode.write.other': {
     'en-US': 'The original file contains {{count}} byte sequences that are not valid'
       + ' {{encoding}}, shown as �. Those still present are saved as U+FFFD, so their original'
       + ' bytes cannot be recovered.',
     'zh-CN': '原文件有 {{count}} 处字节序列不是有效的 {{encoding}}，显示为 �；保存后仍保留的这些位置会写为 U+FFFD，原始字节无法恢复。',
+  },
+  'ai.runtime.mutation.lossyDecode.edit.one': {
+    'en-US': 'The original file contains 1 byte sequence that is not valid {{encoding}},'
+      + ' shown as �. Unchanged text keeps its original bytes; any � in the replacement'
+      + ' text is saved as U+FFFD.',
+    'zh-CN': '原文件有 1 处字节序列不是有效的 {{encoding}}，显示为 �；未修改的内容保留原始字节，替换内容中的 � 会写为 U+FFFD。',
+  },
+  'ai.runtime.mutation.lossyDecode.edit.other': {
+    'en-US': 'The original file contains {{count}} byte sequences that are not valid'
+      + ' {{encoding}}, shown as �. Unchanged text keeps its original bytes; any � in the'
+      + ' replacement text is saved as U+FFFD.',
+    'zh-CN': '原文件有 {{count}} 处字节序列不是有效的 {{encoding}}，显示为 �；未修改的内容保留原始字节，替换内容中的 � 会写为 U+FFFD。',
   },
   'ai.interaction.viewSource': { 'en-US': 'View source', 'zh-CN': '查看来源' },
   'ai.interaction.subagentSource': { 'en-US': 'subagent', 'zh-CN': '子 Agent' },
