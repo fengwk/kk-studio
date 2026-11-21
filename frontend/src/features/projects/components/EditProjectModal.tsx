@@ -189,8 +189,7 @@ function EditProjectModalContent({
             workflowLockedReason={draft.workflowLockedReason}
             messages={messages.workflow}
             missingCatalogAgents={draft.missingCatalogAgents}
-            agentOptions={draft.agentOptions}
-            agentsLoading={draft.agentsLoading}
+            agentCatalog={draft.agentCatalog}
             environments={draft.environments}
             isPending={isPending}
             activeSubmission={activeSubmission}

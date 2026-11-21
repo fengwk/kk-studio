@@ -6,6 +6,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { environmentService } from '@/features/environment/environment-service'
+import { AgentSelect } from '@/features/thread/AgentSelect'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
@@ -14,6 +15,9 @@ export function CreateChatModal({
   open,
   mode = 'create',
   agents,
+  agentsLoading = false,
+  agentsError = false,
+  agentsReady = true,
   selectedAgentName,
   title,
   yoloEnabled,
@@ -21,6 +25,7 @@ export function CreateChatModal({
   pending,
   formError = '',
   nameError = '',
+  agentError = '',
   onClose,
   onSelectAgent,
   onTitleChange,
@@ -30,7 +35,13 @@ export function CreateChatModal({
 }: {
   open: boolean
   mode?: 'create' | 'edit'
-  agents: AgentDTO[]
+  agents: readonly AgentDTO[]
+  /** Agent 目录读取中：保留当前名称，不提前宣称不可用。 */
+  agentsLoading?: boolean
+  /** Agent 目录读取失败：目录内容未知，不据此判定已保存的 Agent 不可用。 */
+  agentsError?: boolean
+  /** Agent 目录已成功读取：只有此时才能确认名称不在目录里。 */
+  agentsReady?: boolean
   selectedAgentName: string
   title: string
   yoloEnabled: boolean
@@ -38,6 +49,7 @@ export function CreateChatModal({
   pending: boolean
   formError?: string
   nameError?: string
+  agentError?: string
   onClose: () => void
   onSelectAgent: (agentName: string) => void
   onTitleChange: (title: string) => void
@@ -104,17 +116,22 @@ export function CreateChatModal({
             />
             {nameError ? <span className="field-error">{nameError}</span> : null}
           </label>
-          <label className="form-group">
+          <div className={`form-group${agentError ? ' is-error' : ''}`}>
             <FieldLabel required>{t('ai.chat.agent')}</FieldLabel>
-            <Select
-              aria-label={t('ai.chat.agent')}
+            <AgentSelect
+              agents={agents}
               value={selectedAgentName}
-              placeholder={t('ai.chat.selectAgent')}
-              options={agents.map((agent) => ({ value: agent.name, label: agent.name }))}
               onChange={onSelectAgent}
+              aria-label={t('ai.chat.agent')}
+              aria-invalid={agentError ? true : undefined}
               disabled={pending}
+              loading={agentsLoading}
+              catalogError={agentsError}
+              catalogReady={agentsReady}
+              required
             />
-          </label>
+            {agentError ? <span className="field-error">{agentError}</span> : null}
+          </div>
           <div className="form-group">
             <div className="settings-row">
               <div className="settings-row-text">

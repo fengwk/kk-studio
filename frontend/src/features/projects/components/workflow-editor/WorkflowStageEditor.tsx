@@ -1,6 +1,7 @@
 import { useI18n } from '@/shared/i18n'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { WorkflowDraftState } from '../../workflow-draft'
+import type { AgentCatalog } from '../../useAgentCatalog'
 import { WorkflowStageForm } from './WorkflowStageForm'
 import { WorkflowStageList } from './WorkflowStageList'
 
@@ -11,8 +12,7 @@ interface WorkflowStageEditorProps {
   referencedStates: ReadonlySet<string>
   constraintsReady: boolean
   isPending: boolean
-  agentOptions: string[]
-  agentsLoading: boolean
+  agentCatalog: AgentCatalog
   environments: ReadonlyArray<{ name: string }>
   onSelect: (key: string) => void
   onRename: (key: string, rawCode: string) => void
@@ -33,8 +33,7 @@ export function WorkflowStageEditor({
   referencedStates,
   constraintsReady,
   isPending,
-  agentOptions,
-  agentsLoading,
+  agentCatalog,
   environments,
   onSelect,
   onRename,
@@ -69,8 +68,7 @@ export function WorkflowStageEditor({
           referencedStates={referencedStates}
           constraintsReady={constraintsReady}
           isPending={isPending}
-          agentOptions={agentOptions}
-          agentsLoading={agentsLoading}
+          agentCatalog={agentCatalog}
           environments={environments}
           onRename={onRename}
           onUpdate={onUpdate}

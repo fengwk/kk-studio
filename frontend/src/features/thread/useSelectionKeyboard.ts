@@ -50,11 +50,11 @@ export function useSelectionKeyboard({
   }, [filteredItems, setActiveId])
 
   const selectActive = useCallback(() => {
-    if (selectionPending || activeId == null) {
+    if (selectionPending || activeId == null || !filteredItems.some((item) => item.id === activeId)) {
       return
     }
     void onSelect(activeId)
-  }, [activeId, onSelect, selectionPending])
+  }, [activeId, filteredItems, onSelect, selectionPending])
 
   return useCallback((event: KeyboardEvent<HTMLElement>) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {

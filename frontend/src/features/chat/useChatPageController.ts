@@ -17,6 +17,13 @@ export function useChatPageController() {
     queryFn: () => agentService.listAgents(),
   })
   const agents = agentsQuery.data ?? []
+  // 目录读取状态随表单一起下传：读取中/失败时目录内容未知，不据此判定已保存的 Agent 不可用。
+  const agentCatalog = {
+    agents,
+    loading: agentsQuery.isLoading,
+    error: agentsQuery.isError,
+    ready: agentsQuery.isSuccess,
+  }
   // 已有可用 Agent 即说明 Provider / Model 齐备；否则才查询它们来渲染首次使用引导（与 Catalog 页共享缓存）。
   const hasAgent = agents.some((agent) => agent.execution != null)
   const needsSetupFacts = agentsQuery.isSuccess && !hasAgent
@@ -41,7 +48,7 @@ export function useChatPageController() {
             hasAgent: false,
           }
         : undefined
-  const chatController = useChatListController(agents, true)
+  const chatController = useChatListController(agentCatalog, true)
   const chats = useMemo(
     () => filterChats(chatController.chats, deferredSearch),
     [chatController.chats, deferredSearch],

@@ -10,6 +10,7 @@ export interface SelectionPanelItem {
 
 export interface SelectionRowProps {
   item: SelectionPanelItem
+  optionId?: string
   active: boolean
   current: boolean
   disabled: boolean
@@ -30,6 +31,7 @@ export interface SelectionRowProps {
  */
 export function SelectionRow({
   item,
+  optionId,
   active,
   current,
   disabled,
@@ -44,6 +46,8 @@ export function SelectionRow({
       <button
         type="button"
         role="option"
+        id={optionId}
+        tabIndex={optionId == null ? undefined : -1}
         aria-selected={active}
         aria-current={current ? 'true' : undefined}
         className={[

@@ -19,22 +19,21 @@ const params = new URLSearchParams(window.location.search)
 const initialLocale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
 setLocale(initialLocale)
 
-const testAgents: AgentDTO[] = [
-  {
-    name: 'assistant',
-    description: null,
-    systemPrompt: '',
-    execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
-    config: {
-      tools: [],
-      skills: [],
-      subagents: [],
-    },
-    version: '1',
-    createdAt: 1790812800,
-    updatedAt: 1790812800,
+const testAgent: AgentDTO = {
+  name: 'assistant',
+  description: null,
+  systemPrompt: '',
+  execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
+  config: {
+    tools: [],
+    skills: [],
+    subagents: [],
   },
-]
+  version: '1',
+  createdAt: 1790812800,
+  updatedAt: 1790812800,
+}
+const testAgents = [testAgent, { ...testAgent, name: 'reviewer', description: 'Checks pull requests' }]
 
 const initialEnvironments: EnvironmentDTO[] = [
   {

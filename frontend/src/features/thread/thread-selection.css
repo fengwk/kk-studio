@@ -1,3 +1,30 @@
+/* Agent 表单复用选择面板的搜索与列表，展开在字段所在的滚动容器内。 */
+.agent-select-options {
+  margin-top: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.agent-select-options .thread-selection-search:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.agent-select-options .ui-search-input:focus-visible {
+  outline: 0;
+}
+
+.agent-select-options .thread-selection-list {
+  max-height: 12rem;
+  overscroll-behavior: contain;
+}
+
+.agent-select-options .thread-selection-list:empty {
+  padding: 0;
+}
+
 /* Thread 选择面板：搜索、列表与行内重命名。 */
 .thread-selection-search {
   min-width: 120px;

@@ -60,7 +60,8 @@ export function renderPaneInteraction({
     }
     return (
       <AgentSelectionPanel
-        agents={agents.map((agent) => ({ name: agent.name, description: agent.description }))}
+        agents={agents}
+        selectionError={pane.error}
         selectedAgentName={pane.activeDraft?.agentName}
         selectionPending={pane.pending}
         onClose={pane.closeInteraction}

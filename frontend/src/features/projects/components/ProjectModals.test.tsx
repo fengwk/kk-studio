@@ -194,9 +194,12 @@ describe('EditProjectModal', () => {
           snapshot={{ project, issues: [], referencedStateCodes: [] }}
           api={api} onClose={vi.fn()} onSuccess={vi.fn()} />
       </QueryClientProvider>)
-      const catalogKey = [...queryKeys.agents.list, 'all-names']
-      if (catalogState !== 'loading') {
+      const catalogKey = queryKeys.agents.list
+      if (catalogState === 'empty') {
         await waitFor(() => expect(queryClient.getQueryData(catalogKey)).toEqual([]))
+      } else if (catalogState === 'failed') {
+        // 读取失败以查询错误表达，不再伪装成空目录。
+        await waitFor(() => expect(queryClient.getQueryState(catalogKey)?.status).toBe('error'))
       }
       await user.click(screen.getByRole('button', { name: /2处理中/ }))
       await user.click(screen.getByRole('button', { name: '执行方式' }))
@@ -206,22 +209,35 @@ describe('EditProjectModal', () => {
       expect(agentField).toHaveAttribute('aria-required', 'true')
       expect(agentField).toHaveAttribute('aria-invalid', 'true')
       expect(within(screen.getByRole('button', { name: /2处理中/ })).getByText('Agent')).toBeInTheDocument()
-      if (catalogState === 'loading') {
-        expect(agentField).toBeDisabled()
-      }
+      // 打开实际选择器：空、读取中与读取失败都以面板内的状态文案表达，且没有任何可选项。
+      await user.click(agentField)
+      expect(agentField).toHaveAttribute('aria-expanded', 'true')
+      const agentPanel = screen.getByRole('group', { name: '选择 Agent' })
+      expect(within(agentPanel).getByRole('status')).toHaveTextContent(
+        catalogState === 'failed'
+          ? '读取 Agent 列表失败'
+          : catalogState === 'loading'
+            ? '加载中…'
+            : '暂无可用 Agent',
+      )
+      expect(within(agentPanel).queryAllByRole('option')).toHaveLength(0)
+      await user.keyboard('{Escape}')
+      expect(agentField).toHaveAttribute('aria-expanded', 'false')
       await user.click(screen.getByRole('button', { name: '保存工作流' }))
       expect(await screen.findByText('Agent 阶段「WORK」必须选择 Agent')).toBeInTheDocument()
       expect(api.updateWorkflow).not.toHaveBeenCalled()
 
       if (catalogState === 'loading') {
         await act(async () => { resolveCatalog(emptyPage) })
-        await waitFor(() => expect(agentField).toBeEnabled())
       }
       await act(async () => { await queryClient.invalidateQueries({ queryKey: catalogKey, exact: true }) })
       expect(screen.getByRole('button', { name: '执行方式' })).toHaveTextContent('Agent 执行')
       expect(agentField).toHaveAttribute('aria-invalid', 'true')
+      // 目录刷新后选项才可用：只在这里显式选择，之前的已保存名称不被自动改写。
       await user.click(agentField)
-      await user.click(screen.getByRole('option', { name: 'backend-dev' }))
+      await user.click(await screen.findByRole('option', { name: 'backend-dev' }))
+      await waitFor(() => expect(agentField).toHaveTextContent('backend-dev'))
+      expect(agentField).toHaveAttribute('data-value', 'backend-dev')
       expect(agentField).not.toHaveAttribute('aria-invalid')
       await user.type(screen.getByRole('textbox', { name: 'Run 额度' }), '3')
       await user.click(screen.getByRole('button', { name: '保存工作流' }))

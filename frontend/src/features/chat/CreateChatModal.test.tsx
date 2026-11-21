@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
@@ -111,6 +111,27 @@ describe('CreateChatModal', () => {
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()
+  })
+
+  // 目录读取中/失败/为空时保留已保存的 Agent 名称，只有确认目录成功后才会标记不可用
+  it.each([
+    { catalog: 'loading', props: { agentsLoading: true, agentsReady: false }, unavailable: false, feedback: '加载中…' },
+    { catalog: 'error', props: { agentsError: true, agentsReady: false }, unavailable: false, feedback: '读取 Agent 列表失败' },
+    { catalog: 'empty', props: { agentsReady: true }, unavailable: true, feedback: '暂无可用 Agent' },
+  ])('retains the saved Agent and reports accurate $catalog state', async ({ props, unavailable, feedback }) => {
+    const user = userEvent.setup()
+    renderModal(
+      <CreateChatModal
+        {...createModalProps({ mode: 'edit', agents: [], selectedAgentName: 'retired-agent', ...props })}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Agent' })
+    expect(trigger).toHaveTextContent(unavailable ? 'retired-agent · 不可用' : /^retired-agent$/)
+
+    await user.click(trigger)
+    const panel = screen.getByRole('group', { name: '选择 Agent' })
+    expect(within(panel).getByRole('status')).toHaveTextContent(feedback)
   })
 
   // 验证编辑模式下共用表单布局与字段，展示编辑标题、保存按钮和取消动作，完整回显 YOLO 与环境

@@ -176,7 +176,7 @@ export function RootAgentPane({
         projection={pane.controller}
         environments={environments}
         activity={{
-          actionError: pane.error,
+          actionError: pane.interaction === 'agent' && interactionPanel != null ? null : pane.error,
           onDismissActionError,
           onStop: () => { void pane.controller.stopThread() },
           stopPending: pane.controller.stopPending || pane.controller.stopReplayPending,
@@ -236,7 +236,7 @@ export function RootAgentPane({
         )}
         activity={{
           working: false,
-          actionError: pane.error,
+          actionError: pane.interaction === 'agent' && interactionPanel != null ? null : pane.error,
           onDismissActionError,
         }}
         slots={{
