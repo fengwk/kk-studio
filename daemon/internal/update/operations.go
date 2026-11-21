@@ -39,6 +39,7 @@ type Outcome struct {
 type Runner interface {
 	Configured() bool
 	StopForUpdate(context.Context) error
+	ResumeAfterFailedUpdate()
 	HandleUpdate(context.Context, Command, config.DaemonConfig, func(Progress)) (Outcome, error)
 }
 
@@ -137,7 +138,7 @@ func (o *Operations) Decide(command Command, currentVersion string, configured b
 	return Decision{Action: ActionAdmit, Receipt: cloneReceipt(&receipt)}, nil
 }
 
-// Complete records a runner result. PREPARED retains the admission hold until FailActive or shutdown.
+// Complete records a runner result. PREPARED retains the admission hold until failure or shutdown.
 func (o *Operations) Complete(operationID string, phase Phase, message string) (Receipt, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -154,18 +155,6 @@ func (o *Operations) Complete(operationID string, phase Phase, message string) (
 	if phase != PhaseFailed {
 		return Receipt{}, false
 	}
-	o.active = nil
-	o.rememberLocked(receipt)
-	return receipt, true
-}
-
-func (o *Operations) FailActive(message string) (Receipt, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.active == nil {
-		return Receipt{}, false
-	}
-	receipt := Receipt{Command: o.active.receipt.Command, Phase: PhaseFailed, Message: message}
 	o.active = nil
 	o.rememberLocked(receipt)
 	return receipt, true

@@ -53,6 +53,7 @@ type lateProgressUpdateRunner struct {
 }
 
 func (r *lateProgressUpdateRunner) Configured() bool                    { return true }
+func (r *lateProgressUpdateRunner) ResumeAfterFailedUpdate()            {}
 func (r *lateProgressUpdateRunner) StopForUpdate(context.Context) error { return nil }
 func (r *lateProgressUpdateRunner) HandleUpdate(_ context.Context, _ update.Command, _ config.DaemonConfig, report func(update.Progress)) (update.Outcome, error) {
 	r.callback <- report

@@ -205,7 +205,8 @@ type recordingUpdateRunner struct {
 	once    sync.Once
 }
 
-func (r *recordingUpdateRunner) Configured() bool { return true }
+func (r *recordingUpdateRunner) Configured() bool         { return true }
+func (r *recordingUpdateRunner) ResumeAfterFailedUpdate() {}
 func (r *recordingUpdateRunner) StopForUpdate(context.Context) error {
 	return nil
 }

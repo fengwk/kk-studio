@@ -80,9 +80,9 @@ func TestRuntimeUpdateReplaysPreparedReceiptWithoutReleasingPermitTwice(t *testi
 	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
 		return countUpdatePhase(frames, protocol.UpdatePhase_UPDATE_PREPARED) == 2
 	})
-	if runner.runCalls.Load() != 1 || releases.Load() != 1 {
+	if runner.runCalls.Load() != 1 || releases.Load() != 1 || runner.resumeCalls.Load() != 0 {
 		cancel()
-		t.Fatalf("runner calls=%d permit releases=%d", runner.runCalls.Load(), releases.Load())
+		t.Fatalf("runner calls=%d permit releases=%d resumes=%d", runner.runCalls.Load(), releases.Load(), runner.resumeCalls.Load())
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -211,6 +211,7 @@ type blockingUpdateRunner struct {
 
 func (r *blockingUpdateRunner) Configured() bool                    { return true }
 func (r *blockingUpdateRunner) StopForUpdate(context.Context) error { return nil }
+func (r *blockingUpdateRunner) ResumeAfterFailedUpdate()            {}
 func (r *blockingUpdateRunner) HandleUpdate(ctx context.Context, _ update.Command, _ config.DaemonConfig, _ func(update.Progress)) (update.Outcome, error) {
 	close(r.started)
 	<-ctx.Done()
@@ -223,11 +224,28 @@ func TestRuntimeUpdateWatchedInstallerFailure(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
 	connection.in <- updateEnvelope(testUpdateOperationID, "2.0.0")
-	var fail func(string)
-	runner := &testUpdateRunner{outcome: update.Outcome{Phase: update.PhasePrepared, WatchFailure: func(callback func(string)) func() {
-		fail = callback
-		return func() {}
-	}}}
+	fail := make(chan struct{})
+	permitReleased := make(chan struct{})
+	runner := &testUpdateRunner{outcome: update.Outcome{
+		Phase: update.PhasePrepared,
+		ReleasePermit: func() error {
+			close(permitReleased)
+			return nil
+		},
+		WatchFailure: func(callback func(string)) func() {
+			stop, done := make(chan struct{}), make(chan struct{})
+			go func() {
+				defer close(done)
+				select {
+				case <-fail:
+					callback("official installer failed")
+				case <-stop:
+				}
+			}()
+			// Match the installer: stopping the watcher waits for its callback to return.
+			return func() { close(stop); <-done }
+		},
+	}}
 	runtime := newUpdateTestRuntime(t, connection, runner)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -236,22 +254,25 @@ func TestRuntimeUpdateWatchedInstallerFailure(t *testing.T) {
 	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
 		return countUpdatePhase(frames, protocol.UpdatePhase_UPDATE_PREPARED) == 1
 	})
-	if fail == nil {
-		cancel()
-		t.Fatal("installer failure watcher was not registered")
+	select {
+	case <-permitReleased:
+	case <-time.After(2 * time.Second):
+		t.Fatal("installer permit was not released")
 	}
-	fail("sensitive installer detail")
+	close(fail)
 	frames := connection.waitFor(t, func(frames []*protocol.Envelope) bool {
 		return countUpdatePhase(frames, protocol.UpdatePhase_UPDATE_FAILED) == 1
 	})
 	failed := frames[len(frames)-1].GetUpdateResult()
-	if failed.GetMessage() != "sensitive installer detail" {
+	if failed.GetMessage() != "official installer failed" {
 		cancel()
 		t.Fatalf("watch failure diagnostic = %q", failed.GetMessage())
 	}
 	if _, ok := runtime.updateOps.Active(); ok {
-		cancel()
 		t.Fatal("watch failure retained update admission")
+	}
+	if resumes := runner.resumeCalls.Load(); resumes != 1 {
+		t.Fatalf("resumes after watched failure = %d, want 1", resumes)
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -301,12 +322,13 @@ func TestRuntimeUpdateRequiresEnvironmentID(t *testing.T) {
 }
 
 type testUpdateRunner struct {
-	outcome   update.Outcome
-	progress  *update.Progress
-	stopError error
-	runError  error
-	stopCalls atomic.Int32
-	runCalls  atomic.Int32
+	outcome     update.Outcome
+	progress    *update.Progress
+	stopError   error
+	runError    error
+	stopCalls   atomic.Int32
+	runCalls    atomic.Int32
+	resumeCalls atomic.Int32
 }
 
 func (r *testUpdateRunner) Configured() bool { return true }
@@ -314,6 +336,7 @@ func (r *testUpdateRunner) StopForUpdate(context.Context) error {
 	r.stopCalls.Add(1)
 	return r.stopError
 }
+func (r *testUpdateRunner) ResumeAfterFailedUpdate() { r.resumeCalls.Add(1) }
 func (r *testUpdateRunner) HandleUpdate(_ context.Context, _ update.Command, _ config.DaemonConfig, report func(update.Progress)) (update.Outcome, error) {
 	r.runCalls.Add(1)
 	if r.progress != nil {

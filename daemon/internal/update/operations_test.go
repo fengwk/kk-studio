@@ -48,7 +48,7 @@ func TestOperationsFailPreparedActiveUpdate(t *testing.T) {
 	operations := NewOperations()
 	_, _ = operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "")
 	_, _ = operations.Complete("op-1", PhasePrepared, "")
-	receipt, ok := operations.FailActive("official installer failed")
+	receipt, ok := operations.Complete("op-1", PhaseFailed, "official installer failed")
 	if !ok || receipt.Phase != PhaseFailed || receipt.Message != "official installer failed" {
 		t.Fatalf("failure receipt = %+v, present=%t", receipt, ok)
 	}
@@ -105,7 +105,7 @@ func TestOperationsResendActiveBeforeCached(t *testing.T) {
 	if !ok || receipt.Command.OperationID != "op-1" || receipt.Phase != PhasePrepared {
 		t.Fatalf("prepared resend receipt = %+v, present=%t", receipt, ok)
 	}
-	_, _ = operations.FailActive("failed")
+	_, _ = operations.Complete("op-1", PhaseFailed, "failed")
 	receipt, ok = operations.ReceiptToResend()
 	if !ok || receipt.Command.OperationID != "op-1" || receipt.Phase != PhaseFailed {
 		t.Fatalf("cached resend receipt = %+v, present=%t", receipt, ok)

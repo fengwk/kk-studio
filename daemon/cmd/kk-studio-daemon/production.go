@@ -86,7 +86,7 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 }
 
 // startProcessSupervision owns the OS process tree for the daemon's lifetime.
-func startProcessSupervision(runErr *error) (native.Supervisor, func(), error) {
+func startProcessSupervision(runErr *error) (native.UpdateSupervisor, func(), error) {
 	processes, err := native.NewSupervisor()
 	if err != nil {
 		return nil, nil, productionFailure("native process supervision is unavailable", err)
@@ -182,7 +182,7 @@ func startEnvironmentConfig(initial config.DaemonConfig, lspFacade *lsp.Facade, 
 
 // productionAssembly is the set of already-started services the runtime session is built from.
 type productionAssembly struct {
-	processes          native.Supervisor
+	processes          native.UpdateSupervisor
 	networks           *networkRuntimeStore
 	temporaryResources *coding.TextOutputStore
 	instanceID         string
@@ -213,9 +213,7 @@ func (r productionRuntime) assembleRuntime(initial config.DaemonConfig, assembly
 	}
 	updateRunner := r.updateRunner
 	if updateRunner == nil {
-		updateRunner = &productionUpdateRunner{current: environmentConfig.Current, stop: func(ctx context.Context) error {
-			return assembly.processes.Close(ctx)
-		}}
+		updateRunner = &productionUpdateRunner{current: environmentConfig.Current, processes: assembly.processes}
 	}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
 		EnvironmentID: initial.EnvironmentID,
@@ -391,8 +389,8 @@ func skillFailure(callID, message string) daemonruntime.CapabilityResult {
 }
 
 type productionUpdateRunner struct {
-	current func() config.DaemonConfig
-	stop    func(context.Context) error
+	current   func() config.DaemonConfig
+	processes native.UpdateSupervisor
 }
 
 func (r *productionUpdateRunner) runner() *update.InstallerRunner {
@@ -400,19 +398,22 @@ func (r *productionUpdateRunner) runner() *update.InstallerRunner {
 	if err != nil {
 		return nil
 	}
-	return update.NewInstallerRunner(update.InstallerRunnerOptions{HTTPClient: policy.HTTPClient(), Stop: r.stop})
+	return update.NewInstallerRunner(update.InstallerRunnerOptions{HTTPClient: policy.HTTPClient()})
 }
 func (r *productionUpdateRunner) Configured() bool {
 	runner := r.runner()
 	return runner != nil && runner.Configured()
 }
-func (r *productionUpdateRunner) StopForUpdate(ctx context.Context) error { return r.stop(ctx) }
+func (r *productionUpdateRunner) StopForUpdate(ctx context.Context) error {
+	return r.processes.Suspend(ctx)
+}
+func (r *productionUpdateRunner) ResumeAfterFailedUpdate() { r.processes.Resume() }
 func (r *productionUpdateRunner) HandleUpdate(ctx context.Context, command update.Command, applied config.DaemonConfig, report func(update.Progress)) (update.Outcome, error) {
 	policy, err := proxyPolicy(applied)
 	if err != nil {
 		return update.Outcome{}, err
 	}
-	runner := update.NewInstallerRunner(update.InstallerRunnerOptions{HTTPClient: policy.HTTPClient(), Stop: r.stop})
+	runner := update.NewInstallerRunner(update.InstallerRunnerOptions{HTTPClient: policy.HTTPClient()})
 	return runner.HandleUpdate(ctx, command, applied, report)
 }
 

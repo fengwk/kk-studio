@@ -28,7 +28,7 @@ const (
 // PosixSupervisor supervises each command in a private process session.
 type PosixSupervisor struct {
 	mu                     sync.Mutex
-	closed                 bool
+	admission              admissionGate
 	processes              map[int]*posixProcess
 	snapshotDirectChildren func(int, []int) ([]sessionMember, error)
 	startAPI               posixStartAPI
@@ -55,11 +55,11 @@ func nativePOSIXStartAPI() posixStartAPI {
 }
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
-func NewSupervisor() (Supervisor, error) {
+func NewSupervisor() (UpdateSupervisor, error) {
 	return newPOSIXSupervisor(enableChildSubreaper)
 }
 
-func newPOSIXSupervisor(enableSubreaper func() error) (Supervisor, error) {
+func newPOSIXSupervisor(enableSubreaper func() error) (UpdateSupervisor, error) {
 	if runtime.GOOS == "linux" {
 		if err := enableSubreaper(); err != nil {
 			return nil, fmt.Errorf("cannot enable process subreaper: %w", err)
@@ -137,12 +137,10 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	if err := validateProcessSpec(spec); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil, errors.New("the process supervisor is closed")
+	if err := s.admission.admit(); err != nil {
+		return nil, err
 	}
-	s.mu.Unlock()
+	defer s.admission.finish()
 	dir, api, _, baselinePIDs, baselineKnown, err := s.preparePOSIXStartState(spec)
 	if err != nil {
 		return nil, err
@@ -220,13 +218,13 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	if err := publishPOSIXPermit(ctx, dir); err != nil {
 		return nil, p.cleanupFailedStart(err)
 	}
-	s.mu.Lock()
-	if s.closed {
+	if err := s.admission.register(func() {
+		s.mu.Lock()
+		s.processes[p.pid] = p
 		s.mu.Unlock()
-		return nil, p.cleanupFailedStart(errors.New("the process supervisor is closed"))
+	}); err != nil {
+		return nil, p.cleanupFailedStart(err)
 	}
-	s.processes[p.pid] = p
-	s.mu.Unlock()
 	return p, nil
 }
 
@@ -237,9 +235,27 @@ func publishPOSIXPermit(ctx context.Context, stateDir string) error {
 	return publishText(stateDir, permitFile, "true")
 }
 
+// Close terminates every tracked process and permanently refuses new Starts.
 func (s *PosixSupervisor) Close(ctx context.Context) error {
+	s.admission.close()
+	return s.terminateTracked(ctx)
+}
+
+// Suspend refuses new Starts and terminates every tracked process, including one published by a
+// Start that was already in flight when the suspension began.
+func (s *PosixSupervisor) Suspend(ctx context.Context) error {
+	if err := s.admission.suspend(ctx); err != nil {
+		return err
+	}
+	return s.terminateTracked(ctx)
+}
+
+// Resume restores process admission after a suspension.
+func (s *PosixSupervisor) Resume() { s.admission.resume() }
+
+// terminateTracked converges every tracked process and reports the failures it cannot prove.
+func (s *PosixSupervisor) terminateTracked(ctx context.Context) error {
 	s.mu.Lock()
-	s.closed = true
 	processes := make([]*posixProcess, 0, len(s.processes))
 	for _, p := range s.processes {
 		processes = append(processes, p)

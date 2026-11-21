@@ -469,6 +469,9 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 - 一个 Environment 同一时刻至多一次更新：Server 只在命令下发的短暂窗口内登记内存准入，发送返回后
   立即释放；最终互斥由本机 `install.lock` 保证。更新期间普通 capability 调用在起点被 busy 拒绝，
   连接仍保持认证。
+- 受管更新开始前临时暂停原生进程监管：先停止受管原生进程并拒绝新启动。安装器准备失败、停止受管
+  进程失败，或安装器报告失败且 Daemon 仍在运行时，Daemon 会恢复监管，此后可再次执行 Bash 命令、
+  使用语言服务器或打开 IDE。成功交接后保持暂停，直到旧 Daemon 停止。
 - 只有官方受管安装接受更新：Daemon 的 config/token/distribution 路径必须等于本卡片受管目录。
 - Daemon 启动 **OS 级独立、短生命周期的任务**（Linux `systemd-run` 瞬时单元、
   macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务），任务在目标服务作用域之外运行，

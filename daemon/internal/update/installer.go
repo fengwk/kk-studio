@@ -49,7 +49,6 @@ type InstallerRunnerOptions struct {
 	Environment  map[string]string
 	HTTPClient   *http.Client
 	Launch       JobLauncher
-	Stop         func(context.Context) error
 	Log          func(string)
 }
 
@@ -86,13 +85,6 @@ func NewInstallerRunner(options InstallerRunnerOptions) *InstallerRunner {
 
 func (r *InstallerRunner) Configured() bool {
 	return r != nil && r.options.Home != "" && r.options.TempDir != "" && r.options.Launch != nil
-}
-
-func (r *InstallerRunner) StopForUpdate(ctx context.Context) error {
-	if r.options.Stop == nil {
-		return nil
-	}
-	return r.options.Stop(ctx)
 }
 
 // HandleUpdate prepares an independently running official installer and reports only safe fixed diagnostics.
@@ -636,5 +628,3 @@ type InstallerConfig struct {
 	TokenPath       string
 	DistributionDir string
 }
-
-var _ Runner = (*InstallerRunner)(nil)

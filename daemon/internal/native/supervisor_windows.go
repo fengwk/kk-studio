@@ -44,12 +44,12 @@ type windowsJobAccounting struct {
 
 type windowsSupervisor struct {
 	mu        sync.Mutex
-	closed    bool
+	admission admissionGate
 	processes map[int]*windowsProcess
 }
 
 // NewSupervisor creates a Job-based Windows process supervisor.
-func NewSupervisor() (Supervisor, error) {
+func NewSupervisor() (UpdateSupervisor, error) {
 	return &windowsSupervisor{processes: make(map[int]*windowsProcess)}, nil
 }
 
@@ -60,12 +60,10 @@ func (s *windowsSupervisor) Start(ctx context.Context, spec ProcessSpec) (Manage
 	if err := validateWindowsProcessSpec(spec); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil, errors.New("the process supervisor is closed")
+	if err := s.admission.admit(); err != nil {
+		return nil, err
 	}
-	s.mu.Unlock()
+	defer s.admission.finish()
 	stateDir, err := prepareWindowsScopeState(spec)
 	if err != nil {
 		return nil, err
@@ -121,13 +119,13 @@ func (s *windowsSupervisor) Start(ctx context.Context, spec ProcessSpec) (Manage
 	if err := publishWindowsPermit(ctx, stateDir); err != nil {
 		return nil, p.cleanupFailedStart(err)
 	}
-	s.mu.Lock()
-	if s.closed {
+	if err := s.admission.register(func() {
+		s.mu.Lock()
+		s.processes[p.pid] = p
 		s.mu.Unlock()
-		return nil, p.cleanupFailedStart(errors.New("the process supervisor is closed"))
+	}); err != nil {
+		return nil, p.cleanupFailedStart(err)
 	}
-	s.processes[p.pid] = p
-	s.mu.Unlock()
 	return p, nil
 }
 
@@ -190,9 +188,27 @@ func startWindowsHelperProcess(stateDir string, spec ProcessSpec) (*windowsHelpe
 	return pipes, helper, nil
 }
 
+// Close terminates every tracked process and permanently refuses new Starts.
 func (s *windowsSupervisor) Close(ctx context.Context) error {
+	s.admission.close()
+	return s.terminateTracked(ctx)
+}
+
+// Suspend refuses new Starts and terminates every tracked process, including one published by a
+// Start that was already in flight when the suspension began.
+func (s *windowsSupervisor) Suspend(ctx context.Context) error {
+	if err := s.admission.suspend(ctx); err != nil {
+		return err
+	}
+	return s.terminateTracked(ctx)
+}
+
+// Resume restores process admission after a suspension.
+func (s *windowsSupervisor) Resume() { s.admission.resume() }
+
+// terminateTracked converges every tracked process and reports the failures it cannot prove.
+func (s *windowsSupervisor) terminateTracked(ctx context.Context) error {
 	s.mu.Lock()
-	s.closed = true
 	pending := make([]*windowsProcess, 0, len(s.processes))
 	for _, process := range s.processes {
 		pending = append(pending, process)

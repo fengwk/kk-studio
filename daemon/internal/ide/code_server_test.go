@@ -82,7 +82,7 @@ func TestCodeServerExitDuringHealthCheck(t *testing.T) {
 	}
 }
 
-// Verifies an unexpected process exit is reported once and the manager can restart.
+// Verifies that termination outside the manager is reported and the next start launches a new host.
 func TestCodeServerUnexpectedExitRestart(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -97,7 +97,9 @@ func TestCodeServerUnexpectedExitRestart(t *testing.T) {
 	supervisor.mu.Lock()
 	process := supervisor.proc
 	supervisor.mu.Unlock()
-	process.exit <- native.ProcessExit{Code: intPointer(5)}
+	if err := process.Terminate(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case generation := <-exited:
 		if generation != first.Generation {

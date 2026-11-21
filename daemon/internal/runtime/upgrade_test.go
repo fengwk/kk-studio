@@ -36,7 +36,8 @@ func newUpgradeRunner() *upgradeRunner {
 	}
 }
 
-func (r *upgradeRunner) Configured() bool { return r.configured }
+func (r *upgradeRunner) Configured() bool         { return r.configured }
+func (r *upgradeRunner) ResumeAfterFailedUpdate() {}
 func (r *upgradeRunner) StopForUpdate(context.Context) error {
 	r.stopCalls.Add(1)
 	return nil
