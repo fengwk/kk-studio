@@ -397,11 +397,64 @@ describe('IdeOverlayPanel', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
 
     await user.click(tabSelectButton(VIEW_A))
-    expect(screen.getByTestId('ide-close-error')).toHaveTextContent(message)
+    const banner = screen.getByTestId('ide-close-error')
+    expect(banner).toHaveTextContent(message)
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(within(banner).getByRole('button'))
+    expect(screen.queryByTestId('ide-close-error')).not.toBeInTheDocument()
     expect(tabCloseButton(VIEW_A)).not.toBeDisabled()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(closeIdeView).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['confirm', 'cancel', 'success'] as const)('handles %s when explicitly closing a bound error tab', async (action) => {
+    const user = userEvent.setup()
+    const onCloseEnvironment = vi.fn().mockResolvedValue({ ok: true, requiresForceConfirmation: false })
+    if (action !== 'success') {
+      onCloseEnvironment.mockResolvedValueOnce({
+        ok: false, requiresForceConfirmation: true, message: 'close-control-unavailable',
+      })
+    }
+    const props = baseProps({ onCloseEnvironment })
+    // 恢复后的错误没有 iframe，但仍持有实例和 epoch。
+    render(<IdeOverlayPanel {...props} views={{
+      ...props.views, [VIEW_A]: { ...props.views[VIEW_A], status: 'error', entryUrl: undefined },
+    }} />)
+
+    await user.click(tabCloseButton(VIEW_A))
+    expect(onCloseEnvironment).toHaveBeenCalledExactlyOnceWith(VIEW_A, false)
+    if (action !== 'success') {
+      const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
+      await user.click(within(dialog).getByRole('button', { name: action === 'confirm' ? '强制关闭' : '取消' }))
+    }
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    if (action === 'confirm') {
+      expect(onCloseEnvironment).toHaveBeenCalledTimes(2)
+      expect(onCloseEnvironment).toHaveBeenNthCalledWith(2, VIEW_A, true)
+    } else {
+      expect(onCloseEnvironment).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it.each<Partial<IdeViewState>>([
+    { status: 'error', bindingEpoch: undefined },
+    { status: 'error', bindingEpoch: '0' },
+    { status: 'error', daemonInstanceId: 'invalid' },
+    { status: 'gone' },
+    { status: 'binding' },
+    { status: 'reconciling' },
+  ])('does not send a close for an ineligible tab (%j)', async (patch) => {
+    const user = userEvent.setup()
+    const props = baseProps()
+    render(<IdeOverlayPanel {...props} views={{
+      ...props.views, [VIEW_A]: { ...props.views[VIEW_A], ...patch, entryUrl: undefined },
+    }} />)
+
+    const close = tabCloseButton(VIEW_A)
+    expect(close).toBeDisabled()
+    await user.click(close)
+    expect(props.onCloseEnvironment).not.toHaveBeenCalled()
   })
 
   it('invalidates force confirmation when the Daemon instance changes even if the epoch is reused', async () => {
@@ -413,7 +466,7 @@ describe('IdeOverlayPanel', () => {
     expect(await screen.findByRole('alertdialog')).toBeVisible()
 
     rerender(<IdeOverlayPanel {...props} views={{
-      ...props.views, [VIEW_A]: { ...props.views[VIEW_A], daemonInstanceId: 'replacement-instance' },
+      ...props.views, [VIEW_A]: { ...props.views[VIEW_A], daemonInstanceId: 'd1000000-0000-4000-8000-000000000002' },
     }} />)
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(onCloseEnvironment).toHaveBeenCalledTimes(1)

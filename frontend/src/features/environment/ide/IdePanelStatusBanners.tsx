@@ -50,11 +50,10 @@ interface IdePanelStatusBannersProps {
   selectedEnvironmentId: string | null
   viewBusy: boolean
   claimError: string | undefined
-  closeError: string | undefined
   terminalError: string | undefined
   onOpenNewView: (environmentId: string) => void
   onRetryClaim: (environmentId: string) => void
-  onDismissCloseError: (environmentId: string) => void
+  onDismissCloseError: (viewId: string) => void
   commandMessage: (code: string | undefined, fallback: TranslationKey) => string
 }
 
@@ -73,7 +72,6 @@ export function IdePanelStatusBanners({
   selectedEnvironmentId,
   viewBusy,
   claimError,
-  closeError,
   terminalError,
   onOpenNewView,
   onRetryClaim,
@@ -185,17 +183,13 @@ export function IdePanelStatusBanners({
           </Button>
         </div>
       ) : null}
-      {closeError ? (
+      {selectedView?.closeError ? (
         <div className="ide-panel-error-banner" role="alert" data-testid="ide-close-error">
-          <span>{commandMessage(closeError, 'ai.ide.error')}</span>
+          <span>{commandMessage(selectedView.closeError, 'ai.ide.error')}</span>
           <Button
             variant="ghost"
             size="compact"
-            onClick={() => {
-              if (selectedEnvironmentId != null) {
-                onDismissCloseError(selectedEnvironmentId)
-              }
-            }}
+            onClick={() => onDismissCloseError(selectedView.viewId)}
           >
             {t('ai.ide.dismiss')}
           </Button>
