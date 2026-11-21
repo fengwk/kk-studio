@@ -6,6 +6,7 @@ import { AppShell } from '@/platform/shell/AppShell'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { OverlayHost } from '@/platform/workbench/WorkbenchSlots'
 import { useI18n } from '@/shared/i18n'
+import { EmptyState } from '@/shared/ui/feedback/EmptyState'
 
 function UnknownContributionFallback() {
   const { t } = useI18n()
@@ -13,10 +14,16 @@ function UnknownContributionFallback() {
   return (
     <section className="screen active">
       <div className="screen-body">
-        <h1>{t('platform.pageUnavailable')}</h1>
-        <p>{t('platform.pageExtensionMissing')}</p>
+        <EmptyState
+          title={(
+            <>
+              <h1>{t('platform.pageUnavailable')}</h1>
+              <p>{t('platform.pageExtensionMissing')}</p>
+            </>
+          )}
+          action={<Link className="btn-primary" to="/chats">{t('platform.backToChat')}</Link>}
+        />
       </div>
-      <Link to="/chats">{t('platform.backToChat')}</Link>
     </section>
   )
 }

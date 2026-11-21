@@ -141,7 +141,7 @@
   cursor: pointer;
   font: inherit;
   font-size: var(--font-size-sm);
-  line-height: 1;
+  line-height: 1.5;
   text-align: left;
 }
 
@@ -513,6 +513,19 @@
   min-width: 0;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+}
+
+.ui-tab,
+.ui-tab > span:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ui-tab svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
 }
 
 .ui-tab {

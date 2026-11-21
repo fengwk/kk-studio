@@ -52,12 +52,12 @@
 .md-code-block {
   display: block;
   margin: 0.45em 0;
-  padding: 0;
+  padding: var(--space-3) var(--space-4);
   overflow-x: auto;
-  border-radius: 0;
-  border: 0;
-  background: transparent;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-active);
+  font-family: var(--mono);
   font-size: var(--font-size-xs);
   line-height: 1.5;
   white-space: pre;
@@ -66,6 +66,7 @@
 
 .md-code-block code {
   display: block;
+  width: max-content;
   background: transparent !important;
   border: 0 !important;
   padding: 0 !important;

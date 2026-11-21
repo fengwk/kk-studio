@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { AssistantMessageBlock } from '@/features/thread/runtime/thread-panel/messages/AssistantMessageBlock'
-import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
+import type { TextDialogueMessage, ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import type { ToolRendererProps } from '@/platform/extensions/types'
 import { setLocale } from '@/shared/i18n'
+import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 
-setLocale('zh-CN')
+// 语言由查询串决定：默认 zh-CN，`locale=en-US` 用于校验英文界面文案。
+const isEnglish = new URLSearchParams(window.location.search).get('locale') === 'en-US'
+setLocale(isEnglish ? 'en-US' : 'zh-CN')
 
 /**
  * M1 表格复制的真实浏览器 harness：挂载真实 AssistantMessageBlock（含外层「复制全文」
@@ -74,6 +79,67 @@ function buildMessage(appendedRows: number): TextDialogueMessage {
   }
 }
 
+/** 代码表面夹具：行内代码 + 长行代码块，覆盖助手消息内的真实 Markdown 渲染。 */
+const LONG_CODE_LINE = `const scope = '${'x'.repeat(160)}'`
+
+function buildCodeMessage(): TextDialogueMessage {
+  return {
+    id: 'entry-code',
+    role: 'assistant',
+    subjectEntryId: 'entry-code',
+    createdAt: Date.parse('2026-10-06T10:05:00Z'),
+    status: 'done',
+    text: [
+      isEnglish ? 'Run `pnpm run dev` to start the server.' : '运行 `pnpm run dev` 启动服务。',
+      '',
+      isEnglish ? '> Read `config.json` before starting.' : '> 启动前请查看 `config.json`。',
+      '',
+      '```ts',
+      'const total = input + output',
+      LONG_CODE_LINE,
+      '```',
+      '',
+    ].join('\n'),
+  }
+}
+
+/** `.md-tone-muted`（思考正文）下的行内代码与代码块。 */
+const MUTED_CODE_SOURCE = [
+  isEnglish ? 'Reasoning with `inline-token`.' : '思考中的 `inline-token` 代码。',
+  '',
+  '```text',
+  'muted code block',
+  '```',
+].join('\n')
+
+// 用扩展渲染器接线验证 Markdown 工具结果，不改变内置工具的纯文本输出语义。
+const TOOL_CALL: ToolDialogueMessage = {
+  id: 'code-tool-call',
+  role: 'tool',
+  subjectEntryId: 'code-tool-call',
+  createdAt: 0,
+  status: 'done',
+  phase: 'call',
+  contents: [],
+  toolCallId: 'code-tool',
+  toolName: 'markdown_fixture',
+  rendererKey: 'markdown_fixture',
+  arguments: '{}',
+}
+
+const TOOL_RESULT: ToolDialogueMessage = {
+  ...TOOL_CALL,
+  id: 'code-tool-result',
+  subjectEntryId: 'code-tool-result',
+  phase: 'result',
+  contents: [{ type: 'text', text: buildCodeMessage().text }],
+}
+
+function MarkdownToolResult({ message }: ToolRendererProps) {
+  const content = message.contents[0]
+  return content?.type === 'text' ? <MarkdownRenderer content={content.text} /> : null
+}
+
 declare global {
   interface Window {
     markdownTableHarness: {
@@ -89,6 +155,7 @@ declare global {
 
 export function MarkdownTableHarnessApp() {
   const [appendedRows, setAppendedRows] = useState(0)
+  const showCode = new URLSearchParams(window.location.search).has('code')
 
   useEffect(() => {
     window.markdownTableHarness = {
@@ -99,8 +166,19 @@ export function MarkdownTableHarnessApp() {
   }, [])
 
   return (
-    <div style={{ width: 760, padding: 24 }}>
+    <div style={{ width: 760, maxWidth: showCode ? '100%' : undefined, padding: 24 }}>
       <AssistantMessageBlock message={buildMessage(appendedRows)} />
+      {showCode ? (
+        <div id="markdown-code-fixture">
+          <AssistantMessageBlock message={buildCodeMessage()} />
+          <div id="markdown-muted-tone">
+            <MarkdownRenderer tone="muted" content={MUTED_CODE_SOURCE} />
+          </div>
+          <div id="markdown-tool-result">
+            <ToolMessageBlock message={TOOL_CALL} result={TOOL_RESULT} renderer={MarkdownToolResult} />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

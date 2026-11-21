@@ -147,13 +147,13 @@
 
 .modal-footer {
   justify-content: flex-end;
+  gap: var(--space-2);
   border-top: 1px solid var(--border);
   border-bottom: 0;
 }
 
 .modal-footer-with-leading-action {
   flex-wrap: wrap;
-  gap: 8px;
 }
 
 .modal-footer-leading-action {
@@ -212,7 +212,6 @@
 
   .modal-touch-target .modal-footer {
     flex-wrap: wrap;
-    gap: 8px;
   }
 
   .modal-touch-target button,

@@ -106,6 +106,7 @@ const ERROR_FIXTURES: Record<string, SubmitErrors> = {
 
 interface HarnessScenario {
   kind: 'model' | 'agent'
+  edit: boolean
   errors: SubmitErrors | null
   /** 技能目录查询失败：面板必须呈现失败与重试，而不是「目录为空」。 */
   skillsDirectoryError: boolean
@@ -117,6 +118,7 @@ function readScenario(): HarnessScenario {
   const errorKey = params.get('errors') ?? ''
   return {
     kind: params.get('scenario') === 'agent' ? 'agent' : 'model',
+    edit: params.has('edit'),
     errors: ERROR_FIXTURES[errorKey] ?? null,
     skillsDirectoryError: params.get('directories') === 'error',
   }
@@ -181,7 +183,9 @@ export function CatalogEditorHarness() {
         modal={
           scenario.kind === 'agent'
             ? { kind: 'agent', mode: 'create' }
-            : { kind: 'model', mode: 'create', resourceKind: 'MODEL' }
+            : scenario.edit
+              ? { kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: modelDraft.name, expectedVersion: '1' }
+              : { kind: 'model', mode: 'create', resourceKind: 'MODEL' }
         }
         providers={[SAMPLE_PROVIDER]}
         models={FIXTURE_MODELS}

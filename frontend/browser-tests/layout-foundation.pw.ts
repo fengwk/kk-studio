@@ -92,7 +92,7 @@ for (const width of [1280, 320]) {
     await page.screenshot({ path: testInfo.outputPath(`dialog-${width}.png`) })
     await dialog.getByRole('button', { name: '模型' }).click()
     if (width === 320) {
-      const option = (await page.getByRole('option', { name: 'Alpha' }).boundingBox())!
+      const option = (await page.getByRole('option', { name: 'gpt-4o-jpy' }).boundingBox())!
       expect(option.height).toBeGreaterThanOrEqual(44)
     }
     await page.keyboard.press('Escape')

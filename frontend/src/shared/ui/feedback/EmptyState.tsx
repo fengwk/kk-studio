@@ -5,7 +5,7 @@ import './feedback.css'
 export function EmptyState({ title, action }: { title: ReactNode; action?: ReactNode }) {
   return (
     <div className="ui-empty-state">
-      <span>{title}</span>
+      <div>{title}</div>
       {action}
     </div>
   )
