@@ -74,6 +74,8 @@ describe('compaction branch projection', () => {
       entry('end', 'TURN_END', { outcome: 'COMPLETED', continueModel: false }),
     ])
 
+    expect(branch.assistantEntries.map((entry) => entry.entryId)).toEqual(['first-call', 'second-call'])
+    expect(branch.outcome).toBe('COMPLETED')
     expect(branch.instruction).toBe(INSTRUCTION)
     // 第一次模型调用的上下文输入 = 未缓存输入 + 缓存读写。
     expect(branch.inheritedContextTokens).toBe(150)
@@ -115,6 +117,8 @@ describe('compaction branch projection', () => {
     ])
 
     expect(branch).toEqual({
+      assistantEntries: [],
+      outcome: null,
       instruction: null,
       inheritedContextTokens: null,
       modelCalls: [],

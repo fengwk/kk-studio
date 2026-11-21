@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
@@ -155,6 +156,36 @@ class ManualCompactionLifecycleRegressionTest {
     // (c) 子 Thread 与 THREAD work 存在
     assertNotNull(result.childThreadId());
     assertNotNull(work(store, new WorkTarget(WorkTargetType.THREAD, result.childThreadId())));
+  }
+
+  /**
+   * 测试意图：已停止的后代 Thread 仍接受用户手动压缩做摘要维护——被压缩的后代保持 STOPPED、不获得自己的 THREAD Work，祖先 Root
+   * 也不因这次后代维护被唤醒或改写。压缩自身的 turn 事实与票据语义由 HarnessRuntime / PG 用例覆盖。
+   */
+  @Test
+  void stoppedChildCompactionKeepsStopAndLeavesAncestorUntouched() {
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    FakeTurnResolver resolver = new FakeTurnResolver();
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            store,
+            new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, resolver))),
+            () -> new CompactionConfig(20_000));
+
+    TwoLevelBaseline baseline = seedTwoLevelTree(store);
+    runtime.stop(new StopCommand(baseline.childThreadId(), UUID.randomUUID(), 0));
+    long stoppedVersion = thread(store, baseline.childThreadId()).version();
+
+    runtime.compactThread(new CompactThreadCommand(baseline.childThreadId(), stoppedVersion));
+
+    ThreadState child = thread(store, baseline.childThreadId());
+    assertEquals(ThreadExecutionControl.STOPPED, child.executionControl());
+    assertNull(work(store, new WorkTarget(WorkTargetType.THREAD, baseline.childThreadId())));
+
+    ThreadState root = thread(store, baseline.rootThreadId());
+    assertEquals(ThreadExecutionControl.RUNNABLE, root.executionControl());
+    assertEquals(0L, root.version());
+    assertNull(work(store, new WorkTarget(WorkTargetType.THREAD, baseline.rootThreadId())));
   }
 
   // --- 测试脚手架与数据初始化 ---

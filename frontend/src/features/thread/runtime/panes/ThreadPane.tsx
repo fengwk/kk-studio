@@ -117,7 +117,7 @@ export function ThreadPane({
     resetKey: projection.threadId,
   }
   const panelActivity: ThreadPanelActivityInput = {
-    working: workPhase.kind !== 'none',
+    working: !projection.timeline.compactionInProgress && workPhase.kind !== 'none',
     workingLabel: phaseLabel,
     animated: workPhase.kind === 'model-running' || workPhase.kind === 'tool-running',
     widgets: unconfirmedExecutions.length === 0

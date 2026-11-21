@@ -27,7 +27,7 @@ function entry(
 }
 
 /** 全量快照保留切点及到达分支末尾的完整 Entry 链。 */
-function branchSnapshot(stopped = false): HarnessThreadSnapshotDTO {
+function branchSnapshot(stopped = false, updated = false): HarnessThreadSnapshotDTO {
   return {
     version: stopped ? '8' : '7',
     baseEntryId: null,
@@ -36,7 +36,7 @@ function branchSnapshot(stopped = false): HarnessThreadSnapshotDTO {
       parentThreadId: ROOT_ID,
       name: 'main',
       sessionId: SESSION_ID,
-      headEntryId: '00000000-0000-4000-8000-000000000018',
+      headEntryId: stopped ? '00000000-0000-4000-8000-000000000018' : '00000000-0000-4000-8000-000000000017',
       rootThreadId: ROOT_ID,
       yoloEnabled: false,
       nextCommandSequence: '3',
@@ -66,12 +66,14 @@ function branchSnapshot(stopped = false): HarnessThreadSnapshotDTO {
         sourceEntryId: CUT_ID,
         sourceThreadId: null,
       }, CUT_ID),
+      entry('00000000-0000-4000-8000-00000000000a', 'TURN_START', { reason: 'INPUT' },
+        '00000000-0000-4000-8000-000000000014'),
       entry('00000000-0000-4000-8000-000000000015', 'CUSTOM_MESSAGE', {
         message: {
           role: 'USER',
           contents: [{ type: 'text', text: '[Compaction mode]\nSummarize the conversation.' }],
         },
-      }, '00000000-0000-4000-8000-000000000014'),
+      }, '00000000-0000-4000-8000-00000000000a'),
       entry('00000000-0000-4000-8000-000000000016', 'MESSAGE', {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'draft' }] },
         assistantMetadata: {
@@ -99,14 +101,27 @@ function branchSnapshot(stopped = false): HarnessThreadSnapshotDTO {
           }],
         },
       }, '00000000-0000-4000-8000-000000000016'),
-      entry('00000000-0000-4000-8000-000000000018', 'TURN_END', {
-        outcome: 'FAILED',
+      ...(stopped ? [entry('00000000-0000-4000-8000-000000000018', 'TURN_END', {
+        turnStartEntryId: '00000000-0000-4000-8000-00000000000a',
+        outcome: 'STOPPED',
         continueModel: false,
-        reason: 'TURN_FAILED',
-      }, '00000000-0000-4000-8000-000000000017'),
+        reason: 'USER_STOP',
+      }, '00000000-0000-4000-8000-000000000017')] : []),
     ],
     queuedCommands: [],
-    activeAssistantOutput: null,
+    activeAssistantOutput: stopped ? null : {
+      generationId: '00000000-0000-4000-8000-000000000019',
+      turnStartEntryId: '00000000-0000-4000-8000-00000000000a',
+      requestHeadEntryId: '00000000-0000-4000-8000-000000000017',
+      status: 'RUNNING',
+      attempt: 1,
+      sequence: updated ? '2' : '1',
+      contents: [{ type: 'text', text: updated ? '生成中的摘要：已收到快照更新' : '生成中的摘要' }],
+      error: null,
+      resultEntryId: null,
+      createdAt: 1767225600000,
+      updatedAt: 1767225600000,
+    },
     generationFailures: [],
     toolInvocations: [],
     stopReceipts: [],
@@ -118,11 +133,13 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   const stopRequests: Array<{ path: string; body: unknown }> = []
   const snapshotReads: Array<string | null> = []
   let stopped = false
+  let updated = false
+  let pushSnapshot: (() => void) | undefined
   const sendThreadSnapshot = (socket: WebSocketRoute) => socket.send(JSON.stringify({
     type: 'event',
     resource: { kind: 'thread', id: CHILD_ID },
     name: 'snapshot',
-    data: branchSnapshot(stopped),
+    data: branchSnapshot(stopped, updated),
   }))
   await page.routeWebSocket(/\/ws\/events$/, (socket) => {
     socket.send(JSON.stringify({
@@ -136,7 +153,8 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
       if (frame.type === 'subscribe') {
         socket.send(JSON.stringify({ type: 'subscribed', resource: frame.resource, cursor: '0' }))
         if (frame.resource.kind === 'thread' && frame.resource.id === CHILD_ID) {
-          sendThreadSnapshot(socket)
+          pushSnapshot = () => sendThreadSnapshot(socket)
+          pushSnapshot()
         }
       } else if (frame.type === 'refresh' && frame.resource.kind === 'thread'
         && frame.resource.id === CHILD_ID) {
@@ -203,9 +221,25 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
 
   await page.screenshot({ path: test.info().outputPath('compaction-lifecycle-desktop.png'), fullPage: true })
 
-  // 打开分支执行视图：全量快照包含切点及其后续 Entry，投影展示调用内容与用量。
-  await failedCard.getByRole('link', { name: '查看执行' }).click()
-  await expect(page.getByTestId('compaction-branch-view')).toBeVisible()
+  // 实时快照在不改 Thread version 时也必须刷新助手正文。
+  await cards.nth(3).getByRole('link', { name: '查看执行' }).click()
+  const branch = page.getByTestId('compaction-branch-view')
+  const transcript = branch.getByRole('log')
+  await expect(transcript.getByText('生成中的摘要', { exact: true })).toBeVisible()
+  await expect(branch.getByText('正在生成摘要…')).toBeVisible()
+  await expect(branch.getByRole('textbox')).toHaveCount(0)
+  await expect(transcript).not.toContainText('Earlier context')
+  await expect(transcript).not.toContainText('[Compaction mode]')
+  await expect(transcript).not.toContainText('Tools are disabled')
+  await expect.poll(() => pushSnapshot != null).toBe(true)
+  updated = true
+  pushSnapshot?.()
+  await expect(transcript.getByText('生成中的摘要：已收到快照更新')).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('compaction-branch-streaming-desktop.png') })
+
+  await expect(page.locator('.compaction-branch-instruction')).toBeHidden()
+  await page.getByText('诊断', { exact: true }).click()
+  await expect(page.getByTestId('compaction-branch-inherited')).toBeVisible()
   await expect(page.getByTestId('compaction-branch-inherited')).toHaveText('继承的上下文：150 tokens')
   await expect(page.locator('.compaction-branch-instruction')).toContainText('[Compaction mode]')
   await expect(page.locator('.compaction-branch-call')).toHaveCount(1)
@@ -222,6 +256,9 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   expect(stopRequests[0]?.body).toMatchObject({ expectedVersion: '7' })
   expect(stopRequests[0]?.path).toBe(`/api/harness/threads/${CHILD_ID}/stop`)
   await expect(stop).toHaveCount(0)
+  await expect(branch.getByRole('status')).toContainText('上下文压缩已停止 · 候选摘要')
+  await expect(transcript.getByText('draft', { exact: true })).toBeVisible()
+  await expect(transcript).not.toContainText('生成中的摘要')
   expect(snapshotReads).toEqual([null])
 
   // 移动端宽度：卡片与分支视图都保持可读，不出现横向溢出。

@@ -583,8 +583,8 @@ export const chatCatalog = {
     'zh-CN': '当前项目仅支持单会话',
   },
   'ai.runtime.command.disabled.compaction.threadStopped': {
-    'en-US': 'The Thread is stopped; resume it before compacting',
-    'zh-CN': 'Thread 已停止，恢复后才能压缩',
+    'en-US': 'Wait for execution to exit and child tasks to settle before compacting',
+    'zh-CN': '请等待执行退出、子任务结算后再压缩',
   },
   'ai.runtime.command.disabled.compaction.threadBusy': {
     'en-US': 'The Thread is busy; wait for the current turn to finish',
@@ -834,25 +834,29 @@ export const chatCatalog = {
     'en-US': 'The compaction execution could not be stopped.',
     'zh-CN': '无法停止本次压缩执行。',
   },
-  'ai.runtime.compactionBranch.loading': {
-    'en-US': 'Loading execution…',
-    'zh-CN': '正在加载执行…',
+  'ai.runtime.compactionBranch.generating': {
+    'en-US': 'Generating summary…',
+    'zh-CN': '正在生成摘要…',
+  },
+  'ai.runtime.compactionBranch.candidate': {
+    'en-US': 'Candidate summary',
+    'zh-CN': '候选摘要',
+  },
+  'ai.runtime.compactionBranch.empty': {
+    'en-US': 'No summary output',
+    'zh-CN': '暂无摘要输出',
+  },
+  'ai.runtime.compactionBranch.diagnostics': {
+    'en-US': 'Diagnostics',
+    'zh-CN': '诊断',
   },
   'ai.runtime.compactionBranch.loadFailed': {
     'en-US': 'This execution could not be loaded.',
     'zh-CN': '无法加载本次执行。',
   },
-  'ai.runtime.compactionBranch.retry': {
-    'en-US': 'Reload',
-    'zh-CN': '重新加载',
-  },
   'ai.runtime.compactionBranch.inheritedContext': {
     'en-US': 'Inherited context: {{tokens}} tokens',
     'zh-CN': '继承的上下文：{{tokens}} tokens',
-  },
-  'ai.runtime.compactionBranch.inheritedContextUnknown': {
-    'en-US': 'Inherited context: not reported',
-    'zh-CN': '继承的上下文：未提供',
   },
   'ai.runtime.compactionBranch.instruction': {
     'en-US': 'Compaction instruction',
@@ -862,17 +866,9 @@ export const chatCatalog = {
     'en-US': 'Model calls',
     'zh-CN': '模型调用',
   },
-  'ai.runtime.compactionBranch.noModelCalls': {
-    'en-US': 'No model call yet',
-    'zh-CN': '尚无模型调用',
-  },
   'ai.runtime.compactionBranch.toolErrors': {
     'en-US': 'Disabled tool calls',
     'zh-CN': '被停用的工具调用',
-  },
-  'ai.runtime.compactionBranch.noToolErrors': {
-    'en-US': 'This execution made no tool call.',
-    'zh-CN': '本次执行没有发起工具调用。',
   },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',

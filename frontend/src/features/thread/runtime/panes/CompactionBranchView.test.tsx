@@ -138,10 +138,14 @@ describe('CompactionBranchView', () => {
 
     const { container } = renderBranch()
 
-    await screen.findByTestId('compaction-branch-inherited')
+    expect(await screen.findByText('draft')).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('上下文压缩失败 · 候选摘要')
     const [, options] = vi.mocked(harnessService.getThreadSnapshot).mock.calls[0] ?? []
     expect(options?.afterEntryId).toBeUndefined()
-    // 继承量、指令、每次调用的用量与停用的工具结果都来自分支自己的 Entry。
+    // 诊断默认折叠，只有助手正文属于对话。
+    const diagnostics = screen.getByText('诊断').closest('details')!
+    expect(diagnostics).not.toHaveAttribute('open')
+    expect(screen.getByRole('log')).not.toHaveTextContent(INSTRUCTION)
     expect(screen.getByTestId('compaction-branch-inherited')).toHaveTextContent('继承的上下文：150 tokens')
     expect(container.querySelector('.compaction-branch-instruction')?.textContent).toBe(INSTRUCTION)
     expect(container.querySelector('.compaction-branch-call')).not.toBeNull()

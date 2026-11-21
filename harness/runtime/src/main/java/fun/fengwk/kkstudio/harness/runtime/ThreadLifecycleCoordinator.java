@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadActivityEvaluator;
@@ -314,7 +315,7 @@ public final class ThreadLifecycleCoordinator {
 
   /**
    * 对一批刚冻结的结算型 Join 唤醒父侧交付 Work：Owner-turn 请求父 THREAD，task 请求 invocation 对应的 TOOL。结果只冻结 receipt，不构造
-   * SUBAGENT_RESULT 通知、不分配父序列。STOPPED 父只推进一次 version，不请求 Work、不自动恢复执行。
+   * SUBAGENT_RESULT 通知、不分配父序列。STOPPED 父不恢复执行，仅当前维护压缩的匹配票据可以请求结算 Work。
    */
   private static void wakeSettleParents(
       HarnessStore.Transaction tx, List<ThreadJoin> settleMatches) {
@@ -339,7 +340,11 @@ public final class ThreadLifecycleCoordinator {
     for (UUID parentId : parents) {
       ThreadState parent = tx.threads().lock(parentId).orElseThrow();
       if (parent.executionControl().isStopped()) {
-        tx.threads().update(parent.touchVersion(tx.now()));
+        if (threadParents.contains(parentId) && settlesOpenMaintenance(tx, parent, settleMatches)) {
+          targets.add(new WorkTarget(WorkTargetType.THREAD, parentId));
+        } else {
+          tx.threads().update(parent.touchVersion(tx.now()));
+        }
         stoppedParents.add(parentId);
       } else if (threadParents.contains(parentId)) {
         targets.add(new WorkTarget(WorkTargetType.THREAD, parentId));
@@ -360,6 +365,22 @@ public final class ThreadLifecycleCoordinator {
     for (WorkTarget target : targets) {
       tx.work().request(target);
     }
+  }
+
+  private static boolean settlesOpenMaintenance(
+      HarnessStore.Transaction tx, ThreadState parent, List<ThreadJoin> matches) {
+    return CompactionTurns.openUserRequest(
+            tx.entries().loadCurrent(parent.headEntryId()).openTurnStart(), parent.id())
+        .filter(
+            start ->
+                matches.stream()
+                    .anyMatch(
+                        join ->
+                            join.delivery() == JoinDelivery.SETTLE_OWNER_TURN
+                                && parent.id().equals(join.parentThreadId())
+                                && start.joinInvocationId().equals(join.invocationId())
+                                && start.childThreadId().equals(join.childThreadId())))
+        .isPresent();
   }
 
   /** 在已确定继续运行的边界把 max-turn 短预算提醒作为 NOTIFICATION 物化到历史（按 Join 幂等，不分配邮箱 sequence）。 */

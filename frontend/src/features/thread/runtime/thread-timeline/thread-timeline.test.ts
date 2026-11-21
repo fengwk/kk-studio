@@ -142,7 +142,7 @@ describe('compaction summary projection', () => {
     ])
   })
 
-  it('reports a compaction that completed without resuming the owner model as failed', () => {
+  it('applies a saved summary without resuming the owner model', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart('cs1', 'COMPACTION'),
@@ -154,7 +154,7 @@ describe('compaction summary projection', () => {
     )
 
     expect(compactionCards(timeline.messages)).toMatchObject([
-      { title: '上下文压缩失败', compaction: { state: 'failed' } },
+      { title: '上下文已压缩', text: 'summary', compaction: { state: 'compacted' } },
     ])
   })
 
@@ -2182,25 +2182,25 @@ describe('thread timeline', () => {
   it('derives working from activity independently of execution control and pending inputs', () => {
     expect(isThreadWorking(
         { status: 'RUNNING', executionControl: 'STOPPED' } as never,
-        { messages: [], queuedMessages: [], hasPendingInputs: false },
+        { hasPendingInputs: false },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
         { status: 'IDLE', executionControl: 'RUNNABLE' } as never,
-        { messages: [], queuedMessages: [], hasPendingInputs: true },
+        { hasPendingInputs: true },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
         { status: 'IDLE', executionControl: 'STOPPED' } as never,
-        { messages: [], queuedMessages: [], hasPendingInputs: false },
+        { hasPendingInputs: false },
       ),
     ).toBe(false)
     expect(
       isThreadWorking(
         { status: 'WAITING', executionControl: 'RUNNABLE' } as never,
-        { messages: [], queuedMessages: [], hasPendingInputs: false },
+        { hasPendingInputs: false },
       ),
     ).toBe(true)
   })

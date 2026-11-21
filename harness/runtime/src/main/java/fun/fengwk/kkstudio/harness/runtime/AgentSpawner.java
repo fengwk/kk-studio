@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
@@ -61,6 +62,32 @@ public final class AgentSpawner {
       SpawnRequest request,
       AcceptancePreflight preflight,
       DriverRegistry driverRegistry) {
+    return spawn(tx, request, preflight, driverRegistry, false);
+  }
+
+  /** Runtime 压缩子执行入口；通用 spawn 不接受维护压缩准入信息。 */
+  public static AcceptedCommands spawnCompactionChild(
+      HarnessStore.Transaction tx,
+      SpawnRequest request,
+      DriverRegistry driverRegistry,
+      CompactionTrigger trigger) {
+    if (request.sameSessionBranch() == null) {
+      throw new IllegalArgumentException("compaction child requires a same-session branch");
+    }
+    return spawn(
+        tx,
+        request,
+        AcceptancePreflight.IDENTITY,
+        driverRegistry,
+        trigger == CompactionTrigger.USER_REQUEST);
+  }
+
+  private static AcceptedCommands spawn(
+      HarnessStore.Transaction tx,
+      SpawnRequest request,
+      AcceptancePreflight preflight,
+      DriverRegistry driverRegistry,
+      boolean userRequestedCompaction) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(preflight, "preflight");
@@ -72,7 +99,7 @@ public final class AgentSpawner {
           driverRegistry, request.settings(), request.commands());
     }
     if (request.sameSessionBranch() != null) {
-      return spawnSameSessionBranch(tx, request, preflight);
+      return spawnSameSessionBranch(tx, request, preflight, userRequestedCompaction);
     }
     return request.continuation() == null
         ? spawnNew(tx, request, preflight)
@@ -138,7 +165,10 @@ public final class AgentSpawner {
   }
 
   private static AcceptedCommands spawnSameSessionBranch(
-      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
+      HarnessStore.Transaction tx,
+      SpawnRequest request,
+      AcceptancePreflight preflight,
+      boolean userRequestedCompaction) {
     SpawnRequest.SameSessionBranch branch = request.sameSessionBranch();
     String creationRequestHash =
         ThreadCreationRequestHash.forSameSessionBranch(
@@ -168,7 +198,7 @@ public final class AgentSpawner {
     return SpawnTickets.attach(
         tx,
         ThreadCreations.createSameSessionBranchWithThread(
-            tx, request, creationRequestHash, preflight),
+            tx, request, creationRequestHash, preflight, userRequestedCompaction),
         request);
   }
 

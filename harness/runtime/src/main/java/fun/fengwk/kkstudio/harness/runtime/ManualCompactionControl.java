@@ -138,8 +138,8 @@ final class ManualCompactionControl {
   /** 沿当前分支回溯带上下文预算的已关闭 Turn，并检查所有权并使用同一 cut 规则。 */
   private ManualDecision manualDecision(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
-    // STOPPED 是持久执行事实：历史仍然可读，但绝不能在停止的 Thread 上启动新的压缩回合或 resolve。
-    if (thread.executionControl().isStopped()) {
+    if (thread.executionControl().isStopped()
+        && !AcceptCommandsValidation.resumeConverged(tx, thread)) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_STOPPED);
     }
     AgentDriver driver = driverRegistry.of(path.baseSettings());
@@ -167,7 +167,7 @@ final class ManualCompactionControl {
       if (start.contextWindow() != null) {
         CompactionPreparation preparation =
             new CompactionPlanner(compactionConfig)
-                .prepare(path, CompactionTrigger.MANUAL, start.contextWindow())
+                .prepare(path, CompactionTrigger.USER_REQUEST, start.contextWindow())
                 .orElse(null);
         return preparation == null
             ? ManualDecision.disabled(
@@ -260,7 +260,7 @@ final class ManualCompactionControl {
                 now));
     ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.threads().update(advanced);
-    if (plan.hasDeferredUserMessages()) {
+    if (!thread.executionControl().isStopped() && plan.hasDeferredUserMessages()) {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     return new CompactThreadResult(advanced, plan.turnStartEntryId(), null);

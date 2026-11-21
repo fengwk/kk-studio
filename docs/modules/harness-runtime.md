@@ -293,7 +293,9 @@ summaryBudget    = floor(0.8 * effectiveReserve)
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
 
-手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。模型侧的 `compact` 工具（INTERNAL，默认声明、无参数）只返回“已排队”，Runtime 在该工具批次结束后的第一个安全边界按同一手动压缩规则启动压缩，再续作原请求；COMPACTION Thread 内平台工具一律禁用，因此不会递归压缩。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、预算不足、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
+用户通过 `compactThread` 显式维护空闲或已停止的 Thread：单事务复验 expected version 与[可用性](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java)，原子提交冻结 `USER_REQUEST` 的压缩回合、子 Thread 与票据。成功以摘要和匹配的 `TURN_END(COMPLETED)` 为准；这类压缩写 `continueModel=false`，不启动父模型，后续新输入使用已保存的摘要。维护期间另行提交的设置在回合关闭后应用，不触发模型调用。已停止的 Thread 须通过与接收新输入相同的执行退出和子 Join 围栏，否则返回 `THREAD_STOPPED`；维护压缩不会解除停止状态。压缩中的新 Stop 会取消在途维护，重放旧 Stop 不会取消新工作。
+
+模型侧的 `compact` 工具（INTERNAL，默认声明、无参数）只返回“已排队”，Runtime 在该工具批次结束后的第一个安全边界启动 `MANUAL` 压缩，成功后续作原请求。预算与溢出触发的压缩同样保持续作语义。COMPACTION Thread 内平台工具一律禁用，因此不会递归压缩。
 
 ## 停止
 
@@ -318,7 +320,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 - `NOTIFY_PARENT`：`AgentTaskService` 内部 `async` 请求的交付方式，计入额度；同一事务校验父可接受本次调用、父 head 匹配与深度/并发额度，父已 `STOPPED` 时拒绝新委派。子完成后冻结结果并向父投递 `SUBAGENT_RESULT` 通知。续用只能向既有子追加 prompt，不能改父关系。
 - `SETTLE_TOOL_RESULT`：同步 task 子任务，计入额度；Join 结算只冻结结果并唤醒父，不生成异步通知。等待中的工具线程重读固定 Join 并返回其收据。
 - `RECEIPT_ONLY`：没有父的内部 root 任务，不计额度，只供票据观察。
-- `SETTLE_OWNER_TURN`：压缩等运行时子执行，不计额度，结算后只唤醒父 Thread 的 open 回合；父已 `STOPPED` 时只推进一次 owner `version` 使结算后的派生状态可见，不请求 Work、不自动恢复执行。
+- `SETTLE_OWNER_TURN`：压缩等运行时子执行，不计额度，结算后只唤醒父 Thread 的 open 回合；父已 `STOPPED` 时，仅匹配其当前开放 `USER_REQUEST` 压缩回合的票据会请求 THREAD Work 写回摘要，不恢复执行；其它票据只推进一次 owner `version` 使结算后的派生状态可见。
 
 同一父子对至多一个有效未完成 Join；子 Thread 无未完成的 `SETTLE_OWNER_TURN` 时，新续接可取代旧等待，否则须完成 owner 结算后才可继续。精确重放仍返回原票据。
 

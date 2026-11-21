@@ -27,6 +27,9 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -52,6 +55,7 @@ import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
@@ -71,7 +75,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** HarnessRuntime 手动压缩入口：availability 与单事务 candidate 构造 / resolve / 提交。 */
+/**
+ * HarnessRuntime 手动压缩入口：availability 与单事务 candidate 构造 / resolve / 提交。
+ *
+ * <p>用户显式触发的压缩冻结 {@link CompactionTrigger#USER_REQUEST}：{@link CompactionTrigger#MANUAL} 只保留给内置
+ * {@code compact} 工具与既有历史。已持久 STOPPED 的 Thread 不再一概拒绝，而是只允许这类显式压缩；是否放行由复用 {@code resumeConverged}
+ * 的退出/子 Join 围栏决定，压缩本身既不恢复执行控制，也不安排父 Thread 的 THREAD Work。
+ */
 class HarnessRuntimeManualCompactionTest {
 
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
@@ -112,8 +122,8 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   @Test
-  void compactThreadCommitsManualTurnAndModelWorkWithoutMailboxCommand() {
-    // Runtime 同步提交 TURN_START + ModelInvocation；模型执行仍由既有 MODEL Work 异步驱动。
+  void compactThreadCommitsUserRequestTurnAndModelWorkWithoutMailboxCommand() {
+    // Runtime 同步提交 TURN_START 和摘要子执行；父线程不消费邮箱，也不创建模型调用。
     Fixture fixture = fixture();
     ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
     fixture.resolver.autoConsistent = true;
@@ -127,7 +137,7 @@ class HarnessRuntimeManualCompactionTest {
     EntryPath path = path(fixture.store, baseline.threadId());
     TurnStartPayload start = (TurnStartPayload) path.head().payload();
     assertEquals(result.turnStartEntryId(), path.head().id());
-    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+    assertEquals(CompactionTrigger.USER_REQUEST, start.compaction().trigger());
     assertEquals(HarnessRuntimeTestSupport.executionSelection(), start.compaction().execution());
     assertNotNull(start.contextWindow());
     assertNotNull(start.maxOutputTokens());
@@ -190,7 +200,7 @@ class HarnessRuntimeManualCompactionTest {
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(12, path.entries().size());
     TurnStartPayload start = (TurnStartPayload) path.entries().get(9).payload();
-    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+    assertEquals(CompactionTrigger.USER_REQUEST, start.compaction().trigger());
     TurnEndPayload end = (TurnEndPayload) path.head().payload();
     assertEquals(TurnEndOutcome.FAILED, end.outcome());
   }
@@ -213,16 +223,65 @@ class HarnessRuntimeManualCompactionTest {
             .code());
   }
 
-  /** Stop 后 Thread 拒绝手动压缩：守卫发生在 resolve/写入之前，且重放 Stop 不改变结论。 */
+  /**
+   * 已确认退出的 STOPPED Thread 只允许显式压缩：用户触发冻结 USER_REQUEST，摘要子执行照常启动，而被压缩的 Thread 保持 STOPPED、不被安排自己的
+   * THREAD Work。
+   */
   @Test
-  void stoppedThreadRejectsManualCompactionBeforeResolveOrWrites() {
+  void compactThreadOnStoppedThreadFreezesUserRequestAndKeepsStop() {
     Fixture fixture = fixture();
     ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
     fixture.resolver.autoConsistent = true;
-    UUID stopRequestId = UUID.randomUUID();
     StopResult stopped =
-        fixture.runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, 0));
-    assertFalse(stopped.replayed());
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), 0));
+    assertEquals(ThreadExecutionControl.STOPPED, stopped.thread().executionControl());
+    assertTrue(
+        fixture.runtime.manualCompactionAvailability(baseline.threadId()).available(),
+        "STOPPED thread with converged exit and joins still accepts an explicit compaction");
+
+    CompactThreadResult result =
+        fixture.runtime.compactThread(
+            new CompactThreadCommand(baseline.threadId(), stopped.thread().version()));
+
+    // 显式压缩只写摘要 turn：执行控制保持 STOPPED，version 只按本次 turn 提交推进一次。
+    assertEquals(ThreadExecutionControl.STOPPED, result.thread().executionControl());
+    assertEquals(stopped.thread().version() + 1, result.thread().version());
+    assertNotNull(result.childThreadId());
+    EntryPath path = path(fixture.store, baseline.threadId());
+    TurnStartPayload start = (TurnStartPayload) path.head().payload();
+    assertEquals(result.turnStartEntryId(), path.head().id());
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.USER_REQUEST, start.compaction().trigger());
+    assertEquals(result.childThreadId(), start.compaction().childThreadId());
+    assertEquals(1, fixture.resolver.calls);
+
+    // 只有压缩子拿到执行 Work：STOPPED Thread 不会被再次催醒执行模型。
+    assertNotNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, result.childThreadId())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // owner 票据仍然 open，并由当前 open 的 USER_REQUEST 压缩 turn 冻结的 invocation identity 标识。
+    List<ThreadJoin> tickets = joins(fixture.store, result.childThreadId());
+    assertEquals(1, tickets.size());
+    ThreadJoin ticket = tickets.getFirst();
+    assertEquals(JoinDelivery.SETTLE_OWNER_TURN, ticket.delivery());
+    assertEquals(baseline.threadId(), ticket.parentThreadId());
+    assertEquals(start.compaction().joinInvocationId(), ticket.invocationId());
+    assertFalse(ticket.matched());
+  }
+
+  /**
+   * STOPPED 上的显式压缩复用 {@code resumeConverged} 的真实退出围栏：退出证据未确认前必须在 resolve 与任何写入之前拒绝，证据落账后同一 Thread
+   * 立即可压缩且仍保持 STOPPED。
+   */
+  @Test
+  void stoppedThreadFenceRejectsManualCompactionUntilExitIsConfirmed() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
+    fixture.resolver.autoConsistent = true;
+    ExecutionExitFact pendingExit = seedUnconfirmedDriverExit(fixture.store, baseline.threadId());
+    StopResult stopped =
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), 0));
     assertEquals(ThreadExecutionControl.STOPPED, stopped.thread().executionControl());
 
     EntryPath stoppedPath = path(fixture.store, baseline.threadId());
@@ -230,11 +289,11 @@ class HarnessRuntimeManualCompactionTest {
     long stoppedVersion = stopped.thread().version();
     int stoppedEntryCount = stoppedPath.entries().size();
 
-    ManualCompactionAvailability availability =
+    ManualCompactionAvailability fenced =
         fixture.runtime.manualCompactionAvailability(baseline.threadId());
-    assertFalse(availability.available());
+    assertFalse(fenced.available());
     assertEquals(
-        ManualCompactionAvailability.DisabledReason.THREAD_STOPPED, availability.disabledReason());
+        ManualCompactionAvailability.DisabledReason.THREAD_STOPPED, fenced.disabledReason());
 
     DomainException rejected =
         assertThrows(
@@ -244,28 +303,167 @@ class HarnessRuntimeManualCompactionTest {
                     new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
     assertEquals(DomainErrorCode.CONFLICT, rejected.code());
     assertEquals(HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), rejected.reason());
-    assertEquals(0, fixture.resolver.calls, "STOPPED must be rejected before turn resolution");
+    assertEquals(0, fixture.resolver.calls, "unconfirmed exit must be rejected before resolve");
     assertUnchanged(fixture, baseline.threadId(), stoppedHeadId, stoppedVersion, stoppedEntryCount);
 
-    // 同一 stopRequestId 的 replay 不写新事实；结论仍是 STOPPED，重复 compact 仍不触发 resolver。
-    StopResult replay =
-        fixture.runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, stoppedVersion));
-    assertTrue(replay.replayed());
-    assertEquals(stoppedVersion, replay.thread().version());
+    // 真实退出证据落账后围栏开放：显式压缩可提交，但不把 Thread 恢复为 RUNNABLE。
+    confirmExit(fixture.store, pendingExit);
+    assertTrue(fixture.runtime.manualCompactionAvailability(baseline.threadId()).available());
+    long confirmedVersion = thread(fixture.store, baseline.threadId()).version();
+    CompactThreadResult result =
+        fixture.runtime.compactThread(
+            new CompactThreadCommand(baseline.threadId(), confirmedVersion));
+    assertEquals(ThreadExecutionControl.STOPPED, result.thread().executionControl());
+    assertEquals(1, fixture.resolver.calls);
+    TurnStartPayload start =
+        (TurnStartPayload)
+            entry(path(fixture.store, baseline.threadId()), result.turnStartEntryId()).payload();
+    assertEquals(CompactionTrigger.USER_REQUEST, start.compaction().trigger());
+  }
+
+  /** 未结算的 owner 压缩票据同样属于围栏：STOPPED Thread 不因“已经停了”而绕过子 Join 收敛条件。 */
+  @Test
+  void stoppedThreadWithUnsettledOwnerTicketStaysFenced() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedStoppedCompactionReadyClosedTurn(fixture.store);
+    fixture.resolver.autoConsistent = true;
+    seedChildThread(
+        fixture.store,
+        baseline.threadId(),
+        ThreadKind.COMPACTION,
+        COMPACTION_CONSTRAINTS,
+        JoinDelivery.SETTLE_OWNER_TURN,
+        false);
+    assertTrue(
+        fixture.store.<Boolean>transaction(
+            tx -> tx.joins().hasIncompleteOwnerChild(baseline.threadId())));
+
+    EntryPath stoppedPath = path(fixture.store, baseline.threadId());
+    UUID stoppedHeadId = stoppedPath.head().id();
+    long stoppedVersion = thread(fixture.store, baseline.threadId()).version();
+    int stoppedEntryCount = stoppedPath.entries().size();
+
+    ManualCompactionAvailability fenced =
+        fixture.runtime.manualCompactionAvailability(baseline.threadId());
+    assertFalse(fenced.available());
     assertEquals(
-        ManualCompactionAvailability.DisabledReason.THREAD_STOPPED,
-        fixture.runtime.manualCompactionAvailability(baseline.threadId()).disabledReason());
-    DomainException replayConflict =
+        ManualCompactionAvailability.DisabledReason.THREAD_STOPPED, fenced.disabledReason());
+
+    DomainException rejected =
         assertThrows(
             DomainException.class,
             () ->
                 fixture.runtime.compactThread(
                     new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
-    assertEquals(DomainErrorCode.CONFLICT, replayConflict.code());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals(HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), rejected.reason());
     assertEquals(
-        HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), replayConflict.reason());
-    assertEquals(0, fixture.resolver.calls);
+        0, fixture.resolver.calls, "unsettled owner ticket must be rejected before resolve");
     assertUnchanged(fixture, baseline.threadId(), stoppedHeadId, stoppedVersion, stoppedEntryCount);
+  }
+
+  /**
+   * STOPPED 上 resolver 业务拒绝只落 FAILED turn：不催醒该 Thread（父模型不会被再次调用），也不产生压缩子或未结算票据。
+   *
+   * <p>同一 deferred 输入在 RUNNABLE 上会被唤醒（见 {@link
+   * #resolverRejectionWakesThreadOnlyForDeferredUserDemand()}），这里必须保持静默。
+   */
+  @Test
+  void stoppedThreadResolverRejectionClosesFailedTurnWithoutWakingIt() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
+    StopResult stopped =
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), 0));
+    assertEquals(ThreadExecutionControl.STOPPED, stopped.thread().executionControl());
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new CustomMessageCommandPayload(userMessage("deferred input")));
+    fixture.resolver.results.add(rejection());
+    long version = thread(fixture.store, baseline.threadId()).version();
+
+    CompactThreadResult result =
+        fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), version));
+
+    assertNull(result.childThreadId());
+    assertEquals(ThreadExecutionControl.STOPPED, result.thread().executionControl());
+    assertEquals(1, fixture.resolver.calls);
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) path.head().payload()).outcome());
+    assertEquals(
+        CompactionTrigger.USER_REQUEST,
+        ((TurnStartPayload) entry(path, result.turnStartEntryId()).payload())
+            .compaction()
+            .trigger());
+
+    // 拒绝不催醒也不恢复：没有 THREAD Work、没有压缩子、没有未结算票据，排队输入继续留在邮箱。
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertTrue(joins(fixture.store, baseline.threadId()).isEmpty());
+    assertEquals(
+        1,
+        fixture.store.<Integer>transaction(
+            tx -> tx.threads().listBySession(path.root().sessionId()).size()));
+    List<ThreadCommand> queued =
+        fixture.store.<List<ThreadCommand>>transaction(
+            tx -> loadCommandsByThread(tx, baseline.threadId()));
+    assertEquals(1, queued.size());
+    assertEquals(ThreadCommandState.QUEUED, queued.getFirst().state());
+  }
+
+  /** open 的手动压缩 turn 与 Stop 的关系：同一 stopRequestId 的重放不动任何事实，新 Stop 取消该压缩并不留未结算票据。 */
+  @Test
+  void stopReplayAndNewStopGovernOpenManualCompactionOnStoppedThread() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
+    fixture.resolver.autoConsistent = true;
+    UUID stopRequestId = UUID.randomUUID();
+    StopResult first = fixture.runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, 0));
+    assertFalse(first.replayed());
+    CompactThreadResult compaction =
+        fixture.runtime.compactThread(
+            new CompactThreadCommand(baseline.threadId(), first.thread().version()));
+    UUID compactionChild = compaction.childThreadId();
+    assertNotNull(compactionChild);
+    EntryPath opened = path(fixture.store, baseline.threadId());
+    UUID openHeadId = opened.head().id();
+    long openVersion = compaction.thread().version();
+    int openEntryCount = opened.entries().size();
+
+    // 重放旧 stopRequestId 直接返回既有回执：不写 Entry、不推进 version，open 的压缩 turn 保持原样。
+    StopResult replay =
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, openVersion));
+    assertTrue(replay.replayed());
+    assertEquals(openVersion, replay.thread().version());
+    EntryPath replayed = path(fixture.store, baseline.threadId());
+    assertEquals(openHeadId, replayed.head().id());
+    assertEquals(openEntryCount, replayed.entries().size());
+
+    // 新 Stop 关闭压缩回合，但不得在压缩子真实退出前冻结票据。
+    ExecutionExitFact pendingExit = seedUnconfirmedDriverExit(fixture.store, compactionChild);
+    StopResult again =
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), openVersion));
+    assertFalse(again.replayed());
+    assertEquals(ThreadExecutionControl.STOPPED, again.thread().executionControl());
+    EntryPath cancelled = path(fixture.store, baseline.threadId());
+    assertTrue(cancelled.openTurnStart().isEmpty());
+    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) cancelled.head().payload()).outcome());
+    assertEquals(1, joins(fixture.store, compactionChild).size());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // 迟到的退出确认只收敛已取消的票据，不能催醒已无开放压缩回合的停止父。
+    confirmExit(fixture.store, pendingExit);
+    assertTrue(joins(fixture.store, compactionChild).isEmpty());
+    assertFalse(
+        fixture.store.<Boolean>transaction(
+            tx -> tx.joins().hasIncompleteOwnerChild(baseline.threadId())));
+    assertEquals(
+        0,
+        fixture.store.<Integer>transaction(
+            tx -> tx.joins().countIncompleteChildren(baseline.threadId())));
+    assertEquals(
+        ThreadExecutionControl.STOPPED, thread(fixture.store, compactionChild).executionControl());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, compactionChild)));
   }
 
   private static void assertUnchanged(
@@ -319,7 +517,7 @@ class HarnessRuntimeManualCompactionTest {
 
     assertNotNull(result.childThreadId());
     assertEquals(
-        CompactionTrigger.MANUAL,
+        CompactionTrigger.USER_REQUEST,
         ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload())
             .compaction()
             .trigger());
@@ -439,6 +637,71 @@ class HarnessRuntimeManualCompactionTest {
 
   private static ClosedTurnBaseline seedCompactionReadyClosedTurn(InMemoryHarnessStore store) {
     return seedClosedTurn(store, 50_000, 90_000);
+  }
+
+  /** 已持久 STOPPED 且退出/子 Join 围栏干净的可压缩历史：把“停止事实”本身与 Stop 控制面行为隔开。 */
+  private static ClosedTurnBaseline seedStoppedCompactionReadyClosedTurn(
+      InMemoryHarnessStore store) {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store);
+    HarnessRuntimeTestSupport.inTransaction(
+        store,
+        tx -> {
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads()
+              .update(
+                  thread.reserveCommandSequencesAndSetControl(
+                      1, ThreadExecutionControl.STOPPED, NOW));
+        });
+    return baseline;
+  }
+
+  /** 登记一次尚未确认退出的本地 Driver 执行：STOPPED Thread 的真实退出围栏依赖它才能收敛。 */
+  private static ExecutionExitFact seedUnconfirmedDriverExit(
+      InMemoryHarnessStore store, UUID threadId) {
+    ExecutionExitFact fact =
+        new ExecutionExitFact(
+            UUID.randomUUID(),
+            threadId,
+            UUID.randomUUID(),
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.DRIVER,
+            null,
+            null,
+            ExecutionExitState.UNCONFIRMED,
+            NOW,
+            null,
+            null);
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId);
+          return tx.exits().register(fact);
+        });
+    return fact;
+  }
+
+  private static void confirmExit(InMemoryHarnessStore store, ExecutionExitFact fact) {
+    HarnessRuntimeTestSupport.inTransaction(
+        store,
+        tx -> {
+          ExecutionExitLedger.lockAncestorChain(tx, fact.threadId());
+          ExecutionExitLedger.advanceAfterConfirmation(
+              tx,
+              fact.threadId(),
+              ExecutionExitLedger.confirm(tx, fact, ExecutionExitState.STUDIO_EXITED, NOW)
+                  .orElseThrow());
+        });
+  }
+
+  private static List<ThreadJoin> joins(InMemoryHarnessStore store, UUID childThreadId) {
+    return store.transaction(tx -> tx.joins().loadIncomplete(childThreadId));
+  }
+
+  private static Entry entry(EntryPath path, UUID entryId) {
+    return path.entries().stream()
+        .filter(candidate -> candidate.id().equals(entryId))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("entry " + entryId + " is not on the path"));
   }
 
   private static ClosedTurnBaseline seedSmallClosedTurn(InMemoryHarnessStore store) {

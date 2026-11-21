@@ -18,8 +18,8 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 setLocale('zh-CN')
 
 /** 分支视图只从这些规范 UUID 加载：切点是分支 FORK 的父 Entry。 */
-const FAILED_CHILD_ID = '00000000-0000-4000-8000-000000000010'
-const FAILED_CUT_ID = '00000000-0000-4000-8000-000000000011'
+const RUNNING_CHILD_ID = '00000000-0000-4000-8000-000000000010'
+const RUNNING_CUT_ID = '00000000-0000-4000-8000-000000000011'
 const RETAINED_USER_ID = '00000000-0000-4000-8000-000000000002'
 
 function entry(
@@ -101,11 +101,11 @@ const HARNESS_ENTRIES: HarnessSessionEntryDTO[] = [
   entry('00000000-0000-4000-8000-000000000022', 'COMPACTION', {
     summaryText: '## 会话摘要\n\n- 已完成的压缩摘要内容。',
   }),
-  turnEnd('00000000-0000-4000-8000-000000000020', 'COMPLETED', true),
+  turnEnd('00000000-0000-4000-8000-000000000020', 'COMPLETED'),
   compactionStart(
     '00000000-0000-4000-8000-000000000030',
-    FAILED_CHILD_ID,
-    FAILED_CUT_ID,
+    '00000000-0000-4000-8000-000000000032',
+    '00000000-0000-4000-8000-00000000000a',
   ),
   entry('00000000-0000-4000-8000-000000000031', 'ASSISTANT_ERROR', {
     error: { code: 'COMPACTION_OUTPUT_TRUNCATED', message: 'summary was truncated' },
@@ -123,8 +123,8 @@ const HARNESS_ENTRIES: HarnessSessionEntryDTO[] = [
   // 最后一条压缩回合保持打开：卡片显示进行中。
   compactionStart(
     '00000000-0000-4000-8000-000000000050',
-    '00000000-0000-4000-8000-000000000051',
-    '00000000-0000-4000-8000-00000000000a',
+    RUNNING_CHILD_ID,
+    RUNNING_CUT_ID,
   ),
 ]
 

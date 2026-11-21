@@ -13,12 +13,14 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
  * 压缩回合的时间线投影：卡片随 TURN_START 立即出现，回合内的错误与摘要补充事实，
  * TURN_END 决定最终状态。卡片只在真实 Entry 事实到达时改变，不做任何推测。
  */
-export interface CompactionTurnProjection {
+interface CompactionSummary {
   startEntryId: string
-  summaryEntryId: string | null
   summaryText: string
-  errorCode: string | null
   cutEntryId: string | null
+}
+
+export interface CompactionTurnProjection extends CompactionSummary {
+  errorCode: string | null
   childThreadId: string | null
   message: EntryCompactionMessage
 }
@@ -67,7 +69,6 @@ export function beginCompactionTurn(entry: HarnessSessionEntryDTO): CompactionTu
   }
   return {
     startEntryId: entry.entryId,
-    summaryEntryId: null,
     summaryText: '',
     errorCode: null,
     cutEntryId: fact.cutEntryId,
@@ -98,18 +99,25 @@ export function recordCompactionTurnEntry(
     }
     return
   }
-  if (entry.entryType !== 'COMPACTION') {
-    return
-  }
-  const summaryText = getString(asRecord(entry.payload).summaryText)
-  if (summaryText.trim() !== '') {
-    turn.summaryEntryId = entry.entryId
-    turn.summaryText = summaryText
+  recordSummary(turn, entry)
+}
+
+function recordSummary(turn: CompactionSummary, entry: HarnessSessionEntryDTO): void {
+  if (entry.entryType === 'COMPACTION') {
+    const text = getString(asRecord(entry.payload).summaryText)
+    if (text.trim() !== '') {
+      turn.summaryText = text
+    }
   }
 }
 
+function isCompleted(turn: CompactionSummary, payload: Record<string, unknown>): boolean {
+  return payload.turnStartEntryId === turn.startEntryId
+    && payload.outcome === 'COMPLETED' && turn.summaryText !== ''
+}
+
 /**
- * 关闭压缩回合：COMPLETED 且继续 owner model 并带摘要才是已压缩；
+ * 关闭压缩回合：带摘要且匹配 COMPLETED 才是已压缩，与父模型是否续作无关；
  * STOPPED 是用户停止；其余关闭都按失败呈现，保证卡片不会停留在进行中。
  *
  * 卡片对象已经在 TURN_START 时进入 messages，因此这里原地更新而不是替换引用。
@@ -119,11 +127,10 @@ export function closeCompactionTurn(
   turnEndPayload: Record<string, unknown>,
 ): void {
   const outcome = getString(turnEndPayload.outcome)
-  const continueModel = turnEndPayload.continueModel === true
   let state: CompactionCardState
   if (outcome === 'STOPPED') {
     state = 'stopped'
-  } else if (outcome === 'COMPLETED' && continueModel && turn.summaryEntryId != null) {
+  } else if (isCompleted(turn, turnEndPayload)) {
     state = 'compacted'
   } else {
     state = 'failed'
@@ -146,31 +153,35 @@ interface CompactionRetainedAnchor {
 
 /**
  * 最新一次成功压缩的保留段起点：`cutEntryId` 之后路径上的第一条 Entry。
- * 只有 COMPLETED、continueModel=true 且带摘要的压缩会移动保留段；失败/停止不移动。
+ * 只有匹配 COMPLETED 且带摘要的压缩会移动保留段；失败/停止不移动。
  */
 export function latestRetainedAnchor(
   entries: readonly HarnessSessionEntryDTO[],
 ): CompactionRetainedAnchor | null {
   const positions = new Map(entries.map((entry, index) => [entry.entryId, index]))
-  let open: { startEntryId: string; cutEntryId: string } | null = null
+  let open: CompactionSummary | null = null
   let anchor: CompactionRetainedAnchor | null = null
   for (const entry of entries) {
     if (entry.entryType === 'TURN_START') {
       const payload = asRecord(entry.payload)
       const cutEntryId = getString(asRecord(payload.compaction).cutEntryId)
       open = getString(payload.reason) === 'COMPACTION' && cutEntryId !== ''
-        ? { startEntryId: entry.entryId, cutEntryId }
+        ? { startEntryId: entry.entryId, cutEntryId, summaryText: '' }
         : null
       continue
     }
-    if (entry.entryType !== 'TURN_END' || open == null) {
+    if (open == null) {
+      continue
+    }
+    if (entry.entryType !== 'TURN_END') {
+      recordSummary(open, entry)
       continue
     }
     const payload = asRecord(entry.payload)
     if (getString(payload.turnStartEntryId) !== open.startEntryId) {
       continue
     }
-    if (getString(payload.outcome) === 'COMPLETED' && payload.continueModel === true) {
+    if (open.cutEntryId != null && isCompleted(open, payload)) {
       const cutIndex = positions.get(open.cutEntryId)
       const next = cutIndex != null ? entries[cutIndex + 1] : undefined
       if (next != null) {

@@ -10,7 +10,7 @@ import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
  */
 export function isThreadWorking(
   thread: HarnessThreadDTO | undefined,
-  timeline?: ThreadTimeline,
+  timeline?: Pick<ThreadTimeline, 'hasPendingInputs'>,
 ): boolean {
   if (isThreadActiveStatus(thread?.status)) {
     return true

@@ -6,7 +6,7 @@ import { getString } from '@/shared/lib/value'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
- * 一次压缩执行的只读投影：只包含分支自己的 Entry（调用方用 afterEntryId 从 FORK 之后加载）。
+ * 一次压缩执行的只读投影：调用方先从完整快照截出分支自己的 Entry。
  *
  * 继承量取分支第一次模型调用的上下文输入估计（未缓存输入 + 缓存读写），它正是分支
  * 从主对话继承的上下文规模；未知时保持 null，不用 0 伪造。
@@ -24,6 +24,8 @@ interface CompactionBranchToolError {
 }
 
 export interface CompactionBranchProjection {
+  assistantEntries: HarnessSessionEntryDTO[]
+  outcome: string | null
   /** 分支首条用户消息：固定压缩指令原文。 */
   instruction: string | null
   inheritedContextTokens: number | null
@@ -35,11 +37,17 @@ export interface CompactionBranchProjection {
 export function projectCompactionBranch(
   entries: readonly HarnessSessionEntryDTO[],
 ): CompactionBranchProjection {
+  const assistantEntries: HarnessSessionEntryDTO[] = []
+  let outcome: string | null = null
   let instruction: string | null = null
   const modelCalls: CompactionBranchModelCall[] = []
   const toolErrors: CompactionBranchToolError[] = []
   for (const entry of entries) {
-    // FORK 是分支锚点事实，不是执行内容。游标读取后的首条 Entry 就是它。
+    if (entry.entryType === 'TURN_START') {
+      outcome = null
+    } else if (entry.entryType === 'TURN_END') {
+      outcome = getString(asRecord(entry.payload).outcome)
+    }
     if (entry.entryType !== 'MESSAGE' && entry.entryType !== 'CUSTOM_MESSAGE') {
       continue
     }
@@ -55,6 +63,7 @@ export function projectCompactionBranch(
       continue
     }
     if (role === 'ASSISTANT') {
+      assistantEntries.push(entry)
       const usage = parseAssistantUsage(payload.assistantMetadata, entry.usageCost)
       if (usage != null) {
         modelCalls.push({ entryId: entry.entryId, createdAt: entry.createdAt, usage })
@@ -76,6 +85,8 @@ export function projectCompactionBranch(
     }
   }
   return {
+    assistantEntries,
+    outcome,
     instruction,
     inheritedContextTokens: modelCalls[0]?.usage.contextInputTokens ?? null,
     modelCalls,

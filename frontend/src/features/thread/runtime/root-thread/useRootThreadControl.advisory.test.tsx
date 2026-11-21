@@ -43,7 +43,7 @@ function makeMockProjection(threadId: string): ThreadProjection {
     unavailable: false,
     isRoot: true,
     title: thread.name,
-    timeline: { messages: [], queuedMessages: [], hasPendingInputs: false },
+    timeline: { messages: [], queuedMessages: [], hasPendingInputs: false, compactionInProgress: false },
     events: [],
     runtimeLabels: { environmentName: null, contextWindow: undefined },
     branchUsage: null,
@@ -200,7 +200,7 @@ describe('useRootThreadControl advisory query lifecycle', () => {
     await waitFor(() => {
       const compact = result.current.composer.commands!.find((c) => c.id === 'compact')
       expect(compact?.disabled).toBe(true)
-      expect(compact?.disabledReason).toBe('Thread 已停止，恢复后才能压缩')
+      expect(compact?.disabledReason).toBe('请等待执行退出、子任务结算后再压缩')
     })
   })
 

@@ -99,7 +99,8 @@ final class ThreadCreations {
       HarnessStore.Transaction tx,
       SpawnRequest request,
       String creationRequestHash,
-      AcceptancePreflight preflight) {
+      AcceptancePreflight preflight,
+      boolean userRequestedCompaction) {
     SpawnRequest.SameSessionBranch branch = request.sameSessionBranch();
     ThreadState parent =
         tx.threads()
@@ -108,7 +109,8 @@ final class ThreadCreations {
     if (parent.kind() == ThreadKind.COMPACTION) {
       throw new IllegalArgumentException("COMPACTION threads cannot spawn children");
     }
-    if (parent.executionControl().isStopped()) {
+    if (parent.executionControl().isStopped()
+        && !(userRequestedCompaction && AcceptCommandsValidation.resumeConverged(tx, parent))) {
       throw new IllegalArgumentException("join parent is stopped");
     }
     if (!parent.sessionId().equals(request.sessionId())) {

@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
@@ -58,7 +57,7 @@ public final class CompactionChildSpawn {
     NewThreadCommand command = new NewThreadCommand(payload, ticketId, requestHash);
 
     int outputCap = (int) Math.min(resolved.outputBudget(), Integer.MAX_VALUE);
-    AgentSpawner.spawn(
+    AgentSpawner.spawnCompactionChild(
         tx,
         new SpawnRequest(
             threadId,
@@ -76,8 +75,8 @@ public final class CompactionChildSpawn {
             ticketId,
             requestHash,
             new SpawnRequest.SameSessionBranch(preparation.cutEntryId())),
-        AcceptancePreflight.IDENTITY,
-        driverRegistry);
+        driverRegistry,
+        preparation.trigger());
 
     return new CompactionStart(
         preparation.trigger(),
