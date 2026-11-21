@@ -108,7 +108,7 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
   await getCase(IDE_CASE_ID).run(ctx)
 
   const ideCalls = calls.filter((call) => call.path.includes('/api/ide/environments/'))
-  assert.equal(ideCalls.length, 8, `IDE case must exercise eight IDE requests: ${JSON.stringify(ideCalls)}`)
+  assert.equal(ideCalls.length, 7, `IDE case must exercise seven IDE requests: ${JSON.stringify(ideCalls)}`)
   const viewsPath = `/api/ide/environments/${ENVIRONMENT_ID}/views`
   const open = ideCalls.find((call) => call.method === 'POST' && call.path === viewsPath)
   for (const field of ['viewId', 'browserSessionId', 'eventNodeId', 'connectionId', 'claimId', 'expectedDaemonInstanceId']) {
@@ -117,6 +117,7 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
   assert.equal(open.body.mode, 'create')
   assert.equal(open.body.expectedBindingEpoch, '0')
   assert.equal(Object.hasOwn(open.body, 'documentId'), false)
+  assert.equal(Object.hasOwn(open.body, 'directory'), false)
   const read = ideCalls.find((call) => call.method === 'GET' && call.path.includes(`/views/${open.body.viewId}?`))
   assert.ok(read, 'IDE case must exercise pure-read recovery')
   const query = new URL(read.path, 'http://fixture').searchParams
@@ -139,10 +140,6 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
   assert.ok(
     ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/apply-mobile-layout')),
     'IDE case must attempt mobile layout',
-  )
-  assert.ok(
-    calls.some((call) => call.method === 'GET' && call.path.endsWith('/directories')),
-    'IDE case must attempt a directory listing',
   )
   assert.ok(
     ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/close')),

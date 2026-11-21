@@ -435,8 +435,11 @@ Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻
 Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化
 pricing；金额输入按十进制字符串提交，不引入 currency 或独立 unpriced 开关，`pricing: null` 表示未定价。
+模型和 Agent 的编辑器在宽屏提供区块导航，在窄屏提供单栏和区块跳转；保存按整张表单提交，错误就地定位。
+Agent 的工具、技能和子代理在对应区块展开多选；搜索和「已选」只筛选，不改变已选集合。对话和工作流的 Agent 单选可搜索，
+选中后只更新表单，保存时才提交。会话内切换 Agent 先校验模型和预设，失败保留已编辑内容。
 已配置价格以基础费率、固定三类互斥规则和 ISO 日期调价计划组成；同组规则互斥、组间倍率相乘。
-pricing 编辑器按基础价格、规则 type、逐费用项倍率与调价计划编辑，不用数组顺序表达优先级。
+价格编辑器一次编辑一套方案，默认显示当前生效方案。规则收起时显示条件和覆盖摘要；服务端按整份草稿试算费率，不保存草稿。
 新建 Model 的 models.dev 候选目录按当前搜索词分页读取：刷新后重取筛选后的第一页，
 不把不带 query 的刷新首页混入列表，翻页游标只与产生它的搜索词配对，迟到响应按请求代际丢弃。
 Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责搜索、过滤与查询聚合；
@@ -532,15 +535,10 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 [开发与测试](../operations/development-and-testing.md#真实-ide-与-daemon-验收) 的真实 IDE 入口执行；只记录实际
 运行结果，不预设固定用例数。
 
-目录选择器是 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) 内的惰性目录树
-（[`OpenDirectoryModal`](../../frontend/src/features/environment/ide/OpenDirectoryModal.tsx)）：
-打开时只读取宿主主目录的直接子目录，展开某个目录才请求它自己的下一层，收起即丢弃；
-“上级目录”沿服务端返回的 `parentPath` 逐级向上，到根目录后禁用。确认后由 `CHANGE_DIRECTORY` 切换工作区，
-只有切换成功才写入该 Environment 的最近目录。最近目录按 Environment 隔离保存在 localStorage
-（`kk-studio.recent-directories:ide`，最多 8 条，最新在前），与展示意图共用同一存储适配，不提供视图身份。
-换根、切换 Environment 与关闭弹窗都会推进请求代际并中止在途请求，迟到的目录响应不覆盖当前树；
-宿主返回的权限或不存在等原因原样展示，超过上限的列表标注截断。移动端弹窗全屏，
-行、展开、帮助与上级按钮的可点击区域不小于 44px；目录说明由可访问的 `?` 提示展开，不使用括号补说明。
+Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 VS Code 原生界面打开。新标签从无目录工作台开始，
+每次新开拥有独立 view。托管工作台的 Open Folder、New Window 和关闭此工作区分别对应目录切换、Studio 新建标签
+和该标签的正常关闭。Studio 只接受来自当前可见 iframe、同源且匹配当前 view 与 epoch 的固定动作。只有 Daemon
+确认目录生效后才改标签名；新窗口不覆盖已开标签，关完最后一个不会自动重开。
 
 ### Mermaid 图
 

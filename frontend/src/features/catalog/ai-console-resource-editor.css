@@ -75,9 +75,7 @@
   font-weight: 600;
 }
 
-/* Catalog 资源编辑器弹窗的类型切换。 */
-
-/* Model / Model Group 创建与目录参数：全部为本次功能新增的 scoped 样式。 */
+/* 模型与模型组的类型切换常驻正文滚动区之外。 */
 .model-kind-tabs {
   display: inline-flex;
   gap: 4px;
@@ -86,6 +84,8 @@
   border-radius: var(--radius-md);
   background: var(--wash-1);
   align-self: flex-start;
+  flex: 0 0 auto;
+  margin: var(--space-3) 24px 0;
 }
 
 .model-kind-tabs button {
@@ -113,6 +113,10 @@
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);
     padding-top: 0;
+  }
+
+  .model-kind-tabs {
+    margin: var(--space-2) 16px;
   }
 
   /* 窄屏单栏：跳转条停在正文顶部，横向滚动而不是换行，避免挤压表单首屏。 */

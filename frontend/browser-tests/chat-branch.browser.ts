@@ -1,5 +1,5 @@
 import { expect, test, type Page } from './fixture'
-import type { Route, WebSocketRoute } from '@playwright/test'
+import type { Locator, Route, WebSocketRoute } from '@playwright/test'
 import { createDefaultChatPaneState, type ChatLayout, type ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
 import type { EntryType, HarnessSessionEntryDTO, HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
@@ -18,6 +18,17 @@ const CHILD_ID = 'a2000000-0000-4000-8000-0000000000c1'
 const GRANDCHILD_ID = 'a2000000-0000-4000-8000-0000000000d1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
+
+async function readAt(page: Page, transcript: Locator, position: number): Promise<number> {
+  await transcript.hover()
+  await expect(transcript).toHaveAttribute('data-following', 'true')
+  const current = await transcript.evaluate((element) => element.scrollTop)
+  await page.mouse.wheel(0, position - current)
+  await expect(transcript).toHaveAttribute('data-following', 'false')
+  await expect.poll(() => transcript.evaluate((element, top) => Math.abs(element.scrollTop - top), position))
+    .toBeLessThanOrEqual(1)
+  return transcript.evaluate((element) => element.scrollTop)
+}
 const rootPayload = { settings: {
   agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' },
   environmentName: null,
@@ -1070,11 +1081,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await sourceEditor.fill('root source draft')
     const rootLog = source.getByRole('log')
     await expect(rootLog).toContainText('Scroll marker 23')
-    const rootScroll = await rootLog.evaluate((element) => {
-      element.scrollTop = 180
-      return element.scrollTop
-    })
-    expect(rootScroll).toBeGreaterThan(0)
+    const rootScroll = await readAt(page, rootLog, 180)
     await source.getByRole('button', { name: '打开命令表' }).click()
     await source.getByRole('option', { name: /subagent/ }).click()
     const tree = source.locator('.subagent-tree-panel')
@@ -1095,11 +1102,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
     const childLog = source.locator('.chat-pane-layer:not([hidden])').getByRole('log')
     await expect(childLog).toContainText('Scroll marker 23')
-    const childScroll = await childLog.evaluate((element) => {
-      element.scrollTop = 240
-      return element.scrollTop
-    })
-    expect(childScroll).toBeGreaterThan(0)
+    const childScroll = await readAt(page, childLog, 240)
     await expect(page.getByRole('alert')).toHaveCount(0)
     await expect(header.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
     await expect(header.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)

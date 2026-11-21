@@ -428,8 +428,9 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(contextWindow).toHaveValue('128000')
       await expect(page.getByRole('dialog')).toHaveCount(1)
       await expect(
-        dialog.getByRole('button', { name: /使用参数|取消|Use parameters|Cancel/ }),
+        dialog.getByRole('button', { name: /使用参数|Use parameters/ }),
       ).toHaveCount(0)
+      await expect(dialog.locator('.modal-footer').getByRole('button', { name: '取消', exact: true })).toBeVisible()
       await page.screenshot({
         path: test.info().outputPath(`catalog-preview-${viewport.width}.png`),
         fullPage: true,

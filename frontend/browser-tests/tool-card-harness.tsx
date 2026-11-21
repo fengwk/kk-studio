@@ -493,7 +493,8 @@ const toolCardHarness = {
     })
     const assistant = entry('assistant', 'head', 'ASSISTANT', [{ type: 'tool_call', ...call, argumentsJson }])
     const durable = entry('result', 'assistant', 'TOOL', [{
-      type: 'tool_result', ...call, contents: [], error: false,
+      type: 'tool_result', ...call,
+      contents: stage === 7 ? [{ type: 'text', text: bashOutput(40) }] : [], error: false,
     }], { toolResultMetadata: { assistantEntryId: 'assistant', callIndex: 0, status: 'SUCCEEDED' } })
     const invocation: ToolInvocationDTO = {
       ...call, argumentsJson, id: 'invocation', threadId: 'thread', turnStartEntryId: 'turn',

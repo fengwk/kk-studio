@@ -413,7 +413,7 @@ Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED
 ### IDE 服务
 
 Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、
-`CLOSE_VIEW`、`LIST_VIEWS`、`LIST_DIRECTORIES`、`COLLAPSE_MOBILE`。每个 Daemon 进程最多 64 个视图；owner 是
+`CLOSE_VIEW`、`LIST_VIEWS`、`OPEN_ATTACHMENT`、`COLLAPSE_MOBILE`。每个 Daemon 进程最多 64 个视图；owner 是
 `browserSessionId`，`eventNodeId` / `connectionId` 只证明当前连接的使用意图，`claimId` 只承担绑定幂等。
 
 - `OPEN_VIEW` 在同一入口内完成“确保 view 资源”和“绑定当前连接”：create 携带 `expectedBindingEpoch=0`，resume
@@ -427,8 +427,8 @@ Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_
 - 强制关闭只在 bridge 不可达或状态未知时可用：先把未保存文档备份到恢复配额内，再关闭并清理。
 - 视图自最后一次被接受的使用证明起 600 秒才进入到期检查；到期时只有 bridge 报告没有未保存修改才自动回收，
   否则保留视图等待用户决定。
-- 目录列举只返回某个目录下的直接子目录名，按名称排序并有数量上限；窄屏布局由 bridge 执行收起侧栏与面板的命令，不
-  修改用户设置。
+- Studio 管标签，VS Code 管文件和目录。新标签从登记的零根 `.code-workspace` 启动；Open Folder 由 bridge 走原生保存、
+  放弃或取消，Daemon 以新宿主的目录确认结果。窄屏布局可由 bridge 收起侧栏与面板，不修改用户设置。
 
 ### 代理与在线更新
 

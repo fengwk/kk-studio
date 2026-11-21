@@ -34,7 +34,7 @@
 
 `start` 先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`；`logs` 与 `tail` 接受可选
-目标 `backend`、`frontend`、`all`。Backend 产物是 `web/target/kk-studio-web-1.2.3.jar`，
+目标 `backend`、`frontend`、`all`。Backend 产物是 `web/target/kk-studio-web-1.2.4.jar`，
 log 与 PID 文件都在 `DEV_WORK_DIR` 下。
 
 可用环境变量：
@@ -380,7 +380,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 阅读 case 结果时还需保留两个边界：
 
-- 无 READY owner 的 IDE 拒绝路径证明路由层 fail closed，不证明已 READY 时的 exact-intent 校验、
+- 无 READY owner 的 IDE 用例使用无目录创建请求，验证读写均在路由层拒绝。它不证明已 READY 时的 exact-intent 校验、
   视图占用或续租；API 契约断言也不替代真实 Agent 的 Issue 接受与阶段交接。
 - `node --test scripts/dev/verify/e2e/tests/*.test.mjs` 只验证 case 与 HTTP mock 的脚本契约，
   不能替代对真实服务执行对应 case。

@@ -78,7 +78,7 @@ registerCase({
   id: 'environment.ide_view_no_ready_owner_rejected',
   level: 'L1',
   title: 'IDE 视图在没有 READY owner 时明确拒绝，不伪造绑定',
-  docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开、纯读视图、列举目录、切换目录、终端、移动布局和关闭返回 409 unavailable + DAEMON_NOT_READY，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验由生产链路集成测试验收',
+  docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开无目录视图、纯读视图、切换目录、终端、移动布局和关闭返回 409 unavailable + DAEMON_NOT_READY，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验由生产链路集成测试验收',
   async run(ctx) {
     const environment = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
     const viewsPath = `/api/ide/environments/${encodeURIComponent(environment.id)}/views`
@@ -91,7 +91,6 @@ registerCase({
       mode: 'create',
       expectedBindingEpoch: '0',
       expectedDaemonInstanceId: IDE_DAEMON_INSTANCE_ID,
-      directory: '/workspace',
     }
 
     try {
@@ -141,11 +140,6 @@ registerCase({
       )
       assertProblemEnvelope(terminalError)
 
-      const listError = await expectHttpError(
-        () => ctx.call('GET', `/api/ide/environments/${encodeURIComponent(environment.id)}/directories`),
-        { status: 409, code: 'unavailable', reason: 'DAEMON_NOT_READY' },
-      )
-      assertProblemEnvelope(listError)
       const mobileError = await expectHttpError(
         () => ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/apply-mobile-layout`, {
           browserSessionId: IDE_BROWSER_SESSION_ID,

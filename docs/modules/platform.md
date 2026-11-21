@@ -321,7 +321,7 @@ Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能
 Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`）或 PUT 的必填
 `SecretUpdate`（`KEEP`/`SET`/`CLEAR`）写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
-`openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。`GET /api/platform/models/capabilities?providerName&modelId` 以 Provider 当前协议与端点、草稿 wire model ID 返回缓存选项、已知 TTL/写入倍率、默认档位及服务端自动缓存标志；查询不要求先保存模型。模型创建、更新与配置同步实际写入时也按相同能力规则校验 LONG，既有 NONE/SHORT 值仍可保存。
+`openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。`GET /api/platform/models/capabilities?providerName&modelId` 以 Provider 当前协议与端点、草稿 wire model ID 返回缓存选项、已知 TTL/写入倍率、默认档位及 `promptCacheState`（可配置、上游管理、由端点决定或不支持）；查询不要求先保存模型。模型创建、更新与配置同步实际写入时也按相同能力规则校验 LONG，既有 NONE/SHORT 值仍可保存。
 `GET /api/platform/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
 模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，

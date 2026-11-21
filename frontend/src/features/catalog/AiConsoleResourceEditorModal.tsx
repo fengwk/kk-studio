@@ -168,6 +168,30 @@ export function ResourceEditorModal({
       onClose={onClose}
     >
       <form className="modal-card-form" aria-label={title} onSubmit={onSubmit} noValidate>
+        {modal.kind === 'model' && modal.mode === 'create' ? (
+          <div className="model-kind-tabs" role="tablist" aria-label={t('ai.catalog.form.modelKind')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={modal.resourceKind === 'MODEL'}
+              className={modal.resourceKind === 'MODEL' ? 'is-selected' : undefined}
+              disabled={pending}
+              onClick={() => onModelCreateKindChange('MODEL')}
+            >
+              {t('ai.catalog.resourceType.model')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={modal.resourceKind === 'GROUP'}
+              className={modal.resourceKind === 'GROUP' ? 'is-selected' : undefined}
+              disabled={pending}
+              onClick={() => onModelCreateKindChange('GROUP')}
+            >
+              {t('ai.catalog.resourceType.modelGroup')}
+            </button>
+          </div>
+        ) : null}
         <div
           ref={bodyRef}
           className={['modal-body', 'catalog-editor-body', sections.length > 0 ? 'is-split' : '']
@@ -202,48 +226,22 @@ export function ResourceEditorModal({
                 onChange={onProviderDraftChange}
               />
             )}
-            {modal.kind === 'model' && (
-              <>
-                {modal.mode === 'create' ? (
-                  <div className="model-kind-tabs" role="tablist" aria-label={t('ai.catalog.form.modelKind')}>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={modal.resourceKind === 'MODEL'}
-                      className={modal.resourceKind === 'MODEL' ? 'is-selected' : undefined}
-                      onClick={() => onModelCreateKindChange('MODEL')}
-                    >
-                      {t('ai.catalog.resourceType.model')}
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={modal.resourceKind === 'GROUP'}
-                      className={modal.resourceKind === 'GROUP' ? 'is-selected' : undefined}
-                      onClick={() => onModelCreateKindChange('GROUP')}
-                    >
-                      {t('ai.catalog.resourceType.modelGroup')}
-                    </button>
-                  </div>
-                ) : null}
-                {modal.resourceKind === 'GROUP' ? (
-                  <ModelGroupForm
-                    draft={modelGroupDraft}
-                    models={models}
-                    fieldErrors={fieldErrors}
-                    onChange={onModelGroupDraftChange}
-                  />
-                ) : (
-                  <ModelForm
-                    draft={modelDraft}
-                    mode={modal.mode}
-                    providers={providers}
-                    fieldErrors={fieldErrors}
-                    onChange={onModelDraftChange}
-                  />
-                )}
-              </>
-            )}
+            {modal.kind === 'model' && (modal.resourceKind === 'GROUP' ? (
+              <ModelGroupForm
+                draft={modelGroupDraft}
+                models={models}
+                fieldErrors={fieldErrors}
+                onChange={onModelGroupDraftChange}
+              />
+            ) : (
+              <ModelForm
+                draft={modelDraft}
+                mode={modal.mode}
+                providers={providers}
+                fieldErrors={fieldErrors}
+                onChange={onModelDraftChange}
+              />
+            ))}
             {modal.kind === 'agent' && (
               <AgentForm
                 draft={agentDraft}

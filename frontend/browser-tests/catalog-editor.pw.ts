@@ -160,7 +160,7 @@ test('navigates model sections on desktop and reveals preset and pricing errors 
   await page.route('**/api/platform/models/capabilities?**', (route) => route.fulfill({ json: {
     promptCacheOptions: [{ retention: 'NONE' }, { retention: 'SHORT' }],
     defaultPromptCacheRetention: 'SHORT',
-    automaticCache: false,
+    promptCacheState: 'CONFIGURABLE',
   } }))
 
   // 预设错误：导航跳到「模型预设」不提交，提交后内联错误被定位到。

@@ -146,7 +146,7 @@ test.describe('Compaction summary system card', () => {
   })
 
   test('does not move a reading card when later streaming content grows', async ({ page }) => {
-    // 展开接入真实外层 Hook；后续流式增长不能抢回卡片。
+    // 展开不会退出跟随；用户确实上滚开始阅读后，后续流式增长不应抢走锚点。
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto(HARNESS_URL)
     await page.locator('#start-stream').click()
@@ -156,13 +156,20 @@ test.describe('Compaction summary system card', () => {
     const card = page.locator('[data-entry-kind="compaction"]').first()
     await card.getByRole('button', { name: '展开详情' }).click()
     await expect(card.locator('.thread-system-message-body')).toBeVisible()
+    const distanceToBottom = () => outer.evaluate((element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight)
+    await expect(outer).toHaveAttribute('data-following', 'true')
+    await expect.poll(distanceToBottom).toBeLessThanOrEqual(1)
+    await outer.hover()
+    await page.mouse.wheel(0, -10_000)
+    await expect(outer).toHaveAttribute('data-following', 'false')
+    await expect(card.getByRole('button', { name: '收起详情' })).toBeInViewport()
 
     const anchor = await outer.evaluate((element) => element.scrollTop)
     const top = (await card.boundingBox())!.y
     await page.locator('#grow-stream').click()
     await expect(outer).toContainText('stream line 42')
-    await expect.poll(() => outer.evaluate((element) =>
-      element.scrollHeight - element.scrollTop - element.clientHeight)).toBeGreaterThan(210)
+    await expect.poll(distanceToBottom).toBeGreaterThan(32)
     expect(await outer.evaluate((element) => element.scrollTop)).toBe(anchor)
     expect((await card.boundingBox())!.y).toBeCloseTo(top, 0)
   })
