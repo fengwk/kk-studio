@@ -1,9 +1,11 @@
 import { useRef, type RefObject } from 'react'
-import type {
-  EnvironmentIdeViewDTO,
-  EnvironmentIdeViewSnapshotDTO,
-} from '@/shared/api/generated/contracts'
-import { IdeProtocolError, validateViewSnapshot, viewFingerprint } from '@/features/environment/ide/ide-contract'
+import {
+  IdeProtocolError,
+  validateViewSnapshot,
+  viewFingerprint,
+  type IdeNormalizedView,
+  type IdeWireSnapshotView,
+} from '@/features/environment/ide/ide-contract'
 import { compareDecimal } from '@/features/environment/ide/ide-decimal'
 import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-browser-session'
 
@@ -15,7 +17,7 @@ interface SnapshotCacheEntry {
 export interface AcceptedSnapshot {
   accepted: boolean
   daemonInstanceId: string
-  view: EnvironmentIdeViewDTO | null
+  view: IdeNormalizedView | null
 }
 
 /**
@@ -28,7 +30,7 @@ export function useIdeSnapshotCache(sessionRef: RefObject<IdeBrowserSessionState
   function acceptSnapshot(
     environmentId: string,
     viewId: string,
-    snapshot: EnvironmentIdeViewSnapshotDTO,
+    snapshot: IdeWireSnapshotView,
   ): AcceptedSnapshot {
     const validated = validateViewSnapshot(
       environmentId,

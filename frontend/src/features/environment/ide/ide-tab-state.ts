@@ -1,8 +1,8 @@
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
-import { hasExactKeys, isRecord, utf8ByteLength } from '@/shared/lib/value'
+import { hasExactKeys, isRecord } from '@/shared/lib/value'
 import {
   loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
-  TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
+  TAB_LAST_PREFIX, TAB_SESSION_PREFIX,
   type TabStorage,
 } from '@/shared/lib/tab-storage'
 import type { EnvironmentIdeOpenMode } from '@/shared/api/generated/contracts'
@@ -73,10 +73,8 @@ export interface IdeSaveResult {
 
 export const IDE_TAB_SESSION_KEY = `${TAB_SESSION_PREFIX}ide`
 export const IDE_TAB_LAST_KEY = `${TAB_LAST_PREFIX}ide`
-export const IDE_RECENT_DIRECTORIES_KEY = 'kk-studio.recent-directories:ide'
 export const IDE_MAX_OPEN_ENVIRONMENTS = 64
 const IDE_MAX_DIRECTORY_CHARS = 4096
-export const IDE_MAX_RECENT_DIRECTORIES = 8
 
 function hasControlCharacters(value: string): boolean {
   for (const character of value) {
@@ -560,93 +558,4 @@ export function saveIdeSession(
     IDE_TAB_SESSION_KEY,
     serializeSession(browserSessionId, presentation, recoveryByView),
   )
-}
-
-function parseRecentDirectories(raw: string | null): Record<string, string[]> {
-  if (raw == null || utf8ByteLength(raw) > TAB_STATE_MAX_BYTES) {
-    return {}
-  }
-  try {
-    const value: unknown = JSON.parse(raw)
-    if (
-      !isRecord(value)
-      || !hasExactKeys(value, ['byEnvironment'])
-      || !isRecord(value.byEnvironment)
-    ) {
-      return {}
-    }
-    const parsed: Record<string, string[]> = {}
-    for (const [environmentId, entries] of Object.entries(value.byEnvironment)) {
-      if (!isCanonicalUuid(environmentId) || !Array.isArray(entries)) {
-        continue
-      }
-      const directories: string[] = []
-      for (const entry of entries) {
-        if (!isIdeDirectory(entry) || directories.includes(entry)) {
-          continue
-        }
-        directories.push(entry)
-        if (directories.length === IDE_MAX_RECENT_DIRECTORIES) {
-          break
-        }
-      }
-      if (directories.length > 0) {
-        parsed[environmentId] = directories
-      }
-    }
-    return parsed
-  } catch {
-    return {}
-  }
-}
-
-/** 按 Environment 读取最近目录；localStorage 不可用或内容损坏时退化为空列表。 */
-export function readRecentDirectories(environmentId: string, storage?: IdeTabStorage): string[] {
-  if (!isCanonicalUuid(environmentId)) {
-    return []
-  }
-  const { local } = resolveTabStorage(storage)
-  if (local == null) {
-    return []
-  }
-  try {
-    return parseRecentDirectories(local.getItem(IDE_RECENT_DIRECTORIES_KEY))[environmentId] ?? []
-  } catch {
-    return []
-  }
-}
-
-/**
- * 只在用户确认切换成功后记录：最新目录置顶、去重、按 Environment 隔离并限制条数。
- * 持久化失败仍返回内存结果，不阻断已成功的目录切换。
- */
-export function recordRecentDirectory(
-  environmentId: string,
-  directory: string,
-  storage?: IdeTabStorage,
-): string[] {
-  if (!isCanonicalUuid(environmentId) || !isIdeDirectory(directory)) {
-    return readRecentDirectories(environmentId, storage)
-  }
-  const { local } = resolveTabStorage(storage)
-  let byEnvironment: Record<string, string[]>
-  try {
-    byEnvironment = parseRecentDirectories(local?.getItem(IDE_RECENT_DIRECTORIES_KEY) ?? null)
-  } catch {
-    byEnvironment = {}
-  }
-  const directories = [directory, ...(byEnvironment[environmentId] ?? []).filter(
-    (entry) => entry !== directory,
-  )].slice(0, IDE_MAX_RECENT_DIRECTORIES)
-  if (local != null) {
-    try {
-      local.setItem(
-        IDE_RECENT_DIRECTORIES_KEY,
-        JSON.stringify({ byEnvironment: { ...byEnvironment, [environmentId]: directories } }),
-      )
-    } catch {
-      // 存储写满或被禁用时保留内存结果。
-    }
-  }
-  return directories
 }

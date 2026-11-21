@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,7 +26,6 @@ const ideService = vi.hoisted(() => ({
   focusIdeTerminal: vi.fn(),
   applyIdeMobileLayout: vi.fn(),
   closeIdeView: vi.fn(),
-  listIdeDirectories: vi.fn(),
   openIdeAttachment: vi.fn(),
 }))
 vi.mock('@/features/environment/ide/environment-ide-service', () => ideService)
@@ -130,10 +129,24 @@ function seedSession(browserSessionId = BROWSER_A, recoveryValue: IdeRecovery = 
 
 function sessionSnapshot(): {
   browserSessionId: string
+  presentation: {
+    panelVisible: boolean
+    selectedEnvironmentId: string | null
+    openedEnvironmentIds: string[]
+    viewIdsByEnvironment: Record<string, string[]>
+    selectedViewIdsByEnvironment: Record<string, string>
+  }
   recoveryByView: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
 } {
   const raw = JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}') as {
     browserSessionId: string
+    presentation: {
+      panelVisible: boolean
+      selectedEnvironmentId: string | null
+      openedEnvironmentIds: string[]
+      viewIdsByEnvironment: Record<string, string[]>
+      selectedViewIdsByEnvironment: Record<string, string>
+    }
     recoveryByView: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
   }
   return {
@@ -267,6 +280,45 @@ function installLocks(locks: unknown): void {
 
 const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks')
 
+const NATIVE_ACTION_TYPE = 'kk-studio.ide.native-action'
+
+function nativeAction(
+  viewId: string,
+  bindingEpoch: string,
+  action: 'open-folder' | 'new-window' | 'close-workspace',
+  directory?: string,
+): Record<string, unknown> {
+  return {
+    type: NATIVE_ACTION_TYPE,
+    viewId,
+    bindingEpoch,
+    action,
+    ...(directory == null ? {} : { directory }),
+  }
+}
+
+/** 工具栏里唯一带 aria-haspopup 的环境选择器触发按钮。 */
+function environmentTrigger(): HTMLElement {
+  return screen.getByRole('button', { expanded: false })
+}
+
+/** 由当前可见 iframe 向宿主发出 Native 动作；真实 postMessage 链路由 Chromium 验收覆盖。 */
+function postNative(viewId: string, message: Record<string, unknown>): void {
+  const frame = screen.getAllByTestId('ide-iframe').find(
+    (candidate) => candidate.getAttribute('data-ide-view') === viewId,
+  ) as HTMLIFrameElement | undefined
+  if (frame == null) {
+    throw new Error(`Missing iframe for ${viewId}`)
+  }
+  act(() => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: message,
+      origin: window.location.origin,
+      source: frame.contentWindow,
+    }))
+  })
+}
+
 describe('IdePanelProvider recovery state machine', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -285,12 +337,6 @@ describe('IdePanelProvider recovery state machine', () => {
     ideService.openIdeAttachment.mockResolvedValue(undefined)
     ideService.focusIdeTerminal.mockResolvedValue(undefined)
     ideService.applyIdeMobileLayout.mockResolvedValue(undefined)
-    ideService.listIdeDirectories.mockResolvedValue({
-      path: '/workspace/projects/a',
-      parentPath: '/workspace/projects',
-      truncated: false,
-      children: [{ name: 'next', path: '/workspace/projects/a/next' }],
-    })
     vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }))
     installLocks(fakeLocks())
   })
@@ -725,8 +771,12 @@ describe('IdePanelProvider recovery state machine', () => {
     await waitFor(() => {
       expect(sessionSnapshot().browserSessionId).not.toBe(BROWSER_A)
     })
+    // 复制出的标签不带走原标签的视图与会话身份。
     expect(sessionSnapshot().recoveryByView).toEqual({})
-    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
+    expect(sessionSnapshot().presentation.selectedEnvironmentId).toBeNull()
+    expect(sessionSnapshot().presentation.openedEnvironmentIds).toEqual([])
+    expect(screen.queryAllByTestId('ide-tab')).toHaveLength(0)
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
     expect(ideService.readIdeView).not.toHaveBeenCalled()
     expect(ideService.openIdeView).not.toHaveBeenCalled()
     expect(sessionSnapshot().browserSessionId).toMatch(/^[0-9a-f-]{36}$/)
@@ -773,7 +823,7 @@ describe('IdePanelProvider recovery state machine', () => {
     expect(sessionSnapshot().recoveryByView[ENV_A]).toBeUndefined()
   })
 
-  it('hides an unrelated view in a Chat without an environment and keeps its iframe for return', async () => {
+  it('keeps an unrelated view hidden in a Chat without an environment and returns to the same iframe', async () => {
     const user = userEvent.setup()
     const { sockets } = renderPanel()
     connect(sockets)
@@ -782,7 +832,11 @@ describe('IdePanelProvider recovery state machine', () => {
     const opens = ideService.openIdeView.mock.calls.length
 
     await user.click(screen.getByTestId('activate-none'))
-    expect(screen.getByTestId('ide-overlay-panel')).not.toBeVisible()
+    // 没有 Environment 时只留顶栏与空标签区，已有视图只隐藏不卸载。
+    expect(screen.getByTestId('ide-overlay-panel')).toBeVisible()
+    expect(screen.getByTestId('ide-toolbar')).toBeVisible()
+    expect(screen.queryAllByTestId('ide-tab')).toHaveLength(0)
+    expect(screen.getByTestId('ide-view-layer')).toHaveAttribute('hidden')
     expect(screen.getByTestId('ide-iframe')).toBe(frame)
     await user.click(screen.getByTestId('activate-a'))
     expect(screen.getByTestId('ide-overlay-panel')).toBeVisible()
@@ -887,14 +941,14 @@ describe('IdePanelProvider recovery state machine', () => {
     await screen.findByTestId('ide-iframe')
   })
 
-  it('keeps the same epoch when a directory change stays inside the same workspacePath', async () => {
+  it('keeps the same epoch when a native open-folder stays inside the same workspacePath', async () => {
     const user = userEvent.setup()
     const { sockets } = renderPanel()
     connect(sockets)
     await user.click(screen.getByTestId('toggle-a'))
     await screen.findByTestId('ide-iframe')
-    const openedViewId = sessionSnapshot().recoveryByView[ENV_A]?.viewId
-    const epoch = sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch
+    const openedViewId = sessionSnapshot().recoveryByView[ENV_A]!.viewId
+    const epoch = sessionSnapshot().recoveryByView[ENV_A]!.bindingEpoch!
     const readCalls = ideService.readIdeView.mock.calls.length
 
     ideService.changeIdeViewDirectory.mockResolvedValue({
@@ -911,12 +965,8 @@ describe('IdePanelProvider recovery state machine', () => {
       state: 'OPEN',
     })
 
-    await user.click(screen.getByTestId('ide-open-directory-btn'))
-    await waitFor(() => {
-      expect(ideService.listIdeDirectories).toHaveBeenCalled()
-    })
-    const dialog = await screen.findByRole('dialog')
-    await user.click(within(dialog).getByTestId('ide-directory-confirm'))
+    // VS Code 主目录/文件夹选择只通过 Native 消息映射到当前 view 的目录切换。
+    postNative(openedViewId, nativeAction(openedViewId, epoch, 'open-folder', '/workspace/projects/a/native-subdir'))
 
     await waitFor(() => {
       expect(ideService.changeIdeViewDirectory).toHaveBeenCalledTimes(1)
@@ -925,10 +975,59 @@ describe('IdePanelProvider recovery state machine', () => {
       browserSessionId: sessionSnapshot().browserSessionId,
       bindingEpoch: epoch,
       expectedDaemonInstanceId: DAEMON_A,
+      directory: '/workspace/projects/a/native-subdir',
     })
     expect(sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch).toBe(epoch)
     expect(ideService.readIdeView).toHaveBeenCalledTimes(readCalls)
     expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the environment after the last tab closes and reopens only on an explicit +', async () => {
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    const firstViewId = sessionSnapshot().recoveryByView[ENV_A]!.viewId
+    await waitFor(() => {
+      // 环境选择器的触发按钮文案随 locale 变化，这里只确认它仍展示当前环境。
+      expect(environmentTrigger()).toHaveTextContent('local-node')
+    })
+
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await waitFor(() => {
+      expect(ideService.closeIdeView).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    })
+
+    // 关完只留顶栏：环境、`+` 与收起仍在，正文没有说明页，也不自动重开。
+    expect(screen.getByTestId('ide-overlay-panel')).toBeVisible()
+    expect(screen.getByTestId('ide-toolbar')).toBeVisible()
+    expect(screen.queryAllByTestId('ide-tab')).toHaveLength(0)
+    expect(environmentTrigger()).toHaveTextContent('local-node')
+    expect(screen.queryByTestId('ide-opening-state')).not.toBeInTheDocument()
+    expect(sessionSnapshot().presentation).toMatchObject({
+      panelVisible: true,
+      selectedEnvironmentId: ENV_A,
+      openedEnvironmentIds: [ENV_A],
+    })
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+
+    const openWorkspace = screen.getByTestId('ide-open-workspace-btn')
+    expect(openWorkspace).toBeEnabled()
+    await user.click(openWorkspace)
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
+    })
+    const reopened = ideService.openIdeView.mock.calls[1]![1] as Record<string, unknown>
+    expect(reopened.viewId).not.toBe(firstViewId)
+    expect(reopened).toMatchObject({ mode: 'create' })
+    expect(reopened).not.toHaveProperty('directory')
+    await waitFor(() => {
+      expect(screen.getAllByTestId('ide-tab')).toHaveLength(1)
+    })
   })
 
   it('keeps the view when a late binding response belongs to a replaced connection', async () => {

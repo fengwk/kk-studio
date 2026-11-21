@@ -86,91 +86,104 @@
   display: none !important;
 }
 
+/* 单行托管标签栏：环境固定、标签与 `＋` 一起横向滚动、收起固定。 */
 .ide-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 1px 4px;
-  min-height: 32px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-hover);
-  flex-shrink: 0;
-}
-
-.ide-workspace-tabs {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
-  max-width: 100%;
+  min-height: 34px;
   padding: 2px 4px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
   border-bottom: 1px solid var(--border);
-  scrollbar-width: thin;
+  background: var(--surface-hover);
 }
 
-.ide-workspace-tabs [data-testid='ide-tab'] {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ide-toolbar-info {
-  display: flex;
-  align-items: center;
-  flex: 1 1 0;
+.ide-toolbar .ide-environment-selector {
+  flex: 0 0 auto;
   min-width: 0;
-  overflow: hidden;
-}
-
-.ide-toolbar-info .ide-environment-selector {
-  flex: 0 1 auto;
-  min-width: 80px;
   max-width: 160px;
 }
 
-.ide-toolbar .ide-toolbar-directory {
+/* 标签区自己滚动；环境与收起不会被挤出面板。 */
+.ide-workspace-tabs {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
-  max-width: 100%;
-  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  overscroll-behavior-x: contain;
 }
 
-.ide-toolbar-directory svg {
-  flex-shrink: 0;
-}
-
-.ide-toolbar-dir {
+.ide-workspace-tab {
   display: flex;
-  min-width: 0;
-  font-size: var(--font-size-xs);
-  font-family: var(--mono);
-  color: var(--fg-muted);
-  overflow: hidden;
-  white-space: nowrap;
-  user-select: text;
-}
-
-.ide-toolbar-dir-prefix {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ide-toolbar-dir-suffix {
   flex: 0 0 auto;
-  max-width: 45%;
+  align-items: stretch;
+  min-width: 0;
+  max-width: 200px;
+  border-radius: var(--radius-sm);
+}
+
+.ide-workspace-tab:has([aria-current='page']) {
+  background: var(--surface-active);
+}
+
+.ide-workspace-tab > button {
+  min-width: 0;
+  height: 28px;
+  white-space: nowrap;
+}
+
+/* 标签名先截断，关闭按钮保持固定宽度。 */
+.ide-workspace-tab > button:first-child {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 0 6px 0 8px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.ide-workspace-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
+}
+
+.ide-workspace-tab > button[aria-current='page'] {
+  color: var(--fg);
+}
+
+.ide-workspace-tab > button + button {
+  flex: 0 0 auto;
+  width: 26px;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  color: var(--fg-muted);
+}
+
+.ide-workspace-tab > button + button:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+/* `＋` 是标签区的直接子元素，跟着标签一起滚动。 */
+.ide-workspace-tabs .ide-open-workspace {
+  flex: 0 0 auto;
+  width: 28px;
+  padding: 0;
+  font-size: var(--font-size-md);
+  line-height: 1;
+}
+
+/* 横向滚动容器会裁掉外扩焦点环，标签区改用内缩焦点环保持键盘焦点可见。 */
+.ide-workspace-tab > button:focus-visible,
+.ide-workspace-tabs .ide-open-workspace:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  box-shadow: none;
 }
 
 .ide-toolbar-action-label {
@@ -181,14 +194,8 @@
   display: none;
 }
 
-.ide-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
 .ide-toolbar .ide-toolbar-icon {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -218,13 +225,17 @@
   }
 
   .ide-toolbar .ide-toolbar-icon,
-  .ide-toolbar .ide-toolbar-directory,
   .ide-toolbar .ide-environment-selector.ui-select .ui-select-trigger,
-  .ui-select-menu.ide-environment-selector.is-compact .ui-select-option {
+  .ui-select-menu.ide-environment-selector.is-compact .ui-select-option,
+  .ide-workspace-tab > button,
+  .ide-workspace-tabs .ide-open-workspace {
+    height: auto;
     min-height: 44px;
   }
 
-  .ide-toolbar .ide-toolbar-icon {
+  .ide-toolbar .ide-toolbar-icon,
+  .ide-workspace-tab > button + button,
+  .ide-workspace-tabs .ide-open-workspace {
     min-width: 44px;
   }
 }
@@ -290,246 +301,6 @@
   color: var(--danger);
 }
 
-.ide-select-env-row {
-  width: min(320px, 100%);
-}
-
-.ide-state-muted {
-  color: var(--fg-muted);
-  font-size: var(--font-size-sm);
-}
-
-.ide-directory-modal {
-  width: min(560px, 100%);
-  max-height: min(720px, calc(100vh - 48px));
-  display: flex;
-  flex-direction: column;
-}
-
-.ide-directory-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.ide-directory-modal .modal-footer {
-  flex: 0 0 auto;
-}
-
-.ide-directory-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.ide-directory-location {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--font-size-xs);
-  color: var(--fg-muted);
-}
-
-.ide-directory-help {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.ide-directory-help:hover {
-  background: var(--surface-hover);
-  color: var(--fg);
-}
-
-.ide-directory-help:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
-.ide-directory-hint {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-}
-
-.ide-directory-section-title {
-  margin: 0 0 6px;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--fg-muted);
-}
-
-.ide-directory-recent-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ide-directory-recent-item {
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--font-size-xs);
-}
-
-.ide-directory-tree {
-  flex: 1 1 auto;
-  min-height: 160px;
-  max-height: 46vh;
-  overflow: auto;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.ide-directory-tree:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
-.ide-directory-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ide-directory-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  border-radius: var(--radius-sm);
-}
-
-.ide-directory-row[data-selected='true'] {
-  background: var(--surface-active);
-}
-
-.ide-directory-toggle,
-.ide-directory-entry {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.ide-directory-toggle {
-  flex: 0 0 auto;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: var(--radius-sm);
-  color: var(--fg-muted);
-}
-
-.ide-directory-chevron {
-  transition: transform 120ms ease;
-}
-
-.ide-directory-chevron[data-expanded='true'] {
-  transform: rotate(90deg);
-}
-
-.ide-directory-entry {
-  flex: 1 1 auto;
-  gap: 6px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  text-align: left;
-}
-
-.ide-directory-toggle:hover,
-.ide-directory-entry:hover {
-  background: var(--surface-hover);
-}
-
-.ide-directory-toggle:focus-visible,
-.ide-directory-entry:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
-.ide-directory-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ide-directory-empty,
-.ide-directory-truncated {
-  margin: 2px 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-}
-
-.ide-directory-node-state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 8px;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-}
-
-.ide-directory-error {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--danger);
-  font-size: var(--font-size-sm);
-}
-
-.ide-directory-error-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ide-directory-error-detail {
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-}
-
-.ide-directory-selection {
-  margin-right: auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--font-size-xs);
-  color: var(--fg-muted);
-}
-
 .ide-panel-warning-banner {
   padding: 6px 12px;
   background: var(--surface-hover);
@@ -576,48 +347,9 @@
 }
 
 @media (max-width: 760px) {
-  .modal-backdrop:has(.ide-directory-modal) {
-    padding: 0;
-  }
-
-  .ide-directory-modal {
-    width: 100%;
-    height: 100%;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  }
-
-  .ide-directory-tree {
-    max-height: none;
-  }
-
-  .ide-directory-modal .modal-header button,
-  .ide-directory-modal .modal-footer button,
   .ide-confirm-modal .modal-header button,
-  .ide-confirm-modal .modal-footer button,
-  .ide-directory-help,
-  .ide-directory-up,
-  .ide-directory-toggle,
-  .ide-directory-entry,
-  .ide-directory-recent-item {
-    min-height: 44px;
-  }
-
-  .ide-directory-modal .modal-header button,
-  .ide-directory-modal .modal-footer button,
-  .ide-confirm-modal .modal-header button,
-  .ide-confirm-modal .modal-footer button,
-  .ide-directory-help,
-  .ide-directory-up,
-  .ide-directory-toggle {
+  .ide-confirm-modal .modal-footer button {
     min-width: 44px;
-  }
-
-  .ide-directory-help,
-  .ide-directory-toggle {
-    width: 44px;
-    height: 44px;
+    min-height: 44px;
   }
 }

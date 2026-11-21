@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useRef, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
@@ -8,9 +8,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IdeOverlayPanel, type IdeOverlayPanelProps } from '@/features/environment/ide/IdeOverlayPanel'
 import type { IdeViewState } from '@/features/environment/ide/ide-view-state'
 
-const { listIdeDirectories, closeIdeView } = vi.hoisted(() => ({ listIdeDirectories: vi.fn(), closeIdeView: vi.fn() }))
+const { closeIdeView } = vi.hoisted(() => ({ closeIdeView: vi.fn() }))
 
-vi.mock('@/features/environment/ide/environment-ide-service', () => ({ listIdeDirectories, closeIdeView }))
+vi.mock('@/features/environment/ide/environment-ide-service', () => ({ closeIdeView }))
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
@@ -19,6 +19,7 @@ const VIEW_B = 'c2000000-0000-4000-8000-000000000002'
 const DAEMON_A = 'd1000000-0000-4000-8000-000000000001'
 const DIRECTORY_A = '/workspace/projects/a'
 const DIRECTORY_B = '/workspace/projects/b'
+const NATIVE_ACTION_TYPE = 'kk-studio.ide.native-action'
 
 function view(partial: Partial<IdeViewState> & Pick<IdeViewState, 'environmentId' | 'viewId'>): IdeViewState {
   const { environmentId, viewId, ...overrides } = partial
@@ -55,8 +56,6 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
       { id: ENV_A, name: 'local-node', ready: true },
       { id: ENV_B, name: 'remote-node', ready: true },
     ],
-    environmentsLoading: false,
-    environmentsError: false,
     sessionStatus: 'ready',
     storageUnavailable: false,
     recoveryError: false,
@@ -67,32 +66,73 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
     onCloseEnvironment: vi.fn().mockResolvedValue({ ok: true, requiresForceConfirmation: false }),
     onDismissCloseError: vi.fn(),
     onChangeDirectory: vi.fn().mockResolvedValue({ ok: true }),
-    onOpenTerminal: vi.fn(),
     onIframeLoaded: vi.fn(),
     onOpenNewView: vi.fn(),
     onRetryClaim: vi.fn(),
-    onReloadEnvironments: vi.fn(),
-    readRecentDirectories: vi.fn().mockReturnValue([]),
-    recordRecentDirectory: vi.fn().mockReturnValue([]),
     ...overrides,
   }
 }
 
-const HOME_LISTING = {
-  path: '/home/user',
-  parentPath: '/home',
-  truncated: false,
-  children: [
-    { name: 'projects', path: '/home/user/projects' },
-    { name: 'notes', path: '/home/user/notes' },
-  ],
+function tabFor(viewId: string): HTMLElement {
+  const element = screen.getAllByTestId('ide-tab').find(
+    (candidate) => candidate.getAttribute('data-ide-view') === viewId,
+  )
+  if (element == null) {
+    throw new Error(`Missing tab for ${viewId}`)
+  }
+  return element
+}
+
+/** 标签容器只是外壳，选中态与关闭都在它内部的两个按钮上。 */
+function tabSelectButton(viewId: string): HTMLElement {
+  return within(tabFor(viewId)).getAllByRole('button')[0]!
+}
+
+function tabCloseButton(viewId: string): HTMLElement {
+  return within(tabFor(viewId)).getByTestId('ide-close-btn')
+}
+
+function frameFor(viewId: string): HTMLIFrameElement {
+  const element = screen.getAllByTestId('ide-iframe').find(
+    (candidate) => candidate.getAttribute('data-ide-view') === viewId,
+  )
+  if (element == null) {
+    throw new Error(`Missing iframe for ${viewId}`)
+  }
+  return element as HTMLIFrameElement
+}
+
+function nativeAction(action: string, viewId = VIEW_A, directory?: string): Record<string, unknown> {
+  return {
+    type: NATIVE_ACTION_TYPE,
+    viewId,
+    bindingEpoch: '7',
+    action,
+    ...(directory == null ? {} : { directory }),
+  }
+}
+
+/**
+ * 面板只接受同源且来自当前可见 iframe 的 Native 消息；这里显式构造来源与 origin，
+ * 真实 postMessage 链路由 Chromium 验收覆盖。
+ */
+function postNative(
+  data: unknown,
+  options: { frame?: HTMLIFrameElement; origin?: string; source?: Window | null } = {},
+): void {
+  const source = options.source === undefined ? (options.frame ?? frameFor(VIEW_A)).contentWindow : options.source
+  act(() => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data,
+      origin: options.origin ?? window.location.origin,
+      source,
+    }))
+  })
 }
 
 describe('IdeOverlayPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    listIdeDirectories.mockReset()
-    listIdeDirectories.mockResolvedValue(HOME_LISTING)
   })
 
   it('keeps every opened iframe mounted while only the selected environment is visible', () => {
@@ -107,22 +147,22 @@ describe('IdeOverlayPanel', () => {
     expect(layerA).not.toHaveAttribute('hidden')
     expect(layerB).toHaveAttribute('hidden')
     expect(layerB).toHaveAttribute('inert')
+
+    // 工具栏只列当前 Environment 的标签。
+    expect(screen.getAllByTestId('ide-tab')).toHaveLength(1)
+    expect(tabFor(VIEW_A)).toBeVisible()
   })
 
   it('switches views within one Environment without unmounting either iframe', async () => {
     const user = userEvent.setup()
     const onSelectView = vi.fn()
-    const viewB = view({
-      environmentId: ENV_A,
-      viewId: VIEW_B,
-      directory: '/workspace/projects/b',
-      entryUrl: `/ide/${ENV_A}/${VIEW_B}/__ide/bootstrap?token=fixture-b`,
-    })
     const props = baseProps({
-      selectedViewId: VIEW_A,
       openedEnvironmentIds: [ENV_A],
       viewsByEnvironment: { [ENV_A]: [VIEW_A, VIEW_B] },
-      views: { [VIEW_A]: view({ environmentId: ENV_A, viewId: VIEW_A }), [VIEW_B]: viewB },
+      views: {
+        [VIEW_A]: view({ environmentId: ENV_A, viewId: VIEW_A }),
+        [VIEW_B]: view({ environmentId: ENV_A, viewId: VIEW_B, directory: DIRECTORY_B }),
+      },
       onSelectView,
     })
     const { rerender } = render(<IdeOverlayPanel {...props} />)
@@ -131,7 +171,16 @@ describe('IdeOverlayPanel', () => {
     const secondFrame = screen.getAllByTestId('ide-iframe')[1]
     expect(screen.getAllByTestId('ide-view-layer')[0]).not.toHaveAttribute('hidden')
     expect(screen.getAllByTestId('ide-view-layer')[1]).toHaveAttribute('hidden')
-    await user.click(screen.getByTestId('ide-tab-strip').querySelector(`[data-ide-view="${VIEW_B}"]`) as HTMLElement)
+    // 每个标签是 ide-tab 外壳：内部一个选择按钮 + 一个关闭按钮。
+    const tabWrappers = screen.getAllByTestId('ide-tab')
+    expect(tabWrappers).toHaveLength(2)
+    expect(within(tabWrappers[1]!).getAllByRole('button')).toHaveLength(2)
+    expect(tabSelectButton(VIEW_B)).toHaveTextContent('b')
+    expect(tabCloseButton(VIEW_B)).toHaveAccessibleName('关闭 · b')
+    expect(tabSelectButton(VIEW_A)).toHaveAttribute('aria-current', 'page')
+    expect(tabSelectButton(VIEW_B)).not.toHaveAttribute('aria-current')
+
+    await user.click(tabSelectButton(VIEW_B))
 
     expect(onSelectView).toHaveBeenCalledWith(VIEW_B)
     rerender(<IdeOverlayPanel {...props} selectedViewId={VIEW_B} />)
@@ -139,9 +188,11 @@ describe('IdeOverlayPanel', () => {
     expect(screen.getAllByTestId('ide-iframe')[1]).toBe(secondFrame)
     expect(screen.getAllByTestId('ide-view-layer')[0]).toHaveAttribute('hidden')
     expect(screen.getAllByTestId('ide-view-layer')[1]).not.toHaveAttribute('hidden')
+    expect(tabSelectButton(VIEW_B)).toHaveAttribute('aria-current', 'page')
+    expect(tabSelectButton(VIEW_A)).not.toHaveAttribute('aria-current')
   })
 
-  it('dispatches explicit environment, terminal, directory and collapse actions', async () => {
+  it('dispatches environment, explicit new view and collapse from the toolbar', async () => {
     const user = userEvent.setup()
     const props = baseProps()
     render(<IdeOverlayPanel {...props} />)
@@ -150,101 +201,137 @@ describe('IdeOverlayPanel', () => {
     await user.click(screen.getByRole('option', { name: 'remote-node' }))
     expect(props.onSelectEnvironment).toHaveBeenCalledWith(ENV_B)
 
-    await user.click(screen.getByTestId('ide-terminal-btn'))
-    expect(props.onOpenTerminal).toHaveBeenCalledWith(VIEW_A)
-
-    await user.click(screen.getByTestId('ide-open-directory-btn'))
-    const dialog = await screen.findByRole('dialog', { name: '打开宿主目录' })
-    expect(await within(dialog).findByTestId('ide-directory-location')).toHaveTextContent('/home/user')
-    expect(within(dialog).getByText('projects')).toBeVisible()
-    await user.click(within(dialog).getByRole('button', { name: '取消' }))
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '打开宿主目录' })).not.toBeInTheDocument()
-    })
+    await user.click(screen.getByTestId('ide-open-workspace-btn'))
+    expect(props.onOpenNewView).toHaveBeenCalledWith(ENV_A)
 
     await user.click(screen.getByTestId('ide-collapse-btn'))
     expect(props.onCollapse).toHaveBeenCalledTimes(1)
   })
 
-  it('records the switched directory only after the change succeeds', async () => {
+  it('keeps only the toolbar row when no view is open and offers an explicit new view', async () => {
+    const user = userEvent.setup()
+    const props = baseProps({
+      selectedViewId: null,
+      openedEnvironmentIds: [ENV_A],
+      viewsByEnvironment: {},
+      views: {},
+    })
+    render(<IdeOverlayPanel {...props} />)
+
+    expect(screen.queryAllByTestId('ide-tab')).toHaveLength(0)
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    // 无视图时正文不再渲染说明页。
+    const body = screen.getByTestId('ide-panel-body')
+    expect(body.querySelector('.ide-global-view-stack')).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('ide-opening-state')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ide-offline-state')).not.toBeInTheDocument()
+
+    expect(screen.getByRole('button', { name: '环境' })).toBeVisible()
+    expect(screen.getByTestId('ide-collapse-btn')).toBeVisible()
+    const openWorkspace = screen.getByTestId('ide-open-workspace-btn')
+    expect(openWorkspace).toBeEnabled()
+    await user.click(openWorkspace)
+    expect(props.onOpenNewView).toHaveBeenCalledWith(ENV_A)
+  })
+
+  it('keeps the toolbar without a workspace body when no environment is selected', () => {
+    render(<IdeOverlayPanel {...baseProps({
+      selectedEnvironmentId: null,
+      selectedViewId: null,
+      openedEnvironmentIds: [],
+      viewsByEnvironment: {},
+      views: {},
+    })} />)
+
+    expect(screen.getByRole('button', { name: '环境' })).toBeVisible()
+    expect(screen.queryByTestId('ide-open-workspace-btn')).not.toBeInTheDocument()
+    expect(screen.queryAllByTestId('ide-tab')).toHaveLength(0)
+    expect(screen.getByTestId('ide-panel-body').querySelector('.ide-global-view-stack')).toBeEmptyDOMElement()
+  })
+
+  it('disables the explicit new view while the environment is offline', () => {
+    render(<IdeOverlayPanel {...baseProps({
+      environments: [{ id: ENV_A, name: 'local-node', ready: false }],
+    })} />)
+
+    expect(screen.getByTestId('ide-open-workspace-btn')).toBeDisabled()
+  })
+
+  it('maps native open-folder to the selected view and reports a failed change on that view', async () => {
     const user = userEvent.setup()
     const onChangeDirectory = vi.fn()
       .mockResolvedValueOnce({ ok: false, message: 'directory-failed' })
       .mockResolvedValueOnce({ ok: true })
-    const readRecentDirectories = vi.fn().mockReturnValue(['/workspace/projects/previous'])
-    const recordRecentDirectory = vi.fn().mockReturnValue([DIRECTORY_A, '/workspace/projects/previous'])
-    render(
-      <IdeOverlayPanel
-        {...baseProps({ onChangeDirectory, readRecentDirectories, recordRecentDirectory })}
-      />,
-    )
+    render(<IdeOverlayPanel {...baseProps({ onChangeDirectory })} />)
 
-    await user.click(screen.getByTestId('ide-open-directory-btn'))
-    const dialog = await screen.findByRole('dialog', { name: '打开宿主目录' })
-    expect(readRecentDirectories).toHaveBeenCalledWith(ENV_A)
-    expect(within(dialog).getByText('/workspace/projects/previous')).toBeVisible()
+    postNative(nativeAction('open-folder', VIEW_A, DIRECTORY_B))
+    expect(onChangeDirectory).toHaveBeenCalledWith(VIEW_A, DIRECTORY_B)
+    expect(await screen.findByRole('alert')).toHaveTextContent('切换目录失败')
 
-    await user.click(within(dialog).getByTestId('ide-directory-confirm'))
-    expect(await within(dialog).findByTestId('ide-directory-error')).toHaveTextContent('切换目录失败')
-    expect(onChangeDirectory).toHaveBeenLastCalledWith(VIEW_A, DIRECTORY_A)
-    expect(recordRecentDirectory).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '忽略' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
-    await user.click(within(dialog).getByTestId('ide-directory-confirm'))
+    postNative(nativeAction('open-folder', VIEW_A, '/workspace/projects/c'))
     await waitFor(() => {
-      expect(recordRecentDirectory).toHaveBeenCalledWith(ENV_A, DIRECTORY_A)
+      expect(onChangeDirectory).toHaveBeenCalledTimes(2)
     })
+    expect(onChangeDirectory).toHaveBeenLastCalledWith(VIEW_A, '/workspace/projects/c')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('maps native new-window to an explicit view and close-workspace to the tab close', async () => {
+    const props = baseProps()
+    render(<IdeOverlayPanel {...props} />)
+
+    postNative(nativeAction('new-window'))
+    expect(props.onOpenNewView).toHaveBeenCalledWith(ENV_A)
+
+    postNative(nativeAction('close-workspace'))
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '打开宿主目录' })).not.toBeInTheDocument()
+      expect(props.onCloseEnvironment).toHaveBeenCalledWith(VIEW_A, false)
     })
   })
 
-  it('copies the directory path with in-place feedback instead of a new banner row', async () => {
-    vi.useFakeTimers()
-    try {
-      const write = vi.spyOn(navigator.clipboard, 'writeText')
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('denied'))
-      render(<IdeOverlayPanel {...baseProps()} />)
-      const panel = screen.getByTestId('ide-overlay-panel')
-      const panelChildren = panel.children.length
-      const button = screen.getByTestId('ide-copy-directory-btn')
+  it('does not create a view for native new-window while the environment is offline', () => {
+    const props = baseProps({ environments: [{ id: ENV_A, name: 'local-node', ready: false }] })
+    render(<IdeOverlayPanel {...props} />)
 
-      fireEvent.click(button)
-      await act(async () => {})
+    postNative(nativeAction('new-window'))
+    expect(props.onOpenNewView).not.toHaveBeenCalled()
+  })
 
-      // 反馈落在按钮原地：图标变 ✓、悬停说明与读屏状态同步，面板不插入横幅行。
-      expect(write).toHaveBeenCalledWith(DIRECTORY_A)
-      expect(button.querySelector('.lucide-check')).not.toBeNull()
-      expect(button).toHaveAttribute('title', '目录路径已复制')
-      expect(screen.getByRole('status')).toHaveTextContent('目录路径已复制')
-      expect(screen.getByRole('status')).toHaveClass('sr-only')
-      expect(panel.children.length).toBe(panelChildren)
-      expect(
-        screen.queryByText('目录路径已复制', { selector: '.ide-panel-warning-banner' }),
-      ).toBeNull()
+  it('accepts native actions only from the visible frame on this origin with the current binding', () => {
+    const props = baseProps({
+      openedEnvironmentIds: [ENV_A],
+      viewsByEnvironment: { [ENV_A]: [VIEW_A, VIEW_B] },
+      views: {
+        [VIEW_A]: view({ environmentId: ENV_A, viewId: VIEW_A }),
+        [VIEW_B]: view({ environmentId: ENV_A, viewId: VIEW_B }),
+      },
+    })
+    render(<IdeOverlayPanel {...props} />)
 
-      act(() => {
-        vi.advanceTimersByTime(1500)
-      })
-      expect(button).toHaveAttribute('title', '复制目录路径')
-      expect(button.querySelector('.lucide-copy')).not.toBeNull()
+    const rejected = '/workspace/projects/rejected'
+    // Studio 页面自身而不是 iframe。
+    postNative(nativeAction('open-folder', VIEW_A, rejected), { source: window })
+    // 同源之外的来源。
+    postNative(nativeAction('open-folder', VIEW_A, rejected), { origin: 'https://evil.example' })
+    // 隐藏标签的 iframe 不是当前工作台。
+    postNative(nativeAction('open-folder', VIEW_B, rejected), { frame: frameFor(VIEW_B) })
+    // 过期 bindingEpoch。
+    postNative({ ...nativeAction('open-folder', VIEW_A, rejected), bindingEpoch: '6' })
+    // 额外的命令字段不符合协议形状。
+    postNative({ ...nativeAction('open-folder', VIEW_A, rejected), command: 'workbench.action.terminal.new' })
+    // 控制字符路径不是可接受的目录。
+    postNative(nativeAction('open-folder', VIEW_A, '/workspace/projects/\u0001crafted'))
 
-      // 剪贴板与兜底都失败时同样是原地红色 !，仍然不新增行。
-      fireEvent.click(button)
-      await act(async () => {})
-      expect(button.querySelector('.lucide-circle-alert')).not.toBeNull()
-      expect(button).toHaveClass('is-copy-failed')
-      expect(button).toHaveAttribute('title', '无法复制目录路径')
-      expect(panel.children.length).toBe(panelChildren)
+    expect(props.onChangeDirectory).not.toHaveBeenCalled()
+    expect(props.onOpenNewView).not.toHaveBeenCalled()
+    expect(props.onCloseEnvironment).not.toHaveBeenCalled()
 
-      act(() => {
-        vi.advanceTimersByTime(3000)
-      })
-      expect(button).toHaveAttribute('title', '复制目录路径')
-      expect(button).not.toHaveClass('is-copy-failed')
-    } finally {
-      vi.useRealTimers()
-    }
+    // 正向对照：当前可见工作台的有效动作照常生效。
+    postNative(nativeAction('open-folder', VIEW_A, '/workspace/projects/accepted'))
+    expect(props.onChangeDirectory).toHaveBeenCalledWith(VIEW_A, '/workspace/projects/accepted')
   })
 
   it('distinguishes unknown and unavailable control in explicit force-close confirmation', async () => {
@@ -256,7 +343,7 @@ describe('IdeOverlayPanel', () => {
     })
     render(<IdeOverlayPanel {...baseProps({ onCloseEnvironment })} />)
 
-    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(tabCloseButton(VIEW_A))
     expect(await screen.findByRole('alertdialog')).toHaveTextContent('IDE 控制通道不可用，关闭请求未发送。')
     expect(onCloseEnvironment).toHaveBeenCalledWith(VIEW_A, false)
   })
@@ -302,18 +389,17 @@ describe('IdeOverlayPanel', () => {
         onCloseEnvironment={commands.closeView} onDismissCloseError={commands.dismissCloseError} />
     }
     render(<Harness />)
-    const tab = (id: string) => screen.getByTestId('ide-tab-strip').querySelector(`[data-ide-view="${id}"]`) as HTMLElement
-    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(tabCloseButton(VIEW_A))
     expect(closeIdeView).toHaveBeenCalledWith(ENV_A, VIEW_A, expect.objectContaining({ discard: false }))
-    await user.click(tab(VIEW_B))
+    await user.click(tabSelectButton(VIEW_B))
     await act(async () => { rejectClose(new ApiError('test close error', 503, 'unavailable', undefined, code)) })
     expect(screen.queryByTestId('ide-close-error')).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
 
-    await user.click(tab(VIEW_A))
+    await user.click(tabSelectButton(VIEW_A))
     expect(screen.getByTestId('ide-close-error')).toHaveTextContent(message)
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(screen.getByTestId('ide-close-btn')).not.toBeDisabled()
+    expect(tabCloseButton(VIEW_A)).not.toBeDisabled()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(closeIdeView).toHaveBeenCalledTimes(1)
   })
@@ -323,7 +409,7 @@ describe('IdeOverlayPanel', () => {
     const onCloseEnvironment = vi.fn().mockResolvedValue({ ok: false, requiresForceConfirmation: true })
     const props = baseProps({ onCloseEnvironment })
     const { rerender } = render(<IdeOverlayPanel {...props} />)
-    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(tabCloseButton(VIEW_A))
     expect(await screen.findByRole('alertdialog')).toBeVisible()
 
     rerender(<IdeOverlayPanel {...props} views={{
@@ -340,7 +426,7 @@ describe('IdeOverlayPanel', () => {
       .mockResolvedValueOnce({ ok: true, requiresForceConfirmation: false })
     render(<IdeOverlayPanel {...baseProps({ onCloseEnvironment })} />)
 
-    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(tabCloseButton(VIEW_A))
 
     const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
     expect(dialog).toHaveTextContent('关闭结果未知。')
@@ -357,7 +443,6 @@ describe('IdeOverlayPanel', () => {
     const user = userEvent.setup()
     const onRetryClaim = vi.fn()
     const onOpenNewView = vi.fn()
-    const onReloadEnvironments = vi.fn()
     const reconciling = view({
       environmentId: ENV_A,
       viewId: VIEW_A,
@@ -372,7 +457,6 @@ describe('IdeOverlayPanel', () => {
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
         onOpenNewView,
-        onReloadEnvironments,
       })} />,
     )
 
@@ -393,7 +477,6 @@ describe('IdeOverlayPanel', () => {
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
         onOpenNewView,
-        onReloadEnvironments,
       })} />,
     )
     expect(screen.getByTestId('ide-view-gone')).toBeVisible()
@@ -414,7 +497,6 @@ describe('IdeOverlayPanel', () => {
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
         onOpenNewView,
-        onReloadEnvironments,
       })} />,
     )
     expect(screen.getByTestId('ide-view-detached')).toBeVisible()
@@ -500,19 +582,6 @@ describe('IdeOverlayPanel', () => {
     expect(screen.queryByTestId('ide-connecting')).not.toBeInTheDocument()
     expect(screen.queryByTestId('ide-reconnecting')).not.toBeInTheDocument()
     expect(screen.queryByTestId('ide-connection-stopped')).not.toBeInTheDocument()
-  })
-
-  it('renders the environment selector when no environment was supplied', () => {
-    render(
-      <IdeOverlayPanel {...baseProps({
-        selectedEnvironmentId: null,
-        openedEnvironmentIds: [],
-        views: {},
-      })} />,
-    )
-
-    expect(screen.getByTestId('ide-select-environment-state')).toBeVisible()
-    expect(screen.getByText('请选择一个环境以打开 IDE')).toBeVisible()
   })
 
   it('does not mount any panel surface while collapsed but keeps iframe DOM addressable', () => {
