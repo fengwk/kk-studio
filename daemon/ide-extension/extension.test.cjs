@@ -76,13 +76,12 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
       updateWorkspaceFolders(start, remove, ...added) {
         calls.updateWorkspaceFolders.push([start, remove, added])
         if (options.updateWorkspaceFolders) { return options.updateWorkspaceFolders(start, remove, ...added) }
-        // A workspace-file window applies folder changes in place: the live list changes and the
-        // workbench reports it, which is what the managed directory change waits for.
+        // VS Code exposes the optimistic folder list before the workbench confirms it.
         const next = vscode.workspace.workspaceFolders.slice()
         next.splice(start, remove, ...added.map((folder) => ({ uri: folder.uri })))
         vscode.workspace.workspaceFolders = next
         const notify = () => { for (const listener of [...folderListeners]) { listener() } }
-        if (options.syncFolderEvent) { notify() } else { setImmediate(notify) }
+        if (options.syncFolderEvent) { notify() } else if (!options.deferFolderEvent) { setImmediate(notify) }
         return true
       },
       async openTextDocument(uri) {
@@ -536,6 +535,28 @@ test('handles a target notification inside the folder update before restarting',
     assert.deepEqual([start, remove], [0, 2])
     assert.deepEqual(fake.vscode.workspace.workspaceFolders.map((folder) => folder.uri.fsPath), ['/target'])
     assert.deepEqual(fake.calls.commands, ['workbench.action.reloadWindow'])
+  } finally { context.host.dispose() }
+})
+
+test('waits for a workbench event even when the folder update exposes the target immediately', async () => {
+  const fake = fakeVscode(WORKSPACE, ['/home/user'], { deferFolderEvent: true })
+  const context = setup(fake)
+  try {
+    await connected(context)
+    const stream = context.network.streams[0]
+    stream.response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', directory: '/target' })}\n`)
+    await waitFor(() => fake.calls.updateWorkspaceFolders.length === 1)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(fake.vscode.workspace.workspaceFolders.map((folder) => folder.uri.fsPath), ['/target'])
+    assert.equal(stream.request.destroyed, false)
+    assert.deepEqual(fake.calls.commands, [])
+
+    // The workbench confirms the same list later, without changing the getter's value.
+    fake.fireFolders()
+    assert.deepEqual(fake.calls.commands, ['workbench.action.reloadWindow'])
+    assert.equal(stream.request.destroyed, true)
+    assert.equal(fake.folderListeners.size, 0)
+    assert.equal(context.network.posts.some((post) => post.payload.id === 'change'), false)
   } finally { context.host.dispose() }
 })
 

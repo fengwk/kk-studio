@@ -207,7 +207,7 @@ function createBridgeHost(vscode, options) {
   })
 
   const folderSubscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-    if (!isInactive() && !actions.observeDirectoryChange()) {
+    if (!isInactive() && !actions.onWorkspaceFoldersChanged()) {
       // Outside a managed change, refresh the registration to describe the live folders.
       failStream()
     }
