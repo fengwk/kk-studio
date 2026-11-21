@@ -36,7 +36,9 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await invalid.focus()
     await expect(invalid).toHaveCSS('border-top-color', 'rgb(240, 133, 133)')
     // 等到能力读取完成、模型预设控件可用，再测量布局与截图。
-    await expect(model.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
+    const cacheRetention = model.getByRole('button', { name: '提示缓存留存 1' })
+    await expect(cacheRetention).toBeEnabled()
+    await expect(cacheRetention).toHaveAttribute('data-value', 'NONE')
     await expect(model.getByLabel('供应商', { exact: true })).toBeDisabled()
     await expect(model.getByRole('textbox', { name: '模型 ID', exact: true }))
       .toHaveJSProperty('required', true)

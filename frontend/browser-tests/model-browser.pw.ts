@@ -610,16 +610,21 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await pricing.getByRole('button', { name: '创建调价草稿', exact: true }).click()
     await expect(planSelect).toHaveText(futureDate)
 
-    // 同一草稿内两条区间重叠：行内直接报冲突，不靠保存时才提示。
+    // 每条区间都有有效的覆盖价，确保行内只报区间重叠，不靠保存时才提示。
     const rangeGroup = pricing.locator('.pricing-plan-section').nth(1)
-    for (const [min, max] of [['0', '1000'], ['500', '2000']]) {
+    for (const [min, max, input] of [['0', '1000', '1.5'], ['500', '2000', '2']]) {
       await rangeGroup.getByRole('button', { name: '添加输入档位', exact: true }).click()
       const row = rangeGroup.locator('.pricing-rule-details').last()
       await expect(row).toHaveAttribute('open', '')
       await row.getByLabel('起点（含）', { exact: true }).fill(min)
       await row.getByLabel('终点（不含）', { exact: true }).fill(max)
+      await row.getByLabel(RATE_LABELS.input, { exact: true }).fill(input)
     }
     await expect(rangeGroup.getByRole('alert')).toHaveCount(2)
+    await expect(rangeGroup.getByRole('alert')).toHaveText([
+      '输入区间与规则 2 重叠。',
+      '输入区间与规则 1 重叠。',
+    ])
 
     // 切回基础方案后保存：冲突的方案必须被重新选中并显示，而不是静默提交。
     await selectListOption(page, planSelect, '基础方案 · 当前生效')
