@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -38,11 +39,11 @@ func TestEditKeepsDeclaredEncodingAndRefusesChanges(t *testing.T) {
 	}
 }
 
-// An edit of a lossy file rewrites the U+FFFD view it showed and discloses the loss in the review;
+// An edit that writes literal U+FFFD discloses the original decode loss, while preserving untouched bytes;
 // binary files and declarations the codec cannot use are still refused before any write.
 func TestEditDisclosesLossyDecodeAndRefusesCodecFailures(t *testing.T) {
-	lossy := writeFixture(t, "lossy.txt", []byte("bad: \xff\n"))
-	preview := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(lossy, replace("\ufffd", "\ufffd!")), nil)
+	lossy := writeFixture(t, "lossy.txt", []byte("edit: \xff\nkeep: \xfe\n"))
+	preview := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(lossy, replace("edit: \ufffd", "edit: \ufffd!")), nil)
 	if preview.Error {
 		t.Fatalf("preview=%#v", preview)
 	}
@@ -50,14 +51,18 @@ func TestEditDisclosesLossyDecodeAndRefusesCodecFailures(t *testing.T) {
 	if err := json.Unmarshal(preview.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
 	}
-	if review.LossyDecode == nil || review.LossyDecode.Encoding != "UTF-8" || review.LossyDecode.InvalidSequences != 1 {
+	if review.LossyDecode == nil || review.LossyDecode.Encoding != "UTF-8" || review.LossyDecode.InvalidSequences != 2 {
 		t.Fatalf("review=%#v", review)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(lossy, replace("\ufffd", "\ufffd!")), nil)
-	if result.Error || !strings.Contains(result.Contents[0].Text, "Note: the original file contains 1 byte sequence that is not valid UTF-8, shown as U+FFFD (�); those still present were saved as U+FFFD, so their original bytes are lost.") {
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(lossy, replace("edit: \ufffd", "edit: \ufffd!")), nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "Note: the edit saved literal U+FFFD in replacements after 2 original UTF-8 decode replacements; untouched bytes were preserved.") {
 		t.Fatalf("result=%#v", result)
 	}
-	if written := mustRead(t, lossy); string(written) != "bad: \xef\xbf\xbd!\n" {
+	var details struct{ EditReview EditReview }
+	if err := json.Unmarshal(result.Details, &details); err != nil || !reflect.DeepEqual(details.EditReview, review) {
+		t.Fatalf("preview=%+v, commit=%s", review, result.Details)
+	}
+	if written := mustRead(t, lossy); string(written) != "edit: \xef\xbf\xbd!\nkeep: \xfe\n" {
 		t.Fatalf("bytes=%x", written)
 	}
 	binary := writeFixture(t, "binary.dat", []byte{'a', 0, 'b'})

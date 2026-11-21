@@ -317,11 +317,14 @@ func TestEditCancellingEffectsOnLossyFileDoesNotWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	edits := []map[string]any{replace("left/", ""), replace("right", "left/right")}
-	updated, _, replacements, err := applyPlannedEdits(path, "bad: \ufffdleft/right", []editEntry{
+	decoded := "bad: \ufffdleft/right"
+	source := newEditSource(decoded)
+	replacements, err := planEdits(path, source, []editEntry{
 		{OldString: stringPointer("left/"), NewString: stringPointer("")},
 		{OldString: stringPointer("right"), NewString: stringPointer("left/right")},
 	})
-	if err != nil || updated != "bad: \ufffdleft/right" || len(replacements) != 2 {
+	updated, _ := applyEdits(decoded, source, replacements)
+	if err != nil || updated != decoded || len(replacements) != 2 {
 		t.Fatalf("updated=%q replacements=%d err=%v", updated, len(replacements), err)
 	}
 	call, err := json.Marshal(editArgs(path, edits...))
