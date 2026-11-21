@@ -154,6 +154,7 @@ function renderStage(options: {
     createLink: vi.fn(),
     deleteLink: vi.fn(),
     uploadFiles: vi.fn(async () => undefined),
+    toggleAddMenu: vi.fn(),
     completeInitialFit: vi.fn(),
     editTextNode: vi.fn(),
     renameNode: vi.fn(),
@@ -662,5 +663,27 @@ describe('CanvasStage conditional rendering and viewport', () => {
 
     view.unmount()
     expect(flowHarness.fitView).not.toHaveBeenCalled()
+  })
+
+  it('guides an empty canvas with the same add entry', () => {
+    const { actions, flow } = renderStage({ snapshot: snapshotDTO({ nodes: [] }) })
+
+    expect(flow().nodes).toHaveLength(0)
+    const guidance = screen.getByRole('note')
+    expect(guidance).toHaveTextContent('先添加资源或 Function 开始')
+    // 引导说明可添加资源、Function 节点并运行 Function。
+    expect(guidance).toHaveTextContent('图片、视频、音频与文本资源')
+    expect(guidance).toHaveTextContent('选中 Function 节点即可运行')
+
+    // 与左侧 `+` 共用同一个添加入口：点击后打开同一个菜单。
+    const action = screen.getByRole('button', { name: '添加资源或 Function' })
+    expect(action).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(action)
+    expect(actions.toggleAddMenu).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops the empty-canvas guidance once the canvas has a node', () => {
+    renderStage({})
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 })

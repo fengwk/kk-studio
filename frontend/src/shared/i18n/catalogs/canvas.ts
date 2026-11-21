@@ -593,4 +593,12 @@ export const canvasCatalog = {
     'en-US': 'The storage service returned an invalid upload handle',
     'zh-CN': '存储服务返回了无效的上传句柄',
   },
+  'canvas.empty.title': {
+    'en-US': 'Add a resource or Function to start',
+    'zh-CN': '先添加资源或 Function 开始',
+  },
+  'canvas.empty.description': {
+    'en-US': 'Drop media files here, or add image, video, audio, and text resources from the + menu. Select a Function node to run it.',
+    'zh-CN': '可将媒体文件拖到这里，也可从 + 菜单添加图片、视频、音频与文本资源；选中 Function 节点即可运行。',
+  },
 } satisfies LocaleCatalog

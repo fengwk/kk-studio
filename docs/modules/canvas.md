@@ -90,6 +90,8 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 草稿记录编辑基线与 generation。远端更新只推进确认层，ACK 只清除对应操作和 generation；dirty 输入、编辑器和选择保留。请求发送后冻结 ID、参数与前置条件，网络重试沿用原请求；解决冲突时创建新请求。去重记录与业务修改同事务提交，精确重试返回原接受回执。浏览器草稿、IndexedDB 存储与冲突恢复细节见 [Frontend](frontend.md)。
 
+编辑器头部只呈现画布标题与保存状态：`revision` 属于同步协议与诊断信息，不作为头部版本号展示。空白画布显示不遮挡平移、框选与拖放的引导，说明可以添加资源与 Function 节点、并在选中 Function 节点后运行；引导自带与左侧 `+` 相同的添加入口，加入第一个节点后自动消失。
+
 ## 持久化与读模型
 
 持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`CanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。

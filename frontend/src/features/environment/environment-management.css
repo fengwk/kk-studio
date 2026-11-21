@@ -105,6 +105,14 @@
 }
 
 /* --- Environment Events --- */
+/* 读取中、失败与空态各自占位：失败时错误块与重试入口纵向排列，窄屏不并排挤压。 */
+.env-events-failure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .env-events-list {
   display: flex;
   flex-direction: column;

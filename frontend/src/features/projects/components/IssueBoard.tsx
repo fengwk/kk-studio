@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { Badge } from '@/shared/ui/data/Badge'
 import { useI18n } from '@/shared/i18n'
 import { IssueCard } from './IssueCard'
 import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
@@ -37,6 +36,12 @@ export function IssueBoard({
     [workflow, t],
   )
 
+  // 阶段编码到名称的映射：列头、卡片与搜索都以名称为主，编码只在提示里出现。
+  const stateNames = useMemo(
+    () => new Map(states.map((st) => [st.state, st.name])),
+    [states],
+  )
+
   // 状态与允许转移的映射表
   const stateNextMap = useMemo(() => {
     const map = new Map<string, string[]>()
@@ -53,13 +58,15 @@ export function IssueBoard({
       if (!q) {
         return true
       }
+      const stageName = stateNames.get(item.issue.state) ?? ''
       return (
         item.issue.title.toLowerCase().includes(q) ||
         item.issue.number.includes(q) ||
+        stageName.toLowerCase().includes(q) ||
         item.issue.state.toLowerCase().includes(q)
       )
     })
-  }, [issues, searchQuery])
+  }, [issues, searchQuery, stateNames])
 
   // 按状态自然 token 组织 Issue 列表
   const issuesByState = useMemo(() => {
@@ -89,10 +96,8 @@ export function IssueBoard({
           return (
             <div key={st.state} className="project-board-column" data-state={st.state}>
               <div className="column-header">
-                <div className="column-header-left">
-                  <h3 className="column-title">{st.name}</h3>
-                  <Badge tone="info" mono>{st.state}</Badge>
-                </div>
+                {/* 内部状态码只在提示里保留，列头以阶段名称为主。 */}
+                <h3 className="column-title" title={st.state}>{st.name}</h3>
                 <span className="column-count">{colIssues.length}</span>
               </div>
 
@@ -106,6 +111,7 @@ export function IssueBoard({
                     <IssueCard
                       key={item.issue.id}
                       item={item}
+                      stateNames={stateNames}
                       availableNextStates={stateNextMap.get(item.issue.state) ?? []}
                       onClick={() => onSelectIssue(item.issue.id)}
                       onTransition={(toState) =>
@@ -126,9 +132,7 @@ export function IssueBoard({
         {issuesByState.unknownStateIssues.length > 0 && (
           <div className="project-board-column">
             <div className="column-header">
-              <div className="column-header-left">
-                <h3 className="column-title">{t('projects.board.otherStates')}</h3>
-              </div>
+              <h3 className="column-title">{t('projects.board.otherStates')}</h3>
               <span className="column-count">
                 {issuesByState.unknownStateIssues.length}
               </span>
@@ -138,6 +142,7 @@ export function IssueBoard({
                 <IssueCard
                   key={item.issue.id}
                   item={item}
+                  stateNames={stateNames}
                   onClick={() => onSelectIssue(item.issue.id)}
                 />
               ))}

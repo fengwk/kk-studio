@@ -26,6 +26,12 @@ interface UseIssueEvidenceInput {
 interface UseIssueEvidenceResult {
   /** 本地刚上传的证据在前、服务端列表在后。 */
   evidences: IssueEvidenceDTO[]
+  /** 权威计数：服务端读取未成功时为 null，不能把未知或本地乐观列表当成权威计数。 */
+  evidenceCount: number | null
+  isLoading: boolean
+  loadFailed: boolean
+  isRetrying: boolean
+  retry: () => void
   isUploading: boolean
   fileInputRef: RefObject<HTMLInputElement | null>
   handleFileSelected: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>
@@ -34,6 +40,7 @@ interface UseIssueEvidenceResult {
 /**
  * Issue 公开证据：服务端列表查询、本地乐观列表与上传（校验、哈希、预留、直传、完成、挂接）。
  * 写操作进行中或有未决侧车时拒绝上传，拒绝理由沿用统一的操作错误位。
+ * 查询状态原样上抛：加载中、失败与真正的空列表由调用方分别呈现。
  */
 export function useIssueEvidence({
   isOpen,
@@ -51,7 +58,7 @@ export function useIssueEvidence({
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const evidenceQueryKey = queryKeys.projects.evidence(projectId, issueId ?? '')
-  const { data: serverEvidences = [] } = useQuery({
+  const evidenceQuery = useQuery({
     queryKey: evidenceQueryKey,
     queryFn: () => (api.listIssueEvidence ? api.listIssueEvidence(issueId!) : Promise.resolve([])),
     enabled: isOpen && Boolean(issueId),
@@ -68,7 +75,9 @@ export function useIssueEvidence({
     }
   }, [isOpen])
 
-  const evidences = mergeEvidences(localEvidences, serverEvidences)
+  const evidences = mergeEvidences(localEvidences, evidenceQuery.data ?? [])
+  // 计数只来自成功的服务端读取：加载中、失败以及仅有本地乐观上传时都不写数字。
+  const evidenceCount = evidenceQuery.isSuccess ? evidences.length : null
 
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -130,5 +139,15 @@ export function useIssueEvidence({
     }
   }
 
-  return { evidences, isUploading, fileInputRef, handleFileSelected }
+  return {
+    evidences,
+    evidenceCount,
+    isLoading: evidenceQuery.isPending,
+    loadFailed: evidenceQuery.isError,
+    isRetrying: evidenceQuery.isFetching,
+    retry: () => void evidenceQuery.refetch({ cancelRefetch: false }),
+    isUploading,
+    fileInputRef,
+    handleFileSelected,
+  }
 }

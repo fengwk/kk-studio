@@ -1,24 +1,37 @@
-import { Upload } from 'lucide-react'
+import { CircleAlert, Upload } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 import type { StorageService } from '@/shared/api/storage-service'
 import { Button } from '@/shared/ui/controls/Button'
 import { EmptyState } from '@/shared/ui/feedback/EmptyState'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { IssueEvidenceDTO } from '@/shared/api/generated/contracts'
 import { EvidenceRow } from './EvidenceRow'
 
 interface IssueEvidencePaneProps {
   evidences: IssueEvidenceDTO[]
   storageService: StorageService
+  isLoading: boolean
+  loadFailed: boolean
+  isRetrying: boolean
+  onRetry: () => void
   isUploading: boolean
   uploadDisabled: boolean
   fileInputRef: React.RefObject<HTMLInputElement | null>
   onFileSelected: (event: React.ChangeEvent<HTMLInputElement>) => void
 }
 
-/** 证据 tab：上传入口与公开证据列表。 */
+/**
+ * 证据 tab：上传入口与公开证据列表。
+ *
+ * <p>加载中、读取失败与真正的空列表分别呈现：失败就地说明并给重试，只有成功且为空才说没有证据。
+ */
 export function IssueEvidencePane({
   evidences,
   storageService,
+  isLoading,
+  loadFailed,
+  isRetrying,
+  onRetry,
   isUploading,
   uploadDisabled,
   fileInputRef,
@@ -45,14 +58,31 @@ export function IssueEvidencePane({
         </Button>
       </div>
 
-      {evidences.length === 0 ? (
-        <EmptyState title={t('projects.issue.emptyEvidence')} />
+      {isLoading ? (
+        <StateBlock title={t('projects.issue.loadingEvidence')} />
       ) : (
-        <div className="evidence-list">
-          {evidences.map((evidence) => (
-            <EvidenceRow key={evidence.blobId} evidence={evidence} storageService={storageService} />
-          ))}
-        </div>
+        <>
+          {/* 失败保留已知道的证据，只在上方说明读取失败并可重试。 */}
+          {loadFailed && (
+            <div className="evidence-feedback" role="alert">
+              <CircleAlert size={16} aria-hidden="true" />
+              <span>{t('projects.issue.evidenceLoadFailed')}</span>
+              <Button size="compact" variant="ghost" disabled={isRetrying} onClick={onRetry}>
+                {t('shared.retry')}
+              </Button>
+            </div>
+          )}
+
+          {evidences.length > 0 ? (
+            <div className="evidence-list">
+              {evidences.map((evidence) => (
+                <EvidenceRow key={evidence.blobId} evidence={evidence} storageService={storageService} />
+              ))}
+            </div>
+          ) : loadFailed ? null : (
+            <EmptyState title={t('projects.issue.emptyEvidence')} />
+          )}
+        </>
       )}
     </div>
   )

@@ -150,16 +150,6 @@
   font-size: var(--font-size-xs);
 }
 
-.canvas-feature .version-pill {
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-}
-
 .canvas-feature .canvas-editor-state {
   display: grid;
   min-height: 360px;
@@ -1355,6 +1345,52 @@
   background: var(--surface-active);
 }
 
+/* 空画布引导：整层不接收指针事件，只有添加按钮可交互，不挡平移、框选与拖放。 */
+.canvas-feature .canvas-empty-guidance {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: var(--space-6);
+  pointer-events: none;
+}
+
+.canvas-feature .canvas-empty-guidance-body {
+  display: grid;
+  width: min(280px, 100%);
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+
+.canvas-feature .canvas-empty-guidance-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.canvas-feature .canvas-empty-guidance-description {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.canvas-feature .canvas-empty-guidance-action {
+  pointer-events: auto;
+}
+
+.canvas-feature .canvas-empty-guidance-action .canvas-plus-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .canvas-feature .canvas-upload-progress {
   position: fixed;
   right: 18px;
@@ -1582,10 +1618,6 @@
   .canvas-feature .canvas-zoom-controls button {
     min-width: 36px;
     height: 36px;
-  }
-
-  .canvas-feature .version-pill {
-    display: none;
   }
 }
 

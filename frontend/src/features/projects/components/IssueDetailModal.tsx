@@ -131,7 +131,7 @@ export function IssueDetailModal({
           runs: detail?.runs?.length ?? 0,
           stageBudgets: detail?.stageBudgets?.length ?? 0,
           agentThreads: detail?.agentThreads?.length ?? 0,
-          evidence: evidence.evidences.length,
+          evidence: evidence.evidenceCount,
         }}
       >
         <IssueDetailTabPanels

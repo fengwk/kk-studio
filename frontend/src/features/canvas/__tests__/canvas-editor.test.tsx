@@ -243,7 +243,7 @@ describe('CanvasEditor state rendering', () => {
     expect(await screen.findByTestId('library')).toBeInTheDocument()
   })
 
-  it('renders the loaded document without an unsupported Agent dock', () => {
+  it('renders the loaded document without an unsupported Agent dock or a header version badge', () => {
     const { rerenderWith } = renderEditor({
       snapshot: snapshotDTO(),
       query: { isLoading: false },
@@ -251,7 +251,8 @@ describe('CanvasEditor state rendering', () => {
     expect(screen.getByLabelText('Canvas 资源编辑器')).toBeInTheDocument()
     expect(screen.getByText('Board')).toBeInTheDocument()
     expect(screen.getByText('已保存')).toBeInTheDocument()
-    expect(screen.getByText('v3')).toBeInTheDocument()
+    // 版本号留在同步协议与诊断信息里，不占编辑器头部主视觉。
+    expect(screen.queryByText('v3')).not.toBeInTheDocument()
     expect(screen.getByTestId('canvas-stage')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '返回画布库' })).toHaveAttribute('href', '/canvas')
 

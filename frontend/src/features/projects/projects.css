@@ -163,12 +163,6 @@
   border-bottom: 1px solid var(--border);
 }
 
-.column-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .column-title {
   margin: 0;
   font-size: var(--font-size-sm);
@@ -275,11 +269,12 @@
   gap: 4px;
 }
 
-.issue-card-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+/* Run 摘要：执行事实用文字说明，不与列头重复当前阶段。 */
+.issue-card-meta {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+  line-height: 1.3;
 }
 
 .issue-block-reason {
@@ -303,6 +298,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
+}
+
+/* 目标阶段名称由项目配置，长名称在窄卡片内换行，不把操作挤出卡片。 */
+.issue-card-transitions .ghost-btn {
+  max-width: 100%;
+  height: auto;
+  min-height: 28px;
+  padding-block: 3px;
+  white-space: normal;
 }
 
 /* ---------- 反馈 ---------- */
@@ -780,6 +785,19 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 读取失败就地说明并给重试；不冒充空数据。 */
+.evidence-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--fg);
+  font-size: var(--font-size-sm);
 }
 
 .evidence-card {

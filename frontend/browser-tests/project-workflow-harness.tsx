@@ -12,7 +12,8 @@ import { IssueDetailModal } from '@/features/projects/components/IssueDetailModa
 import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 
-setLocale('zh-CN')
+// 语言由用例显式指定：`?locale=en-US` 之外的默认仍是中文，断言不依赖浏览器偏好。
+setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 })
