@@ -70,7 +70,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await expect(effortInput).toHaveValue('high')
   })
 
-  test('Ai Navigation: Skill Packages tab localized to 技能包 in zh-CN and Skill Packages in en-US', async ({
+  test('Ai Navigation: Skill Package tab localized to 技能包 in zh-CN and Skill Package in en-US', async ({
     page,
   }) => {
     await page.goto('/browser-tests/catalog-i18n-harness.html')
@@ -82,7 +82,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
 
     // 切换至 en-US
     await page.click('#toggle-locale-btn')
-    const skillPkgEnLink = page.getByRole('link', { name: 'Skill Packages' })
+    const skillPkgEnLink = page.getByRole('link', { name: 'Skill Package' })
     await expect(skillPkgEnLink).toBeVisible()
     await expect(page.getByRole('link', { name: '技能包' })).toHaveCount(0)
 
@@ -99,7 +99,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await page.click('#tab-skills-btn')
 
     // 1. 中文卡片与状态展示
-    await expect(page.getByRole('button', { name: '创建技能包' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建技能包' })).toBeVisible()
     await expect(page.getByText('核心开发技能集')).toBeVisible()
 
     // 状态 pill
@@ -116,7 +116,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
 
     // 2. 实时切换为 en-US
     await page.click('#toggle-locale-btn')
-    await expect(page.getByRole('button', { name: 'Create Package' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'New Skill Package' })).toBeVisible()
     await expect(pills.nth(0)).toHaveText('Unchecked')
     await expect(pills.nth(1)).toHaveText('Update available')
     await expect(pills.nth(2)).toHaveText('Check failed')
@@ -125,8 +125,8 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await expect(page.getByText('Error', { exact: true })).toBeVisible()
 
     // 3. 创建弹窗与校验提示（en-US）
-    await page.click('button:has-text("Create Package")')
-    const createModal = page.getByRole('dialog', { name: 'Create Package' })
+    await page.click('button:has-text("New Skill Package")')
+    const createModal = page.getByRole('dialog', { name: 'New Skill Package' })
     await expect(createModal).toBeVisible()
 
     // 测试取消按钮（Cancel）
@@ -136,7 +136,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await expect(createModal).toHaveCount(0)
 
     // 重新打开并测试非法名称符号校验
-    await page.click('button:has-text("Create Package")')
+    await page.click('button:has-text("New Skill Package")')
     const nameInput = page.getByRole('dialog').getByPlaceholder('my-skills')
     await nameInput.fill('invalid:name@pkg')
     await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click()
@@ -150,7 +150,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await page.getByRole('button', { name: 'Details core-tools' }).click()
     const detailModal = page.getByRole('dialog', { name: 'Details: core-tools' })
     await expect(detailModal).toBeVisible()
-    await detailModal.getByRole('button', { name: 'Delete Package core-tools' }).click()
+    await detailModal.getByRole('button', { name: 'Delete Skill Package core-tools' }).click()
     const deleteModal = page.getByRole('alertdialog')
     await expect(deleteModal).toBeVisible()
     await expect(deleteModal).toContainText('Are you sure you want to delete skill package "core-tools"?')

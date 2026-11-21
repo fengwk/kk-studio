@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Button } from '@/shared/ui/controls/Button'
-import { SearchField } from '@/shared/ui/controls/SearchField'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { useI18n } from '@/shared/i18n'
+import { ListPageHeader } from '@/platform/shell/ListPageHeader'
 import { CreateProjectModal } from './components/CreateProjectModal'
 import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
@@ -39,23 +39,23 @@ export function ProjectsPage({
   const [deletingProject, setDeletingProject] = useState<ProjectDTO | null>(null)
 
   return (
-    <main className="projects-container">
-      <header className="projects-header">
-        <h1 className="projects-title">{t('projects.pageTitle')}</h1>
-        <div className="projects-controls">
-          <SearchField
-            value={data.searchQuery}
-            onChange={data.setSearchQuery}
-            placeholder={t('projects.searchPlaceholder')}
-            aria-label={t('projects.searchLabel')}
-          />
+    <main className="screen-body">
+      <ListPageHeader
+        title={t('projects.pageTitle')}
+        search={{
+          value: data.searchQuery,
+          onChange: data.setSearchQuery,
+          placeholder: t('projects.searchPlaceholder'),
+          'aria-label': t('projects.searchLabel'),
+        }}
+        actions={(
           <Checkbox
             checked={data.includeArchived}
             onChange={data.setIncludeArchived}
             label={t('projects.includeArchived')}
           />
-        </div>
-      </header>
+        )}
+      />
 
       {data.errorMessage && (
         <div className="projects-status">

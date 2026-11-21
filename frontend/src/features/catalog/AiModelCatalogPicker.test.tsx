@@ -126,7 +126,7 @@ describe('ModelCatalogPicker request fencing', () => {
     fireEvent.click(titleButton)
 
     expect(screen.getByText('已忽略地区倍率，统计费用可能低于实际账单')).toBeInTheDocument()
-    expect(screen.getByText('网页搜索附加费用未计入Token价格')).toBeInTheDocument()
+    expect(screen.getByText('网页搜索附加费用未计入 Token 价格')).toBeInTheDocument()
     expect(screen.getByText('custom backend issue')).toBeInTheDocument()
 
     // 填入时保留完整 candidate 参数交由 apply 消费

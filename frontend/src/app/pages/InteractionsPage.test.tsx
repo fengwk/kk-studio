@@ -143,7 +143,7 @@ describe('InteractionsPage', () => {
 
     const { container } = render(<InteractionsPage />, { wrapper })
     expect(await screen.findByRole('heading', { name: '同一会话' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Chat · 同一会话' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '对话 · 同一会话' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '会话: 同一会话' })).not.toBeInTheDocument()
     expect(container.querySelectorAll('.interactions-session-group')).toHaveLength(1)
     expect(screen.getByText('new')).toBeInTheDocument()
@@ -165,9 +165,9 @@ describe('InteractionsPage', () => {
     })
 
     const { container } = render(<InteractionsPage />, { wrapper })
-    const subagentLink = await screen.findByRole('link', { name: '打开 subagent' })
+    const subagentLink = await screen.findByRole('link', { name: '打开子 Agent' })
     expect(subagentLink).toHaveAttribute('href', '/threads/child-thread')
-    expect(screen.getByRole('button', { name: 'Chat · 子代理任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '对话 · 子代理任务' })).toBeInTheDocument()
     expect(container.querySelector('.interaction-feed-item')?.contains(subagentLink)).toBe(true)
     expect(subagentLink.closest('button')).toBeNull()
   })
@@ -260,7 +260,7 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('处理后，此文件还有 2 个修改将依次请求审批')).toBeInTheDocument()
 
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
-    const chatSourceBtn = screen.getByRole('button', { name: 'Chat · 产品对话' })
+    const chatSourceBtn = screen.getByRole('button', { name: '对话 · 产品对话' })
     fireEvent.click(chatSourceBtn)
     expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=root-th-1')
 

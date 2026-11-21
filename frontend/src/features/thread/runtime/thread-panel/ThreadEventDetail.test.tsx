@@ -153,7 +153,7 @@ describe('ThreadEventDetail', () => {
 
     const button = screen.getByTestId('historical-request-preview')
     expect(button).toHaveTextContent('历史请求预览')
-    expect(button).toHaveAttribute('title', '历史请求预览：按当前目录与 Provider 定义重建，非当时发送原文')
+    expect(button).toHaveAttribute('title', '历史请求预览：按当前目录与提供商定义重建，非当时发送原文')
     fireEvent.click(button)
     expect(onRequestHistoricalPreview).toHaveBeenCalledWith('assistant-entry-1')
   })

@@ -1,3 +1,7 @@
+import { includesSearch } from '@/shared/lib/search-utils'
+import { translate } from '@/shared/i18n'
+import type { McpServerSummaryDTO } from '@/shared/api/generated/contracts'
+
 export const DEFAULT_TIMEOUT_MILLIS = '60000'
 const URL_MAX_LENGTH = 2048
 const HEADER_NAME_MAX_LENGTH = 256
@@ -38,18 +42,18 @@ export interface TimeoutValidationResult {
  */
 export function validateMcpName(name: string): ValidationResult {
   if (!name || !name.trim()) {
-    return { valid: false, error: 'Name must not be blank' }
+    return { valid: false, error: translate('ai.mcp.validation.nameRequired') }
   }
   if (!NAME_PATTERN.test(name)) {
     return {
       valid: false,
-      error: 'Name must start with lowercase letter, contain only a-z, 0-9, _, and be <= 32 chars',
+      error: translate('ai.mcp.validation.namePattern'),
     }
   }
   if (name.length > NAME_MAX_LENGTH) {
     return {
       valid: false,
-      error: `Name must not exceed ${NAME_MAX_LENGTH} characters`,
+      error: translate('ai.mcp.validation.nameTooLong', { max: NAME_MAX_LENGTH }),
     }
   }
   return { valid: true }
@@ -65,27 +69,30 @@ export function validateMcpName(name: string): ValidationResult {
  */
 export function validateMcpUrl(url: string): ValidationResult {
   if (!url || !url.trim()) {
-    return { valid: false, error: 'URL must not be blank' }
+    return { valid: false, error: translate('ai.mcp.validation.urlRequired') }
   }
   if (url !== url.trim()) {
-    return { valid: false, error: 'URL must not contain surrounding whitespace' }
+    return { valid: false, error: translate('ai.mcp.validation.urlWhitespace') }
   }
   if (url.length > URL_MAX_LENGTH) {
-    return { valid: false, error: `URL must not exceed ${URL_MAX_LENGTH} characters` }
+    return {
+      valid: false,
+      error: translate('ai.mcp.validation.urlTooLong', { max: URL_MAX_LENGTH }),
+    }
   }
   try {
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return { valid: false, error: 'URL scheme must be http or https' }
+      return { valid: false, error: translate('ai.mcp.validation.urlScheme') }
     }
     if (!parsed.hostname) {
-      return { valid: false, error: 'URL must contain a valid host' }
+      return { valid: false, error: translate('ai.mcp.validation.urlHost') }
     }
     if (parsed.username || parsed.password) {
-      return { valid: false, error: 'URL must not contain user-info credentials' }
+      return { valid: false, error: translate('ai.mcp.validation.urlUserInfo') }
     }
   } catch {
-    return { valid: false, error: 'URL format is invalid' }
+    return { valid: false, error: translate('ai.mcp.validation.urlInvalid') }
   }
   return { valid: true }
 }
@@ -109,43 +116,54 @@ export function parseAndValidateHeaders(raw: string): HeaderParseResult {
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    return { valid: false, headers: {}, error: 'Headers must be valid JSON' }
+    return { valid: false, headers: {}, error: translate('ai.mcp.validation.headersInvalidJson') }
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { valid: false, headers: {}, error: 'Headers must be a JSON object' }
+    return { valid: false, headers: {}, error: translate('ai.mcp.validation.headersNotObject') }
   }
 
   const result: Record<string, string> = {}
   for (const [key, value] of Object.entries(parsed)) {
     if (!key || !key.trim()) {
-      return { valid: false, headers: {}, error: 'Header names must not be blank' }
+      return { valid: false, headers: {}, error: translate('ai.mcp.validation.headerNameRequired') }
     }
     if (key.length > HEADER_NAME_MAX_LENGTH) {
       return {
         valid: false,
         headers: {},
-        error: `Header name must not exceed ${HEADER_NAME_MAX_LENGTH} characters`,
+        error: translate('ai.mcp.validation.headerNameTooLong', { max: HEADER_NAME_MAX_LENGTH }),
       }
     }
     if (hasIsoControl(key)) {
-      return { valid: false, headers: {}, error: 'Header names must not contain control characters' }
+      return {
+        valid: false,
+        headers: {},
+        error: translate('ai.mcp.validation.headerNameControl'),
+      }
     }
     if (typeof value !== 'string') {
-      return { valid: false, headers: {}, error: `Header value for "${key}" must be a string` }
+      return {
+        valid: false,
+        headers: {},
+        error: translate('ai.mcp.validation.headerValueString', { name: key }),
+      }
     }
     if (value.length > HEADER_VALUE_MAX_LENGTH) {
       return {
         valid: false,
         headers: {},
-        error: `Header value for "${key}" must not exceed ${HEADER_VALUE_MAX_LENGTH} characters`,
+        error: translate('ai.mcp.validation.headerValueTooLong', {
+          name: key,
+          max: HEADER_VALUE_MAX_LENGTH,
+        }),
       }
     }
     if (hasIsoControl(value)) {
       return {
         valid: false,
         headers: {},
-        error: `Header value for "${key}" must not contain control characters`,
+        error: translate('ai.mcp.validation.headerValueControl', { name: key }),
       }
     }
     // 绝不 trim 或修改 header 原始值
@@ -153,6 +171,14 @@ export function parseAndValidateHeaders(raw: string): HeaderParseResult {
   }
 
   return { valid: true, headers: result }
+}
+
+/** 列表按名称过滤；保持服务端返回顺序，不额外排序。 */
+export function filterMcpServers(
+  servers: McpServerSummaryDTO[],
+  search: string,
+): McpServerSummaryDTO[] {
+  return servers.filter((server) => includesSearch(server.name, search))
 }
 
 /**
@@ -166,7 +192,7 @@ export function validateTimeoutMillis(val: unknown): TimeoutValidationResult {
     return {
       valid: false,
       timeoutMillis: DEFAULT_TIMEOUT_MILLIS,
-      error: 'Timeout must be a positive integer',
+      error: translate('ai.mcp.validation.timeoutPositive'),
     }
   }
   return { valid: true, timeoutMillis: val }

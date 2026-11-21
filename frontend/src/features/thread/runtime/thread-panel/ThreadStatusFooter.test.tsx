@@ -23,8 +23,8 @@ describe('ThreadStatusFooter', () => {
         contextWindow={128_000}
       />,
     )
-    const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('ctx —/128k')
+    const footer = screen.getByLabelText('Thread 状态')
+    expect(footer).toHaveTextContent('上下文 —/128k')
     const title = hoverLines(lineOf(footer))
     expect(title).toHaveLength(5)
     expect(title[0]).toBe('未选择环境')
@@ -37,7 +37,7 @@ describe('ThreadStatusFooter', () => {
   // 全部事实必须落在唯一一行，避免 Footer 因数据增多重新折行。
   it('renders all facts on a single line without wrapping', () => {
     render(<ThreadStatusFooter />)
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     // 没有模型调用时 token 计数是真实的 0；费用与速率没有样本，不显示 0。
@@ -60,11 +60,11 @@ describe('ThreadStatusFooter', () => {
         }}
       />,
     )
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     const spans = [...footer.querySelectorAll('.thread-status-line span')]
     expect(spans.map((span) => span.textContent)).toEqual([
       'local',
-      'ctx 61/128k',
+      '上下文 61/128k',
       '↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s',
     ])
   })
@@ -77,7 +77,7 @@ describe('ThreadStatusFooter', () => {
       />,
     )
 
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     expect(footer).toHaveTextContent('local')
     expect(footer.querySelector('button')).toBeNull()
     expect(lineOf(footer).getAttribute('title')).toContain('环境：local')
@@ -92,7 +92,7 @@ describe('ThreadStatusFooter', () => {
       />,
     )
 
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     expect(footer).toHaveTextContent('env-uuid-42')
   })
 
@@ -104,7 +104,7 @@ describe('ThreadStatusFooter', () => {
       />,
     )
 
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     expect(footer).toHaveTextContent('dev · 不可用')
     expect(lineOf(footer).getAttribute('title')).toContain('环境：dev · 不可用')
   })
@@ -131,11 +131,11 @@ describe('ThreadStatusFooter', () => {
       />,
     )
 
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      'local ∣ ctx 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s',
+      'local ∣ 上下文 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s',
     )
     const title = hoverLines(lines[0])
     // 环境 + 上下文 + 用量两行（token/cache）+ 费用行：既无冗余的累计标题行，也没有被压缩成一行。
@@ -167,11 +167,11 @@ describe('ThreadStatusFooter', () => {
         contextWindow={128_000}
       />,
     )
-    const footer = screen.getByLabelText('会话状态')
+    const footer = screen.getByLabelText('Thread 状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
+      '未选择环境 ∣ 上下文 0/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
     )
     // 零用量/无定价/无测速样本时 hover 仍有完整 5 行结构。
     expect(hoverLines(lines[0])).toHaveLength(5)

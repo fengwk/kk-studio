@@ -130,11 +130,11 @@ describe('SkillPackageCreateModal', () => {
     const user = userEvent.setup()
     const { onCreated } = renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'custom-pkg')
     await user.type(within(modal).getByPlaceholderText('https://github.com/org/repo.git'), 'https://github.com/myorg/skills.git')
     await user.type(within(modal).getByLabelText(/访问令牌/), 'ghp_secret')
-    await user.click(within(modal).getByRole('button', { name: /确认创建/ }))
+    await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
       expect(agentService.createSkillPackage).toHaveBeenCalledWith({
@@ -154,9 +154,9 @@ describe('SkillPackageCreateModal', () => {
     const user = userEvent.setup()
     renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'Bad_Name')
-    await user.click(within(modal).getByRole('button', { name: /确认创建/ }))
+    await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     expect(
       within(modal).getByText('技能包名称只能使用 1 到 64 个小写字母、数字或单个连字符'),
@@ -168,7 +168,7 @@ describe('SkillPackageCreateModal', () => {
     const user = userEvent.setup()
     const { onCreated } = renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
@@ -237,7 +237,7 @@ describe('SkillPackageCreateModal', () => {
     )
     renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
@@ -265,7 +265,7 @@ describe('SkillPackageCreateModal', () => {
     const user = userEvent.setup()
     const { onClose } = renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
@@ -294,7 +294,7 @@ describe('SkillPackageCreateModal', () => {
     }))
     renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
@@ -311,7 +311,7 @@ describe('SkillPackageCreateModal', () => {
     const user = userEvent.setup()
     renderModal()
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包/ })
+    const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.click(within(modal).getByRole('button', { name: /解析预览/ }))

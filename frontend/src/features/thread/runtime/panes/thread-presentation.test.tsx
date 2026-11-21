@@ -143,7 +143,7 @@ describe('visible thread presentation', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
     expect(result.current.parentHref).toBe('/threads/parent')
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
-    expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', '/threads/parent')
+    expect(screen.getByRole('link', { name: '回到父 Agent' })).toHaveAttribute('href', '/threads/parent')
     expect(screen.getByText('researcher · model (deep)')).toHaveAttribute('title', 'researcher · model (deep)')
     trigger.remove()
   })
@@ -189,10 +189,10 @@ describe('visible thread presentation', () => {
     const host = render(<ThreadPresentationActions view={null} />)
     expect(screen.queryByRole('button')).toBeNull()
     host.rerender(<ThreadPresentationActions view={result.current} />)
-    fireEvent.click(screen.getByRole('button', { name: '回到父 agent' }))
+    fireEvent.click(screen.getByRole('button', { name: '回到父 Agent' }))
     expect(initial.onParent).toHaveBeenCalledWith('parent')
     expect(initial.views.switchMode).not.toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
     host.rerender(<ThreadPresentationActions view={{ ...result.current, mode: 'debug' }} />)
     expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(document.querySelector('.workspace-read-actions')).toBeNull()
@@ -200,7 +200,7 @@ describe('visible thread presentation', () => {
       ...result.current, viewKey: '', threadId: null, identity: null, parentThreadId: null,
     }} />)
     expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
     expect(document.querySelector('.workspace-view-identity')).toBeNull()
     expect(document.querySelector('.workspace-view-short-id')).toBeNull()
   })
@@ -221,23 +221,23 @@ describe('visible thread presentation', () => {
     // 完整 UUID 不作为可见文本铺开，短 ID 也不进入任何路由地址。
     expect(document.body.textContent).not.toContain('1111-4000')
     expect(screen.queryByRole('link')).toBeNull()
-    expect(screen.getByRole('button', { name: '回到父 agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '回到父 Agent' })).toBeInTheDocument()
 
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
-    fireEvent.click(screen.getByRole('button', { name: '复制 thread ID' }))
+    fireEvent.click(screen.getByRole('button', { name: '复制 Thread ID' }))
     await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledWith(
       threadId, { shouldFallback: expect.any(Function) },
     ))
   })
 
   it('keeps the short id and copy action out of non-subagent thread headers', () => {
-    // 测试意图：根 thread 顶栏不需要自身 ID，也没有“回到父 agent”语义。
+    // 测试意图：根 thread 顶栏不需要自身 ID，也没有“回到父 Agent”语义。
     const initial = options()
     const { result } = renderHook(useThreadPresentation, { initialProps: {
       ...initial, projection: { ...initial.projection, thread: { ...thread, parentThreadId: null } },
     } })
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
     expect(document.querySelector('.workspace-view-short-id')).toBeNull()
-    expect(screen.queryByRole('button', { name: '复制 thread ID' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '复制 Thread ID' })).toBeNull()
   })
 })

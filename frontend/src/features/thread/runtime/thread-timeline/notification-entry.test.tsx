@@ -163,7 +163,7 @@ describe('NOTIFICATION timeline projection', () => {
     expect(notifications).toHaveLength(1)
     expect(notifications[0]).toMatchObject({
       kind: 'notification',
-      title: 'subagent 结果',
+      title: '子 Agent 结果',
       text: 'child finished',
       notification: { kind: 'SUBAGENT_RESULT', sourceThreadId: 'child-thread-1' },
     })
@@ -182,7 +182,7 @@ describe('NOTIFICATION timeline projection', () => {
     )
 
     const titles = notificationMessages(timeline.messages).map((message) => message.title)
-    expect(titles).toEqual(['subagent 结果', '任务预算提醒'])
+    expect(titles).toEqual(['子 Agent 结果', '任务预算提醒'])
   })
 
   it('keeps two receipts from the same source thread as separate entries', () => {
@@ -272,9 +272,9 @@ describe('NotificationEntryBlock', () => {
     expect(block?.querySelector('.thread-disclosure-toggle'))
       .toHaveAttribute('aria-expanded', 'false')
 
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
-    expect(link).toHaveAttribute('title', '查看 subagent 执行')
+    expect(link).toHaveAttribute('title', '查看子 Agent 执行')
     expect(link).not.toHaveTextContent('child-thread-1')
 
     // 折叠态只出现截断后的任务预览，完整任务原文与结果都还没渲染。
@@ -325,7 +325,7 @@ describe('NotificationEntryBlock', () => {
       onOpenThread,
     )
 
-    fireEvent.click(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    fireEvent.click(screen.getByRole('link', { name: '查看子 Agent 执行' }))
     expect(onOpenThread).toHaveBeenCalledWith('child-thread-1')
   })
 
@@ -396,7 +396,7 @@ describe('NotificationEntryBlock', () => {
 
     const card = container.querySelector('.thread-subagent-receipt')
     expect(card).toHaveClass('is-invalid', 'is-error')
-    expect(screen.getByText('subagent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
+    expect(screen.getByText('子 Agent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
     expect(container.querySelector('.thread-disclosure-error')).not.toBeNull()
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
     expect(container.textContent).not.toContain('subagent_result')
@@ -413,7 +413,7 @@ describe('NotificationEntryBlock', () => {
       ),
     )
 
-    expect(screen.getByText('subagent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
+    expect(screen.getByText('子 Agent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
     expect(screen.queryByRole('link')).toBeNull()
   })
 

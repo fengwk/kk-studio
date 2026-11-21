@@ -60,7 +60,7 @@ describe('interactionIdentity', () => {
 
 describe('interactionOwnerLabel', () => {
   it('归属固定为“类型 · 标题”，标题来自会话归属 SPI', () => {
-    expect(interactionOwnerLabel({ ...owner, title: '产品对话' })).toBe('Chat · 产品对话')
+    expect(interactionOwnerLabel({ ...owner, title: '产品对话' })).toBe('对话 · 产品对话')
     setLocale('en-US')
     expect(interactionOwnerLabel({ ...owner, kind: 'ISSUE_AGENT', title: '修复缺陷' }))
       .toBe('Issue · 修复缺陷')
@@ -71,7 +71,7 @@ describe('interactionOwnerLabel', () => {
 
   it('标题缺失时只显示类型，未知类型不猜测产品名', () => {
     setLocale('zh-CN')
-    expect(interactionOwnerLabel(owner)).toBe('Chat')
+    expect(interactionOwnerLabel(owner)).toBe('对话')
     expect(interactionOwnerLabel({ ...owner, kind: 'FUTURE_OWNER', title: ' ' })).toBe('FUTURE_OWNER')
   })
 })

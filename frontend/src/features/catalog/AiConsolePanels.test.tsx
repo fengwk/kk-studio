@@ -116,7 +116,7 @@ describe('AiConsolePanels', () => {
     // Model 卡片使用全局唯一逻辑名。
     expect(screen.getAllByText('MiniMax').length).toBeGreaterThan(0)
     expect(screen.getByText('上下文 128000 · 输出 8192')).toBeInTheDocument()
-    await user.click(screen.getAllByRole('button', { name: '新建 Chat' })[0]!)
+    await user.click(screen.getAllByRole('button', { name: '新建对话' })[0]!)
     expect(onCreate).toHaveBeenCalled()
   })
 })

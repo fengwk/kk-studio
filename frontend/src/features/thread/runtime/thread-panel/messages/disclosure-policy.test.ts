@@ -43,7 +43,7 @@ describe('discloseText', () => {
   it('keeps the leading window and counts hidden whole lines', () => {
     const result = discloseText('1\n2\n3\n4\n5', 2)
     expect(result).toEqual({ text: '1\n2', hiddenLines: 3, truncated: false })
-    expect(disclosureHint(result, 'start')).toBe('… 3 more lines')
+    expect(disclosureHint(result, 'start')).toBe('… 下方还有 3 行')
   })
 
   it('keeps the trailing window for bash and reports earlier lines', () => {
@@ -63,7 +63,7 @@ describe('discloseText', () => {
     expect(result.text).toBe(emoji.repeat(6))
     expect(result.hiddenLines).toBe(0)
     expect(result.truncated).toBe(true)
-    expect(disclosureHint(result, 'start')).toBe('… truncated')
+    expect(disclosureHint(result, 'start')).toBe('… 已截断')
   })
 
   it('reports a partially shown line as truncated without pretending the whole line is lost', () => {
@@ -71,7 +71,7 @@ describe('discloseText', () => {
     expect(result.text).toBe('first\nsec')
     expect(result.hiddenLines).toBe(1)
     expect(result.truncated).toBe(true)
-    expect(disclosureHint(result, 'start')).toBe('… 1 more line, truncated')
+    expect(disclosureHint(result, 'start')).toBe('… 下方还有 1 行，长行已截断')
   })
 
   it('keeps the end of a bash tail window when early lines are huge and the exit error is last', () => {
@@ -106,10 +106,10 @@ describe('discloseText', () => {
   })
 
   it('uses singular line wording and distinguishes earlier truncation', () => {
-    expect(disclosureHint(discloseText('a\nb', 1), 'start')).toBe('… 1 more line')
+    expect(disclosureHint(discloseText('a\nb', 1), 'start')).toBe('… 下方还有 1 行')
     expect(disclosureHint(discloseText('a\nb', 1, 'end'), 'end')).toBe('… 上方还有 1 行')
     expect(disclosureHint(discloseText('abcdef\nb', 1, 'start', 3), 'start'))
-      .toBe('… 1 more line, truncated')
+      .toBe('… 下方还有 1 行，长行已截断')
     expect(disclosureHint(discloseText('abcdef', 1, 'end', 2), 'end'))
       .toBe('… 长行已截断')
   })

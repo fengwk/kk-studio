@@ -390,9 +390,9 @@ describe('catalog utils', () => {
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
 
-    expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
-    expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
-    expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
+    expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('创建 提供商')
+    expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 模型')
+    expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('创建 Agent')
   })
 
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */
@@ -481,7 +481,7 @@ describe('catalog utils', () => {
     expect(formatCatalogSupportIssue('ignored region multiplier'))
       .toBe('已忽略地区倍率，统计费用可能低于实际账单')
     expect(formatCatalogSupportIssue('non-token cost is not included: web_search'))
-      .toBe('网页搜索附加费用未计入Token价格')
+      .toBe('网页搜索附加费用未计入 Token 价格')
     expect(formatCatalogSupportIssue('unsupported condition: tier'))
       .toBe('unsupported condition: tier')
 

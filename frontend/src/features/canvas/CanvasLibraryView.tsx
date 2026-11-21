@@ -3,6 +3,7 @@ import { ArrowRight, Grid2X2 } from 'lucide-react'
 import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { createCanvas, listCanvases } from '@/features/canvas/canvas-api'
+import { ListPageHeader } from '@/platform/shell/ListPageHeader'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { formatBackendDate } from '@/shared/lib/date-format'
@@ -17,7 +18,7 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 
 /**
- * 画布库：与其它资源列表共用 ResourceGrid/ResourceCard/CreateCard。
+ * 画布库：与其它资源列表共用页头、ResourceGrid/ResourceCard/CreateCard。
  * 新建卡只打开确认表单，用户确认后才 POST 并进入；取消不产生任何写入。
  */
 export function CanvasLibraryView() {
@@ -25,6 +26,7 @@ export function CanvasLibraryView() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  const [searchQuery, setSearchQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
@@ -58,6 +60,10 @@ export function CanvasLibraryView() {
   })
 
   const canvases = canvasesQuery.data ?? []
+  const search = searchQuery.trim().toLowerCase()
+  const filteredCanvases = search
+    ? canvases.filter((canvas) => canvas.title.toLowerCase().includes(search))
+    : canvases
 
   function openCreateDialog() {
     setCreateName('')
@@ -96,10 +102,16 @@ export function CanvasLibraryView() {
       aria-labelledby="libraryTitle"
     >
       <div className="screen-body library-content">
-        <header className="library-heading">
-          <h1 id="libraryTitle">{t('canvas.library.title')}</h1>
-          <p>{t('canvas.library.description')}</p>
-        </header>
+        <ListPageHeader
+          title={t('canvas.library.title')}
+          titleId="libraryTitle"
+          search={{
+            value: searchQuery,
+            onChange: setSearchQuery,
+            placeholder: t('canvas.library.searchPlaceholder'),
+            'aria-label': t('canvas.library.searchLabel'),
+          }}
+        />
 
         {canvasesQuery.isLoading ? (
           <ResourceCardSkeleton
@@ -121,6 +133,10 @@ export function CanvasLibraryView() {
           </div>
         ) : null}
 
+        {search && filteredCanvases.length === 0 && canvasesQuery.isSuccess ? (
+          <StateBlock title={t('canvas.library.empty.noMatch')} />
+        ) : null}
+
         {!canvasesQuery.isLoading && (
           <ResourceGrid className="canvas-library-grid">
             <CreateCard
@@ -128,7 +144,7 @@ export function CanvasLibraryView() {
               subtitle={t('canvas.library.createSubtitle')}
               onClick={openCreateDialog}
             />
-            {canvases.map((canvas) => (
+            {filteredCanvases.map((canvas) => (
               <ResourceCard
                 key={canvas.id}
                 icon={<Grid2X2 aria-hidden="true" />}

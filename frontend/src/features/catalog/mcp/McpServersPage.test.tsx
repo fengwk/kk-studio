@@ -101,7 +101,7 @@ describe('McpServersPage', () => {
     expect(screen.getByText('Streamable HTTP')).toBeInTheDocument()
     expect(screen.getByText('可用')).toBeInTheDocument()
     expect(screen.getByText('5')).toBeInTheDocument()
-    expect(screen.getByText('45000ms')).toBeInTheDocument()
+    expect(screen.getByText('45000 毫秒')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getByText('已启用')).toBeInTheDocument()
 
@@ -121,21 +121,42 @@ describe('McpServersPage', () => {
     expect(await screen.findByText('Network offline')).toBeInTheDocument()
   })
 
+  it('filters the server list from the page search', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([
+      summary({ name: 'filesystem' }),
+      summary({ name: 'github_tools' }),
+    ])
+
+    renderPage()
+
+    expect(await screen.findByText('github_tools')).toBeInTheDocument()
+
+    // 搜索与其它 AI 子页同位同组件：只收窄资源卡，新建卡保留为空结果的唯一沉点。
+    await user.type(screen.getByPlaceholderText('搜索资源...'), 'github')
+
+    await waitFor(() => {
+      expect(screen.queryByText('filesystem')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('github_tools')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建 MCP 服务' })).toBeInTheDocument()
+  })
+
   it('creates a server with headers submitted as one secret', async () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.createServer).mockResolvedValue(detail({ name: 'new_srv' }))
 
     renderPage()
 
-    await user.click(await screen.findByRole('button', { name: '创建 MCP 服务' }))
-    const modal = screen.getByRole('dialog', { name: '创建 MCP 服务' })
+    await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
+    const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
 
     await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'new_srv')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
     fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
       target: { value: '{"Authorization": "Bearer secret"}' },
     })
-    await user.click(within(modal).getByRole('button', { name: '确认' }))
+    await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
       expect(mcpServerService.createServer).toHaveBeenCalledWith({
@@ -154,12 +175,12 @@ describe('McpServersPage', () => {
 
     renderPage()
 
-    await user.click(await screen.findByRole('button', { name: '创建 MCP 服务' }))
-    const modal = screen.getByRole('dialog', { name: '创建 MCP 服务' })
+    await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
+    const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
 
     await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'no_headers')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
-    await user.click(within(modal).getByRole('button', { name: '确认' }))
+    await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
       expect(mcpServerService.createServer).toHaveBeenCalledWith({
@@ -169,6 +190,22 @@ describe('McpServersPage', () => {
         timeoutMillis: '60000',
       })
     })
+  })
+
+  it('shows the localized validation error in the create dialog', async () => {
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
+    const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
+    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'Bad_Name')
+    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
+    await user.click(within(modal).getByRole('button', { name: '创建' }))
+
+    // 校验错误是用户可见文案：必须随界面语言走，而不是固定英文。
+    expect(screen.getByRole('alert')).toHaveTextContent('服务名称需以小写字母开头')
+    expect(mcpServerService.createServer).not.toHaveBeenCalled()
   })
 
   it('shows a conflict presenter when create conflicts', async () => {
@@ -182,11 +219,11 @@ describe('McpServersPage', () => {
 
     renderPage()
 
-    await user.click(await screen.findByRole('button', { name: '创建 MCP 服务' }))
-    const modal = screen.getByRole('dialog', { name: '创建 MCP 服务' })
+    await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
+    const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
     await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'conflict_srv')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
-    await user.click(within(modal).getByRole('button', { name: '确认' }))
+    await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     expect(await screen.findByText('数据已发生变化')).toBeInTheDocument()
   })
@@ -220,7 +257,7 @@ describe('McpServersPage', () => {
 
     await user.clear(urlInput)
     await user.type(urlInput, 'https://example.com/api-v2')
-    await user.click(within(modal).getByRole('button', { name: '确认' }))
+    await user.click(within(modal).getByRole('button', { name: '保存修改' }))
 
     await waitFor(() => {
       expect(mcpServerService.updateServer).toHaveBeenCalledWith('srv_edit', {
@@ -249,7 +286,7 @@ describe('McpServersPage', () => {
     fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
       target: { value: '{"X-Api-Key": "key_123"}' },
     })
-    await user.click(within(modal).getByRole('button', { name: '确认' }))
+    await user.click(within(modal).getByRole('button', { name: '保存修改' }))
 
     await waitFor(() => {
       expect(mcpServerService.updateServer).toHaveBeenCalledWith('srv_hdr', {
@@ -264,7 +301,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_hdr'))
     const secondModal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_hdr' })
     await user.click(within(secondModal).getByLabelText('清除已保存的请求头'))
-    await user.click(within(secondModal).getByRole('button', { name: '确认' }))
+    await user.click(within(secondModal).getByRole('button', { name: '保存修改' }))
 
     await waitFor(() => {
       expect(mcpServerService.updateServer).toHaveBeenLastCalledWith('srv_hdr', {
@@ -321,7 +358,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_timeout'))
     const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_timeout' })
     // 清空超时后提交会回退为默认 60000，与已保存值一致，不应被当作未保存的变更。
-    await user.clear(within(modal).getByLabelText('Timeout'))
+    await user.clear(within(modal).getByLabelText('超时'))
     await user.click(within(modal).getByRole('button', { name: '发现工具' }))
 
     await waitFor(() => {
@@ -332,8 +369,8 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_timeout'))
     const reopened = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_timeout' })
     // 真正不同的超时仍然是未保存的变更，必须阻断发现工具。
-    await user.clear(within(reopened).getByLabelText('Timeout'))
-    await user.type(within(reopened).getByLabelText('Timeout'), '45000')
+    await user.clear(within(reopened).getByLabelText('超时'))
+    await user.type(within(reopened).getByLabelText('超时'), '45000')
     await user.click(within(reopened).getByRole('button', { name: '发现工具' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent('存在未保存的配置更改，请先保存再发现工具。')
@@ -385,6 +422,6 @@ describe('McpServersPage', () => {
 
     expect(await screen.findByText('background mcp error')).toBeInTheDocument()
     expect(screen.getByText('cached-server')).toBeInTheDocument()
-    expect(screen.getByText('创建 MCP 服务')).toBeInTheDocument()
+    expect(screen.getByText('新建 MCP 服务')).toBeInTheDocument()
   })
 })

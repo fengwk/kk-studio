@@ -181,9 +181,9 @@ describe('SubagentReceipt collapsed summary', () => {
     expect(container.querySelector('.thread-entry-row')).toBeNull()
     expect(container.querySelector('.thread-entry-icon')).toBeNull()
 
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
-    expect(link).toHaveAttribute('title', '查看 subagent 执行')
+    expect(link).toHaveAttribute('title', '查看子 Agent 执行')
     // 来源链接和展开按钮是同级独立控件，链接位于按钮之前，且不显示完整 threadId。
     expect(link).not.toHaveTextContent('child-thread-1')
     expect(
@@ -197,7 +197,7 @@ describe('SubagentReceipt collapsed summary', () => {
       subagentMessage(receiptEnvelope({ state: 'completed', result: 'done' })),
     )
 
-    expect(container.querySelector('.thread-subagent-receipt-agent')?.textContent).toBe('子代理')
+    expect(container.querySelector('.thread-subagent-receipt-agent')?.textContent).toBe('子 Agent')
   })
 })
 
@@ -273,14 +273,14 @@ describe('SubagentReceipt expansion', () => {
 
     const errorText = container.querySelector('.thread-disclosure-error-text')
     expect(errorText?.textContent).toBe('line one\nline two\nline three')
-    const hint = screen.getByRole('button', { name: '… 2 more lines' })
+    const hint = screen.getByRole('button', { name: '… 下方还有 2 行' })
     expect(container.querySelector('.thread-disclosure-error')?.contains(hint)).toBe(true)
 
     await user.click(hint)
     expect(toggleOf(container)).toHaveAttribute('aria-expanded', 'true')
     expect(container.querySelector('.thread-disclosure-error-text')?.textContent).toBe(error)
     expect(container.querySelector('.thread-disclosure-error')).not.toBeNull()
-    expect(screen.queryByRole('button', { name: '… 2 more lines' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '… 下方还有 2 行' })).toBeNull()
   })
 
   it('opens and closes the summary line with the keyboard', async () => {
@@ -402,7 +402,7 @@ describe('SubagentReceipt identity and safety', () => {
 
       const card = cardOf(container)
       expect(card).toHaveClass('is-invalid', 'is-error')
-      expect(screen.getByText('subagent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
+      expect(screen.getByText('子 Agent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
       expect(container.querySelector('.thread-disclosure-error')).not.toBeNull()
       // 非法回执没有正文分区，但被截断的 header 可展开。
       expect(container.querySelector('.thread-disclosure-body')).toBeNull()
@@ -426,7 +426,7 @@ describe('SubagentReceipt identity and safety', () => {
       ),
     )
 
-    expect(screen.getByText('subagent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
+    expect(screen.getByText('子 Agent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
     expect(screen.queryByRole('link')).toBeNull()
   })
@@ -438,8 +438,8 @@ describe('SubagentReceipt identity and safety', () => {
         threadId: '00000000-0000-4000-8000-000000000004', state: 'completed', result: 'done',
       }), null),
     )
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
-    expect(link).toHaveAttribute('title', '查看 subagent 执行')
+    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
+    expect(link).toHaveAttribute('title', '查看子 Agent 执行')
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
     expect(container.textContent).not.toContain('00000000-0000-4000-8000-000000000004')
   })

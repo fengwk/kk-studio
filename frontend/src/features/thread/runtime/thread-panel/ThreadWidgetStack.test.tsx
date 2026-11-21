@@ -15,7 +15,7 @@ describe('ThreadWidgetStack', () => {
     )
 
     expect(screen.getByText('执行中')).toBeInTheDocument()
-    expect(screen.getByText('queued')).toBeInTheDocument()
+    expect(screen.getByText('排队中')).toBeInTheDocument()
     expect(screen.getByText('下一条消息')).toBeInTheDocument()
     expect(screen.queryByText('本次请求已停止；发送新消息可重新开始。')).not.toBeInTheDocument()
     const workingBox = screen.getByText('执行中').closest('.thread-working')
@@ -52,7 +52,7 @@ describe('ThreadWidgetStack', () => {
       />,
     )
 
-    const content = screen.getByText('queued').closest('li')?.querySelector('.thread-input-queue-content')
+    const content = screen.getByText('排队中').closest('li')?.querySelector('.thread-input-queue-content')
     expect(content?.children).toHaveLength(3)
     expect(content?.children[0]).toHaveTextContent('before')
     expect(content?.children[1]).toHaveClass('resource-attachment-link')

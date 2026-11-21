@@ -216,7 +216,7 @@ describe('useChatListController', () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
     })
     expect(chatService.createChat).not.toHaveBeenCalled()
-    expect(result.current.createChatModal.formError).toBe('请填写 Chat 名称')
+    expect(result.current.createChatModal.formError).toBe('请填写对话名称')
     expect(result.current.createChatModal.nameError).toBe('请填写名称')
 
     act(() => {
@@ -587,7 +587,7 @@ describe('useChatListController', () => {
 
     act(() => result.current.openDeleteChat(targetChat))
     expect(result.current.deleteConfirmModal.modal).not.toBeNull()
-    expect(result.current.deleteConfirmModal.modal?.title).toBe('删除 Chat')
+    expect(result.current.deleteConfirmModal.modal?.title).toBe('删除对话')
     expect(result.current.deleteConfirmModal.modal?.description).toContain('Target Chat')
 
     await act(async () => {

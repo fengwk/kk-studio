@@ -200,7 +200,7 @@ describe('IssueDetailModal', () => {
     expect(screen.getByText(/活动时间线/)).toBeInTheDocument()
     expect(screen.getByText(/Run 报告/)).toBeInTheDocument()
     expect(screen.getByText(/阶段预算/)).toBeInTheDocument()
-    expect(screen.getByText(/Agent 线程/)).toBeInTheDocument()
+    expect(screen.getByText(/Agent Thread/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
   })
 
@@ -836,7 +836,7 @@ describe('IssueDetailModal', () => {
   })
 
   it('triggers onOpenThread callback when clicking open button in agent threads tab', async () => {
-    // 测试意图：验证在 Agent 线程 tab 点击“打开”按钮能够触发 onOpenThread 回调并传递对应的 threadId
+    // 测试意图：验证在 Agent Thread tab 点击“打开”按钮能够触发 onOpenThread 回调并传递对应的 threadId
     const onOpenThread = vi.fn()
     const api = createMockApi({
       getIssue: vi.fn().mockResolvedValue({
@@ -863,13 +863,13 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    const threadsTab = screen.getByText(/Agent 线程/)
+    const threadsTab = screen.getByText(/Agent Thread/)
     fireEvent.click(threadsTab)
 
     expect(await screen.findByText('architect')).toBeInTheDocument()
     expect(screen.getByText('th-arch-001')).toBeInTheDocument()
 
-    const openBtn = screen.getByTitle('打开此 Agent 线程视图')
+    const openBtn = screen.getByTitle('打开此 Agent Thread 视图')
     fireEvent.click(openBtn)
 
     expect(onOpenThread).toHaveBeenCalledWith('th-arch-001')

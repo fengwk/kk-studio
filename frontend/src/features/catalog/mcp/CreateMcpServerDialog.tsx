@@ -52,9 +52,7 @@ export function CreateMcpServerDialog({
               required
               autoFocus
             />
-            <span className="inline-hint">
-              Lowercase letters, numbers, and underscores. Pattern: ^[a-z][a-z0-9_]*$
-            </span>
+            <span className="inline-hint">{t('ai.mcp.nameHint')}</span>
           </label>
 
           <label className="form-group">
@@ -67,9 +65,7 @@ export function CreateMcpServerDialog({
               disabled={pending}
               required
             />
-            <span className="inline-hint">
-              Streamable HTTP endpoint URL. Use http:// or https://.
-            </span>
+            <span className="inline-hint">{t('ai.mcp.urlHint')}</span>
           </label>
 
           <label className="form-group">
@@ -115,7 +111,7 @@ export function CreateMcpServerDialog({
             {t('shared.cancel')}
           </Button>
           <Button type="submit" loading={pending}>
-            {t('shared.confirm')}
+            {t('ai.catalog.action.confirmCreate')}
           </Button>
         </div>
       </form>

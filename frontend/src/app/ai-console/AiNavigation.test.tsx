@@ -18,7 +18,7 @@ describe('AiNavigation', () => {
 
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
       '对话',
-      '代理',
+      'Agent',
       '模型',
       '提供商',
       '技能包',
@@ -35,7 +35,7 @@ describe('AiNavigation', () => {
       'Agent',
       'Model',
       'Provider',
-      'Skill Packages',
+      'Skill Package',
       'Environment',
       'MCP Server',
     ])

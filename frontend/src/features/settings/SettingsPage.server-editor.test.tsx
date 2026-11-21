@@ -99,12 +99,12 @@ describe('SettingsPage server editor', () => {
     mocks.update.mockImplementation(backend.update)
     renderSettings()
 
-    await userEvent.click(await serverTab('Backend 网络'))
+    await userEvent.click(await serverTab('后端网络'))
     const panel = screen.getByRole('tabpanel')
     expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
     expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
-      'Backend 发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
+      '后端发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后后端新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
     )
     const proxy = within(panel).getByLabelText('代理地址')
     const bypass = within(panel).getByLabelText('代理绕过规则')

@@ -175,7 +175,7 @@ describe('AI resource cards', () => {
     )
 
     // 标签行保留 label；tag limit 沿用 2，第 3 个折叠为 +1。
-    expect(screen.getByText('子代理')).toBeInTheDocument()
+    expect(screen.getByText('子 Agent')).toBeInTheDocument()
     expect(screen.getByText('helper')).toBeInTheDocument()
     expect(screen.getByText('writer')).toBeInTheDocument()
     expect(screen.queryByText('architect')).not.toBeInTheDocument()
@@ -193,7 +193,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('子代理')).toBeInTheDocument()
+    expect(screen.getByText('子 Agent')).toBeInTheDocument()
     expect(screen.queryByText('+1')).not.toBeInTheDocument()
   })
 
@@ -286,8 +286,8 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('180s')).toBeInTheDocument()
-    expect(screen.getByText('1500ms')).toBeInTheDocument()
+    expect(screen.getByText('180 秒')).toBeInTheDocument()
+    expect(screen.getByText('1500 毫秒')).toBeInTheDocument()
     expect(screen.getByText('已配置')).toBeInTheDocument()
 
     rerender(

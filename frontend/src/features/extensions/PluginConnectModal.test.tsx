@@ -232,7 +232,7 @@ describe('PluginConnectModal lifecycle', () => {
     expect(input()).toHaveClass('ui-text-input')
     expect(input()).toHaveAttribute('type', 'password')
     expect(input()).toHaveAttribute('autocomplete', 'off')
-    expect(input()).toHaveAccessibleName('2. 粘贴回调 Deep Link')
+    expect(input()).toHaveAccessibleName('2. 粘贴回调链接')
 
     // Step 1: select region EN and open login
     await user.click(screen.getByRole('button', { name: '区域' }))

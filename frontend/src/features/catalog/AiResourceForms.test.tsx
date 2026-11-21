@@ -45,7 +45,7 @@ describe('AiResourceForms', () => {
 
     await user.type(screen.getByPlaceholderText('minimax'), 'provider-a')
     await user.type(screen.getByPlaceholderText('用途说明'), 'provider desc')
-    await selectFormOption(user, 'Provider Type', 'anthropic')
+    await selectFormOption(user, '提供商类型', 'anthropic')
     await user.type(
       screen.getByPlaceholderText('https://api.example.com/v1'),
       'https://proxy.example/v1',
@@ -60,7 +60,7 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByDisplayValue('provider-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('provider desc')).toBeInTheDocument()
-    expect(screen.getByLabelText('Provider Type')).toHaveAttribute('data-value', 'anthropic')
+    expect(screen.getByLabelText('提供商类型')).toHaveAttribute('data-value', 'anthropic')
     expect(screen.getByDisplayValue('https://proxy.example/v1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toHaveAttribute('type', 'password')
@@ -386,8 +386,8 @@ describe('AiResourceForms', () => {
     expect(screen.getByPlaceholderText('留空保留当前密钥')).toHaveValue('')
     expect(screen.getByPlaceholderText('minimax')).toHaveAttribute('readonly')
     // ProviderUpdateDTO 没有 providerType：编辑模式只读显示，创建后不可改协议。
-    expect(screen.getByLabelText('Provider Type')).toHaveValue('openai')
-    expect(screen.getByLabelText('Provider Type')).toHaveAttribute('readonly')
+    expect(screen.getByLabelText('提供商类型')).toHaveValue('openai')
+    expect(screen.getByLabelText('提供商类型')).toHaveAttribute('readonly')
     const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
     expect(labels[0]).toBe('名称 *')
     expect(labels[1]).toBe('API Key')
@@ -533,7 +533,7 @@ describe('AiResourceForms', () => {
         />,
       )
 
-      const providerSelect = screen.getByLabelText('供应商')
+      const providerSelect = screen.getByLabelText('提供商')
       expect(providerSelect).toHaveAttribute('data-value', providerName)
       expect(providerSelect).toBeDisabled()
       expect(providerSelect).toHaveAttribute('aria-describedby', 'model-provider-identity-status')
@@ -594,7 +594,7 @@ describe('AiResourceForms', () => {
     await user.click(screen.getByRole('button', { name: '添加预设' }))
     expect(screen.getByLabelText('思考强度 2')).toHaveValue('')
     expect(
-      screen.getByText(/留空使用供应商协议的默认值；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。/),
+      screen.getByText(/留空使用提供商协议的默认值；off 表示显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。/),
     ).toBeInTheDocument()
 
     await user.click(screen.getByLabelText('推理'))
@@ -927,7 +927,7 @@ describe('AiResourceForms', () => {
     const user = userEvent.setup()
     render(<EditModelFormHarness />)
 
-    const providerSelect = screen.getByLabelText('供应商')
+    const providerSelect = screen.getByLabelText('提供商')
     expect(providerSelect).toBeDisabled()
 
     const nameInput = screen.getByPlaceholderText('MiniMax-M2.7')
@@ -973,7 +973,7 @@ describe('AiResourceForms', () => {
       />,
     )
 
-    expect(screen.getByText('需要先创建 Model 才能配置 Agent。')).toBeInTheDocument()
+    expect(screen.getByText('需要先创建模型才能配置 Agent。')).toBeInTheDocument()
   })
 })
 

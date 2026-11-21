@@ -121,17 +121,17 @@ describe('SettingsPage general tab + notifications', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeDisabled())
     expect(screen.queryByText('有未保存的更改')).not.toBeInTheDocument()
   })
-  // Backend 网络保持 schema 顺序，同步紧随高级，不替换现有服务端设置。
+  // 后端网络保持 schema 顺序，同步紧随高级，不替换现有服务端设置。
   it('renders every top-level settings tab with Sync after Advanced', async () => {
     renderSettings()
-    await tabByName('Backend 网络')
+    await tabByName('后端网络')
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       '常规',
       '插件',
       'AI 运行时',
       '工具与权限',
       '环境',
-      'Backend 网络',
+      '后端网络',
       '存储与媒体',
       '高级',
       '同步',
@@ -266,7 +266,7 @@ describe('SettingsPage general tab + notifications', () => {
     expect(screen.getByRole('heading', { name: '键盘快捷键' })).toBeInTheDocument()
     expect(screen.getByText('本版本支持的键盘快捷键只读目录。')).toBeInTheDocument()
     // scope 分组与条目来自唯一事实源。
-    for (const title of ['应用', '对话', '调试', '画布']) {
+    for (const title of ['应用', 'Thread', '调试', '画布']) {
       expect(screen.getByText(title)).toBeInTheDocument()
     }
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
@@ -281,7 +281,7 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
   it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', async () => {
     renderSettings()
     expect(await tabByName('常规')).toHaveAttribute('tabindex', '0')
-    for (const name of ['AI 运行时', '工具与权限', '环境', 'Backend 网络', '存储与媒体', '高级', '同步']) {
+    for (const name of ['AI 运行时', '工具与权限', '环境', '后端网络', '存储与媒体', '高级', '同步']) {
       expect(await tabByName(name)).toHaveAttribute('tabindex', '-1')
     }
   })

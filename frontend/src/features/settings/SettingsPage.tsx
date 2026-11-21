@@ -75,6 +75,7 @@ export function SettingsPage({
             activeId={effectiveActiveTab}
             onChange={setActiveTab}
             ariaLabel={t('settings.tabs.ariaLabel')}
+            panelClassName="settings-panel"
           >
             {generalError && effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
               <SchemaError error={generalError} onRetry={editor.retryLoad} />

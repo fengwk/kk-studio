@@ -246,10 +246,10 @@ describe('ai-resource-form-validation', () => {
   it('maps reasoning effort and agent variant errors to their fields', () => {
     expect(
       toUserFacingErrorMessage(new Error('variant medium reasoningEffort must not exceed 64 characters')),
-    ).toBe('思考强度不能超过 64 个字符；留空使用供应商协议的默认值。')
+    ).toBe('思考强度不能超过 64 个字符；留空使用提供商协议的默认值。')
     expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toBe('请选择有效的模型预设')
     expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toBe(
-      '请选择有效的 Provider Type',
+      '请选择有效的提供商类型',
     )
   })
 
@@ -489,7 +489,7 @@ describe('ai-resource-form-validation', () => {
 
   describe('additional branches', () => {
     it.each([
-      ['reasoningEffort is required', '思考强度不能超过 64 个字符；留空使用供应商协议的默认值。'],
+      ['reasoningEffort is required', '思考强度不能超过 64 个字符；留空使用提供商协议的默认值。'],
       ['variant must not be blank', '请选择有效的模型预设'],
       ['at least one variant is required', '请至少添加一个模型预设，并填写预设 ID'],
       ['duplicate variant id', '预设 ID 不能重复'],
@@ -498,13 +498,13 @@ describe('ai-resource-form-validation', () => {
       ['contextWindow must be positive', '请填写有效的上下文窗口，必须为正整数'],
       ['maxOutputTokens must be positive', '请填写有效的最大输出长度，必须为正整数'],
       ['input modality is required', '请至少选择一种输入类型，建议保留 TEXT'],
-      ['providerName is required', '请选择供应商'],
-      ['providerType is invalid', '请选择有效的 Provider Type'],
+      ['providerName is required', '请选择提供商'],
+      ['providerType is invalid', '请选择有效的提供商类型'],
       ['pricing.inputPerMillionTokens must not be negative', '请检查价格配置：必填费率、定价规则和生效日期。'],
       ['modelName is required', '请选择默认模型'],
-      ['baseUrl is invalid', '请填写 Base URL'],
-      ['tools 重名', 'Tools 名称冲突，请检查勾选项'],
-      ['skills 去前缀后存在重名', 'Skills 名称冲突，请检查勾选项'],
+      ['baseUrl is invalid', '请填写基础 URL'],
+      ['tools 重名', '工具名称冲突，请检查勾选项'],
+      ['skills 去前缀后存在重名', '技能名称冲突，请检查勾选项'],
     ])('translates %s', (message, expected) => {
       expect(toUserFacingErrorMessage(new Error(message))).toBe(expected)
     })
@@ -545,7 +545,7 @@ describe('ai-resource-form-validation', () => {
         toUserFacingErrorMessage(
           new Error('model name already exists: MiniMax-M2.7'),
         ),
-      ).toBe('当前 Provider 下已存在同名 Model，请换一个名称')
+      ).toBe('当前提供商下已存在同名模型，请换一个名称')
     })
 
     it('passes through other backend business English errors instead of a generic banner', () => {

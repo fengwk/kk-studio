@@ -354,7 +354,7 @@ describe('ProjectDetailPage', () => {
     )
 
     expect(
-      await screen.findByText('目标 Thread 不属于该 Issue 绑定的 Agent 线程或 Run 记录，已拒绝接入'),
+      await screen.findByText('目标 Thread 不属于该 Issue 绑定的 Agent Thread 或 Run 记录，已拒绝接入'),
     ).toBeInTheDocument()
     expect(screen.queryByTestId('agent-pane')).not.toBeInTheDocument()
   })
@@ -654,7 +654,7 @@ describe('ProjectDetailPage', () => {
   })
 
   it('opens thread from IssueDetailModal: updates URL with thread parameter and mounts dock', async () => {
-    // 测试意图：验证从 Issue 详情中点击“打开 Agent 线程”时，handleOpenThread 将 thread 写入 URL 并展示受控 Dock
+    // 测试意图：验证从 Issue 详情中点击“打开 Agent Thread”时，handleOpenThread 将 thread 写入 URL 并展示受控 Dock
     const api = createMockApi()
     const targetIssue = mockSnapshot.issues[0].issue
     const { getNav } = renderPage(
@@ -666,9 +666,9 @@ describe('ProjectDetailPage', () => {
     // 等待弹窗打开
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
 
-    // 切换到 Agent 线程 Tab（共享 Tabs 的语义是 tab，而非 button）
-    fireEvent.click(screen.getByRole('tab', { name: /Agent 线程/ }))
-    const openThreadBtn = await screen.findByTitle('打开此 Agent 线程视图')
+    // 切换到 Agent Thread Tab（共享 Tabs 的语义是 tab，而非 button）
+    fireEvent.click(screen.getByRole('tab', { name: /Agent Thread/ }))
+    const openThreadBtn = await screen.findByTitle('打开此 Agent Thread 视图')
     fireEvent.click(openThreadBtn)
 
     // 验证 URL 更新为包含 issue 和 thread，且挂载 AgentPane

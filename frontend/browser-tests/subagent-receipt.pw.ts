@@ -88,7 +88,7 @@ test.describe('Subagent receipt card', () => {
 
     // 同一来源 subagent 的两条回执各自保留身份与独立来源链接；可见文字不含 UUID。
     for (const index of [0, 4]) {
-      const link = cards.nth(index).getByRole('link', { name: '查看 subagent 执行' })
+      const link = cards.nth(index).getByRole('link', { name: '查看子 Agent 执行' })
       await expect(link).toHaveAttribute('href', '/threads/child-thread-1')
       await expect(link).toHaveText('查看执行')
     }
@@ -161,14 +161,14 @@ test.describe('Subagent receipt card', () => {
     await expect(longError).toBeVisible()
     const collapsedText = await longError.locator('.thread-disclosure-error-text').textContent()
     expect(collapsedText?.split('\n')).toEqual(['failure line one', 'failure line two', 'failure line three'])
-    const hint = longErrorCard.getByRole('button', { name: '… 3 more lines' })
+    const hint = longErrorCard.getByRole('button', { name: '… 下方还有 3 行' })
     await expect(hint).toBeVisible()
 
     await hint.click()
     await expect(longErrorCard.getByRole('button', { name: '收起详情' }))
       .toHaveAttribute('aria-expanded', 'true')
     await expect(longError.locator('.thread-disclosure-error-text')).toContainText('failure line six')
-    await expect(longErrorCard.getByRole('button', { name: '… 3 more lines' })).toHaveCount(0)
+    await expect(longErrorCard.getByRole('button', { name: '… 下方还有 3 行' })).toHaveCount(0)
     // 固定错误块仍在 preview 顶部，结果在其后。
     const firstPreviewChild = longErrorCard.locator('.thread-disclosure-preview').locator(':scope > *').first()
     await expect(firstPreviewChild).toHaveClass(/thread-disclosure-error/)
@@ -200,7 +200,7 @@ test.describe('Subagent receipt card', () => {
     }))
     expect(focused.tag).toBe('A')
     expect(focused.href).toBe('/threads/child-thread-2')
-    expect(focused.label).toBe('查看 subagent 执行')
+    expect(focused.label).toBe('查看子 Agent 执行')
   })
 
   for (const width of [360, 320]) {

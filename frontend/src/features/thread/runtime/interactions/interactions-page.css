@@ -1,52 +1,13 @@
-/* Interactions 待处理页布局；卡片内容样式由各卡片组件导入。 */
+/* Interactions 待处理页布局；页头由 platform/shell 的 ListPageHeader 提供，卡片内容样式由各卡片组件导入。 */
 .interactions-page-layout {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 24px 20px;
-  box-sizing: border-box;
-}
-
-.interactions-page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.interactions-header-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.interactions-page-title {
-  margin: 0;
-  color: var(--fg);
-  font-size: var(--font-size-lg);
-  font-weight: 700;
-}
-
-.interactions-count-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: var(--surface-hover);
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
 }
 
 .interactions-page-content {
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: 12px;
-  overflow-y: auto;
   overflow-wrap: anywhere;
 }
 
@@ -163,7 +124,5 @@
 }
 
 @media (max-width: 480px) {
-  .interactions-page-layout { padding: 16px 12px; }
-  .interactions-page-header { flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
   .interactions-empty-state { padding: 48px 16px; }
 }

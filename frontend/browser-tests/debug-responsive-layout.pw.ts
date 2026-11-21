@@ -440,7 +440,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(colPreview).toBeVisible()
 
     // 1. 点击 Subagent helper chip
-    const helperBtn = colPreview.getByRole('button', { name: /子代理 helper|Subagent helper/ })
+    const helperBtn = colPreview.getByRole('button', { name: /子 Agent helper|Subagent helper/ })
     await expect(helperBtn).toBeVisible()
     await helperBtn.click()
 

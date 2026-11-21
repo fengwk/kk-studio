@@ -6,6 +6,7 @@ import {
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { useI18n } from '@/shared/i18n'
+import { ListPageHeader } from '@/platform/shell/ListPageHeader'
 import { interactionIdentity, interactionOwnerLabel, interactionOwnerLink } from '@/shared/lib/interactions'
 import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
@@ -41,23 +42,23 @@ export function InteractionsPage() {
   }))
 
   return (
-    <div className="interactions-page-layout">
-      <header className="interactions-page-header">
-        <div className="interactions-header-title-row">
-          <h1 className="interactions-page-title">
-            {t('ai.interaction.pendingTitle')}
-          </h1>
-          <span className="interactions-count-badge">{items.length}</span>
-        </div>
-        <Button
-          variant="ghost"
-          disabled={isLoading || isFetchingMore}
-          onClick={() => void refresh()}
-        >
-          <RotateCw size={14} className={isLoading ? 'animate-spin' : ''} />
-          <span>{t('ai.interaction.refresh')}</span>
-        </Button>
-      </header>
+    <div className="screen-body interactions-page-layout">
+      <ListPageHeader
+        title={t('ai.interaction.pendingTitle')}
+        count={hasMore
+          ? t('ai.interaction.pendingCountMore', { count: items.length })
+          : t('ai.interaction.pendingCount', { count: items.length })}
+        actions={(
+          <Button
+            variant="ghost"
+            disabled={isLoading || isFetchingMore}
+            onClick={() => void refresh()}
+          >
+            <RotateCw size={14} className={isLoading ? 'animate-spin' : ''} />
+            <span>{t('ai.interaction.refresh')}</span>
+          </Button>
+        )}
+      />
 
       <main className="interactions-page-content">
         {isLoading && items.length === 0 ? (

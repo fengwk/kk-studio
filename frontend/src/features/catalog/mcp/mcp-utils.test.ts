@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { setLocale } from '@/shared/i18n'
 import {
   DEFAULT_TIMEOUT_MILLIS,
   parseAndValidateHeaders,
@@ -8,6 +9,16 @@ import {
 } from './mcp-utils'
 
 describe('mcp-utils', () => {
+  // 现有断言校验英文文案，固定语言避免受全局默认语言影响。
+  beforeEach(() => setLocale('en-US'))
+
+  it('localizes user-facing validation messages', () => {
+    setLocale('zh-CN')
+    expect(validateMcpName('').error).toBe('服务名称不能为空')
+    expect(validateMcpUrl(' https://example.com/mcp ').error).toBe('服务地址首尾不能包含空白字符')
+    expect(validateTimeoutMillis('abc').error).toBe('超时必须是正整数')
+    expect(parseAndValidateHeaders('{ bad }').error).toBe('请求头必须是合法的 JSON')
+  })
   describe('validateMcpName', () => {
     it('accepts valid lowercase names with numbers and underscores', () => {
       expect(validateMcpName('filesystem').valid).toBe(true)

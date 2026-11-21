@@ -336,7 +336,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       await expect(card.locator('.thread-tool-approval-field').filter({ has: page.locator('dt', { hasText: 'command' }) }).locator('pre'))
         .toContainText('npm --prefix frontend run test')
       await expect(page.getByRole('heading', { name: '迁移审批' })).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Chat · 迁移审批' })).toBeVisible()
+      await expect(page.getByRole('button', { name: '对话 · 迁移审批' })).toBeVisible()
 
       const [
         surface,
@@ -444,7 +444,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
     await expect(card.getByRole('textbox')).toHaveCount(0)
     const group = page.locator('.interactions-session-group').filter({ has: card })
-    await expect(group.getByRole('button', { name: 'Chat · 等待迁移环境' })).toBeVisible()
+    await expect(group.getByRole('button', { name: '对话 · 等待迁移环境' })).toBeVisible()
     const refresh = page.getByRole('button', { name: '刷新', exact: true })
     const refreshed = page.waitForResponse((response) =>
       new URL(response.url()).pathname === '/api/harness/interactions'
@@ -465,9 +465,9 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await page.goto(HARNESS_URL)
 
     const group = page.locator('.interactions-session-group').first()
-    const source = group.getByRole('button', { name: 'Chat · 迁移审批' })
-    const subagentSource = group.getByRole('link', { name: '打开 subagent' })
-    await expect(source).toContainText('Chat · 迁移审批')
+    const source = group.getByRole('button', { name: '对话 · 迁移审批' })
+    const subagentSource = group.getByRole('link', { name: '打开子 Agent' })
+    await expect(source).toContainText('对话 · 迁移审批')
     await expect(subagentSource).toHaveAttribute('href', '/threads/thread-approval')
     await expect(group.getByRole('link')).toHaveCount(1)
     await source.click()

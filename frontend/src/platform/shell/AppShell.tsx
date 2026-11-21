@@ -250,9 +250,11 @@ export function AppShell({
                   >
                     <Icon aria-hidden="true" />
                     <span>{t(item.labelKey)}</span>
-                    <small aria-hidden="true">{item.shortLabel}</small>
                     {item.id === 'interactions' && pendingInteractionsCount > 0 ? (
-                      <span className="nav-pending-badge" aria-label={`${pendingInteractionsCount} pending`}>
+                      <span
+                        className="nav-pending-badge"
+                        aria-label={t('ai.interaction.pendingCount', { count: pendingInteractionsCount })}
+                      >
                         {pendingInteractionsCount}
                       </span>
                     ) : null}

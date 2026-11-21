@@ -13,6 +13,18 @@ export const canvasCatalog = {
     'en-US': 'Organize assets and run image or video Functions.',
     'zh-CN': '整理素材，并运行图片或视频 Function。',
   },
+  'canvas.library.searchLabel': {
+    'en-US': 'Search canvases',
+    'zh-CN': '搜索画布',
+  },
+  'canvas.library.searchPlaceholder': {
+    'en-US': 'Search canvas names...',
+    'zh-CN': '搜索画布名称...',
+  },
+  'canvas.library.empty.noMatch': {
+    'en-US': 'No matching canvases',
+    'zh-CN': '暂无匹配画布',
+  },
   'canvas.library.loading': {
     'en-US': 'Loading canvases',
     'zh-CN': '正在加载画布',
@@ -22,8 +34,8 @@ export const canvasCatalog = {
     'zh-CN': '画布列表加载失败：{{message}}',
   },
   'canvas.library.createTitle': {
-    'en-US': 'Create new canvas',
-    'zh-CN': '创建新画布',
+    'en-US': 'New Canvas',
+    'zh-CN': '新建画布',
   },
   'canvas.library.createSubtitle': {
     'en-US': 'Blank canvas · Create and open',
@@ -87,7 +99,7 @@ export const canvasCatalog = {
   },
   'canvas.editor.ariaLabel': {
     'en-US': 'Canvas resource editor',
-    'zh-CN': 'Canvas 资源编辑器',
+    'zh-CN': '画布资源编辑器',
   },
   'canvas.editor.save.saving': {
     'en-US': 'Saving…',
@@ -371,7 +383,7 @@ export const canvasCatalog = {
   },
   'canvas.generation.outputsAria': {
     'en-US': 'Expected Function outputs',
-    'zh-CN': '函数预期输出',
+    'zh-CN': 'Function 预期输出',
   },
   'canvas.generation.attachedReferencesAria': {
     'en-US': 'Attached references',

@@ -48,7 +48,7 @@ function open(environment?: typeof card) {
 }
 
 const saveButton = () => screen.getByRole('button', { name: '保存配置' })
-const createButton = () => screen.getByRole('button', { name: '创建环境' })
+const createButton = () => screen.getByRole('button', { name: '创建' })
 
 describe('EnvironmentConfigModal', () => {
   beforeEach(() => {
@@ -71,7 +71,7 @@ describe('EnvironmentConfigModal', () => {
   it('creates a card with name, note, full daemon config and null direct proxy', async () => {
     const user = userEvent.setup()
     const { created } = open()
-    expect(screen.getByRole('dialog', { name: '创建环境' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '新建环境' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(window.location.origin)
     await user.type(screen.getByRole('textbox', { name: '环境名称' }), ' new-host ')
     await user.type(screen.getByRole('textbox', { name: '备注' }), '  my note  ')
@@ -187,7 +187,7 @@ describe('EnvironmentConfigModal', () => {
     await user.click(screen.getByRole('checkbox'))
     await user.type(screen.getByRole('textbox', { name: 'LSP servers' }), 'not JSON')
     await user.click(createButton())
-    expect(await screen.findByRole('alert')).toHaveTextContent('LSP servers 配置无效')
+    expect(await screen.findByRole('alert')).toHaveTextContent('LSP 服务器配置无效')
     expect(environmentService.createEnvironment).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('checkbox'))

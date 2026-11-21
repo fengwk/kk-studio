@@ -538,7 +538,7 @@ describe('PluginConfigModal workflow editing', () => {
   it('never auto-discards an invalid raw array snippet to switch back to structured editing', async () => {
     renderModal()
     const user = userEvent.setup()
-    const toggleName = '切换 entries 的结构化/Raw JSON 编辑'
+    const toggleName = '切换 entries 的结构化/原始 JSON 编辑'
 
     // 结构化 -> Raw：整个数组变成一段 raw 片段。
     await user.click(screen.getByRole('button', { name: toggleName }))

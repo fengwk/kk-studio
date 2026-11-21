@@ -21,7 +21,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/test',
     labelKey: 'platform.nav.ai',
     ariaKey: 'platform.nav.aiAria',
-    shortLabel: 'T',
     icon: () => null,
   },
 ]
@@ -43,7 +42,7 @@ describe('WorkbenchShell', () => {
     renderWorkbench(contributions, '/missing')
 
     expect(screen.getByText('页面不可用')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回 Chat' })).toHaveAttribute('href', '/chats')
+    expect(screen.getByRole('link', { name: '返回对话' })).toHaveAttribute('href', '/chats')
   })
 
   it('renders the current static fixture after the provider value changes', () => {

@@ -272,9 +272,9 @@ for (const scenario of ['pane-root', 'pane-child']) {
 
     if (isRoot) {
       const approvalCard = page.locator('.interaction-feed-item')
-      await expect(approvalCard.getByRole('link', { name: '打开 subagent', exact: true })).toHaveAttribute('href', `/threads/${CHILD}`)
+      await expect(approvalCard.getByRole('link', { name: '打开子 Agent', exact: true })).toHaveAttribute('href', `/threads/${CHILD}`)
       await expect(approvalCard.getByRole('button', { name: '拒绝', exact: true })).toBeEnabled()
-      await expect(approvalCard).not.toContainText('Chat · 等待工具聊天')
+      await expect(approvalCard).not.toContainText('对话 · 等待工具聊天')
       await expect(approvalCard.locator('pre')).toHaveCount(2)
       await expect(approvalCard.locator('pre.is-command')).toHaveText('deploy --dry-run')
       await expect(approvalCard.getByText('/srv/approval-workdir', { exact: true })).toHaveCount(1)

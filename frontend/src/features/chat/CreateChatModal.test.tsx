@@ -103,13 +103,13 @@ describe('CreateChatModal', () => {
     expect(screen.getAllByText('*')).toHaveLength(2)
     expect(screen.getByRole('alert')).toHaveTextContent('请填写 Chat 名称')
     expect(screen.getByText('请填写名称')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat 名称').closest('label')).toHaveClass('is-error')
+    expect(screen.getByPlaceholderText('对话名称').closest('label')).toHaveClass('is-error')
 
-    await user.type(screen.getByPlaceholderText('Chat 名称'), 'My Chat')
+    await user.type(screen.getByPlaceholderText('对话名称'), 'My Chat')
     expect(onTitleChange).toHaveBeenCalled()
     await chooseSelectOption(user, 'Agent', 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
-    await user.click(screen.getByRole('button', { name: '确认创建' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     expect(onSubmit).toHaveBeenCalled()
   })
 
@@ -160,8 +160,8 @@ describe('CreateChatModal', () => {
       />,
     )
 
-    expect(screen.getByRole('form', { name: '编辑 Chat' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '编辑 Chat' })).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: '编辑对话' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '编辑对话' })).toBeInTheDocument()
     expect(screen.getByDisplayValue('Existing Chat')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存修改' })).toBeInTheDocument()
 
@@ -245,7 +245,7 @@ describe('CreateChatModal', () => {
     // 初始加载中：保留环境名称，不宣称不可用，展示加载指示
     expect(screen.getByText('pending-env')).toBeInTheDocument()
     expect(screen.queryByText('pending-env · 不可用')).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('正在加载 Environment')
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载环境')
 
     // 列表成功返回且不含 pending-env：确认为不可用，方才标记 “· 不可用”
     await act(async () => {

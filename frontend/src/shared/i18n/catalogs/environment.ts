@@ -188,11 +188,11 @@ export const environmentCatalog = {
   },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',
-    'zh-CN': '正在加载 Environment',
+    'zh-CN': '正在加载环境',
   },
   'ai.environment.loadFailed': {
     'en-US': 'Failed to load environments',
-    'zh-CN': '加载 Environment 失败',
+    'zh-CN': '加载环境失败',
   },
   'ai.environment.refreshFailed': {
     'en-US': 'Refresh failed',
@@ -215,8 +215,8 @@ export const environmentCatalog = {
     'zh-CN': '上次 Daemon 版本',
   },
   'ai.environment.create': {
-    'en-US': 'Create Environment',
-    'zh-CN': '创建环境',
+    'en-US': 'New Environment',
+    'zh-CN': '新建环境',
   },
   'ai.environment.createDescription': {
     'en-US': 'Register execution environment and capabilities',
@@ -396,11 +396,11 @@ export const environmentCatalog = {
   },
   'ai.environment.form.lsp': {
     'en-US': 'Enable LSP servers',
-    'zh-CN': '启用 LSP servers',
+    'zh-CN': '启用 LSP 服务器',
   },
   'ai.environment.form.lspHelp': {
     'en-US': 'Declare installed language servers. Command and at least one dotted file extension are required; root markers and first-match markers are optional.',
-    'zh-CN': '声明已安装的语言服务器。command 和至少一个带点的合法文件后缀必填；root markers 与 first-match markers 可选。',
+    'zh-CN': '声明已安装的语言服务器。命令和至少一个带点的文件后缀必填；根标记与首个匹配标记可选。',
   },
   'ai.environment.form.proxyUrl': {
     'en-US': 'Daemon proxy',
@@ -427,8 +427,8 @@ export const environmentCatalog = {
     'zh-CN': '保存配置',
   },
   'ai.environment.form.create': {
-    'en-US': 'Create environment',
-    'zh-CN': '创建环境',
+    'en-US': 'Create',
+    'zh-CN': '创建',
   },
   'ai.environment.form.invalidName': {
     'en-US': 'The name must be nonblank, at most 64 characters, without a slash or surrounding whitespace.',
@@ -452,7 +452,7 @@ export const environmentCatalog = {
   },
   'ai.environment.form.invalidLsp': {
     'en-US': 'LSP servers are invalid: each server needs a valid ID, command and at least one dotted file extension; markers are optional.',
-    'zh-CN': 'LSP servers 配置无效：每个服务器需有合法 ID、command 和至少一个带点的文件后缀；markers 可选。',
+    'zh-CN': 'LSP 服务器配置无效：每个服务器需有合法 ID、命令和至少一个带点的文件后缀；标记可选。',
   },
   'ai.environment.form.invalidConfig': {
     'en-US': 'The Daemon configuration is invalid.',
@@ -472,7 +472,7 @@ export const environmentCatalog = {
   },
   'ai.environment.capabilities': {
     'en-US': 'Capabilities',
-    'zh-CN': 'Capabilities',
+    'zh-CN': '能力',
   },
   'ai.environment.userName': {
     'en-US': 'Process User',

@@ -81,7 +81,7 @@ describe('execution tree HTTP Instant contract', () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderPanel()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('turns: 3 · tools: 5')
+    expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('轮次：3 · 工具：5')
     expect(transport).toHaveBeenCalledTimes(1)
     expect(transport.mock.calls[0][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])

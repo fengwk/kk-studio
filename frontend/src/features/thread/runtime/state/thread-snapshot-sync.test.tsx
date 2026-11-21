@@ -270,7 +270,7 @@ describe('useThreadSnapshotSync', () => {
       socket.emitServer({ ...snapshotFrame(healthy('2')), resource: healthyResource })
     })
     const history = within(screen.getByRole('log'))
-    expect(history.getByRole('alert')).toHaveTextContent('此线程已不存在')
+    expect(history.getByRole('alert')).toHaveTextContent('此 Thread 已不存在')
     expect(history.getByText('Retained Thread history')).toBeInTheDocument()
     expect(within(history.getByRole('alert')).queryByRole('button')).not.toBeInTheDocument()
     expect(container.querySelector('.thread-working')).toBeNull()
@@ -291,7 +291,7 @@ describe('useThreadSnapshotSync', () => {
     rerender(<Fixture show />)
     await act(async () => { await queryClient.invalidateQueries({ queryKey: key, exact: true }) })
     expect(next.sentMessages()).toEqual([{ type: 'subscribe', resource: healthyResource, afterEntryId: ENTRY }])
-    expect(screen.getByRole('alert')).toHaveTextContent('此线程已不存在')
+    expect(screen.getByRole('alert')).toHaveTextContent('此 Thread 已不存在')
     expect(get).not.toHaveBeenCalled()
   })
 
@@ -472,7 +472,7 @@ describe('useThreadSnapshotSync', () => {
     await act(async () => socket.emitServer(snapshotFrame(snapshot('3'))))
     expect(result.current.error).toBeNull()
     await act(async () => socket.onmessage?.({ data: JSON.stringify({ ...snapshotFrame(snapshot()), name: 'unknown' }) }))
-    expect(result.current.error).toContain('此线程的内容可能已过期')
+    expect(result.current.error).toContain('此 Thread 的内容可能已过期')
     expect(queryClient.getQueryData(queryKeys.threads.snapshot(THREAD))).toEqual(snapshot('3'))
   })
 

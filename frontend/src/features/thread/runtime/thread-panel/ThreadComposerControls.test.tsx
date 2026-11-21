@@ -125,7 +125,7 @@ describe('ThreadComposerControls permission menu', () => {
       'aria-selected',
       'true',
     )
-    expect(within(listbox).getByRole('option', { name: 'Default' })).not.toHaveAttribute(
+    expect(within(listbox).getByRole('option', { name: '默认' })).not.toHaveAttribute(
       'aria-selected',
       'true',
     )
@@ -137,7 +137,7 @@ describe('ThreadComposerControls permission menu', () => {
 
     renderOpen('permission', createSettings({ yoloEnabled: false }))
     const listboxDefault = screen.getByRole('listbox', { name: '权限选项' })
-    expect(within(listboxDefault).getByRole('option', { name: 'Default' })).toHaveAttribute(
+    expect(within(listboxDefault).getByRole('option', { name: '默认' })).toHaveAttribute(
       'aria-selected',
       'true',
     )
@@ -173,14 +173,14 @@ describe('ThreadComposerControls model/variant menus', () => {
         menu={null}
       />,
     )
-    const button = screen.getByRole('button', { name: 'Model 与 Variant' })
+    const button = screen.getByRole('button', { name: '模型与预设' })
     expect(button).toHaveTextContent('grok-4.7 (xhigh)')
     expect(button).toHaveAttribute('title', 'grok-4.7 (xhigh)')
   })
 
   it('lists all models with current one marked', () => {
     renderOpen('model')
-    expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()
+    expect(screen.getByRole('listbox', { name: '模型选项' })).toBeInTheDocument()
     const options = screen.getAllByRole('option')
     expect(options.map((option) => option.textContent)).toEqual(['MiniMax', 'gpt'])
     expect(screen.getByRole('option', { name: 'MiniMax' })).toHaveAttribute(
@@ -206,7 +206,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     const { settings } = renderOpen('model')
     const search = screen.getByRole('searchbox', { name: '搜索模型' })
     await user.type(search, 'zzz')
-    const listbox = screen.getByRole('listbox', { name: 'Model 选项' })
+    const listbox = screen.getByRole('listbox', { name: '模型选项' })
     expect(within(listbox).queryAllByRole('option')).toHaveLength(0)
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
     expect(settings.onModelChange).not.toHaveBeenCalled()
@@ -229,7 +229,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     // 构造一个不在目录中的 id：菜单里没有对应 option，直接对 listbox 外的
     // 位置无法点击，因此通过 fireEvent 在 listbox 上派发携带该 id 的
     // option 点击事件（等价于 stale 渲染残留的 option）。
-    const listbox = screen.getByRole('listbox', { name: 'Model 选项' })
+    const listbox = screen.getByRole('listbox', { name: '模型选项' })
     const staleOption = document.createElement('button')
     staleOption.setAttribute('role', 'option')
     staleOption.textContent = 'stale/ghost'
@@ -248,7 +248,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     await user.click(screen.getByRole('option', { name: 'MiniMax' }))
     expect(view.onMenuChange.mock.calls).toEqual([['variant', undefined]])
     // active 落在默认 variant（default）；ArrowDown 到 high 后 Enter 提交。
-    const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
+    const listbox = screen.getByRole('listbox', { name: '预设选项' })
     expect(within(listbox).getByRole('option', { name: 'default' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -281,7 +281,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     expect(selected).toEqual([{ modelName: 'gpt', variant: 'fast' }])
     expect(second.onMenuChange.mock.calls).toEqual([['variant', undefined]])
     // 键盘路径同样进入 Variant 列表，且初始 active 是当前 variant。
-    const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
+    const listbox = screen.getByRole('listbox', { name: '预设选项' })
     expect(within(listbox).getByRole('option', { name: 'default' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -296,7 +296,7 @@ describe('ThreadComposerControls model/variant menus', () => {
         modelSelection: { modelName: 'ghost', variant: 'none' },
       }),
     )
-    const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
+    const listbox = screen.getByRole('listbox', { name: '预设选项' })
     expect(within(listbox).queryAllByRole('option')).toHaveLength(0)
   })
 
@@ -317,7 +317,7 @@ describe('ThreadComposerControls model/variant menus', () => {
       variant: null,
     })
     expect(view.onMenuChange.mock.calls).toEqual([[null, true]])
-    expect(screen.queryByRole('listbox', { name: 'Variant 选项' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('listbox', { name: '预设选项' })).not.toBeInTheDocument()
   })
 
   it('returns to the model menu with Backspace and closes with Escape', async () => {
@@ -346,7 +346,7 @@ describe('ThreadComposerControls model/variant menus', () => {
         modelSelection: { modelName: 'ghost', variant: 'none' },
       }),
     )
-    expect(screen.getByRole('button', { name: 'Model' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '模型' })).toBeInTheDocument()
   })
 
   it('closes the menu on Escape from the search box', async () => {
@@ -366,7 +366,7 @@ describe('ThreadComposerControls disabled and empty states', () => {
     const settings = createSettings()
     render(<Harness settings={settings} menu="permission" disabled onMenuChange={onMenuChange} />)
     expect(permissionButton()).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '模型与预设' })).toBeDisabled()
 
     // 即使菜单已打开，disabled 时点击选项也不应触发任何变更。
     await user.click(screen.getByRole('option', { name: 'YOLO' }))
@@ -377,7 +377,7 @@ describe('ThreadComposerControls disabled and empty states', () => {
   it('disables the model trigger when the catalog has no usable model', () => {
     const settings = createSettings({ models: [] })
     render(<Harness settings={settings} menu={null} />)
-    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '模型与预设' })).toBeDisabled()
     // 权限触发不受模型目录影响。
     expect(permissionButton()).toBeEnabled()
   })
@@ -420,13 +420,13 @@ describe('ThreadComposerControls menu switching', () => {
   it('closes the model or variant menu when clicking the model trigger', async () => {
     const user = userEvent.setup()
     const modelOpen = renderOpen('model')
-    await user.click(screen.getByRole('button', { name: 'Model 与 Variant' }))
+    await user.click(screen.getByRole('button', { name: '模型与预设' }))
     expect(modelOpen.onMenuChange).toHaveBeenCalledWith(null, undefined)
     modelOpen.unmount()
 
     // variant 二级菜单同样由同一个 trigger 关闭。
     const variantOpen = renderOpen('variant')
-    await user.click(screen.getByRole('button', { name: 'Model 与 Variant' }))
+    await user.click(screen.getByRole('button', { name: '模型与预设' }))
     expect(variantOpen.onMenuChange).toHaveBeenCalledWith(null, undefined)
   })
 
@@ -449,7 +449,7 @@ describe('ThreadComposerControls environment menu', () => {
   /** 测试意图：验证未选环境时 trigger 显示 None，已选时展示具体环境名称。 */
   it('renders None when environmentName is null, and renders name when present', () => {
     const noneView = renderOpen(null, createSettings({ environmentName: null }))
-    expect(screen.getByRole('button', { name: '环境' })).toHaveTextContent('None')
+    expect(screen.getByRole('button', { name: '环境' })).toHaveTextContent('无')
     noneView.unmount()
 
     renderOpen(null, createSettings({ environmentName: 'dev-cluster' }))
@@ -469,7 +469,7 @@ describe('ThreadComposerControls environment menu', () => {
     const listbox = screen.getByRole('listbox', { name: '环境选项' })
     const options = within(listbox).getAllByRole('option')
     expect(options.map((opt) => opt.textContent)).toEqual([
-      'None',
+      '无',
       'dev-cluster',
       'prod-box',
       'orphan-env',
@@ -508,7 +508,7 @@ describe('ThreadComposerControls environment menu', () => {
     expect(onEnvironmentChange).toHaveBeenCalledWith('__none__')
 
     // 选择 None 时传 null
-    await user.click(within(listbox).getByRole('option', { name: 'None' }))
+    await user.click(within(listbox).getByRole('option', { name: '无' }))
     expect(onEnvironmentChange).toHaveBeenCalledWith(null)
   })
 

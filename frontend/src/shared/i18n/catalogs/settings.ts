@@ -123,7 +123,7 @@ export const settingsCatalog = {
   },
   'plugins.connectDialog.step2': {
     'en-US': '2. Paste Callback Deep Link',
-    'zh-CN': '2. 粘贴回调 Deep Link',
+    'zh-CN': '2. 粘贴回调链接',
   },
   'plugins.connectDialog.callbackPlaceholder': {
     'en-US': 'Paste callback URL, for example minimax-cn://auth-callback?...',
@@ -151,7 +151,7 @@ export const settingsCatalog = {
   },
   'plugins.connectDialog.afterLoginHint': {
     'en-US': 'After login, copy the callback deep link from the browser and paste it here.',
-    'zh-CN': '登录后，从浏览器复制回调 Deep Link 并粘贴到这里。',
+    'zh-CN': '登录后，从浏览器复制回调链接并粘贴到这里。',
   },
   'plugins.noRegionsAvailable': {
     'en-US': 'No regions available for this plugin',
@@ -359,7 +359,7 @@ export const settingsCatalog = {
   },
   'plugins.configDialog.toggleArrayEditor': {
     'en-US': 'Toggle structured/Raw JSON for {{name}}',
-    'zh-CN': '切换 {{name}} 的结构化/Raw JSON 编辑',
+    'zh-CN': '切换 {{name}} 的结构化/原始 JSON 编辑',
   },
   'plugins.configDialog.arrayStructuredMode': {
     'en-US': 'Structured',
@@ -367,7 +367,7 @@ export const settingsCatalog = {
   },
   'plugins.configDialog.arrayRawMode': {
     'en-US': 'Raw JSON',
-    'zh-CN': 'Raw JSON',
+    'zh-CN': '原始 JSON',
   },
   'plugins.configDialog.structureEditsBlocked': {
     'en-US': 'Resolve draft errors before removing {{name}} items',
@@ -508,19 +508,19 @@ export const settingsCatalog = {
   },
   'settings.tabs.backendNetwork': {
     'en-US': 'Backend Network',
-    'zh-CN': 'Backend 网络',
+    'zh-CN': '后端网络',
   },
   'settings.section.backendNetwork.description': {
     'en-US': 'Configure the HTTP proxy used by backend outbound requests.',
-    'zh-CN': '配置 Backend 发起外部请求时使用的 HTTP 代理。',
+    'zh-CN': '配置后端发起外部请求时使用的 HTTP 代理。',
   },
   'settings.section.backendNetwork.proxy.title': {
     'en-US': 'Backend HTTP proxy',
-    'zh-CN': 'Backend HTTP 代理',
+    'zh-CN': '后端 HTTP 代理',
   },
   'settings.section.backendNetwork.proxy.description': {
     'en-US': 'New backend HTTP requests use the saved proxy; in-flight requests are unaffected. Daemon proxy settings are configured per environment card.',
-    'zh-CN': '保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 代理按环境卡片单独配置。',
+    'zh-CN': '保存后后端新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 代理按环境卡片单独配置。',
   },
   'settings.field.backendNetwork.proxyUrl': {
     'en-US': 'Proxy URL',
@@ -528,7 +528,7 @@ export const settingsCatalog = {
   },
   'settings.field.backendNetwork.proxyUrl.hint': {
     'en-US': 'HTTP proxy used by backend outbound requests. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected.',
-    'zh-CN': 'Backend 发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
+    'zh-CN': '后端发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后后端新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
   },
   'settings.field.backendNetwork.noProxyHosts': {
     'en-US': 'Proxy bypass rules',
@@ -661,7 +661,7 @@ export const settingsCatalog = {
   // --- AI Runtime ---
   'settings.section.aiRuntime.description': {
     'en-US': 'Shared invocation retry, context compaction and subagent budgets.',
-    'zh-CN': '共享调用重试、上下文压缩与子代理预算。',
+    'zh-CN': '共享调用重试、上下文压缩与子 Agent 预算。',
   },
   'settings.section.aiRuntime.retry.title': {
     'en-US': 'Invocation retry',
@@ -682,11 +682,11 @@ export const settingsCatalog = {
   },
   'settings.section.aiRuntime.subagent.title': {
     'en-US': 'Subagent budget',
-    'zh-CN': '子代理预算',
+    'zh-CN': '子 Agent 预算',
   },
   'settings.section.aiRuntime.subagent.description': {
     'en-US': 'Limits for delegated subagent tasks.',
-    'zh-CN': '委派子代理任务的预算限制。',
+    'zh-CN': '委派子 Agent 任务的预算限制。',
   },
   'settings.field.aiRuntime.retryMaxRetries': {
     'en-US': 'Max retries',
@@ -752,7 +752,7 @@ export const settingsCatalog = {
   },
   'settings.field.aiRuntime.subagentMaxDepth.hint': {
     'en-US': 'Maximum nesting depth for recursive subagent delegation. Further delegations are blocked once this limit is reached.',
-    'zh-CN': '允许子代理继续递归委派子代理的最大嵌套层级。达到上限后将禁止进一步向下委派。',
+    'zh-CN': '允许子 Agent 继续递归委派子 Agent 的最大嵌套层级。达到上限后将禁止进一步向下委派。',
   },
   'settings.field.aiRuntime.subagentMaxConcurrency': {
     'en-US': 'Max concurrency',
@@ -760,7 +760,7 @@ export const settingsCatalog = {
   },
   'settings.field.aiRuntime.subagentMaxConcurrency.hint': {
     'en-US': 'Maximum number of subagent tasks that can execute concurrently within a single conversation session.',
-    'zh-CN': '单个会话内允许同时并行运行的子代理任务最大数量。',
+    'zh-CN': '单个会话内允许同时并行运行的子 Agent 任务最大数量。',
   },
   'settings.field.aiRuntime.subagentMaxTotalConcurrency': {
     'en-US': 'Max total concurrency',
@@ -768,7 +768,7 @@ export const settingsCatalog = {
   },
   'settings.field.aiRuntime.subagentMaxTotalConcurrency.hint': {
     'en-US': 'Global limit on concurrent subagents across all conversation sessions. Set to 0 for no global cap.',
-    'zh-CN': '全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。',
+    'zh-CN': '全系统所有会话中同时运行的子 Agent 任务总数上限。设为 0 表示不设全局上限。',
   },
   'settings.field.aiRuntime.subagentMaxTurns': {
     'en-US': 'Max turns',
@@ -776,7 +776,7 @@ export const settingsCatalog = {
   },
   'settings.field.aiRuntime.subagentMaxTurns.hint': {
     'en-US': 'Soft interaction-turn budget for a subagent task. At the limit, the subagent is reminded to finish the current phase and report.',
-    'zh-CN': '单个子代理任务的交互轮数软预算。达到上限后提醒子代理结束当前阶段并汇报。',
+    'zh-CN': '单个子 Agent 任务的交互轮数软预算。达到上限后提醒子 Agent 结束当前阶段并汇报。',
   },
   'settings.option.imageTier.720p': {
     'en-US': '720p (fits 1280×720)',
@@ -936,7 +936,7 @@ export const settingsCatalog = {
   // --- Environment ---
   'settings.section.environment.description': {
     'en-US': 'Resource limits and timeouts for the daemon gateway.',
-    'zh-CN': '守护网关的资源上限与超时。',
+    'zh-CN': 'Daemon 网关的资源上限与超时。',
   },
   'settings.section.environment.runtime.title': {
     'en-US': 'Runtime budgets',
@@ -952,12 +952,12 @@ export const settingsCatalog = {
   },
   'settings.field.environment.heartbeatTimeoutMillis.hint': {
     'en-US': 'Heartbeat timeout in milliseconds for runtime environments. Environments without heartbeats past this duration are marked disconnected.',
-    'zh-CN': 'Environment 运行时的心跳超时毫秒数。超过该时间未收到心跳将被标记为失联。',
+    'zh-CN': '环境运行时的心跳超时毫秒数。超过该时间未收到心跳将被标记为失联。',
   },
   // --- Storage & Media ---
   'settings.section.storageMedia.description': {
     'en-US': 'Upload, S3 presigning and canvas media processing budgets.',
-    'zh-CN': '上传、S3 预签名与 Canvas 媒体处理预算。',
+    'zh-CN': '上传、S3 预签名与画布媒体处理预算。',
   },
   'settings.section.storageMedia.upload.title': {
     'en-US': 'Uploads & S3 presigning',
@@ -967,7 +967,7 @@ export const settingsCatalog = {
     'en-US':
       'Upload lifetime and S3 presigned URL budgets. Upload lifetime applies on the next decision to existing unclaimed uploads, not only to new uploads.',
     'zh-CN':
-      '上传有效期与 S3 预签名 URL 预算。上传有效期在下次判断时作用于存量未 claim 上传，而不只是新上传。',
+      '上传有效期与 S3 预签名 URL 预算。上传有效期在下次判断时作用于存量未认领的上传，而不只是新上传。',
   },
   'settings.section.storageMedia.imageInput.title': {
     'en-US': 'Model request images',
@@ -1003,7 +1003,7 @@ export const settingsCatalog = {
     'en-US':
       'Lifetime in seconds of an upload from its creation. Shortening it immediately expires older unclaimed uploads on their next check; extending it keeps unclaimed uploads alive. Once cleanup has started it never revives.',
     'zh-CN':
-      '上传自创建起的有效秒数。缩短后存量未 claim 上传会在下次判断时立即过期；延长则让未 claim 上传继续有效；清理一旦开始便不再复活。',
+      '上传自创建起的有效秒数。缩短后存量未认领的上传会在下次判断时立即过期；延长则让未认领的上传继续有效；清理一旦开始便不再复活。',
   },
   'settings.field.storageMedia.s3PresignDefaultExpiresSeconds': {
     'en-US': 'S3 presign default expiry (s)',
@@ -1178,7 +1178,7 @@ export const settingsCatalog = {
   },
   'settings.field.advanced.applicationEventMaxBytes.hint': {
     'en-US': 'Maximum allowed byte size for a single internal application event payload.',
-    'zh-CN': '应用内部单条事件 Payload 允许的最大字节数。',
+    'zh-CN': '应用内部单条事件负载允许的最大字节数。',
   },
   'settings.field.advanced.applicationEventSendTimeoutMillis': {
     'en-US': 'Event send timeout (ms)',

@@ -12,7 +12,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/chats',
     labelKey: 'platform.nav.ai',
     ariaKey: 'platform.nav.aiAria',
-    shortLabel: 'AI',
     icon: Bot,
   },
   {
@@ -21,7 +20,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/interactions',
     labelKey: 'ai.nav.interactions',
     ariaKey: 'ai.nav.interactionsAria',
-    shortLabel: 'Pending',
     icon: Inbox,
   },
   {
@@ -30,7 +28,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/projects',
     labelKey: 'platform.nav.projects',
     ariaKey: 'platform.nav.projectsAria',
-    shortLabel: 'Projects',
     icon: FolderKanban,
   },
   {
@@ -39,7 +36,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/canvas',
     labelKey: 'platform.nav.canvas',
     ariaKey: 'platform.nav.canvasAria',
-    shortLabel: 'Canvas',
     icon: Grid2X2,
   },
   {
@@ -48,7 +44,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     to: '/settings',
     labelKey: 'platform.nav.settings',
     ariaKey: 'platform.nav.settingsAria',
-    shortLabel: 'Settings',
     icon: Settings,
   },
 ] as const

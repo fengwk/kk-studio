@@ -276,8 +276,8 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 })
     const mock = await api(page)
     await page.goto(HARNESS_URL)
-    await page.getByRole('button', { name: '创建环境', exact: true }).click()
-    const create = page.getByRole('dialog', { name: '创建环境' })
+    await page.getByRole('button', { name: '新建环境', exact: true }).click()
+    const create = page.getByRole('dialog', { name: '新建环境' })
     await create.getByRole('textbox', { name: /环境名称/ }).fill(`fresh-${width}`)
     await create.getByRole('textbox', { name: '备注' }).fill('我的工作站')
     await expect(create.getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
@@ -286,7 +286,7 @@ for (const width of [1280, 390]) {
     await create.getByRole('textbox', { name: 'Daemon 代理' }).fill('')
     await expect(create.getByRole('button', { name: /帮助：保存后的配置无需重装 Daemon/ })).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`create-${width}.png`), fullPage: true })
-    await create.getByRole('button', { name: '创建环境', exact: true }).click()
+    await create.getByRole('button', { name: '创建', exact: true }).click()
 
     await expect(create).toHaveCount(0)
     expect(mock.createBodies).toHaveLength(1)
@@ -468,7 +468,7 @@ test('rotates the token and deletes the card through plain modal labels', async 
   await remove.getByRole('button', { name: '删除环境' }).click()
   await expect(remove).toHaveCount(0)
   await expect(page.locator('.environment-card')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '创建环境', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建环境', exact: true })).toBeVisible()
   expect(deletes).toEqual(['/api/platform/environments/env-danger?expectedVersion=4'])
 })
 
@@ -495,7 +495,7 @@ test('an initial list failure offers an in-place retry instead of a stale-data n
   await page.goto(HARNESS_URL)
   const failure = page.locator('.environment-feedback')
   await expect(failure).toBeVisible({ timeout: 15000 })
-  await expect(failure.getByRole('status')).toHaveText('加载 Environment 失败')
+  await expect(failure.getByRole('status')).toHaveText('加载环境失败')
   await expect(failure).toHaveCSS('color', await tokenColor(page, '--fg-muted'))
   const icon = failure.locator('svg')
   await expect(icon).toBeVisible()

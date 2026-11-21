@@ -26,17 +26,17 @@ test.describe('Skill Packages real browser verification', () => {
     expect(await card(page, 'browser-skills').locator('button.btn-primary').count()).toBe(1)
     await page.screenshot({ path: `${SHOTS}/skill-packages-list-desktop-1280.png`, fullPage: true })
 
-    await page.getByRole('button', { name: '创建技能包' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建技能包' })
+    await page.getByRole('button', { name: '新建技能包' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建技能包' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole('tab', { name: 'Git 仓库' })).toHaveAttribute('aria-selected', 'true')
 
     await dialog.getByPlaceholder('my-skills').fill('new-git-pack')
     await dialog.getByPlaceholder('https://github.com/org/repo.git').fill('https://github.com/example/new-git-pack.git')
     await dialog.getByPlaceholder('main').fill('main')
-    await dialog.getByRole('button', { name: '确认创建' }).click()
+    await dialog.getByRole('button', { name: '创建' }).click()
 
-    await expect(page.getByRole('dialog', { name: '创建技能包' })).toHaveCount(0)
+    await expect(page.getByRole('dialog', { name: '新建技能包' })).toHaveCount(0)
     await expect(card(page, 'new-git-pack')).toContainText('Git 仓库')
     await expect(card(page, 'new-git-pack')).toContainText('1111111111')
     await expect(card(page, 'new-git-pack').getByRole('button', { name: '检查更新 new-git-pack' })).toBeVisible()
@@ -53,8 +53,8 @@ test.describe('Skill Packages real browser verification', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/browser-tests/skill-packages-harness.html')
 
-    await page.getByRole('button', { name: '创建技能包' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建技能包' })
+    await page.getByRole('button', { name: '新建技能包' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建技能包' })
     await dialog.getByRole('tab', { name: '上传压缩包' }).click()
     await dialog.getByPlaceholder('my-skills').fill('upload-pack')
     await dialog.getByPlaceholder('1.0.0').fill('2026.09.1')
@@ -149,8 +149,8 @@ test.describe('Skill Packages real browser verification', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     await page.screenshot({ path: `${SHOTS}/skill-packages-list-mobile-390.png`, fullPage: true })
 
-    await page.getByRole('button', { name: '创建技能包' }).click()
-    const dialog = page.getByRole('dialog', { name: '创建技能包' })
+    await page.getByRole('button', { name: '新建技能包' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建技能包' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('tab', { name: '上传压缩包' }).click()
     await dialog.getByPlaceholder('my-skills').fill('mobile-pack')
