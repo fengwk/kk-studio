@@ -5,6 +5,7 @@ import {
   clonePricingDraft,
   emptyModelPricingDraft,
   findPricingConflicts,
+  findPricingRangeOverrideIssues,
   findPricingTtlRowIssues,
   hasConfiguredPricing,
   normalizePricingDraft,
@@ -172,7 +173,53 @@ describe('local model pricing draft', () => {
     draft.definition.inputTokenRanges[0]!.cacheWriteByTtl = [{ draftKey: 'ttl', seconds: '600', rate: '' }]
     expect(() => normalizePricingDraft(draft)).toThrow(/pricing\.rules\[0\]\.TTL\.600 rate is required/)
     draft.definition.inputTokenRanges[0]!.cacheWriteTtlMode = 'inherit'
+    draft.definition.inputTokenRanges[0]!.rates = { input: '2' }
     expect(normalizePricingDraft(draft)!.rules[0]).not.toHaveProperty('cacheWriteByTtl')
+  })
+
+  /** 服务端 ModelPricingValidator 拒绝“一个费率都不覆盖”的输入档位，本地必须在保存前以同一口径失败。 */
+  it('rejects a token range that overrides no fee rate locally', () => {
+    const draft = emptyModelPricingDraft()
+    setPricedBase(draft)
+    const range = {
+      draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100', rates: {},
+      cacheWriteTtlMode: 'inherit' as const, cacheWriteByTtl: [],
+    }
+    draft.definition.inputTokenRanges = [range]
+    expect(() => normalizePricingDraft(draft)).toThrow(/pricing\.rules\[0\] must override at least one fee rate/)
+
+    // 显式 0、已声明的 TTL 表（含空表）和显式 reasoning:null 都是合法覆盖，不能被误判。
+    draft.definition.inputTokenRanges = [{ ...range, rates: { input: '0' } }]
+    expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ input: '0' })
+    draft.definition.inputTokenRanges = [{ ...range, cacheWriteTtlMode: 'unpartitioned' }]
+    expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWriteByTtl: {} })
+    draft.definition.inputTokenRanges = [{ ...range, rates: { reasoning: null } }]
+    expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ reasoning: null })
+    draft.definition.inputTokenRanges = [{ ...range, rates: { cacheWrite: '0' } }]
+    expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWrite: '0' })
+  })
+
+  /** 行级提示只定位边界已成立的行，避免新行刚创建就报错，也避免与先校验边界的顺序冲突。 */
+  it('localizes empty-override rows only after their bounds hold', () => {
+    const definition = emptyModelPricingDraft().definition
+    const range = {
+      draftKey: 'range', minInputTokens: '', maxInputTokensExclusive: '', rates: {},
+      cacheWriteTtlMode: 'inherit' as const, cacheWriteByTtl: [],
+    }
+    definition.inputTokenRanges = [range]
+    expect(findPricingRangeOverrideIssues(definition)).toEqual([])
+
+    definition.inputTokenRanges = [{ ...range, minInputTokens: '100' }]
+    expect(findPricingRangeOverrideIssues(definition)).toEqual(['range'])
+
+    definition.inputTokenRanges = [{ ...range, rates: { output: '0' } }]
+    expect(findPricingRangeOverrideIssues(definition)).toEqual([])
+
+    // 边界本身无效（非规范整数、上界不大于下界）时仍按边界报错，不重复给覆盖提示。
+    definition.inputTokenRanges = [{ ...range, minInputTokens: '007', maxInputTokensExclusive: '100' }]
+    expect(findPricingRangeOverrideIssues(definition)).toEqual([])
+    definition.inputTokenRanges = [{ ...range, minInputTokens: '200', maxInputTokensExclusive: '100' }]
+    expect(findPricingRangeOverrideIssues(definition)).toEqual([])
   })
 
   it('reports invalid, duplicate and blank TTL row issues for inline editor messages', () => {

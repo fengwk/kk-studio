@@ -375,6 +375,42 @@ describe('ModelPricingPlanEditor', () => {
     expect(readDraft().definition.base.reasoning).toBeNull()
   })
 
+  it('reports a token range that sets no price once its bounds hold, and clears it for an explicit zero', () => {
+    render(<Harness initial={pricedDraft()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add range' }))
+    // 新行还没边界时先不报覆盖错误：与服务端“先边界、后覆盖”的校验顺序一致。
+    expect(screen.queryByText('Set at least one price in this token range.')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Start (inclusive)'), { target: { value: '100' } })
+    expect(screen.getByText('Set at least one price in this token range.')).toBeInTheDocument()
+    expect(readDraft().definition.inputTokenRanges[0]!.rates).toEqual({})
+
+    // 显式 0 已经是合法覆盖，行级提示立即消失；档位的 Input 排在基础价之后，按 DOM 顺序取第二个。
+    fireEvent.change(screen.getAllByLabelText('Input')[1]!, { target: { value: '0' } })
+    expect(screen.queryByText('Set at least one price in this token range.')).not.toBeInTheDocument()
+    expect(readDraft().definition.inputTokenRanges[0]!.rates).toEqual({ input: '0' })
+  })
+
+  it('reveals the plan holding an empty-override range before the form reports its error', () => {
+    const bad = change('future', utcDate(5), '2')
+    bad.definition.inputTokenRanges = [{
+      draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100', rates: {},
+      cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
+    }]
+    const { container } = render(
+      <form onSubmit={(event) => event.preventDefault()}>
+        <Harness initial={pricedDraft([bad])} />
+      </form>,
+    )
+    // 默认编辑基础方案，有问题的行在未来的调价方案里。
+    expect(screen.getByLabelText('Input')).toHaveValue('1')
+    expect(screen.queryByText('Set at least one price in this token range.')).not.toBeInTheDocument()
+
+    fireEvent.submit(container.querySelector('form')!)
+    expect(screen.getByRole('button', { name: 'Price plan' })).toHaveAttribute('data-value', 'future')
+    expect(screen.getByText('Set at least one price in this token range.')).toBeInTheDocument()
+  })
+
   it('shows duplicate service tier conflicts immediately and removes only the chosen row', () => {
     render(<Harness initial={pricedDraft()} />)
     const add = screen.getByRole('button', { name: 'Add service tier' })

@@ -26,6 +26,7 @@ export function VariantListEditor({
   capabilities,
   capabilitiesLoading = false,
   capabilitiesError,
+  onRetryCapabilities,
   onChange,
 }: {
   label: string
@@ -35,6 +36,7 @@ export function VariantListEditor({
   capabilities?: ModelCapabilitiesDTO | null
   capabilitiesLoading?: boolean
   capabilitiesError?: string
+  onRetryCapabilities?: () => void
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
   const { t } = useI18n()
@@ -49,6 +51,7 @@ export function VariantListEditor({
       : !cacheState
         ? t('ai.catalog.form.promptCachePending')
         : cacheState === 'CONFIGURABLE' ? null : t(cacheStateMessage[cacheState])
+  const defaultRetention = resolvedCapabilities?.defaultPromptCacheRetention
   const capabilityOptions = resolvedCapabilities?.promptCacheOptions ?? []
   const retentionOptions: SelectOption[] = capabilityOptions.map((option) => ({
     value: option.retention,
@@ -88,7 +91,7 @@ export function VariantListEditor({
     }
     onChange([...variants, newVariantDraft({
       id,
-      promptCacheRetention: resolvedCapabilities?.defaultPromptCacheRetention ?? '',
+      promptCacheRetention: defaultRetention ?? '',
     })])
   }
 
@@ -107,7 +110,16 @@ export function VariantListEditor({
           </Button>
         </div>
       </div>
-      {capabilitiesError ? <p className="field-error" role="alert">{capabilitiesError}</p> : null}
+      {capabilitiesError ? (
+        <div>
+          <p className="field-error" role="alert">{capabilitiesError}</p>
+          {onRetryCapabilities ? (
+            <Button variant="inline" onClick={onRetryCapabilities}>
+              {t('ai.catalog.form.retryModelCapabilities')}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <p className="inline-hint" id={reasoningHintId}>
         {t('ai.catalog.form.variantHint')}
         {reasoning
@@ -157,6 +169,16 @@ export function VariantListEditor({
                   <div className="form-group">
                     <FieldLabel>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
                     <span className="inline-hint">{cacheStatus}</span>
+                    {cacheState && currentRetention === 'LONG' && !retentionSupported && defaultRetention != null ? (
+                      <>
+                        <span className="field-error">{t('ai.catalog.form.promptCacheLongUnavailable')}</span>
+                        <div>
+                          <Button variant="inline" onClick={() => updateVariant(index, { promptCacheRetention: defaultRetention })}>
+                            {t('ai.catalog.form.usePromptCacheDefault', { retention: retentionLabel(defaultRetention) })}
+                          </Button>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 )}
                 <label className="form-group">

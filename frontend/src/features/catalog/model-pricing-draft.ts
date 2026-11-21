@@ -237,6 +237,58 @@ export function findPricingTtlRowIssues(rows: PricingTtlRow[]): Record<string, P
   return issues
 }
 
+const RANGE_RATE_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
+
+type RangeBoundsIssue = 'missingBounds' | 'nonIntegerBounds' | 'invalidBounds'
+
+interface RangeBounds {
+  /** Omitted bounds stay undefined because the wire omits them, while an explicit 0 is a real lower bound. */
+  minInputTokens: number | undefined
+  maxInputTokensExclusive: number | undefined
+}
+
+/**
+ * Input-token bounds follow ModelPricingValidator, and issues are returned rather than thrown so that
+ * live row feedback and saving read one parser instead of keeping two drifting copies of the rules.
+ */
+function parseRangeBounds(range: InputRangeDraft): { bounds: RangeBounds } | { issue: RangeBoundsIssue } {
+  const min = range.minInputTokens.trim()
+  const max = range.maxInputTokensExclusive.trim()
+  if (!min && !max) return { issue: 'missingBounds' }
+  if ((min && !/^(?:0|[1-9]\d*)$/.test(min)) || (max && !/^[1-9]\d*$/.test(max))) {
+    return { issue: 'nonIntegerBounds' }
+  }
+  const minInputTokens = min ? Number(min) : undefined
+  const maxInputTokensExclusive = max ? Number(max) : undefined
+  if ((minInputTokens !== undefined && !Number.isSafeInteger(minInputTokens))
+    || (maxInputTokensExclusive !== undefined && !Number.isSafeInteger(maxInputTokensExclusive))
+    || (maxInputTokensExclusive !== undefined && (minInputTokens ?? 0) >= maxInputTokensExclusive)) {
+    return { issue: 'invalidBounds' }
+  }
+  return { bounds: { minInputTokens, maxInputTokensExclusive } }
+}
+
+/** A range must override a fee rate, mirroring the server's "must override at least one fee rate". */
+function rangeOverridesRate(range: InputRangeDraft): boolean {
+  // A blank rate means inherit, so only a non-blank rate counts, and an explicit 0 does count.
+  if (RANGE_RATE_FIELDS.some((field) => (range.rates[field] ?? '').trim() !== '')) return true
+  // A declared TTL table overrides cache-write prices even when it is the empty "unpartitioned" table.
+  if (range.cacheWriteTtlMode !== 'inherit') return true
+  // Explicit `reasoning: null` follows the final output price and is still a declared override.
+  const reasoning = range.rates.reasoning
+  return reasoning === null || (reasoning ?? '').trim() !== ''
+}
+
+/**
+ * Rows whose bounds already hold but which override no fee rate; exposed by draftKey for inline messages.
+ * Incomplete bounds are still being typed, and the server too reports the boundary problem first.
+ */
+export function findPricingRangeOverrideIssues(definition: PricingDefinitionDraft): string[] {
+  return definition.inputTokenRanges
+    .filter((range) => 'bounds' in parseRangeBounds(range) && !rangeOverridesRate(range))
+    .map((range) => range.draftKey)
+}
+
 function overlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd
 }
@@ -369,24 +421,19 @@ function normalizeRuleDefinition(definition: PricingDefinitionDraft): ModelPrici
   const conflicts = findPricingConflicts(definition)
   if (conflicts.length) throw new Error(`pricing rules conflict: ${conflicts[0]!.keys.join(', ')}`)
   const ranges: ModelPricingRuleDTO[] = definition.inputTokenRanges.map((range, index) => {
-    const min = range.minInputTokens.trim()
-    const max = range.maxInputTokensExclusive.trim()
-    if (!min && !max) throw new Error(`pricing.rules input range ${index + 1} requires at least one token bound`)
-    if ((min && !/^(?:0|[1-9]\d*)$/.test(min)) || (max && !/^[1-9]\d*$/.test(max))) {
-      throw new Error(`pricing.rules input range ${index + 1} requires integer token bounds`)
+    const parsed = parseRangeBounds(range)
+    if ('issue' in parsed) {
+      throw new Error(`pricing.rules input range ${index + 1} ${
+        parsed.issue === 'missingBounds' ? 'requires at least one token bound'
+          : parsed.issue === 'nonIntegerBounds' ? 'requires integer token bounds' : 'has invalid token bounds'}`)
     }
-    const minInputTokens = min ? Number(min) : 0
-    const maxInputTokensExclusive = max ? Number(max) : undefined
-    if (!Number.isSafeInteger(minInputTokens)
-      || (maxInputTokensExclusive !== undefined && (!Number.isSafeInteger(maxInputTokensExclusive) || minInputTokens >= maxInputTokensExclusive))) {
-      throw new Error(`pricing.rules input range ${index + 1} has invalid token bounds`)
-    }
+    const { minInputTokens, maxInputTokensExclusive } = parsed.bounds
     const rule: ModelPricingRuleDTO = {
       type: 'input_token_range',
-      ...(min ? { minInputTokens } : {}),
+      ...(minInputTokens === undefined ? {} : { minInputTokens }),
       ...(maxInputTokensExclusive === undefined ? {} : { maxInputTokensExclusive }),
     }
-    for (const field of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) {
+    for (const field of RANGE_RATE_FIELDS) {
       const value = range.rates[field]
       if (value != null && value.trim() !== '') rule[field] = normalizeDecimal(value, `pricing.rules[${index}].${field}`, false)
     }
@@ -403,6 +450,9 @@ function normalizeRuleDefinition(definition: PricingDefinitionDraft): ModelPrici
         range.cacheWriteByTtl, `pricing.rules[${index}].TTL`, `pricing.rules[${index}] TTL must be positive seconds`,
       )
     }
+    // Reported after the TTL branches so an empty custom table keeps its own message; the wording
+    // matches the server rule that rejects a range without any fee override.
+    if (!rangeOverridesRate(range)) throw new Error(`pricing.rules[${index}] must override at least one fee rate`)
     return rule
   })
   const serviceTiers = definition.serviceTiers.map((tier, index): ModelPricingRuleDTO => {

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
-import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
+import { emptyModelDraft, toEditableModel } from '@/features/catalog/ai-model-draft-codec'
 import { validateResourceDraft } from '@/features/catalog/ai-resource-form-validation'
 import { toEditableProvider, toEditableProviderUpdate } from '@/features/catalog/ai-provider-draft-codec'
 import { AgentForm } from '@/features/catalog/AiAgentResourceForm'
@@ -12,7 +12,21 @@ import { ModelForm } from '@/features/catalog/AiModelResourceForm'
 import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import { setLocale } from '@/shared/i18n'
-import type { ProviderDTO } from '@/shared/api/generated/contracts'
+import type { ModelCapabilitiesDTO, ProviderDTO } from '@/shared/api/generated/contracts'
+
+const cacheProvider: ProviderDTO = {
+  name: 'cache-provider', providerType: 'anthropic', promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
+  credential: { configured: true }, version: '1', createdAt: 1, updatedAt: 1,
+  modelCallTimeoutMillis: '1800000', modelCallIdleTimeoutMillis: '120000', modelHttpRetryStatusCodes: null,
+}
+
+function cacheResponse(capabilities: ModelCapabilitiesDTO) {
+  return new Response(JSON.stringify(capabilities), { headers: { 'content-type': 'application/json' } })
+}
+
+const managedCache: ModelCapabilitiesDTO = {
+  promptCacheOptions: [], defaultPromptCacheRetention: 'NONE', promptCacheState: 'PROVIDER_MANAGED',
+}
 
 async function selectFormOption(
   user: ReturnType<typeof userEvent.setup>,
@@ -173,6 +187,79 @@ describe('AiResourceForms', () => {
     expect(screen.queryByRole('button', { name: 'Prompt Cache Retention 1' })).not.toBeInTheDocument()
     // 新建表单写入后端 canonical 默认档位，避免把旧档位当作端点能力。
     await waitFor(() => expect(currentDraft.variants[0]?.promptCacheRetention).toBe('NONE'))
+  })
+
+  it('ignores late cache capabilities after a model clear or Provider version change', async () => {
+    setLocale('en-US')
+    // Let superseded requests resolve even after abort, so the UI guards are exercised.
+    let resolveCleared!: (response: Response) => void
+    let resolveOldProvider!: (response: Response) => void
+    const fetchCapabilities = vi.fn()
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveCleared = resolve }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveOldProvider = resolve }))
+      .mockResolvedValueOnce(cacheResponse(managedCache))
+    vi.stubGlobal('fetch', fetchCapabilities)
+    const configurable: ModelCapabilitiesDTO = {
+      promptCacheOptions: [{ retention: 'SHORT' }], defaultPromptCacheRetention: 'SHORT',
+      promptCacheState: 'CONFIGURABLE',
+    }
+    let draft = { ...emptyModelDraft(cacheProvider), name: 'model', modelId: 'before-clear' }
+    const onChange = vi.fn((next: ModelDraft) => { draft = next })
+    const form = (provider: ProviderDTO) => <ModelForm draft={draft} mode="create" providers={[provider]} onChange={onChange} />
+    const { rerender } = render(form(cacheProvider))
+
+    draft = { ...draft, modelId: '' }
+    rerender(form(cacheProvider))
+    await act(async () => resolveCleared(cacheResponse(configurable)))
+    expect(screen.getByText('Select a provider and enter a model ID to check prompt caching')).toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+
+    draft = { ...draft, modelId: 'new-model' }
+    rerender(form(cacheProvider))
+    rerender(form({ ...cacheProvider, version: '2' }))
+    expect(await screen.findByText('Automatic (managed by provider)')).toBeInTheDocument()
+    await act(async () => resolveOldProvider(cacheResponse(configurable)))
+    expect(screen.queryByLabelText('Prompt Cache Retention 1')).not.toBeInTheDocument()
+    expect(draft.variants[0]?.promptCacheRetention).toBe('NONE')
+    expect(fetchCapabilities).toHaveBeenCalledTimes(3)
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries capabilities in edit mode, filling only unset presets until the user repairs LONG', async () => {
+    setLocale('en-US')
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(cacheResponse(managedCache)))
+    const empty = emptyModelDraft(cacheProvider)
+    let draft: ModelDraft = {
+      ...empty, name: 'edit-model', modelId: 'edit-model', contextWindow: '200000',
+      variants: [{ ...empty.variants[0]!, promptCacheRetention: 'LONG' }],
+    }
+    function Harness() {
+      const [current, setCurrent] = useState(draft)
+      return <ModelForm draft={current} mode="edit" providers={[cacheProvider]} onChange={(next) => {
+        draft = next
+        setCurrent(next)
+      }} />
+    }
+    const retentions = () => draft.variants.map((variant) => variant.promptCacheRetention)
+    render(<Harness />)
+    const retry = await screen.findByRole('button', { name: 'Retry loading cache options' })
+    await user.click(screen.getByRole('button', { name: 'Add Variant' }))
+    await user.type(screen.getByLabelText('Variant ID 2'), '-custom')
+    expect(retentions()).toEqual(['LONG', ''])
+    expect(screen.queryByLabelText('Prompt Cache Retention 1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /use server default/i })).not.toBeInTheDocument()
+
+    await user.click(retry)
+    const repair = await screen.findByRole('button', { name: /use server default/i })
+    expect(retentions()).toEqual(['LONG', 'NONE'])
+    expect(screen.queryByLabelText('Prompt Cache Retention 1')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Variant ID 2')).toHaveValue('variant-2-custom')
+    await user.click(repair)
+    expect(toEditableModel(draft).config.variants.map((variant) => variant.promptCacheRetention)).toEqual(['NONE', 'NONE'])
+    expect(screen.queryByRole('button', { name: /use server default/i })).not.toBeInTheDocument()
   })
 
   it('manages HTTP retry policy: inherit, custom, empty list, staged invalid withoutEnter, correct, duplicate, submit payload', async () => {
