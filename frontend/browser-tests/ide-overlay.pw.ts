@@ -901,6 +901,36 @@ test.describe('Chat-scoped persistent IDE host', () => {
     expect(state.iframeRequests[secondViewId]).toBe(1)
   })
 
+  test('dismisses a late close error only on its original view', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    const first = await openA(page, state)
+    const second = await addEmptyView(page, state)
+    await tabSelectButton(page, first).click()
+
+    // 在切换到同环境的另一个标签后，才返回原标签的关闭失败。
+    state.holdNextClose = true
+    state.failNextClose = 'IDE_CONTROL_UNAVAILABLE'
+    const close = tabFor(page, first).getByTestId('ide-close-btn')
+    await close.click()
+    await expect.poll(() => state.closeHeld).toBe(true)
+    await tabSelectButton(page, second).click()
+    state.releaseNextClose?.()
+    await expect(close).toBeEnabled()
+    const banner = page.getByTestId('ide-close-error')
+    const dialog = page.getByRole('alertdialog')
+    await expect(banner).toHaveCount(0)
+    await expect(dialog).toHaveCount(0)
+
+    await tabSelectButton(page, first).click()
+    await expect(banner).toContainText('IDE 控制通道不可用')
+    await expect(dialog).toHaveCount(0)
+    await banner.getByRole('button', { name: '忽略' }).click()
+    await expect(banner).toHaveCount(0)
+    await expect(page.getByTestId('ide-tab')).toHaveCount(2)
+    expect(state.closeCalls).toHaveLength(1)
+  })
+
   test('maps native Close Workspace to the normal close, keeps the toolbar and never reopens the last view', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)

@@ -14,6 +14,7 @@ import {
   type IdePendingClaim,
   type IdeRecovery,
 } from '@/features/environment/ide/ide-tab-state'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { testEnvironment } from '@/test-support/environment-test-fixtures'
 
 const environmentService = vi.hoisted(() => ({ listEnvironments: vi.fn() }))
@@ -171,17 +172,18 @@ function Harness() {
       <button data-testid="toggle-a" onClick={() => togglePanel(ENV_INFO_A)}>
         Toggle
       </button>
-      <button
-        data-testid="open-attachment"
-        disabled={!canOpenAttachment(ENV_A)}
-        onClick={() => void openAttachment(
-          ENV_A,
-          '11111111-2222-3333-4444-555555555555',
-          '12345678-1234-1234-1234-123456789abc',
-        )}
-      >
-        Open attachment
-      </button>
+      {canOpenAttachment(ENV_A) ? (
+        <button
+          data-testid="open-attachment"
+          onClick={() => void openAttachment(
+            ENV_A,
+            '11111111-2222-3333-4444-555555555555',
+            '12345678-1234-1234-1234-123456789abc',
+          )}
+        >
+          Open attachment
+        </button>
+      ) : null}
       <button
         data-testid="reconnect"
         onClick={() => {
@@ -210,7 +212,7 @@ function renderPanel(options: { active?: boolean } = {}) {
       </ApplicationEventProvider>
     </QueryClientProvider>,
   )
-  return { ...view, sockets }
+  return { ...view, sockets, queryClient }
 }
 
 function connect(
@@ -382,7 +384,7 @@ describe('IdePanelProvider recovery state machine', () => {
     connect(sockets)
 
     await user.click(screen.getByTestId('activate-a'))
-    expect(screen.getByTestId('open-attachment')).toBeDisabled()
+    expect(screen.queryByTestId('open-attachment')).not.toBeInTheDocument()
     expect(ideService.readIdeView).not.toHaveBeenCalled()
     expect(ideService.openIdeView).not.toHaveBeenCalled()
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
@@ -425,8 +427,7 @@ describe('IdePanelProvider recovery state machine', () => {
       expectedDaemonInstanceId: DAEMON_A,
     })
     await screen.findByTestId('ide-iframe')
-    await waitFor(() => expect(screen.getByTestId('open-attachment')).toBeEnabled())
-    await user.click(screen.getByTestId('open-attachment'))
+    await user.click(await screen.findByTestId('open-attachment'))
     expect(ideService.openIdeAttachment).toHaveBeenCalledWith(
       ENV_A,
       sessionSnapshot().recoveryByView[ENV_A]?.viewId,
@@ -451,6 +452,23 @@ describe('IdePanelProvider recovery state machine', () => {
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
     expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
     expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes attachments unavailable when the environment goes offline with a bound view', async () => {
+    const user = userEvent.setup()
+    const { sockets, queryClient } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('open-attachment')
+    const frame = screen.getByTestId('ide-iframe')
+
+    // 列表状态先于视图绑定变化；Chat 传入的环境仍为 ready。
+    queryClient.setQueryData(queryKeys.environments.list, [card(ENV_A, CARD_A.name, false), CARD_B])
+    await waitFor(() => expect(screen.queryByTestId('open-attachment')).not.toBeInTheDocument())
+    expect(screen.getByTestId('ide-iframe')).toBe(frame)
+
+    queryClient.setQueryData(queryKeys.environments.list, [CARD_A, CARD_B])
+    expect(await screen.findByTestId('open-attachment')).toBeVisible()
   })
 
   it('switches to an unopened Environment without implicitly creating a workspace', async () => {

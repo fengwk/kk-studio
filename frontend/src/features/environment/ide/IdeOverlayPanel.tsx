@@ -318,7 +318,6 @@ export function IdeOverlayPanel({
         selectedEnvironmentId={selectedEnvironmentId}
         viewBusy={viewBusy}
         claimError={selectedView?.errorMessage}
-        closeError={selectedView?.closeError}
         terminalError={selectedView?.terminalError}
         onOpenNewView={onOpenNewView}
         onRetryClaim={onRetryClaim}

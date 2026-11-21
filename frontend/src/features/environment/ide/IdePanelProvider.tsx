@@ -327,12 +327,16 @@ export function IdePanelProvider({
     }
   }
 
-  function selectedReadyAttachmentView(environmentId: string): IdeViewState | null {
+  function selectedReadyAttachmentView(
+    environmentId: string,
+    currentEnvironments = environmentMapRef.current,
+  ): IdeViewState | null {
     if (
       !active
       || initial.recoveryError
       || activeEnvironmentIdRef.current !== environmentId
       || presentationRef.current.selectedEnvironmentId !== environmentId
+      || currentEnvironments.get(environmentId)?.ready !== true
     ) {
       return null
     }
@@ -357,7 +361,7 @@ export function IdePanelProvider({
   }
 
   function canOpenAttachment(environmentId: string): boolean {
-    return selectedReadyAttachmentView(environmentId) != null
+    return selectedReadyAttachmentView(environmentId, environmentMap) != null
   }
 
   async function openAttachment(

@@ -397,8 +397,11 @@ describe('IdeOverlayPanel', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
 
     await user.click(tabSelectButton(VIEW_A))
-    expect(screen.getByTestId('ide-close-error')).toHaveTextContent(message)
+    const banner = screen.getByTestId('ide-close-error')
+    expect(banner).toHaveTextContent(message)
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(within(banner).getByRole('button'))
+    expect(screen.queryByTestId('ide-close-error')).not.toBeInTheDocument()
     expect(tabCloseButton(VIEW_A)).not.toBeDisabled()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(closeIdeView).toHaveBeenCalledTimes(1)
