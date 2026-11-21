@@ -67,7 +67,7 @@ func TestRuntimeReplaysUnacknowledgedExitAfterReconnect(t *testing.T) {
 		EnvironmentId: stringPtr("env"), InvocationId: stringPtr(testInvocationID),
 		Payload: &protocol.Envelope_ExecutionExitAck{ExecutionExitAck: &protocol.ExecutionExitAck{}},
 	}
-	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), ack); err != nil {
+	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), nil, ack); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := runtime.journal.Get(testInvocationID); exists {

@@ -14,6 +14,8 @@ import (
 type activeConnection struct {
 	generation uint64
 	connection Connection
+	done       chan struct{}
+	resources  resourceExchanges
 	// goaway records that this generation ended through a control GOAWAY. Its retirement closes the
 	// old connection once and reconnects immediately instead of applying the disconnect backoff.
 	goaway atomic.Bool
@@ -256,7 +258,7 @@ func (r *Runtime) serveConnection(ctx context.Context, active *activeConnection)
 		if !r.isActiveConnection(active) {
 			return errors.New("stale control connection generation")
 		}
-		if err := r.handleWithIDEContext(ctx, connectionCtx, envelope); err != nil {
+		if err := r.handleWithIDEContext(ctx, connectionCtx, active, envelope); err != nil {
 			return err
 		}
 	}
@@ -285,7 +287,7 @@ func (r *Runtime) attachConnection(connection Connection) *activeConnection {
 	r.clearIDELeaseRound()
 	r.mu.Lock()
 	r.generation++
-	active := &activeConnection{generation: r.generation, connection: connection}
+	active := &activeConnection{generation: r.generation, connection: connection, done: make(chan struct{})}
 	r.connection = active
 	r.bound = false
 	r.ready = false
@@ -309,6 +311,8 @@ func (r *Runtime) dropConnection(active *activeConnection) error {
 	}
 	r.clearIDELeaseRound()
 	r.connection = nil
+	close(active.done)
+	active.resources = resourceExchanges{}
 	r.bound = false
 	r.ready = false
 	r.mu.Unlock()

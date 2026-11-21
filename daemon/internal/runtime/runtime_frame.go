@@ -7,6 +7,8 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
+var errControlDisconnected = errors.New("control connection is disconnected")
+
 func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {
 	body := &protocol.RuntimeBody{DaemonVersion: stringPtr(r.options.DaemonVersion)}
 	status := r.status.Snapshot()
@@ -79,7 +81,7 @@ func (r *Runtime) sendFrame(e *protocol.Envelope) error {
 	ctx, active := r.sendCtx, r.connection
 	r.mu.RUnlock()
 	if active == nil {
-		return errors.New("control connection is disconnected")
+		return errControlDisconnected
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -87,6 +89,11 @@ func (r *Runtime) sendFrame(e *protocol.Envelope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	return r.writeControlFrame(ctx, active, e)
+}
+
+// writeControlFrame writes to the selected generation while sendMu is held.
+func (r *Runtime) writeControlFrame(ctx context.Context, active *activeConnection, e *protocol.Envelope) error {
 	if err := active.connection.Send(ctx, e); err != nil {
 		r.dropConnection(active)
 		return err

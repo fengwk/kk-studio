@@ -77,7 +77,7 @@ func TestRuntimeSettingsInvokeReconnectRecover(t *testing.T) {
 	if err := runtime.handleEnvironmentConfig(context.Background(), drift); err == nil {
 		t.Fatal("same-version configuration drift was accepted after SETTINGS refresh")
 	}
-	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), invocationEnvelope()); err != nil {
+	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), nil, invocationEnvelope()); err != nil {
 		t.Fatal(err)
 	}
 	firstFrames := firstConnection.waitFor(t, func(frames []*protocol.Envelope) bool {
@@ -125,10 +125,10 @@ func TestRuntimePreReadyInvokeIsJournaledAsFailedAndExited(t *testing.T) {
 	if err := runtime.handleSettings(settingsEnvelope()); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), invocationEnvelope()); err != nil {
+	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), nil, invocationEnvelope()); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), invocationEnvelope()); err != nil {
+	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), nil, invocationEnvelope()); err != nil {
 		t.Fatal(err)
 	}
 	frames := connection.frames()
@@ -171,7 +171,7 @@ func TestRuntimeRecoveredInvocationIsNotExecutedAgain(t *testing.T) {
 	if err := runtime.handleSettings(settingsEnvelope()); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), invocationEnvelope()); err != nil {
+	if err := runtime.handleWithIDEContext(context.Background(), context.Background(), nil, invocationEnvelope()); err != nil {
 		t.Fatal(err)
 	}
 	if executions != 0 || !connection.sent(protocol.MessageType_RECOVER_NOT_FOUND) {
@@ -196,7 +196,7 @@ func TestRuntimePreReadyRecoverReturnsRetryableConnectionFailure(t *testing.T) {
 	if err := runtime.handleSettings(settingsEnvelope()); err != nil {
 		t.Fatal(err)
 	}
-	err = runtime.handleWithIDEContext(context.Background(), context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_RECOVER, EnvironmentId: stringPtr("env"), InvocationId: stringPtr("missing")})
+	err = runtime.handleWithIDEContext(context.Background(), context.Background(), nil, &protocol.Envelope{MessageType: protocol.MessageType_RECOVER, EnvironmentId: stringPtr("env"), InvocationId: stringPtr("missing")})
 	if err == nil {
 		t.Fatal("pre-READY RECOVER was silently accepted")
 	}
