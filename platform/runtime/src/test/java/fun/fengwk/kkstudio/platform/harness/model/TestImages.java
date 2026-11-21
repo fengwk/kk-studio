@@ -7,6 +7,7 @@ import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
 
 import java.awt.Color;
+import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -31,6 +32,25 @@ final class TestImages {
   /** 不透明 PNG：左半红、右半蓝。 */
   static byte[] png(int width, int height) {
     return encode(split(width, height, false), "png");
+  }
+
+  /** 合成截屏：浅色画布、深色标题栏与多行等宽文本。 */
+  static byte[] screenshotPng(int width, int height) {
+    BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+    Graphics2D graphics = image.createGraphics();
+    try {
+      graphics.setColor(Color.WHITE);
+      graphics.fillRect(0, 0, width, height);
+      graphics.setColor(Color.DARK_GRAY);
+      graphics.fillRect(0, 0, width, 48);
+      graphics.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 18));
+      for (int y = 80; y < height; y += 32) {
+        graphics.drawString("kk-studio synthetic screenshot", 24, y);
+      }
+    } finally {
+      graphics.dispose();
+    }
+    return encode(image, "png");
   }
 
   /** 带透明像素的 PNG：左半半透明红、右半不透明蓝。 */

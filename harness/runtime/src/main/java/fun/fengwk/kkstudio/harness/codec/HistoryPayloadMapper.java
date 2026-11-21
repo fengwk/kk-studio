@@ -21,6 +21,8 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -116,6 +118,12 @@ public final class HistoryPayloadMapper {
   }
 
   private ToolResultMessageContent succeededContent(ToolInvocation invocation, ToolResult result) {
+    var contributor = invocation.binding().contributor();
+    ImageInputTier imageTier =
+        BuiltinHarnessContributor.ID.value().equals(contributor.contributorId())
+                && FileTool.READ_NAME.equals(contributor.localName())
+            ? ImageInputTier.P1080
+            : ImageInputTier.P720;
     List<AgentMessageContent> contents = new ArrayList<>();
     for (ResultContent toolContent : result.contents()) {
       if (toolContent instanceof TextResultContent text) {
@@ -123,7 +131,7 @@ public final class HistoryPayloadMapper {
       } else if (toolContent instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
       } else if (toolContent instanceof ResourceResultContent resource) {
-        contents.add(stableResourceContent(resource));
+        contents.add(stableResourceContent(resource, imageTier));
       } else {
         // BinaryResultContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(
@@ -143,9 +151,10 @@ public final class HistoryPayloadMapper {
   }
 
   /**
-   * 稳定 Resource 直接映射为 durable 消息内容：文本工件保留字节/行数事实，普通媒体按平台默认图片档位冻结。此处不消费 upload 或执行 metadata-only 降级。
+   * 稳定 Resource 直接映射为 durable 消息内容：文本工件保留字节/行数事实，图片冻结本次工具结果的档位。此处不消费 upload 或执行 metadata-only 降级。
    */
-  private static ResourceMessageContent stableResourceContent(ResourceResultContent content) {
+  private static ResourceMessageContent stableResourceContent(
+      ResourceResultContent content, ImageInputTier imageTier) {
     var resource = content.resource();
     if (resource.sessionBlobId() == null) {
       throw new IllegalArgumentException(
@@ -170,12 +179,9 @@ public final class HistoryPayloadMapper {
         resource.sessionBlobId(),
         resource.name(),
         content.preview(),
-        defaultImageTier(resource.mediaType()));
-  }
-
-  /** 工具结果图片没有用户选择：冻结平台默认档位（720P）；非图片媒体不带档位。 */
-  private static ImageInputTier defaultImageTier(String mediaType) {
-    return mediaType != null && mediaType.startsWith("image/") ? ImageInputTier.P720 : null;
+        resource.mediaType() != null && resource.mediaType().startsWith("image/")
+            ? imageTier
+            : null);
   }
 
   private ToolResultMessageContent failedContent(ToolInvocation invocation) {

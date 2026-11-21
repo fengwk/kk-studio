@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityD
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
@@ -25,6 +27,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ExpectedFile;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLease;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Invoke;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Recover;
@@ -460,19 +463,20 @@ public final class EnvironmentDaemonServer
     throw unavailable(environmentId, descriptor.id().value());
   }
 
-  /** 组装 INVOKE：能力参数原样透传，输出上限与图片档位取自当前 settings。 */
+  /** 组装 INVOKE：能力参数原样透传，输出上限取自当前 settings，图片档位按能力身份确定。 */
   private static Envelope invokeEnvelope(
       EnvironmentId environmentId,
       UUID invocationId,
       EnvironmentCapabilityExecutionRequest request,
       EnvironmentServerSettings currentSettings) {
+    EnvironmentCapabilityDescriptor descriptor = request.descriptor();
     Invoke.Builder invoke =
         Invoke.newBuilder()
-            .setCapabilityId(request.descriptor().id().value())
+            .setCapabilityId(descriptor.id().value())
             .setArgumentsJson(request.call().argumentsJson())
             .setTimeoutMillis(request.timeout().toMillis())
             .setMaxOutputBytes(currentSettings.maxOutputBytes())
-            .setImageInputTier(currentSettings.imageInputTier());
+            .setImageInputTier(invokeImageInputTier(descriptor.id(), currentSettings));
     if (request.expectedFile() != null) {
       ExpectedFile.Builder expectedFile =
           ExpectedFile.newBuilder().setPath(request.expectedFile().path());
@@ -487,6 +491,20 @@ public final class EnvironmentDaemonServer
         .setInvocationId(invocationId.toString())
         .setInvoke(invoke.build())
         .build();
+  }
+
+  /**
+   * INVOKE 的图片档位：受信能力 {@link EnvironmentCapabilityIds#FS_READ} 读图固定使用协议 {@code
+   * P1080}，其余能力沿用当前系统图片档位。
+   *
+   * <p>调用方传入的 descriptor 已在 {@link #invoke} 中与 {@link EnvironmentCapabilityCatalog} 核对，因此此处按
+   * canonical capability 身份判定，不依赖调用方自报的展示标识。
+   */
+  private static ImageInputTier invokeImageInputTier(
+      EnvironmentCapabilityId capabilityId, EnvironmentServerSettings currentSettings) {
+    return EnvironmentCapabilityIds.FS_READ.equals(capabilityId)
+        ? ImageInputTier.P1080
+        : currentSettings.imageInputTier();
   }
 
   @Override
