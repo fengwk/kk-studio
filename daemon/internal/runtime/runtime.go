@@ -78,8 +78,6 @@ type Runtime struct {
 	ideLeaseRound          int64
 	ideLeaseSentAt         time.Time
 	ideLeaseConsumed       bool
-	resourceMu             sync.Mutex
-	resourceRequests       map[resourceExchangeKey]chan *protocol.Envelope
 	wg                     sync.WaitGroup
 	runMu                  sync.Mutex
 	running                bool
@@ -125,7 +123,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1), shutdown: newShutdownFailureTracker(nil)}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1), shutdown: newShutdownFailureTracker(nil)}
 	runtime.bindOptionCallbacks()
 	if options.EnvironmentConfig != nil {
 		runtime.bindEnvironmentHooks(options.EnvironmentConfig)

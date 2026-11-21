@@ -8,7 +8,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.Envelope) error {
+func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, active *activeConnection, e *protocol.Envelope) error {
 	if e.MessageType == protocol.MessageType_SETTINGS {
 		return r.handleSettings(e)
 	}
@@ -38,7 +38,7 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 		if !ready {
 			return errors.New("resource ticket requires a READY bound connection")
 		}
-		return r.routeResourceTicket(e)
+		return r.routeResourceTicket(active, e)
 	case protocol.MessageType_IDE_COMMAND:
 		if !ready {
 			return r.sendBoundError(e.InvocationId, "IDE command requires a READY bound connection")
