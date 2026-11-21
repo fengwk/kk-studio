@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from './fixture'
+import { tabIconTextGaps } from './visual-shots'
 
 /** 截图保存到 workspace 记录目录，不进入产物仓库。 */
 const SHOTS = fileURLToPath(new URL('../../../screenshots', import.meta.url))
@@ -30,6 +31,7 @@ test.describe('Skill Packages real browser verification', () => {
     const dialog = page.getByRole('dialog', { name: '创建技能包' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole('tab', { name: 'Git 仓库' })).toHaveAttribute('aria-selected', 'true')
+    expect(await tabIconTextGaps(dialog.getByRole('tablist'))).toEqual([4, 4])
 
     await dialog.getByPlaceholder('my-skills').fill('new-git-pack')
     await dialog.getByPlaceholder('https://github.com/org/repo.git').fill('https://github.com/example/new-git-pack.git')
@@ -102,6 +104,7 @@ test.describe('Skill Packages real browser verification', () => {
     await card(page, 'upload-pack').getByRole('button', { name: '详情 upload-pack' }).click()
     const detail = page.getByRole('dialog', { name: /详情：upload-pack/ })
     await expect(detail).toBeVisible()
+    await expect(detail.locator('.modal-footer-with-leading-action')).toHaveCSS('gap', '8px')
 
     // 文件树来自服务端归档索引：目录层级、文件名与解压后文件数都是真实路径。
     await expect(detail.getByText('SKILL.md')).toHaveCount(2)

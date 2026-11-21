@@ -118,10 +118,10 @@
 
 .md-inline-code {
   padding: 0.1em 0.28em;
-  border-radius: 4px;
-  background: transparent;
-  border: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border-radius: var(--radius-xs);
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
   font-size: var(--font-size-xs);
 }
 

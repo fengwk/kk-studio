@@ -16,7 +16,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
 import type { ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
-setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
+const EN = new URLSearchParams(location.search).get('locale') === 'en-US'
+setLocale(EN ? 'en-US' : 'zh-CN')
+
+/** 元信息标签夹具：英文多词标签用于验证标签列不按字符断词。 */
+const LABEL_ROWS: Array<[string, string]> = EN
+  ? [
+      ['Default Environment', 'local-node-primary'],
+      ['Last Updated', '2026-10-01T00:00:00Z'],
+      ['Model Timeout', '1800s'],
+      ['Context Window', '200000'],
+    ]
+  : [
+      ['默认环境', 'local-node-primary'],
+      ['最后更新', '2026-10-01T00:00:00Z'],
+      ['模型超时', '1800s'],
+      ['上下文窗口', '200000'],
+    ]
 
 const LONG_TITLE =
   'a-very-long-resource-name-that-must-be-truncated-with-the-full-name-kept-available'
@@ -78,6 +94,12 @@ export function ResourceCardHarnessApp() {
           icon={<Bot />}
           title="最小内容"
           meta={[['类型', 'agent']]}
+        />
+        <ResourceCard
+          className="harness-labels"
+          icon={<Bot />}
+          title={EN ? 'Meta label column' : '元信息标签列'}
+          meta={LABEL_ROWS}
         />
         <ResourceCard
           className="harness-long"

@@ -218,17 +218,6 @@
   font-size: var(--font-size-xs);
 }
 
-.skill-source-tabs .ui-tab span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.skill-source-tabs .ui-tab svg {
-  width: 14px;
-  height: 14px;
-}
-
 .skill-source-panel {
   display: flex;
   flex-direction: column;

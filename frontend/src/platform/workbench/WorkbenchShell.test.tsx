@@ -42,8 +42,10 @@ describe('WorkbenchShell', () => {
     })
     renderWorkbench(contributions, '/missing')
 
-    expect(screen.getByText('页面不可用')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回 Chat' })).toHaveAttribute('href', '/chats')
+    const heading = screen.getByRole('heading', { name: '页面不可用' })
+    const backLink = screen.getByRole('link', { name: '返回 Chat' })
+    expect(backLink).toHaveAttribute('href', '/chats')
+    expect(heading.closest('.screen-body')).toContainElement(backLink)
   })
 
   it('renders the current static fixture after the provider value changes', () => {
