@@ -7,12 +7,11 @@ import type { ThreadDisclosureProps } from '@/features/thread/runtime/thread-pan
 import './thread-disclosure.css'
 
 /**
- * 只读消息的统一布局外壳：Header（名称/参数/操作/chevron）、preview 与 body。
+ * 只读消息的统一布局外壳：Header（名称/参数/操作/chevron）、可选的 Error、Preview 与 Body。
  * 它只负责布局和展开交互；语义、配额与内容截取由调用方决定。
  *
  * - chevron 只在收起/展开视图不同时出现：收起时由 hasDetails 或 header 的 CSS 截断
  *   决定，展开时始终显示；
- * - 展开视图不做内部滚动；header chevron 是唯一展开/收起入口；
  * - 展开/收起属于阅读意图，通知外层 transcript 暂停自动贴底。
  */
 export function ThreadDisclosure({
@@ -22,6 +21,7 @@ export function ThreadDisclosure({
   expanded,
   onExpandedChange,
   hasDetails,
+  error,
   preview,
   body,
   label,
@@ -122,6 +122,7 @@ export function ThreadDisclosure({
           </button>
         ) : null}
       </div>
+      {error != null ? <div className="thread-disclosure-error-slot">{error}</div> : null}
       {preview != null ? <div className="thread-disclosure-preview">{preview}</div> : null}
       {body != null ? <div className="thread-disclosure-body">{body}</div> : null}
     </section>

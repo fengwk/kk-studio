@@ -33,7 +33,7 @@ export function PreviewTarget({
 }
 
 /** 有损解码警示：只在审查 JSON 声明 lossyDecode 时显示在 diff 上方。 */
-function LossyDecodeWarning({
+export function LossyDecodeWarning({
   lossyDecode,
 }: {
   lossyDecode?: EditReviewLossyDecode
@@ -64,17 +64,14 @@ export function WriteReviewSection({ preview }: { preview: Extract<ToolCallPrevi
     return null
   }
   return (
-    <>
-      <LossyDecodeWarning lossyDecode={review.lossyDecode} />
-      <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
-        {review.diff.split('\n').map((line, index, lines) => (
-          <span key={`diff-${index}`} className={diffLineClass(line)}>
-            {line}
-            {index < lines.length - 1 ? '\n' : ''}
-          </span>
-        ))}
-      </ToolOutputViewport>
-    </>
+    <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
+      {review.diff.split('\n').map((line, index, lines) => (
+        <span key={`diff-${index}`} className={diffLineClass(line)}>
+          {line}
+          {index < lines.length - 1 ? '\n' : ''}
+        </span>
+      ))}
+    </ToolOutputViewport>
   )
 }
 

@@ -1,4 +1,3 @@
-import type { DisclosurePhase } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import {
   previewForToolCall,
   type ToolCallPreview,
@@ -32,16 +31,6 @@ function toolExecutionState(
         ? (message.status === 'error' ? 'failed' : 'succeeded')
         : 'preparing'
   }
-}
-
-/**
- * active：生成调用、排队、等待审批/输入/环境、执行中；
- * settled：成功、失败、已停止、结果未知。
- */
-export function toolDisclosurePhase(state: ToolExecutionState): DisclosurePhase {
-  return ['preparing', 'queued', 'environment', 'approval', 'input', 'waiting-child', 'running'].includes(state)
-    ? 'active'
-    : 'settled'
 }
 
 /** 调用正文由 diff/正文预览组件承载的工具。 */
@@ -184,23 +173,6 @@ export function buildToolMessageView({
     toolName,
     isMutationSuccess,
   }
-}
-
-/**
- * 工具卡片的默认展开状态（不含用户选择）。
- *
- * 仅 write/edit 审查期间默认完整显示审查材料；审查完成后与其他工具一样收起，
- * 由各自配额决定收起时可见的行数。用户主动选择由调用方覆盖。
- */
-export function toolDefaultExpanded({
-  toolName,
-  phase,
-}: {
-  toolName: string
-  phase: DisclosurePhase
-}): boolean {
-  const normalizedName = toolName.trim().toLowerCase()
-  return phase === 'active' && (normalizedName === 'write' || normalizedName === 'edit')
 }
 
 /** 参数是否承载可展示的调用正文（避免空对象渲染空正文）。 */

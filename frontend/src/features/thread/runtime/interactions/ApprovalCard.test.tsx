@@ -23,7 +23,7 @@ const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","timeout":
 const props = { threadId: 'source-child', invocationId: 'original-invocation', toolName: 'bash',
   argumentsJson: args, approval: { required: true, reason: 'Permission rules require approval' } }
 
-it('write 审批卡片显示真实覆盖 diff，且新文件允许 null SHA', () => {
+it('write 审批默认显示完整待写正文，新文件仍接受 null SHA', () => {
   render(
     <ApprovalCard
       {...props}
@@ -43,10 +43,11 @@ it('write 审批卡片显示真实覆盖 diff，且新文件允许 null SHA', ()
 
   expect(screen.getByText('/canonical/new.txt')).toBeInTheDocument()
   expect(document.querySelector('.is-added')?.textContent).toBe('+1|NEW CONTENT')
-  expect(document.querySelector('.thread-tool-preview-body')?.textContent).toBe('+1|NEW CONTENT')
+  expect(screen.getByText('NEW CONTENT', { exact: true })).toBeVisible()
+  expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
 })
 
-it('write 覆盖审批卡片展示哈希保护的变更而非整文件输入', () => {
+it('write 覆盖审批可切换查看哈希保护的冻结 diff', () => {
   render(
     <ApprovalCard
       {...props}
@@ -67,11 +68,27 @@ it('write 覆盖审批卡片展示哈希保护的变更而非整文件输入', (
   expect(screen.getByText('/canonical/a.txt')).toBeInTheDocument()
   expect(document.querySelector('.is-removed')?.textContent).toBe('-1|before\n')
   expect(document.querySelector('.is-added')?.textContent).toBe('+1|after')
-  expect(screen.queryByText('whole replacement')).not.toBeInTheDocument()
+  expect(screen.getByText('whole replacement')).toBeVisible()
+  expect(screen.getByText('审查 Diff').closest('details')).not.toHaveAttribute('open')
   expect(document.querySelector('.thread-tool-lossy-warning')).not.toBeInTheDocument()
 })
 
-it('write 审批卡片在 diff 上方显示有损解码警示的单复数文案', () => {
+it('write 不把未完成的参数前缀当作待写正文', () => {
+  render(
+    <ApprovalCard
+      {...props}
+      toolName="write"
+      argumentsJson={'{"path":"/workspace/a.txt","content":"unfrozen prefix'}
+      approval={{ required: true, editReview: { path: '/canonical/a.txt', diff: '+1|frozen', sha256: null } }}
+    />,
+    { wrapper },
+  )
+
+  expect(screen.queryByText('unfrozen prefix')).not.toBeInTheDocument()
+  expect(screen.getByText('+1|frozen')).toBeVisible()
+})
+
+it('write 审批无需打开 diff 就能看到有损解码警示', () => {
   const renderCard = (invalidSequences: number) => (
     <ApprovalCard
       {...props}
@@ -94,8 +111,9 @@ it('write 审批卡片在 diff 上方显示有损解码警示的单复数文案'
   expect(warning).toHaveTextContent(
     '原文件有 2 处字节序列不是有效的 GB18030，显示为 �；保存后仍保留的这些位置会写为 U+FFFD，原始字节无法恢复。',
   )
-  // 警示必须位于真实审查 diff 上方，而不是替换或藏在 diff 之后。
-  expect(warning?.nextElementSibling).toHaveClass('thread-tool-preview-body', 'is-edit')
+  // 默认正文与权限操作均可见时，警示不能藏在折叠的 diff 中。
+  expect(warning).toBeVisible()
+  expect(warning?.nextElementSibling).toHaveClass('thread-tool-preview-body', 'is-write')
   expect(container.querySelector('.is-removed')?.textContent).toBe('-1|before\n')
 
   setLocale('en-US')

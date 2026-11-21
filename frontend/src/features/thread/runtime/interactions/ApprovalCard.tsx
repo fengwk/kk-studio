@@ -4,7 +4,7 @@ import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { extractApprovalEditReview } from '@/features/thread/runtime/state/mutation-review'
 import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
-import { previewForToolCall } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
+import { parseToolArguments, previewForToolCall } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import { ToolCallPreview } from '@/features/thread/runtime/thread-panel/messages/ToolCallPreview'
 import { useApprovalDecision } from '@/features/thread/runtime/interactions/useApprovalDecision'
 import './interaction-cards.css'
@@ -52,7 +52,9 @@ export function ApprovalCard({
 
   const mutationPreview = useMemo(() => {
     if (!isMutation) return null
-    return previewForToolCall(toolName, argumentsJson || '', {
+    // 不把容错解析得到的流式前缀当作冻结的待写正文；有效 review 仍可独立展示。
+    const frozenArguments = argumentsJson && parseToolArguments(argumentsJson).complete ? argumentsJson : ''
+    return previewForToolCall(toolName, frozenArguments, {
       editReview,
       isWaitingReview: true,
     })
@@ -91,7 +93,7 @@ export function ApprovalCard({
         ) : null}
       </div>
 
-      {argumentsJson ? (
+      {argumentsJson || editReview ? (
         <div className="interaction-approval-mutation-preview">
           <ToolCallPreview
             preview={mutationPreview}

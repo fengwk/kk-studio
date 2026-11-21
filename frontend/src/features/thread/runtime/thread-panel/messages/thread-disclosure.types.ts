@@ -9,6 +9,7 @@ export interface ThreadDisclosureProps extends Omit<ComponentProps<'section'>, '
   onExpandedChange: (expanded: boolean) => void
   /** 内容在收起态被截断或隐藏；header 的 CSS 截断由容器自行检测。 */
   hasDetails: boolean
+  error?: ReactNode
   preview?: ReactNode
   body?: ReactNode
   label: string

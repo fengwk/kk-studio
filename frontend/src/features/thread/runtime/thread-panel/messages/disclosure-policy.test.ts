@@ -4,31 +4,20 @@ import {
   disclosureHint,
   discloseText,
   isMcpToolName,
-  toolDisclosureQuota,
+  toolPreviewLines,
 } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 
-describe('tool disclosure quota', () => {
-  it('uses tail windows for bash and leading windows for write/edit/mcp', () => {
-    expect(toolDisclosureQuota('bash', 'active')).toEqual({ preview: 10, body: 0 })
-    expect(toolDisclosureQuota('bash', 'settled')).toEqual({ preview: 10, body: 0 })
-    expect(toolDisclosureQuota('write', 'active')).toEqual({ preview: -1, body: 0 })
-    expect(toolDisclosureQuota('write', 'settled')).toEqual({ preview: 10, body: 0 })
-    expect(toolDisclosureQuota('edit', 'active')).toEqual({ preview: -1, body: 0 })
-    expect(toolDisclosureQuota('edit', 'settled')).toEqual({ preview: 10, body: 0 })
-    expect(toolDisclosureQuota('mcp_github_list_issues', 'settled'))
-      .toEqual({ preview: 5, body: 0 })
+describe('tool preview quota', () => {
+  it.each(['bash', 'write', 'edit'])('caps %s at ten source lines', (tool) => {
+    expect(toolPreviewLines(tool)).toBe(10)
   })
 
   it('recognizes every mcp_ prefixed tool and hides all other tools', () => {
     expect(isMcpToolName('mcp_github_list_issues')).toBe(true)
     expect(isMcpToolName('  MCP__filesystem__read  ')).toBe(true)
     expect(isMcpToolName('read')).toBe(false)
-    expect(toolDisclosureQuota('read', 'settled')).toEqual({ preview: 0, body: 0 })
-    expect(toolDisclosureQuota('ask_user', 'active')).toEqual({ preview: 0, body: 0 })
-    expect(toolDisclosureQuota('unknown', 'settled')).toEqual({ preview: 0, body: 0 })
-    // 外部工具可与 Object 原型方法同名，仍必须使用未知工具的隐藏配额。
-    expect(toolDisclosureQuota('constructor', 'settled')).toEqual({ preview: 0, body: 0 })
-    expect(toolDisclosureQuota('__proto__', 'active')).toEqual({ preview: 0, body: 0 })
+    expect(toolPreviewLines('mcp_github_list_issues')).toBe(5)
+    expect(toolPreviewLines('read')).toBe(0)
   })
 })
 
@@ -60,7 +49,7 @@ describe('discloseText', () => {
   it('keeps the trailing window for bash and reports earlier lines', () => {
     const result = discloseText('1\n2\n3\n4\n5', 2, 'end')
     expect(result).toEqual({ text: '4\n5', hiddenLines: 3, truncated: false })
-    expect(disclosureHint(result, 'end')).toBe('… 3 earlier lines')
+    expect(disclosureHint(result, 'end')).toBe('… 上方还有 3 行')
   })
 
   it('does not turn a trailing newline into an extra logical line', () => {
@@ -97,8 +86,13 @@ describe('discloseText', () => {
     // huge2 只剩尾部（部分可见），middle 与 exit 完整可见；huge1 整行隐藏。
     expect(result.hiddenLines).toBe(1)
     expect(result.truncated).toBe(true)
-    expect(disclosureHint(result, 'end')).toBe('… 1 earlier line, truncated')
+    expect(disclosureHint(result, 'end')).toBe('… 上方还有 1 行，长行已截断')
     expect(Array.from(result.text)).toHaveLength(1_500)
+  })
+
+  it.each([3, 4])('does not claim a partial line when a whole line fits in %i characters', (maxChars) => {
+    expect(discloseText('first\nend', 10, 'end', maxChars))
+      .toEqual({ text: 'end', hiddenLines: 1, truncated: false })
   })
 
   it('never splits an emoji when keeping the tail suffix', () => {
@@ -113,11 +107,11 @@ describe('discloseText', () => {
 
   it('uses singular line wording and distinguishes earlier truncation', () => {
     expect(disclosureHint(discloseText('a\nb', 1), 'start')).toBe('… 1 more line')
-    expect(disclosureHint(discloseText('a\nb', 1, 'end'), 'end')).toBe('… 1 earlier line')
+    expect(disclosureHint(discloseText('a\nb', 1, 'end'), 'end')).toBe('… 上方还有 1 行')
     expect(disclosureHint(discloseText('abcdef\nb', 1, 'start', 3), 'start'))
       .toBe('… 1 more line, truncated')
     expect(disclosureHint(discloseText('abcdef', 1, 'end', 2), 'end'))
-      .toBe('… truncated')
+      .toBe('… 长行已截断')
   })
 
   it('returns no hint when the complete text already fits', () => {

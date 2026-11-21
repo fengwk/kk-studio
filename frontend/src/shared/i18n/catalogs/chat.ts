@@ -996,16 +996,24 @@ export const chatCatalog = {
   'ai.runtime.tool.task.completed': { 'en-US': 'Completed', 'zh-CN': '已完成' },
   'ai.runtime.tool.task.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
   'ai.runtime.tool.task.cancelled': { 'en-US': 'Cancelled', 'zh-CN': '已取消' },
+  'ai.runtime.tool.timedOut': { 'en-US': 'Timed out', 'zh-CN': '执行超时' },
   'ai.runtime.tool.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
   'ai.runtime.tool.cancelled': { 'en-US': 'Stopped', 'zh-CN': '已停止' },
   'ai.runtime.tool.unknown': { 'en-US': 'Execution outcome unknown', 'zh-CN': '执行结果未知' },
-  // 只读消息容器：提示行在中英文界面使用同一英文文案。
+  // 只读消息容器。
   'ai.runtime.disclosure.expandDetails': { 'en-US': 'Expand details', 'zh-CN': '展开详情' },
   'ai.runtime.disclosure.collapseDetails': { 'en-US': 'Collapse details', 'zh-CN': '收起详情' },
+  'ai.runtime.disclosure.fullDetails': { 'en-US': 'Full details', 'zh-CN': '完整详情' },
+  'ai.runtime.disclosure.storedLogPath': { 'en-US': 'Saved log: {{path}}', 'zh-CN': '已保存的日志：{{path}}' },
+  'ai.runtime.disclosure.outputOmitted': { 'en-US': '… Earlier output was omitted', 'zh-CN': '… 更早的输出已省略' },
   'ai.runtime.disclosure.collapse': { 'en-US': 'Collapse', 'zh-CN': '收起' },
   'ai.runtime.disclosure.truncated': {
     'en-US': '… truncated',
     'zh-CN': '… truncated',
+  },
+  'ai.runtime.disclosure.longLineTruncated': {
+    'en-US': '… Long line truncated',
+    'zh-CN': '… 长行已截断',
   },
   'ai.runtime.disclosure.moreLine': {
     'en-US': '… {{count}} more line',
@@ -1025,27 +1033,23 @@ export const chatCatalog = {
   },
   'ai.runtime.disclosure.earlierLine': {
     'en-US': '… {{count}} earlier line',
-    'zh-CN': '… {{count}} earlier line',
+    'zh-CN': '… 上方还有 {{count}} 行',
   },
   'ai.runtime.disclosure.earlierLines': {
     'en-US': '… {{count}} earlier lines',
-    'zh-CN': '… {{count}} earlier lines',
+    'zh-CN': '… 上方还有 {{count}} 行',
   },
   'ai.runtime.disclosure.earlierLineTruncated': {
-    'en-US': '… {{count}} earlier line, truncated',
-    'zh-CN': '… {{count}} earlier line, truncated',
+    'en-US': '… {{count}} earlier line; long line truncated',
+    'zh-CN': '… 上方还有 {{count}} 行，长行已截断',
   },
   'ai.runtime.disclosure.earlierLinesTruncated': {
-    'en-US': '… {{count}} earlier lines, truncated',
-    'zh-CN': '… {{count}} earlier lines, truncated',
+    'en-US': '… {{count}} earlier lines; long line truncated',
+    'zh-CN': '… 上方还有 {{count}} 行，长行已截断',
   },
   'ai.runtime.disclosure.viewSubagentExecution': {
     'en-US': 'View subagent execution',
     'zh-CN': '查看 subagent 执行',
-  },
-  'ai.runtime.disclosure.waitingForAnswer': {
-    'en-US': 'This tool call needs your answer',
-    'zh-CN': '此工具调用需要你回答',
   },
   'ai.runtime.mutation.writeSuccess': {
     'en-US': 'Write succeeded',
@@ -1055,13 +1059,14 @@ export const chatCatalog = {
     'en-US': 'Edit succeeded',
     'zh-CN': '编辑成功',
   },
+  'ai.runtime.mutation.reviewDiff': { 'en-US': 'Review diff', 'zh-CN': '审查 Diff' },
   'ai.runtime.mutation.preparing': {
     'en-US': 'Preparing diff review…',
     'zh-CN': '正在准备审查 Diff…',
   },
   'ai.runtime.mutation.inputLabel': {
-    'en-US': 'Streamed input',
-    'zh-CN': '流式输入内容',
+    'en-US': 'Proposed changes',
+    'zh-CN': '拟修改内容',
   },
   'ai.runtime.mutation.oldString': {
     'en-US': 'Original text:',
