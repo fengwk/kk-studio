@@ -60,6 +60,22 @@ describe('CanvasPage integration', () => {
     expect(screen.queryByText('threadId')).not.toBeInTheDocument()
   })
 
+  it('shows the shared skeleton on the canvas column template during the first read', async () => {
+    vi.mocked(listCanvases).mockImplementation(() => new Promise(() => undefined))
+    const { container } = renderPage(['/canvas'])
+
+    const skeleton = await waitFor(() => {
+      const found = container.querySelector('.resource-skeleton-container')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    expect(skeleton).toHaveAttribute('role', 'status')
+    expect(skeleton).toHaveTextContent('正在加载画布')
+    // 骨架必须沿用画布库的 280px 列模板，否则首行列数与真实卡不一致。
+    expect(skeleton.querySelector('.resource-grid')).toHaveClass('resource-grid', 'canvas-library-grid')
+    expect(skeleton.querySelectorAll('.resource-card-skeleton').length).toBeGreaterThan(0)
+  })
+
   it('opens the create dialog and cancels without any write', async () => {
     const user = userEvent.setup()
     renderPage(['/canvas'])

@@ -10,6 +10,29 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
 
+/** 与骨架同宽的真实栅格：浏览器断言用它的首行列数作为期望值，而不是写死 6 或某个像素宽度。 */
+function RealGridProbe() {
+  return (
+    <ResourceGrid>
+      {[1, 2, 3, 4, 5, 6].map((index) => (
+        <ResourceCard
+          key={index}
+          className="harness-real-card"
+          icon={<Bot />}
+          title={`真实资源 ${index}`}
+          subtitle="用于比对列数与卡片宽度"
+          meta={[['类型', 'model']]}
+          actions={
+            <Button size="compact" variant="ghost">
+              <Trash2 size={14} /> 删除
+            </Button>
+          }
+        />
+      ))}
+    </ResourceGrid>
+  )
+}
+
 export function LoadingSkeletonHarnessApp() {
   const [clickCount, setClickCount] = useState(0)
   const [btnLoading, setBtnLoading] = useState(true)
@@ -57,9 +80,23 @@ export function LoadingSkeletonHarnessApp() {
       </section>
 
       <section style={{ marginBottom: 32 }}>
-        <h2>独立骨架屏测试 (约 280px 高度)</h2>
+        <h2>普通资源骨架（按实际列数画首行）</h2>
         <div id="standalone-skeleton-wrap">
           <ResourceCardSkeleton label="加载资源中..." />
+        </div>
+      </section>
+
+      <section style={{ marginBottom: 32 }}>
+        <h2>环境摘要骨架</h2>
+        <div id="environment-skeleton-wrap">
+          <ResourceCardSkeleton label="加载环境..." variant="environment" />
+        </div>
+      </section>
+
+      <section style={{ marginBottom: 32 }}>
+        <h2>同宽真实栅格（列数与卡片宽度基准）</h2>
+        <div id="real-grid-wrap">
+          <RealGridProbe />
         </div>
       </section>
 

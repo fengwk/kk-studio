@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
@@ -18,6 +18,12 @@ vi.mock('@/features/environment/environment-service', () => ({
   },
 }))
 
+interface ManageAction {
+  label: string
+  run: () => void
+  danger?: boolean
+}
+
 function testEnvironment(overrides: Partial<EnvironmentDTO> = {}): EnvironmentDTO {
   return fixtureEnvironment({
     id: 'env-test-1',
@@ -33,23 +39,44 @@ function testEnvironment(overrides: Partial<EnvironmentDTO> = {}): EnvironmentDT
   })
 }
 
+interface RenderOptions {
+  onClose?: () => void
+  actions?: ManageAction[]
+  queryClient?: QueryClient
+}
+
 function renderModal(
   environment: EnvironmentDTO = testEnvironment(),
-  onClose = vi.fn(),
-  queryClient = new QueryClient({
+  options: RenderOptions = {},
+) {
+  const onClose = options.onClose ?? vi.fn()
+  const queryClient = options.queryClient ?? new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
       },
     },
-  }),
-) {
+  })
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <EnvironmentManagementModal environment={environment} onClose={onClose} />
+      <EnvironmentManagementModal
+        environment={environment}
+        onClose={onClose}
+        actions={options.actions}
+      />
     </QueryClientProvider>,
   )
   return { queryClient, view, onClose }
+}
+
+function manageDialog(): HTMLElement {
+  return screen.getByRole('dialog', { name: '管理环境：test-environment' })
+}
+
+/** 诊断详情默认折叠：展开后才渲染宿主、配置与事件。 */
+async function expandDiagnostics(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByText('诊断详情'))
+  return screen.findByText('宿主信息')
 }
 
 describe('EnvironmentManagementModal', () => {
@@ -59,55 +86,160 @@ describe('EnvironmentManagementModal', () => {
   })
 
   /**
-   * 测试意图：验证宿主信息卡片呈现包含 userName 与 homeDirectory 的宿主事实。
+   * 测试意图：管理面是一组纯文字标签的动作入口加一段折叠的诊断详情；
+   * 折叠状态不渲染宿主/配置/事件，也不读取事件端点。
    */
-  it('renders host information from environment card including userName and homeDirectory', async () => {
-    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
-    renderModal(testEnvironment())
+  it('renders management actions with plain labels and keeps diagnostics collapsed', () => {
+    const actions: ManageAction[] = [
+      { label: '编辑配置', run: vi.fn() },
+      { label: '更新 Daemon', run: vi.fn() },
+      { label: '删除环境', run: vi.fn(), danger: true },
+    ]
+    renderModal(testEnvironment(), { actions })
+    const dialog = manageDialog()
 
-    // 弹窗标题统一为“动作/对象：名称”，环境名称带在同一条标题里。
-    expect(screen.getByRole('dialog', { name: '管理环境：test-environment' })).toBeInTheDocument()
+    for (const action of actions) {
+      const button = within(dialog).getByRole('button', { name: action.label })
+      // 动作只用标签表达，不额外挂图标或说明。
+      expect(button).toHaveTextContent(action.label)
+      expect(button.querySelector('svg')).toBeNull()
+    }
+    expect(within(dialog).getByRole('button', { name: '删除环境' })).toHaveClass('danger')
+
+    const diagnostics = within(dialog).getByText('诊断详情').closest('details') as HTMLElement | null
+    expect(diagnostics).not.toBeNull()
+    expect(diagnostics).not.toHaveAttribute('open')
+    expect(within(dialog).queryByText('宿主信息')).toBeNull()
+    expect(within(dialog).queryByText('配置')).toBeNull()
+    expect(within(dialog).queryByText('事件记录')).toBeNull()
+    expect(environmentService.listEnvironmentEvents).not.toHaveBeenCalled()
+  })
+
+  /** 测试意图：动作先关闭管理弹窗再打开原确认流，避免两层弹窗叠加。 */
+  it('closes the modal before running the selected action', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const run = vi.fn()
+    renderModal(testEnvironment(), { onClose, actions: [{ label: '重新生成 Token', run }] })
+
+    await user.click(within(manageDialog()).getByRole('button', { name: '重新生成 Token' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(onClose.mock.invocationCallOrder[0]!).toBeLessThan(run.mock.invocationCallOrder[0]!)
+  })
+
+  /**
+   * 测试意图：展开诊断后呈现宿主事实（含 UUID、最近一次 Daemon 版本、能力清单）
+   * 与配置摘要，两者与连接状态是不同事实。
+   */
+  it('expands diagnostics with host facts and the configuration summary', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
+    renderModal(testEnvironment({
+      capabilities: [{ id: 'process.exec' }, { id: 'shell.exec' }],
+    }))
+
+    await expandDiagnostics(user)
+
+    // 宿主信息：UUID 是卡片身份，不冒充名称。
+    expect(screen.getByText('UUID')).toBeInTheDocument()
+    expect(screen.getByText('env-test-1')).toBeInTheDocument()
+    // 宿主信息展示最近一次 Daemon 版本，与 CAS 配置版本不是同一事实。
+    expect(screen.getByText('上次 Daemon 版本')).toBeInTheDocument()
+    expect(screen.getByText('1.2.3')).toBeInTheDocument()
     expect(screen.getByText('linux')).toBeInTheDocument()
     expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument()
-    // 宿主信息展示实际 daemon 构建版本，与 CAS 配置版本不是同一事实。
-    expect(screen.getByText('Daemon 版本')).toBeInTheDocument()
-    expect(screen.getByText('1.2.3')).toBeInTheDocument()
-    // 宿主信息展示最近一次 READY 的进程用户与 HOME。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()
     expect(screen.getByText('Production host')).toBeInTheDocument()
-    // 管理面同时呈现配置状态与已应用版本，不把 READY 当成最新配置已应用。
-    expect(screen.getByText('配置')).toBeInTheDocument()
-    expect(await screen.findByText('已应用')).toBeInTheDocument()
-    expect(screen.getByText('已应用版本')).toBeInTheDocument()
+    expect(screen.getByText('process.exec · shell.exec')).toBeInTheDocument()
     // lastSeen 使用共享固定格式（分钟精度），不直接铺 UTC 原文。
     expect(screen.getByText(/2026-07-20 \d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()
 
-    // 绝不包含任何操作记录区域
-    expect(screen.queryByText('异步操作记录')).not.toBeInTheDocument()
-    expect(screen.queryByText('Operations')).not.toBeInTheDocument()
+    // 配置摘要：状态徽标 + 卡片版本/已应用版本/代理，不把 READY 当成配置已应用。
+    expect(screen.getByText('配置')).toBeInTheDocument()
+    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(screen.getByText('已应用版本')).toBeInTheDocument()
+    expect(screen.getByText('直连')).toBeInTheDocument()
+
+    expect(screen.queryByText('异步操作记录')).toBeNull()
+    expect(screen.queryByText('Operations')).toBeNull()
   })
 
-  /**
-   * 测试意图：验证点击关闭按钮触发 onClose 回调。
-   */
-  it('triggers onClose when close button is clicked', async () => {
+  /** 测试意图：最近活动按 epoch 毫秒（含亚秒值）用共享固定格式展示，不铺 UTC 原文。 */
+  it.each([
+    ['整秒', 1750000000000],
+    ['亚秒', 1750000000500],
+  ])('formats the %s lastSeen value with the shared minute format', async (_label, lastSeenAt) => {
     const user = userEvent.setup()
-    const onClose = vi.fn()
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
-    renderModal(testEnvironment(), onClose)
+    renderModal(testEnvironment({ lastSeenAt }))
 
-    // 底部关闭动作与标题关闭按钮都可用；优先验证新增的底部动作。
-    const closeBtn = screen.getAllByRole('button', { name: '关闭' })[1]
-    await user.click(closeBtn)
-    expect(onClose).toHaveBeenCalled()
+    await expandDiagnostics(user)
+
+    const hostSection = screen.getByRole('region', { name: '宿主信息' })
+    expect(within(hostSection).getByText(/2025-06-15 \d{2}:\d{2}/)).toBeInTheDocument()
   })
 
-  /**
-   * 测试意图：验证事件列表在有记录时正确渲染时间、级别、类型和说明，且高亮 WARN 级别。
-   */
-  it('renders events list with distinguishable levels and empty state when none', async () => {
+  /** 测试意图：运行快照失败时配置状态明确未知，并在诊断里说明读取失败，不冒充已应用或直连。 */
+  it('reports an unknown configuration state when the runtime snapshot fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockRejectedValue(
+      new Error('runtime route failed'),
+    )
+    renderModal(testEnvironment({ version: '3' }))
+
+    await expandDiagnostics(user)
+
+    expect(await screen.findByText('运行状态读取失败')).toBeInTheDocument()
+    expect(screen.getByText('未知')).toBeInTheDocument()
+    expect(screen.queryByText('已应用')).toBeNull()
+    expect(screen.queryByText('直连')).toBeNull()
+  })
+
+  /** 测试意图：离线环境没有有效租约，诊断里只呈现待连接与代理未知，且不读运行快照端点。 */
+  it('reports pending connection and an unknown proxy for an offline environment', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
+    renderModal(testEnvironment({ status: 'OFFLINE', ready: false }))
+
+    await expandDiagnostics(user)
+
+    const configSection = screen.getByRole('region', { name: '配置' })
+    expect(within(configSection).getByText('待连接')).toBeInTheDocument()
+    // 已应用版本与代理都未知：代理不能把卡片上的直连意图当成已生效。
+    expect(within(configSection).getAllByText('—')).toHaveLength(2)
+    expect(within(configSection).queryByText('直连')).toBeNull()
+    expect(environmentService.getEnvironmentRuntime).not.toHaveBeenCalled()
+  })
+
+  /** 测试意图：当前版本的配置失败规则与错误字段在诊断中可读。 */
+  it('surfaces the current configuration error code and field', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(
+      testRuntimeStatus({
+        configuration: {
+          appliedVersion: '2',
+          proxyUrl: null,
+          error: { version: '3', code: 'VALIDATION_FAILED', field: 'daemonConfig.proxyUrl' },
+        },
+      }),
+    )
+    renderModal(testEnvironment({ version: '3' }))
+
+    await expandDiagnostics(user)
+
+    expect(await screen.findByText('应用失败')).toBeInTheDocument()
+    expect(screen.getByText('VALIDATION_FAILED · daemonConfig.proxyUrl')).toBeInTheDocument()
+  })
+
+  /** 测试意图：展开后按时间倒序呈现事件，级别可区分且 WARN 有视觉区分样式。 */
+  it('renders events with distinguishable levels once diagnostics is expanded', async () => {
+    const user = userEvent.setup()
     const mockEvents: EnvironmentEventDTO[] = [
       {
         occurredAt: 1784509200000,
@@ -123,60 +255,59 @@ describe('EnvironmentManagementModal', () => {
       },
     ]
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue(mockEvents)
-
     renderModal(testEnvironment())
 
-    expect(await screen.findByText('Host connected successfully')).toBeInTheDocument()
-    expect(screen.getByText('Daemon update failed')).toBeInTheDocument()
-    expect(screen.getByText('READY')).toBeInTheDocument()
-    expect(screen.getByText('UPDATE_FAILED')).toBeInTheDocument()
+    await expandDiagnostics(user)
 
-    // 检查 WARN 级别是否具有视觉区分样式类
-    const warnLevel = screen.getByText('WARN')
-    expect(warnLevel).toHaveClass('is-warn')
+    expect(await screen.findByText('Daemon update failed')).toBeInTheDocument()
+    expect(screen.getByText('Host connected successfully')).toBeInTheDocument()
+    expect(screen.getByText('UPDATE_FAILED')).toBeInTheDocument()
+    expect(screen.getByText('READY')).toBeInTheDocument()
+    expect(screen.getByText('WARN')).toHaveClass('is-warn')
+    // 倒序：最新事件在前。
+    const messages = screen.getAllByText(/Host connected successfully|Daemon update failed/)
+    expect(messages.map((node) => node.textContent)).toEqual([
+      'Daemon update failed',
+      'Host connected successfully',
+    ])
   })
 
-  /**
-   * 测试意图：验证没有事件时渲染空态文本。
-   */
-  it('renders empty state when there are no events', async () => {
+  /** 测试意图：没有事件时在诊断内给出空态，不隐藏事件分区。 */
+  it('renders the empty events state once diagnostics is expanded', async () => {
+    const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     renderModal(testEnvironment())
+
+    await expandDiagnostics(user)
 
     expect(await screen.findByText('暂无事件记录')).toBeInTheDocument()
   })
 
-  /**
-   * 测试意图：验证管理弹窗在打开期间每 10 秒轮询一次事件端点，
-   * 使用 fakeTimers 推进时间后能至少观察到 2 次 refetch（总计调用至少 3 次）。
-   */
-  it('polls environment events endpoint every 10 seconds while open', async () => {
+  /** 测试意图：展开期间每 10 秒回读一次事件端点，折叠时完全不请求。 */
+  it('polls environment events every 10 seconds only while diagnostics is expanded', async () => {
     vi.useFakeTimers()
     try {
-      const queryClient = new QueryClient({
-        defaultOptions: {
-          queries: {
-            retry: false,
-          },
-        },
-      })
       vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
+      renderModal(testEnvironment())
 
-      renderModal(testEnvironment(), vi.fn(), queryClient)
-
-      // 首次加载发起 1 次请求
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
+      expect(environmentService.listEnvironmentEvents).not.toHaveBeenCalled()
+
+      // jsdom 把 details 的 open 变化转成异步 toggle，React 的 onToggle 再据此渲染诊断内容。
+      await act(async () => {
+        fireEvent.click(screen.getByText('诊断详情'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(screen.getByText('宿主信息')).toBeInTheDocument()
       expect(environmentService.listEnvironmentEvents).toHaveBeenCalledTimes(1)
 
-      // 前进 10 秒触发第 1 次 refetch
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000)
       })
       expect(environmentService.listEnvironmentEvents).toHaveBeenCalledTimes(2)
 
-      // 再次前进 10 秒触发第 2 次 refetch
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000)
       })
@@ -184,5 +315,18 @@ describe('EnvironmentManagementModal', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  /** 测试意图：底部关闭与标题关闭都可关闭弹窗。 */
+  it('triggers onClose when the close button is clicked', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
+    renderModal(testEnvironment(), { onClose })
+
+    const closeButtons = within(manageDialog()).getAllByRole('button', { name: '关闭' })
+    expect(closeButtons).toHaveLength(2)
+    await user.click(closeButtons[1]!)
+    expect(onClose).toHaveBeenCalled()
   })
 })

@@ -102,7 +102,10 @@ export function CanvasLibraryView() {
         </header>
 
         {canvasesQuery.isLoading ? (
-          <ResourceCardSkeleton label={t('canvas.library.loading')} />
+          <ResourceCardSkeleton
+            label={t('canvas.library.loading')}
+            className="canvas-library-grid"
+          />
         ) : null}
         {canvasesQuery.isError ? (
           <div className="library-load-error" role="alert">

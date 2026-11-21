@@ -278,6 +278,26 @@ export const environmentCatalog = {
     'en-US': 'Failed to load environments',
     'zh-CN': '加载 Environment 失败',
   },
+  'ai.environment.refreshFailed': {
+    'en-US': 'Refresh failed',
+    'zh-CN': '刷新失败',
+  },
+  'ai.environment.refreshStale': {
+    'en-US': 'Refresh failed · Showing last data',
+    'zh-CN': '刷新失败 · 显示上次数据',
+  },
+  'ai.environment.diagnostics': {
+    'en-US': 'Diagnostics',
+    'zh-CN': '诊断详情',
+  },
+  'ai.environment.currentDaemonVersion': {
+    'en-US': 'Current Daemon version',
+    'zh-CN': '当前 Daemon 版本',
+  },
+  'ai.environment.lastDaemonVersion': {
+    'en-US': 'Last Daemon version',
+    'zh-CN': '上次 Daemon 版本',
+  },
   'ai.environment.create': {
     'en-US': 'Create Environment',
     'zh-CN': '创建环境',
@@ -299,16 +319,16 @@ export const environmentCatalog = {
     'zh-CN': '重新生成 Token',
   },
   'ai.environment.rotateTokenConfirm': {
-    'en-US': 'Rotate the registration token for "{name}"? Existing connections stay online; the next connection must use the new token.',
-    'zh-CN': '确认为环境「{name}」重新生成 Token？已有连接保持在线，下一次连接必须使用新 Token。',
+    'en-US': 'Rotate the registration token for "{{name}}"? Existing connections stay online; the next connection must use the new token.',
+    'zh-CN': '确认为环境「{{name}}」重新生成 Token？已有连接保持在线，下一次连接必须使用新 Token。',
   },
   'ai.environment.delete': {
     'en-US': 'Delete Environment',
     'zh-CN': '删除环境',
   },
   'ai.environment.deleteConfirm': {
-    'en-US': 'Are you sure you want to delete environment "{name}"?',
-    'zh-CN': '确认删除环境「{name}」？',
+    'en-US': 'Are you sure you want to delete environment "{{name}}"?',
+    'zh-CN': '确认删除环境「{{name}}」？',
   },
   'ai.environment.install': {
     'en-US': "Install / overwrite",

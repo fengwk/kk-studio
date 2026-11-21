@@ -64,21 +64,6 @@
   opacity: 1;
 }
 
-.environment-config-status {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.environment-config-status .field-help {
-  margin: 0;
-  font-size: var(--font-size-xs);
-  color: var(--fg-muted);
-  word-break: break-word;
-}
-
 @media (max-width: 420px), (max-height: 500px) {
   .environment-config-modal .modal-footer button {
     white-space: normal;

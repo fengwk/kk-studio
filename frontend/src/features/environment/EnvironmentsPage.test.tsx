@@ -37,6 +37,8 @@ vi.mock('@/app/ai-console/AiNavigation', () => ({
   AiNavigation: () => null,
 }))
 
+type TestUser = ReturnType<typeof userEvent.setup>
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
@@ -70,6 +72,31 @@ function runtimeStatus(
 function runtimeUnavailableError(): ApiError {
   return new ApiError('environment runtime unavailable', 409, 'unavailable', undefined,
     'ENVIRONMENT_UNAVAILABLE', 'environment runtime snapshot is unavailable; wait for READY or reconnect')
+}
+
+/** 卡片以标题定位：卡片本身只保留状态、版本与更新状态。 */
+async function cardFor(name: string): Promise<HTMLElement> {
+  const heading = await screen.findByRole('heading', { name })
+  const card = heading.closest('article')
+  if (card == null) {
+    throw new Error(`environment card not found: ${name}`)
+  }
+  return card
+}
+
+/** 卡片只保留管理入口：动作与诊断都在管理弹窗里。 */
+async function openManagement(user: TestUser, name: string): Promise<HTMLElement> {
+  await user.click(within(await cardFor(name)).getByRole('button', { name: `管理 ${name}` }))
+  return screen.findByRole('dialog', { name: `管理环境：${name}` })
+}
+
+/** 管理动作执行前先关闭管理弹窗，再打开原有的确认/命令流程。 */
+async function runManagementAction(user: TestUser, name: string, label: string): Promise<void> {
+  const management = await openManagement(user, name)
+  await user.click(within(management).getByRole('button', { name: label }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: `管理环境：${name}` })).toBeNull(),
+  )
 }
 
 /**
@@ -108,94 +135,81 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.getEnvironmentRuntime).mockRejectedValue(runtimeUnavailableError())
   })
 
-  // 验证渲染环境卡片及其状态与能力，底部提供「安装 / 卸载 / 管理 / 轮换 / 删除」动作
-  it('renders environment cards with status and capabilities, with manage, install, uninstall, rotate and delete actions in footer', async () => {
+  /**
+   * 测试意图：卡片只呈现当前状态、版本来源与更新状态，动作收敛为一个管理入口；
+   * 能力清单、最近活动等诊断事实不再铺在卡片上。
+   */
+  it('renders cards with status, note subtitle, version row and only the manage entry', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      {
+      environment({
         id: 'env-1',
         name: 'local-dev',
-        daemonConfig: testDaemonConfig(),
-        userName: 'dev-user',
-        homeDirectory: '/home/dev',
-        status: 'READY',
-        ready: true,
+        note: 'dev workstation',
+        daemonVersion: '1.2.3',
         statusExpiresAt: 1784509383000,
         lastSeenAt: 1784509323000,
         capabilities: [{ id: 'process.exec' }],
-        daemonVersion: '1.2.3',
-        version: '1',
-        createdAt: 1784505600000,
-        updatedAt: 1784505600000,
-      },
-      {
-        id: 'env-2',
-        name: 'stale-box',
-        daemonConfig: testDaemonConfig(),
-        userName: 'ops-user',
-        homeDirectory: '/srv/operations',
-        status: 'READY',
+      }),
+      environment({ id: 'env-2', name: 'stale-box', ready: false, daemonVersion: 'development' }),
+      environment({ id: 'env-3', name: 'connecting-box', status: 'CONNECTING', ready: false }),
+      environment({ id: 'env-4', name: 'offline-unknown', status: 'OFFLINE', ready: false }),
+      environment({
+        id: 'env-5',
+        name: 'offline-known',
+        status: 'OFFLINE',
         ready: false,
-        statusExpiresAt: null,
-        lastSeenAt: 1784419200000,
-        capabilities: [],
-        daemonVersion: 'development',
-        version: '1',
-        createdAt: 1784419200000,
-        updatedAt: 1784419200000,
-      },
-      {
-        id: 'env-3',
-        name: 'connecting-box',
-        daemonConfig: testDaemonConfig(),
-        userName: null,
-        homeDirectory: null,
-        status: 'CONNECTING',
-        ready: false,
-        statusExpiresAt: 1784505660000,
-        lastSeenAt: null,
-        capabilities: [],
-        version: '1',
-        createdAt: 1784505600000,
-        updatedAt: 1784505600000,
-      },
+        daemonVersion: '0.9.0',
+      }),
     ])
     renderPage()
+
     expect(await screen.findByText('local-dev')).toBeInTheDocument()
-    // 环境状态 pill；stale-box 必须显示 UNAVAILABLE 而非 READY。
-    expect(screen.getAllByText('READY').length).toBe(1)
+    expect(screen.getAllByRole('article')).toHaveLength(5)
+    // 状态徽标如实展示连接状态；stale-box 必须显示 UNAVAILABLE 而非 READY。
+    expect(screen.getAllByText('READY')).toHaveLength(1)
     expect(screen.getByText('UNAVAILABLE')).toBeInTheDocument()
-    expect(screen.getByText('process.exec')).toBeInTheDocument()
-    // 卡片展示最近一次 READY 的宿主进程用户，不展示主机目录。
-    expect(screen.getByText('dev-user')).toBeInTheDocument()
-    expect(screen.getByText('ops-user')).toBeInTheDocument()
-    // 卡片展示实际 daemon 构建版本；development 如实展示，缺失时明确未上报而不是伪装成发布版本。
-    expect(screen.getAllByText('Daemon 版本')).toHaveLength(3)
+    expect(screen.getByText('CONNECTING')).toBeInTheDocument()
+    expect(screen.getAllByText('OFFLINE')).toHaveLength(2)
+
+    // 备注是副标题；UUID、能力清单与最近活动只在诊断详情里出现。
+    const localDev = await cardFor('local-dev')
+    expect(within(localDev).getByText('dev workstation')).toBeInTheDocument()
+    expect(within(localDev).queryByText('env-1')).toBeNull()
+    expect(within(localDev).queryByText('process.exec')).toBeNull()
+    expect(within(localDev).queryByText('Capabilities')).toBeNull()
+    expect(screen.queryByText(/最近活动/u)).toBeNull()
+
+    // 每张卡只有两条元信息行：版本来源 + 更新状态。
+    for (const name of [
+      'local-dev',
+      'stale-box',
+      'connecting-box',
+      'offline-unknown',
+      'offline-known',
+    ]) {
+      expect((await cardFor(name)).querySelectorAll('.resource-card-meta-row')).toHaveLength(2)
+    }
+    // 有版本记录的卡片标注为“上次”版本；从未上报的卡片明确未上报而不是伪装成发布版本。
+    expect(screen.getAllByText('上次 Daemon 版本')).toHaveLength(3)
+    expect(screen.getAllByText('Daemon 版本')).toHaveLength(2)
     expect(screen.getByText('1.2.3')).toBeInTheDocument()
     expect(screen.getByText('development')).toBeInTheDocument()
-    expect(screen.getByText('未上报')).toBeInTheDocument()
-    // 没有本代 READY 运行快照时明确展示不可用，不把缺失的 update 伪造成无更新或成功。
-    expect(await screen.findAllByText('状态不可用，等待 Daemon 重连')).toHaveLength(3)
-    expect(screen.queryByText('/workspace/local-dev')).toBeNull()
-    // 卡片不展示 skills 字段
-    expect(screen.queryByText('dev')).toBeNull()
-    expect(screen.getByText('CONNECTING')).toBeInTheDocument()
-    expect(screen.getAllByText('Capabilities').length).toBe(3)
+    expect(screen.getByText('0.9.0')).toBeInTheDocument()
+    expect(screen.getAllByText('未上报')).toHaveLength(2)
 
-    // 验证每个环境卡片底部有「安装 / 卸载 / 编辑配置 / 管理 / 更新 / 重新生成 Token / 删除」七个动作；
-    // 加载列表和打开表单都不得预取 token，仅显式生成安装命令时读取。
-    const cards = screen.getAllByRole('article')
-    expect(cards).toHaveLength(3)
-    for (const card of cards) {
-      const footerButtons = within(card).getAllByRole('button')
-      expect(footerButtons).toHaveLength(7)
-      expect(within(card).getByRole('button', { name: /安装 \/ 覆盖/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /卸载/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /编辑配置/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /管理/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /更新 Daemon/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /重新生成 Token/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
-    }
+    // 默认没有可用运行快照：明确展示状态不可用，不把缺失的 update 伪造成无更新。
+    expect(await screen.findAllByText('状态不可用，等待 Daemon 重连')).toHaveLength(5)
+    expect(screen.queryByText('无进行中的更新')).toBeNull()
+
+    // 动作只剩管理；只有既离线又没有版本记录的卡片才额外提供安装入口。
+    expect(within(localDev).getAllByRole('button')).toHaveLength(1)
+    expect(within(localDev).getByRole('button', { name: '管理 local-dev' })).toBeInTheDocument()
+    const offlineUnknown = await cardFor('offline-unknown')
+    expect(within(offlineUnknown).getAllByRole('button')).toHaveLength(2)
+    expect(
+      within(offlineUnknown).getByRole('button', { name: '安装 / 覆盖 offline-unknown' }),
+    ).toBeInTheDocument()
+    expect(within(await cardFor('offline-known')).queryByRole('button', { name: /安装/u })).toBeNull()
   })
 
   it('shows empty state when no environments configured', async () => {
@@ -273,7 +287,7 @@ describe('EnvironmentsPage', () => {
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('secret-token-12345')
   })
 
-  it('edits a card configuration with CAS and keeps the draft when the version conflicts', async () => {
+  it('edits a card configuration from the management modal with CAS and keeps the draft when the version conflicts', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({
@@ -303,8 +317,8 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const card = await screen.findByRole('article')
-    await user.click(within(card).getByRole('button', { name: '编辑配置 my-box' }))
+    await screen.findByText('my-box')
+    await runManagementAction(user, 'my-box', '编辑配置')
     const modal = await screen.findByRole('dialog', { name: '编辑环境：my-box' })
     expect(within(modal).getByRole('textbox', { name: '环境名称' })).toBeDisabled()
     expect(within(modal).getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
@@ -338,7 +352,11 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑环境：my-box' })).toBeNull())
   })
 
-  it('derives applied, pending, failed and unavailable config states from the runtime snapshot', async () => {
+  /**
+   * 测试意图：卡片只为“待应用/应用失败”让出状态位，并以配置状态徽标取代更新状态；
+   * 已应用的卡片仍显示更新状态，离线卡片没有运行快照时既不读端点也不展示配置徽标。
+   */
+  it('shows pending and failed configuration states on the card, and never fakes a state for offline cards', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-applied', name: 'applied-box', version: '3' }),
       environment({ id: 'env-pending', name: 'pending-box', version: '3' }),
@@ -371,17 +389,27 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     expect(await screen.findByText('applied-box')).toBeInTheDocument()
-    expect(await screen.findByText('已应用')).toBeInTheDocument()
     expect(await screen.findByText('待应用')).toBeInTheDocument()
     expect(await screen.findByText('应用失败')).toBeInTheDocument()
-    expect(screen.getByText(/VALIDATION_FAILED/)).toBeInTheDocument()
-    expect(await screen.findByText('待连接')).toBeInTheDocument()
-    // 离线卡片没有当前运行快照，不能把卡片上的 proxy null 伪装成已直连。
+    expect(screen.getAllByText('配置状态')).toHaveLength(2)
+    expect(screen.getAllByText('更新状态')).toHaveLength(2)
+    // 已应用的卡片不额外加配置徽标。
+    expect(within(await cardFor('applied-box')).queryByText('已应用')).toBeNull()
+    expect(
+      await within(await cardFor('applied-box')).findByText('无进行中的更新'),
+    ).toBeInTheDocument()
+    // 失败详情（错误码与字段）属于诊断详情，不在卡片上展开。
+    expect(screen.queryByText(/VALIDATION_FAILED/u)).toBeNull()
+
+    // 离线卡片没有当前运行快照：不读 runtime 端点，也不把缓存包装成待连接/直连。
     expect(environmentService.getEnvironmentRuntime).not.toHaveBeenCalledWith('env-offline')
-    expect(screen.getAllByText('直连')).toHaveLength(2)
+    expect(within(await cardFor('offline-box')).queryByText('待连接')).toBeNull()
+    expect(
+      within(await cardFor('offline-box')).getByText('状态不可用，等待 Daemon 重连'),
+    ).toBeInTheDocument()
   })
 
-  it('reads the runtime snapshot while CONNECTING instead of waiting for ready', async () => {
+  it('reads the runtime snapshot while CONNECTING and shows the live Daemon version', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({
         id: 'env-connecting',
@@ -399,7 +427,9 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     expect(await screen.findByText('connecting-box')).toBeInTheDocument()
-    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(await screen.findByText('当前 Daemon 版本')).toBeInTheDocument()
+    expect(screen.getByText('1.2.3')).toBeInTheDocument()
+    expect(await screen.findByText('无进行中的更新')).toBeInTheDocument()
     expect(environmentService.getEnvironmentRuntime).toHaveBeenCalledWith('env-connecting')
   })
 
@@ -418,12 +448,13 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(await screen.findByText('无进行中的更新')).toBeInTheDocument()
+    expect(screen.queryByText('配置状态')).toBeNull()
     expect(screen.queryByText('应用失败')).toBeNull()
   })
 
   // 确认后轮换并刷新列表，不展示或缓存凭据。
-  it('rotates registration token without displaying or fetching credentials', async () => {
+  it('rotates registration token from the management modal without displaying or fetching credentials', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'my-box', version: '1' }),
@@ -434,11 +465,10 @@ describe('EnvironmentsPage', () => {
     installClipboard()
     const { queryClient } = renderPage()
 
-    const card = await screen.findByRole('article')
-    const rotateBtn = within(card).getByRole('button', { name: /重新生成 Token/ })
-    await user.click(rotateBtn)
+    await screen.findByText('my-box')
+    await runManagementAction(user, 'my-box', '重新生成 Token')
 
-    // 确认弹窗
+    // 管理动作打开原有的确认弹窗，确认标签与被点动作一致。
     const modal = await screen.findByRole('alertdialog', { name: '重新生成 Token' })
     const confirmBtn = within(modal).getByRole('button', { name: '重新生成 Token' })
     await user.click(confirmBtn)
@@ -451,7 +481,7 @@ describe('EnvironmentsPage', () => {
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('rotated-tok-999')
   })
 
-  it('deletes an environment card after confirmation', async () => {
+  it('deletes an environment card from the management modal after confirmation', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'to-delete', version: '1' }),
@@ -459,8 +489,8 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.deleteEnvironment).mockResolvedValue(undefined)
     renderPage()
 
-    const deleteBtn = await screen.findByRole('button', { name: /删除环境/ })
-    await user.click(deleteBtn)
+    await screen.findByText('to-delete')
+    await runManagementAction(user, 'to-delete', '删除环境')
 
     const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
     const confirmBtn = within(modal).getByRole('button', { name: '删除环境' })
@@ -469,7 +499,7 @@ describe('EnvironmentsPage', () => {
     expect(environmentService.deleteEnvironment).toHaveBeenCalledWith('env-1', '1')
   })
 
-  it('starts a managed Daemon update after confirmation and applies the returned runtime snapshot', async () => {
+  it('starts a managed Daemon update from the management modal after confirmation and applies the returned runtime snapshot', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'my-box', daemonVersion: '1.2.0', version: '1' }),
@@ -488,11 +518,16 @@ describe('EnvironmentsPage', () => {
     })
     const { queryClient } = renderPage()
 
-    const card = await screen.findByRole('article')
+    const card = await cardFor('my-box')
     expect(await within(card).findByText('无进行中的更新')).toBeInTheDocument()
-    const updateBtn = within(card).getByRole('button', { name: '更新 Daemon my-box' })
-    expect(updateBtn).not.toBeDisabled()
-    await user.click(updateBtn)
+
+    // 管理弹窗承载全部动作，标签与确认流程一致。
+    const management = await openManagement(user, 'my-box')
+    const managementLabels = ['编辑配置', '安装 / 覆盖', '更新 Daemon', '卸载', '重新生成 Token', '删除环境']
+    for (const label of managementLabels) {
+      expect(within(management).getByRole('button', { name: label })).toBeInTheDocument()
+    }
+    await user.click(within(management).getByRole('button', { name: '更新 Daemon' }))
 
     const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
     expect(within(modal).getByText(/my-box/)).toBeInTheDocument()
@@ -523,31 +558,37 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.startEnvironmentUpdate).mockResolvedValue({ commandStatus, runtimeStatus: beforeProgress })
     const { queryClient } = renderPage()
 
-    const update = await screen.findByRole('button', { name: '更新 Daemon my-box' })
-    const card = within(update.closest('article')!)
-    expect(await card.findByText('无进行中的更新')).toBeVisible()
-    await user.click(update)
+    const card = await cardFor('my-box')
+    expect(await within(card).findByText('无进行中的更新')).toBeVisible()
+    await runManagementAction(user, 'my-box', '更新 Daemon')
     const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
     await user.click(within(modal).getByRole('button', { name: '更新 Daemon' }))
 
     expect(environmentService.startEnvironmentUpdate).toHaveBeenCalledWith('env-1')
-    expect(await card.findByText(message)).toBeVisible()
-    expect(card.queryByText('无进行中的更新')).not.toBeInTheDocument()
-    expect(screen.getByText('无进行中的更新')).toBeVisible()
-    expect(update).not.toBeDisabled()
+    expect(await within(card).findByText(message)).toBeVisible()
+    expect(within(card).queryByText('无进行中的更新')).not.toBeInTheDocument()
+    expect(within(await cardFor('other-box')).getByText('无进行中的更新')).toBeVisible()
+
+    // 回执不锁住动作：再次打开管理仍然可以发起更新。
+    const management = await openManagement(user, 'my-box')
+    expect(within(management).getByRole('button', { name: '更新 Daemon' })).not.toBeDisabled()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '管理环境：my-box' })).toBeNull(),
+    )
 
     const key = queryKeys.environments.runtime('env-1')
     const progress = runtimeStatus('1.2.0', { targetVersion: '1.3.0', downloadedBytes: '0', totalBytes: null }, '2')
     vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(progress)
     await act(async () => { await queryClient.invalidateQueries({ queryKey: key }) })
-    expect(await card.findByText('正在更新至 1.3.0 · 已下载 0 B · 总大小未知')).toBeVisible()
-    expect(card.queryByText(message)).not.toBeInTheDocument()
+    expect(await within(card).findByText('正在更新至 1.3.0 · 已下载 0 B · 总大小未知')).toBeVisible()
+    expect(within(card).queryByText(message)).not.toBeInTheDocument()
 
     vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(runtimeStatus('1.3.0'))
     await act(async () => { await queryClient.invalidateQueries({ queryKey: key }) })
-    expect(await card.findByText('1.3.0')).toBeVisible()
-    expect(card.getByText('无进行中的更新')).toBeVisible()
-    expect(card.queryByText(message)).not.toBeInTheDocument()
+    expect(await within(card).findByText('1.3.0')).toBeVisible()
+    expect(within(card).getByText('无进行中的更新')).toBeVisible()
+    expect(within(card).queryByText(message)).not.toBeInTheDocument()
   })
 
   it('closes the update confirmation without starting a command when canceled', async () => {
@@ -557,8 +598,8 @@ describe('EnvironmentsPage', () => {
     ])
     renderPage()
 
-    const updateBtn = await screen.findByRole('button', { name: '更新 Daemon cancel-box' })
-    await user.click(updateBtn)
+    await screen.findByText('cancel-box')
+    await runManagementAction(user, 'cancel-box', '更新 Daemon')
 
     const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
     await user.click(within(modal).getByRole('button', { name: '取消' }))
@@ -568,6 +609,7 @@ describe('EnvironmentsPage', () => {
   })
 
   it('shows the live Daemon version and known download progress without treating 100% download as success', async () => {
+    const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'live-box', daemonVersion: '1.2.0' }),
     ])
@@ -580,14 +622,16 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    expect(await screen.findByText('1.2.1')).toBeInTheDocument()
+    expect(await screen.findByText('当前 Daemon 版本')).toBeInTheDocument()
+    expect(screen.getByText('1.2.1')).toBeInTheDocument()
     expect(screen.queryByText('1.2.0')).not.toBeInTheDocument()
     expect(
       screen.getByText('正在更新至 1.3.0 · 1 MB / 1 MB（100%）'),
     ).toBeInTheDocument()
     expect(screen.queryByText('更新成功')).not.toBeInTheDocument()
-    // 当前更新快照不锁定按钮；重复请求由 Server/Daemon 的互斥与幂等语义裁决。
-    expect(screen.getByRole('button', { name: '更新 Daemon live-box' })).not.toBeDisabled()
+    // 当前更新快照不锁定动作；重复请求由 Server/Daemon 的互斥与幂等语义裁决。
+    const management = await openManagement(user, 'live-box')
+    expect(within(management).getByRole('button', { name: '更新 Daemon' })).not.toBeDisabled()
   })
 
   it('shows downloaded bytes without fabricating a percentage when total size is unknown', async () => {
@@ -622,8 +666,9 @@ describe('EnvironmentsPage', () => {
     })
     renderPage()
 
-    expect(await screen.findByText('runtime route failed')).toBeInTheDocument()
-    expect(await screen.findByText('运行状态读取失败')).toBeInTheDocument()
+    // 卡片只给产品文案；错误原文留在诊断详情，不作为卡片文案。
+    expect(await screen.findAllByText('运行状态读取失败')).toHaveLength(2)
+    expect(screen.queryByText('runtime route failed')).not.toBeInTheDocument()
     expect(screen.queryByText('无进行中的更新')).not.toBeInTheDocument()
   })
 
@@ -715,8 +760,8 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const updateBtn = await screen.findByRole('button', { name: '更新 Daemon offline-box' })
-    await user.click(updateBtn)
+    await screen.findByText('offline-box')
+    await runManagementAction(user, 'offline-box', '更新 Daemon')
 
     const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
     const confirmBtn = within(modal).getByRole('button', { name: '更新 Daemon' })
@@ -738,8 +783,8 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const updateBtn = await screen.findByRole('button', { name: '更新 Daemon busy-box' })
-    await user.click(updateBtn)
+    await screen.findByText('busy-box')
+    await runManagementAction(user, 'busy-box', '更新 Daemon')
 
     const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
     const confirmBtn = within(modal).getByRole('button', { name: '更新 Daemon' })
@@ -762,7 +807,7 @@ describe('EnvironmentsPage', () => {
     })
   })
 
-  it('shows the loading state while the registry request is pending', async () => {
+  it('shows the loading skeleton while the registry request is pending', async () => {
     let resolveListing: ((value: EnvironmentDTO[]) => void) | undefined
     vi.mocked(environmentService.listEnvironments).mockImplementation(
       () => new Promise<EnvironmentDTO[]>((resolve) => {
@@ -772,6 +817,7 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     expect(screen.getByText('正在加载 Environment')).toBeInTheDocument()
+    expect(screen.getAllByRole('status')).toHaveLength(1)
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
 
     await act(async () => {
@@ -781,72 +827,109 @@ describe('EnvironmentsPage', () => {
     expect(screen.queryByText('正在加载 Environment')).not.toBeInTheDocument()
   })
 
-  it('renders the query error message with the danger tone', async () => {
-    vi.mocked(environmentService.listEnvironments).mockRejectedValue(new Error('registry down'))
+  /**
+   * 测试意图：首次读取失败没有缓存可保留，页面只给一条失败提示和一个重试入口；
+   * 重试成功后同一处直接替换为列表，错误原文不作为产品文案。
+   */
+  it('offers an initial retry that replaces the failure with the list once the registry responds', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockRejectedValueOnce(new Error('registry down'))
     renderPage()
 
-    expect(await screen.findByText('registry down')).toBeInTheDocument()
-    expect(screen.queryByRole('article')).not.toBeInTheDocument()
-    expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
+    expect(await screen.findByText('加载 Environment 失败')).toBeInTheDocument()
+    expect(screen.getByText('加载 Environment 失败')).toHaveAttribute('role', 'status')
+    expect(screen.queryByText('registry down')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(1)
+    // 没有权威列表时不假装空列表，也不提供创建入口。
+    expect(screen.queryByRole('article')).toBeNull()
+    expect(screen.queryByRole('button', { name: '创建环境' })).toBeNull()
+
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'recovered-box' }),
+    ])
+    await user.click(screen.getByRole('button', { name: '重试' }))
+
+    expect(await screen.findByText('recovered-box')).toBeInTheDocument()
+    expect(screen.queryByText('加载 Environment 失败')).toBeNull()
+    expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
   })
 
-  it('retains cached environments and create action when background refetch fails with an error', async () => {
+  /**
+   * 测试意图：后台回读失败只是“显示上次数据”，列表原地保留，不退回骨架屏；
+   * 重试成功后提示消失且不重建列表。
+   */
+  it('keeps the cached list in place and retries a failed refresh without a skeleton', async () => {
+    const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValueOnce([
-      environment({ name: 'box-cached' }),
+      environment({ id: 'env-1', name: 'box-cached', daemonVersion: '1.2.0' }),
     ])
     const { queryClient } = renderPage()
 
     expect(await screen.findByText('box-cached')).toBeInTheDocument()
-    expect(screen.getByText('创建环境')).toBeInTheDocument()
 
-    // 模拟后台 refetch 发生网络错误
     vi.mocked(environmentService.listEnvironments).mockRejectedValueOnce(new Error('background glitch'))
     await act(async () => {
-      await queryClient.refetchQueries()
+      await queryClient.refetchQueries({ queryKey: queryKeys.environments.list })
     })
 
-    // 验证：既展示错误提示，又保留已有缓存数据与创建卡操作
-    expect(await screen.findByText('background glitch')).toBeInTheDocument()
+    // 宽屏横幅与窄屏抽屉各一条，指向同一份上次数据。
+    expect(await screen.findAllByText('刷新失败 · 显示上次数据')).toHaveLength(2)
+    expect(screen.getByText('刷新失败')).toBeInTheDocument()
     expect(screen.getByText('box-cached')).toBeInTheDocument()
-    expect(screen.getByText('创建环境')).toBeInTheDocument()
-  })
+    expect(screen.getByRole('button', { name: '创建环境' })).toBeInTheDocument()
+    expect(screen.queryByText('正在加载 Environment')).toBeNull()
+    expect(screen.queryByText('加载 Environment 失败')).toBeNull()
+    expect(screen.queryByText('background glitch')).toBeNull()
+    // 宽/窄两种尺寸各有一个入口，指向同一次回读。
+    expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(2)
 
-  it('formats epoch-millisecond lastSeen, including sub-second values', async () => {
-    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({ id: 'env-id-sec', name: 'seconds-box', lastSeenAt: 1750000000000 }),
-      environment({ id: 'env-id-frac', name: 'fraction-box', lastSeenAt: 1750000000500 }),
+    vi.mocked(environmentService.listEnvironments).mockResolvedValueOnce([
+      environment({ id: 'env-1', name: 'box-cached', daemonVersion: '1.2.1' }),
     ])
-    renderPage()
+    await user.click(screen.getAllByRole('button', { name: '重试' })[0]!)
 
-    expect(await screen.findByText('seconds-box')).toBeInTheDocument()
-    expect(screen.getAllByText(/最近活动 · 2025-06-15/)).toHaveLength(2)
+    await waitFor(() => expect(screen.queryByText('刷新失败 · 显示上次数据')).toBeNull())
+    expect(screen.getByText('box-cached')).toBeInTheDocument()
+    expect(screen.getByText('1.2.1')).toBeInTheDocument()
+    expect(screen.queryByText('正在加载 Environment')).toBeNull()
   })
 
-  it('truncates tag rows to three chips and shows the +N remainder', async () => {
+  /**
+   * 测试意图：服务端派生 OFFLINE 后缓存里的运行快照只作为“上次版本”使用，
+   * 既不能继续宣称当前版本，也不能伪装成可用状态。
+   */
+  it('downgrades a card to unavailable on OFFLINE while keeping only the last reported version', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'flaky-box', daemonVersion: '1.2.0' }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(runtimeStatus('1.2.1'))
+    const { queryClient } = renderPage()
+
+    expect(await screen.findByText('当前 Daemon 版本')).toBeInTheDocument()
+    expect(screen.getByText('1.2.1')).toBeInTheDocument()
+    expect(await screen.findByText('无进行中的更新')).toBeInTheDocument()
+
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({
-        name: 'fat-box',
-        capabilities: [
-          { id: 'a' },
-          { id: 'b' },
-          { id: 'c' },
-          { id: 'd' },
-          { id: 'e' },
-        ],
+        id: 'env-1',
+        name: 'flaky-box',
+        status: 'OFFLINE',
+        ready: false,
+        daemonVersion: '1.2.0',
       }),
     ])
-    renderPage()
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: queryKeys.environments.list })
+    })
 
-    const card = (await screen.findByText('fat-box')).closest('article') as HTMLElement | null
-    expect(card).not.toBeNull()
-    const capabilityRow = within(card!).getByText('Capabilities').closest('.resource-card-meta-row') as HTMLElement | null
-    expect(capabilityRow).not.toBeNull()
-    expect(capabilityRow!.querySelectorAll('.resource-card-tag')).toHaveLength(4)
-    expect(within(capabilityRow!).getByText('+2')).toBeInTheDocument()
-    expect(capabilityRow!.querySelector('.resource-card-tags')).toHaveAttribute(
-      'title',
-      'a, b, c, d, e',
-    )
+    expect(await screen.findByText('状态不可用，等待 Daemon 重连')).toBeInTheDocument()
+    expect(screen.queryByText('无进行中的更新')).toBeNull()
+    expect(screen.queryByText('当前 Daemon 版本')).toBeNull()
+    // 缓存快照里的版本降级为“上次 Daemon 版本”，不再代表当前进程。
+    expect(screen.getByText('上次 Daemon 版本')).toBeInTheDocument()
+    expect(screen.getByText('1.2.1')).toBeInTheDocument()
+    // 有版本记录后不再提供安装入口，只剩管理。
+    expect(within(await cardFor('flaky-box')).getAllByRole('button')).toHaveLength(1)
   })
 
   // 验证 Environment rotate 失败时在确认弹窗中可见展示错误（防止静默失败），并在 409 时走共享 ConflictPresenter 语义
@@ -861,9 +944,8 @@ describe('EnvironmentsPage', () => {
     installClipboard()
     renderPage()
 
-    const card = await screen.findByRole('article')
-    const rotateBtn = within(card).getByRole('button', { name: /重新生成 Token/ })
-    await user.click(rotateBtn)
+    await screen.findByText('my-box')
+    await runManagementAction(user, 'my-box', '重新生成 Token')
 
     const modal = await screen.findByRole('alertdialog', { name: '重新生成 Token' })
     const confirmBtn = within(modal).getByRole('button', { name: '重新生成 Token' })
@@ -899,8 +981,8 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const deleteBtn = await screen.findByRole('button', { name: /删除环境/ })
-    await user.click(deleteBtn)
+    await screen.findByText('to-delete')
+    await runManagementAction(user, 'to-delete', '删除环境')
 
     const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
     const confirmBtn = within(modal).getByRole('button', { name: '删除环境' })
@@ -943,9 +1025,10 @@ describe('EnvironmentsPage', () => {
 
   /**
    * 测试意图：卡片只呈现当前状态，不内嵌历史事件；同一环境的历史 WARN 与后续 READY 事件
-   * 只在管理弹窗的 Events 列表中可见，不以删除事件让卡片干净。
+   * 只在管理弹窗的诊断详情里可见，折叠时不读取事件端点。
    */
-  it('renders only the current status on the card and keeps event history in the management modal', async () => {
+  it('renders only the current status on the card and keeps event history in the management diagnostics', async () => {
+    const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-recovered', name: 'recovered-box', status: 'READY', ready: true }),
     ])
@@ -968,13 +1051,16 @@ describe('EnvironmentsPage', () => {
     expect(await screen.findByText('recovered-box')).toBeInTheDocument()
 
     // 卡片显示当前 READY 状态，不回显事件文本。
-    const card = screen.getByRole('heading', { name: 'recovered-box' }).closest('article')!
+    const card = await cardFor('recovered-box')
     expect(within(card).getByText('READY')).toBeInTheDocument()
     expect(within(card).queryByText('daemon connection lost')).not.toBeInTheDocument()
 
-    // 打开管理弹窗后仍可见完整历史：历史 WARN 与后续 READY 都被保留。
-    const user = userEvent.setup()
-    await user.click(within(card).getByRole('button', { name: /管理/ }))
+    const management = await openManagement(user, 'recovered-box')
+    expect(within(management).queryByText('daemon connection lost')).toBeNull()
+    expect(environmentService.listEnvironmentEvents).not.toHaveBeenCalled()
+
+    await user.click(within(management).getByText('诊断详情'))
+    // 展开诊断后完整历史可见：历史 WARN 与后续 READY 都被保留。
     expect(await screen.findByText('daemon connection lost')).toBeInTheDocument()
     expect(screen.getByText('environment ready')).toBeInTheDocument()
   })
