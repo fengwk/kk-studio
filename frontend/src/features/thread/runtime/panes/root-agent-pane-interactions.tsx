@@ -146,6 +146,8 @@ function renderSessionSelection(
       title={t('ai.chat.selectSession')}
       items={pane.sessions.map(sessionSelectionItem)}
       loading={pane.sessionsLoading}
+      loadError={pane.selectionQueries.sessionsError != null ? t('ai.chat.sessionsLoadFailed') : null}
+      onRetryLoad={pane.selectionQueries.retrySessions}
       hasMore={pane.sessionsHasMore}
       loadingMore={pane.sessionsLoadingMore}
       onLoadMore={pane.loadMoreSessions}
@@ -177,6 +179,8 @@ function renderThreadSelection(
       title={t('ai.chat.selectThread')}
       items={pane.threads.map(threadSelectionItem)}
       loading={pane.threadsLoading}
+      loadError={pane.selectionQueries.threadsError != null ? t('ai.chat.threadsLoadFailed') : null}
+      onRetryLoad={pane.selectionQueries.retryThreads}
       emptyText={t('ai.chat.noThreads')}
       renameLabel={t('ai.runtime.rename.titleAria')}
       onClose={() => {

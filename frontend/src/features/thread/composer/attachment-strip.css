@@ -99,6 +99,10 @@
   white-space: nowrap;
 }
 
+.attachment-reference.is-failed .attachment-reference-status {
+  color: var(--danger);
+}
+
 /* 附件档位选择器嵌在附件卡片的状态行内，需要比通用紧凑下拉更矮更窄。 */
 .ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger {
   min-height: 18px;

@@ -1732,6 +1732,7 @@ describe('AgentPane orchestration', () => {
     await user.type(composer, 'unknown error')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('请求失败')
+    // 层级：名称是 title；subtitle 先给时间与规模（Thread 数量走 i18n 复数），预览最后。
     expect(sessionSelectionItem({
       sessionId: 'session-fallback',
       name: 'Named Session',
@@ -1742,7 +1743,7 @@ describe('AgentPane orchestration', () => {
     })).toMatchObject({
       id: 'session-fallback',
       title: 'Named Session',
-      subtitle: expect.stringContaining('0 Threads'),
+      subtitle: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · 0 个 Thread · preview text$/),
     })
     expect(threadSelectionItem({
       threadId: THREAD_ID,
@@ -1754,12 +1755,30 @@ describe('AgentPane orchestration', () => {
       status: 'IDLE',
       executionControl: 'RUNNABLE',
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
-      headMessagePreview: null,
+      headMessagePreview: 'thread preview',
     })).toMatchObject({
       id: THREAD_ID,
       title: 'Named Thread',
-      subtitle: expect.stringContaining('空闲'),
+      subtitle: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · 空闲 · thread preview$/),
     })
+    // 单复数：中文量词一致，英文区分 1 thread / N threads。
+    const countItem = (threadCount: number) => sessionSelectionItem({
+      sessionId: 'session-count',
+      name: 'Session Count',
+      createdAt: 0,
+      lastActivityAt: 0,
+      firstMessagePreview: null,
+      threadCount,
+    }).subtitle
+    expect(countItem(1)).toContain('1 个 Thread')
+    expect(countItem(3)).toContain('3 个 Thread')
+    setLocale('en-US')
+    try {
+      expect(countItem(1)).toContain('1 thread')
+      expect(countItem(3)).toContain('3 threads')
+    } finally {
+      setLocale('zh-CN')
+    }
     // 名称为主展示，绝不回退为 id 或 preview。
     expect(sessionSelectionItem({
       sessionId: 'session-fallback',
@@ -1806,6 +1825,81 @@ describe('AgentPane orchestration', () => {
     expect(await screen.findByRole('region', { name: '选择 Thread' })).toBeInTheDocument()
     expect(screen.getByText('暂无 Thread')).toBeInTheDocument()
     expect(screen.queryByText(/⟦missing:/)).not.toBeInTheDocument()
+  })
+
+  it('reports a failed Session list and recovers on retry instead of showing an empty state', async () => {
+    const user = userEvent.setup()
+    loadSessionsMock.mockRejectedValueOnce(new Error('sessions unavailable'))
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    const panel = await screen.findByRole('region', { name: '选择 Session' })
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('读取 Session 列表失败')
+    // 失败不是空：不得用“暂无 Session”掩盖查询错误。
+    expect(within(panel).queryByText('暂无 Session')).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('option')).not.toBeInTheDocument()
+
+    loadSessionsMock.mockResolvedValueOnce([{
+      sessionId: 'session-1', name: 'Session 1', createdAt: 0, lastActivityAt: 0,
+      firstMessagePreview: null, threadCount: 1,
+    }])
+    await user.click(within(panel).getByRole('button', { name: '重试' }))
+    expect(await within(panel).findByRole('option', { name: /Session 1/ })).toBeInTheDocument()
+    expect(within(panel).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(panel).queryByText('暂无 Session')).not.toBeInTheDocument()
+  })
+
+  it('reports a failed Thread list and recovers on retry instead of showing an empty state', async () => {
+    const user = userEvent.setup()
+    loadSessionsMock.mockResolvedValue([{
+      sessionId: 'session-1', name: 'Session 1', createdAt: 0, lastActivityAt: 0,
+      firstMessagePreview: null, threadCount: 1,
+    }])
+    vi.mocked(harnessService.listSessionThreads).mockRejectedValueOnce(new Error('threads unavailable'))
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    await user.click(await screen.findByRole('option', { name: /Session 1/ }))
+    const panel = await screen.findByRole('region', { name: '选择 Thread' })
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('读取 Thread 列表失败')
+    expect(within(panel).queryByText('暂无 Thread')).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('option')).not.toBeInTheDocument()
+
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValueOnce([{
+      threadId: THREAD_ID, kind: 'USER', parentThreadId: null, name: 'thread-name',
+      createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
+      execution: thread().branchSettings.execution, headMessagePreview: null,
+    }])
+    await user.click(within(panel).getByRole('button', { name: '重试' }))
+    expect(await within(panel).findByRole('option', { name: /thread-name/ })).toBeInTheDocument()
+    expect(within(panel).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(panel).queryByText('暂无 Thread')).not.toBeInTheDocument()
+  })
+
+  it('offers to continue an existing conversation from the blank pane', async () => {
+    const user = userEvent.setup()
+    loadSessionsMock.mockResolvedValue([{
+      sessionId: 'session-1', name: 'Session 1', createdAt: 0, lastActivityAt: 0,
+      firstMessagePreview: null, threadCount: 1,
+    }])
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
+    const action = await screen.findByRole('button', { name: '继续已有对话' })
+    await user.click(action)
+    // 与 `/thread` 同一个面板；入口在面板打开后不再重复出现。
+    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续已有对话' })).not.toBeInTheDocument()
+  })
+
+  it('hides the continue action when the Chat has no Sessions', async () => {
+    loadSessionsMock.mockResolvedValue([])
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
+    await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(loadSessionsMock).toHaveBeenCalled())
+    // 等待首个探测页落地后再断言入口不存在（否则断言会在查询完成前空转通过）。
+    await act(async () => {})
+    expect(screen.queryByRole('button', { name: '继续已有对话' })).not.toBeInTheDocument()
   })
 
   it('renames the bound Thread from the palette since identity moved to the workspace topbar', async () => {

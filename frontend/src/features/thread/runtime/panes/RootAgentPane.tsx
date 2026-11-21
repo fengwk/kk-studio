@@ -170,6 +170,23 @@ export function RootAgentPane({
       environmentSwitchNotice,
     },
   }
+  // 新浏览器里刚打开的用户看不到既有会话：空白草稿 pane 给出与 `/thread` 同一条入口。
+  // 只有 owner 确实已有会话时才提供（没有任何会话时，提交新消息就是唯一路径）。
+  const threadCommand = composer.commands?.find((command) => command.id === 'thread')
+  const resumeConversationAction = pane.target.kind === 'NEW_SESSION_DRAFT'
+    && pane.interaction == null
+    && pane.selectionQueries.hasSessions
+    && threadCommand != null
+    && !threadCommand.disabled
+    ? (
+      <div className="draft-resume-action">
+        <Button variant="ghost" onClick={() => composer.onCommand?.(threadCommand)}>
+          {t('ai.chat.continueConversation')}
+        </Button>
+      </div>
+    )
+    : null
+
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
       <ThreadPane
@@ -231,6 +248,7 @@ export function RootAgentPane({
               composer={composer}
               messages={pane.draftTimeline.messages}
               queuedMessages={[]}
+              notice={resumeConversationAction}
               hidden={debugActive}
             />
         )}

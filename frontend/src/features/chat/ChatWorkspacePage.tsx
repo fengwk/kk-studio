@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef } from 'react'
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router'
 import { Button } from '@/shared/ui/controls/Button'
@@ -66,9 +66,19 @@ function ChatWorkspaceContent({ chat, agents, environments }: ChatWorkspaceConte
   const focusedSessionName = useFocusedSessionName(chat.id, focusedReport?.sessionId ?? null)
   const presentations = usePresentations(focusedPaneId, paneState.paneStateRef, focusedPaneVisible)
 
-  const mountedPanes = paneState.paneState.panes.filter(
-    (pane) => visiblePaneIds.has(pane.id) || paneReports.paneReports[pane.id]?.pending,
-  )
+  const [attachmentPanes, setAttachmentPanes] = useState<ReadonlySet<string>>(() => new Set())
+  const handleAttachmentDraft = useCallback((paneId: string, present: boolean) => {
+    setAttachmentPanes((current) => {
+      if (current.has(paneId) === present) return current
+      const next = new Set(current)
+      if (present) next.add(paneId)
+      else next.delete(paneId)
+      return next
+    })
+  }, [])
+  const mountedPanes = paneState.paneState.panes.filter((pane) => (
+    visiblePaneIds.has(pane.id) || paneReports.paneReports[pane.id]?.pending || attachmentPanes.has(pane.id)
+  ))
   const destinations = paneState.paneState.panes.map((pane) => {
     const report = paneReports.paneReports[pane.id]
     return { value: pane.id, label: destinationLabel(pane.id, report, t) }
@@ -134,6 +144,7 @@ function ChatWorkspaceContent({ chat, agents, environments }: ChatWorkspaceConte
               onTargetConsumed={(consumed) => pendingTargets.handleTargetConsumed(pane.id, consumed)}
               onRequestBranch={branch.handleRequestBranch}
               onPaneReport={paneReports.handlePaneReport}
+              onAttachmentDraft={handleAttachmentDraft}
               onPresentation={presentations.handlePresentation}
             />
           )

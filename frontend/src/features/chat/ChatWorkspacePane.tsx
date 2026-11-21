@@ -1,3 +1,5 @@
+import { useCallback } from 'react'
+import { AttachmentDraftContext } from '@/features/thread/composer/attachment-draft-context'
 import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import type { BranchRequestInput, PaneReport } from '@/features/thread/runtime/root-thread/types'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
@@ -29,6 +31,7 @@ export function ChatWorkspacePane({
   onTargetConsumed,
   onRequestBranch,
   onPaneReport,
+  onAttachmentDraft,
   onPresentation,
 }: {
   chat: ChatDTO
@@ -48,8 +51,12 @@ export function ChatWorkspacePane({
   onRequestBranch?: (sourcePaneId: string, request: BranchRequestInput) => void
   /** 面板运行时摘要：workspace 只用它做目标路由与顶栏面包屑。 */
   onPaneReport?: (paneId: string, report: PaneReport) => void
+  onAttachmentDraft: (paneId: string, present: boolean) => void
   onPresentation?: (paneId: string, report: ThreadPresentation | null) => void
 }) {
+  const reportAttachments = useCallback((present: boolean) => {
+    onAttachmentDraft(pane.id, present)
+  }, [onAttachmentDraft, pane.id])
   const idePanel = useOptionalIdePanel()
   const chatEnvironment = environments.find((environment) => environment.name === chat.environmentName)
   const resourceIdeAction = chatEnvironment != null
@@ -62,44 +69,46 @@ export function ChatWorkspacePane({
       }
     : null
   return (
-    <ResourceOpenInIdeContext.Provider value={resourceIdeAction}>
-      <AgentPane
-        owner={{ kind: 'CHAT', id: chat.id }}
-        paneId={pane.id}
-        agents={agents}
-        environments={environments}
-        defaults={{
-          agentName: chat.agentName,
-          yoloEnabled: chat.yoloEnabled,
-          environmentName: chat.environmentName,
-        }}
-        focused={focused}
-        hidden={hidden}
-        onValidateDraftName={onValidateDraftName}
-        onFocus={onFocus}
-        initialTarget={initialTarget}
-        target={target}
-        onTargetChange={onTargetChange}
-        onTargetConsumed={onTargetConsumed}
-        onRequestBranch={onRequestBranch == null
-          ? undefined
-          : (request) => onRequestBranch(pane.id, request)}
-        onReport={onPaneReport == null
-          ? undefined
-          : (report) => onPaneReport(pane.id, report)}
-        onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
-        loadSessions={(_owner, cursor) => chatService.listChatSessions(chat.id, cursor)}
-        loadSession={async (sessionId) => {
-          try {
-            return await chatService.getChatSession(chat.id, sessionId)
-          } catch (error) {
-            if (isNotFoundError(error)) {
-              return null
+    <AttachmentDraftContext value={reportAttachments}>
+      <ResourceOpenInIdeContext.Provider value={resourceIdeAction}>
+        <AgentPane
+          owner={{ kind: 'CHAT', id: chat.id }}
+          paneId={pane.id}
+          agents={agents}
+          environments={environments}
+          defaults={{
+            agentName: chat.agentName,
+            yoloEnabled: chat.yoloEnabled,
+            environmentName: chat.environmentName,
+          }}
+          focused={focused}
+          hidden={hidden}
+          onValidateDraftName={onValidateDraftName}
+          onFocus={onFocus}
+          initialTarget={initialTarget}
+          target={target}
+          onTargetChange={onTargetChange}
+          onTargetConsumed={onTargetConsumed}
+          onRequestBranch={onRequestBranch == null
+            ? undefined
+            : (request) => onRequestBranch(pane.id, request)}
+          onReport={onPaneReport == null
+            ? undefined
+            : (report) => onPaneReport(pane.id, report)}
+          onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
+          loadSessions={(_owner, cursor) => chatService.listChatSessions(chat.id, cursor)}
+          loadSession={async (sessionId) => {
+            try {
+              return await chatService.getChatSession(chat.id, sessionId)
+            } catch (error) {
+              if (isNotFoundError(error)) {
+                return null
+              }
+              throw error
             }
-            throw error
-          }
-        }}
-      />
-    </ResourceOpenInIdeContext.Provider>
+          }}
+        />
+      </ResourceOpenInIdeContext.Provider>
+    </AttachmentDraftContext>
   )
 }

@@ -70,7 +70,9 @@ export function AttachmentStrip({
             ? `${t('ai.runtime.composer.uploading')} ${progress}%`
             : upload.status === 'complete_unknown'
               ? t('ai.runtime.composer.completeUnknown')
-              : formatByteCount(upload.sizeBytes)
+              : upload.status === 'failed'
+                ? t('ai.runtime.composer.uploadFailed')
+                : formatByteCount(upload.sizeBytes)
         const isImage = mediaKindOf(upload.mediaType) === 'image'
         return (
           <div
@@ -92,11 +94,13 @@ export function AttachmentStrip({
               </span>
               <span className="attachment-reference-status-row">
                 <span className="attachment-reference-status">{status}</span>
-                {upload.status === 'complete_unknown' && onRetry ? (
+                {(upload.status === 'complete_unknown' || upload.status === 'failed') && onRetry ? (
                   <Button
                     variant="ghost"
                     className="attachment-reference-retry"
-                    aria-label={t('ai.runtime.composer.retryComplete', { name: displayName })}
+                    aria-label={t(upload.status === 'failed'
+                      ? 'ai.runtime.composer.retryUpload'
+                      : 'ai.runtime.composer.retryComplete', { name: displayName })}
                     disabled={disabled}
                     onClick={() => onRetry(upload)}
                   >

@@ -131,6 +131,19 @@
   font-style: normal;
 }
 
+/* 诊断标识（如 Session/Thread UUID）：等宽弱化文本，不占用强调色。 */
+.thread-selection-item-title code {
+  flex: 0 1 auto;
+  max-inline-size: 35%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .thread-selection-item-subtitle {
   max-width: 100%;
   overflow: hidden;
@@ -145,6 +158,22 @@
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
   text-align: center;
+}
+
+/* 列表读取失败：错误与重试并排，位置与空态一致但不冒充“没有内容”。 */
+.thread-selection-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 10px;
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+.thread-selection-error span {
+  color: var(--danger);
 }
 
 /* Session/Thread 选择行：选中按钮与行内重命名铅笔并排。 */

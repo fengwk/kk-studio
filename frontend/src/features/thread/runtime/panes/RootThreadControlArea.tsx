@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { ThreadComposer } from '@/features/thread/runtime/thread-panel/ThreadComposer'
 import type { ThreadPanelComposerInput } from '@/features/thread/runtime/thread-panel/ThreadPanel'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
@@ -28,6 +28,7 @@ export function RootThreadControlArea({
   composer,
   messages,
   queuedMessages,
+  notice,
   hidden = false,
 }: {
   /** 执行根；null 表示尚未绑定根面板（新建草稿），不查询也不渲染交互卡片。 */
@@ -35,6 +36,8 @@ export function RootThreadControlArea({
   composer: ThreadPanelComposerInput
   messages: DialogueMessage[]
   queuedMessages: QueuedThreadMessage[]
+  /** 输入框上方的轻量入口/提示（如空白草稿 pane 的“继续已有对话”），不参与 composer 状态。 */
+  notice?: ReactNode
   /**
    * Debug 主视图激活时为真：整个输入/审批/分支控制区保持挂载但完全隐藏且惰性
    * （草稿、上传注册表与绑定原地保留，退出 Debug 立即恢复，不重新初始化）。
@@ -89,6 +92,7 @@ export function RootThreadControlArea({
       {rootThreadId == null
         ? null
         : <RootInteractionList rootThreadId={rootThreadId} />}
+      {notice}
       <ThreadComposer
         ref={composerRef}
         parts={parts}

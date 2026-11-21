@@ -222,6 +222,10 @@ export const chatCatalog = {
     'en-US': 'No Sessions',
     'zh-CN': '暂无会话',
   },
+  'ai.chat.sessionsLoadFailed': {
+    'en-US': 'Could not load Sessions',
+    'zh-CN': '读取 Session 列表失败',
+  },
   'ai.chat.selectThread': {
     'en-US': 'Select Thread',
     'zh-CN': '选择 Thread',
@@ -229,6 +233,22 @@ export const chatCatalog = {
   'ai.chat.noThreads': {
     'en-US': 'No Threads',
     'zh-CN': '暂无 Thread',
+  },
+  'ai.chat.threadsLoadFailed': {
+    'en-US': 'Could not load Threads',
+    'zh-CN': '读取 Thread 列表失败',
+  },
+  'ai.chat.threadCount.one': {
+    'en-US': '1 thread',
+    'zh-CN': '1 个 Thread',
+  },
+  'ai.chat.threadCount.other': {
+    'en-US': '{{count}} threads',
+    'zh-CN': '{{count}} 个 Thread',
+  },
+  'ai.chat.continueConversation': {
+    'en-US': 'Continue a conversation',
+    'zh-CN': '继续已有对话',
   },
   'ai.chat.selection.search': {
     'en-US': 'Search',
@@ -509,6 +529,10 @@ export const chatCatalog = {
   'ai.runtime.composer.retryComplete': {
     'en-US': 'Retry complete {{name}}',
     'zh-CN': '重试完成 {{name}}',
+  },
+  'ai.runtime.composer.retryUpload': {
+    'en-US': 'Retry uploading {{name}}',
+    'zh-CN': '重试上传 {{name}}',
   },
   'ai.runtime.composer.uploadFailed': {
     'en-US': 'Upload failed',

@@ -37,7 +37,7 @@ const EMPTY_SESSION_PAGE: SessionSummaryPage = { items: [], nextCursor: null }
 
 /**
  * Pane 的 owner 范围导航查询：Session 列表（keyset 分页）、Session 下 Thread 列表与完整 Entry Tree。
- * 三者都按需读取（只在对应交互打开或草稿历史目标存在时启用）。
+ * 按需读取；空白 Chat pane 也会读取 Session 首屏以决定是否显示继续入口。
  */
 export function usePaneNavigationQueries(options: {
   owner: AgentRuntimeOwnerDTO | undefined
@@ -71,7 +71,13 @@ export function usePaneNavigationQueries(options: {
     enabled:
       owner != null
       && loadSessions != null
-      && (interaction === 'thread-sessions' || interaction === 'rename-session'),
+      && (
+        interaction === 'thread-sessions'
+        || interaction === 'rename-session'
+        // 空白草稿 pane 先要知道 owner 是否已有会话，才能给出“继续已有对话”入口；
+        // 与面板共用同一 queryKey，不因此多出请求。
+        || (owner.kind === 'CHAT' && target.kind === 'NEW_SESSION_DRAFT')
+      ),
   })
   const sessions = useMemo(
     () => sessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],

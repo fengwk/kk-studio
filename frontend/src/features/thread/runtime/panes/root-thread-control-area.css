@@ -34,3 +34,9 @@
 .thread-root-interactions-more {
   align-self: center;
 }
+
+/* 空白草稿 pane 的“继续已有对话”：输入框上方的次级动作。 */
+.draft-resume-action {
+  display: flex;
+  justify-content: center;
+}

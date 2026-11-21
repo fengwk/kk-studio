@@ -23,6 +23,7 @@ export interface UploadPipelineOptions {
   registry: UploadRegistry
   service: StorageService
   hashFile: HashFile
+  keepRetryableFailures: boolean
 }
 
 
@@ -83,6 +84,7 @@ interface CompleteReservationOptions {
   isStillActive: () => boolean
   patchUpload: (localId: string, patch: Partial<AttachmentUpload>) => void
   onErrorRef: MutableRefObject<((error: AttachmentUploadError) => void) | undefined>
+  keepRetryableFailures: boolean
 }
 
 /**
@@ -102,6 +104,7 @@ async function completeReservation({
   isStillActive,
   patchUpload,
   onErrorRef,
+  keepRetryableFailures,
 }: CompleteReservationOptions): Promise<void> {
   if (scope) {
     persistPendingUnknownUpload(scope, {
@@ -129,11 +132,13 @@ async function completeReservation({
         status: 'complete_unknown',
         progress: 0.8,
       })
-      onErrorRef.current?.({
-        filename: record.filename,
-        reason: completeError instanceof Error ? completeError.message : String(completeError),
-        localId,
-      })
+      if (!keepRetryableFailures) {
+        onErrorRef.current?.({
+          filename: record.filename,
+          reason: completeError instanceof Error ? completeError.message : String(completeError),
+          localId,
+        })
+      }
       return
     }
     // 确定未接受错误（非 5xx/408/429/网络异常）：清理当前 identity，进入外层 cleanup
@@ -168,7 +173,7 @@ async function completeReservation({
  * 每个异步步骤之后都重新核对“这条上传是否仍然有效”；失效就不再写回状态。
  * complete 的结果是否未知决定句柄能否丢弃：未知时保留同一 uploadId 供幂等重试。
  */
-export function useUploadPipeline({ registry, service, hashFile }: UploadPipelineOptions) {
+export function useUploadPipeline({ registry, service, hashFile, keepRetryableFailures }: UploadPipelineOptions) {
   const {
     uploadsRef,
     previewUrlsRef,
@@ -260,6 +265,7 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
           isStillActive: active,
           patchUpload,
           onErrorRef,
+          keepRetryableFailures,
         })
       } catch (error) {
         if (reservedUploadId && active()) {
@@ -269,6 +275,10 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
           removeStoredUnknownUpload(capturedScope, localId)
         }
         if (!active()) {
+          return
+        }
+        if (keepRetryableFailures) {
+          patchUpload(localId, { uploadId: null, sha256: null, status: 'failed', progress: 0 })
           return
         }
         const message = error instanceof Error ? error.message : String(error)
@@ -291,6 +301,7 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
       generationRef,
       hashFile,
       isMountedRef,
+      keepRetryableFailures,
       onErrorRef,
       patchUpload,
       previewUrlsRef,
@@ -299,12 +310,20 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
     ],
   )
 
-  const retryComplete = useCallback(
+  const retryUpload = useCallback(
     async (target: string | AttachmentUpload) => {
       const localId = typeof target === 'string' ? target : target.localId
       const capturedScope = scopeRef.current
       const capturedGeneration = generationRef.current
       const record = uploadsRef.current.find((u) => u.localId === localId)
+      if (record?.status === 'failed') {
+        const file = filesRef.current.get(localId)
+        if (file) {
+          abortControllersRef.current.set(localId, new AbortController())
+          await runPipeline(record, file)
+        }
+        return
+      }
       if (!record || !record.uploadId || record.status !== 'complete_unknown') {
         return
       }
@@ -349,9 +368,13 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
           if (!isStillActive()) {
             return
           }
+          if (keepRetryableFailures && filesRef.current.has(localId)) {
+            patchUpload(localId, { uploadId: null, sha256: null, status: 'failed', progress: 0 })
+            return
+          }
           dropUpload(localId)
         }
-        if (!isStillActive()) {
+        if (keepRetryableFailures || !isStillActive()) {
           return
         }
         onErrorRef.current?.({
@@ -361,8 +384,9 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
         })
       }
     },
-    [dropUpload, generationRef, isMountedRef, onErrorRef, patchUpload, scopeRef, service, uploadsRef],
+    [abortControllersRef, dropUpload, filesRef, generationRef, isMountedRef, keepRetryableFailures,
+      onErrorRef, patchUpload, runPipeline, scopeRef, service, uploadsRef],
   )
 
-  return { runPipeline, retryComplete }
+  return { runPipeline, retryComplete: retryUpload }
 }

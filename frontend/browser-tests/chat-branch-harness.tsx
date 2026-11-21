@@ -2,11 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
-import { setLocale } from '@/shared/i18n'
+import { setLocale, type AppLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { ChatWorkspacePage } from '@/features/chat/ChatWorkspacePage'
 
-setLocale('zh-CN')
+const harnessParams = new URLSearchParams(window.location.search)
+
+/** `?locale=` 覆盖界面语言（默认 zh-CN，与既有基座断言一致）。 */
+const harnessLocale: AppLocale = harnessParams.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
+setLocale(harnessLocale)
 
 export const HARNESS_CHAT_ID = 'chat-branch-1'
 
@@ -27,12 +31,14 @@ const queryClient = new QueryClient({
  * - `tree`（默认）：历史树 `/history` 分叉；
  * - `footer`：回合 footer（TURN_END）图标分叉；
  * - `debug`：Debug 主视图下隐藏底部 chrome 并在退出后原样恢复草稿。
+ *
+ * `?locale=zh-CN|en-US` 选择界面语言，用于同一组状态的中英文截图与文案断言。
  */
-const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 'tree'
+const scenario = harnessParams.get('scenario') ?? 'tree'
 const router = createMemoryRouter([{
   path: '/chats/:chatId',
   element: (
-    <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario}>
+    <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario} data-locale={harnessLocale}>
       <ChatWorkspacePage />
     </div>
   ),
