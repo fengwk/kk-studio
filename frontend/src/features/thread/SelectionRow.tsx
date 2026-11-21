@@ -63,7 +63,7 @@ export function SelectionRow({
         <span className="thread-selection-item-title">
           <span>{item.title}</span>
           {current ? <em>{selectedLabel}</em> : null}
-          {item.badge ? <em>{item.badge}</em> : null}
+          {item.badge ? <code title={item.badge}>{item.badge}</code> : null}
         </span>
         {item.subtitle ? (
           <span className="thread-selection-item-subtitle">{item.subtitle}</span>

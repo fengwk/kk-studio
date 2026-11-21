@@ -200,8 +200,10 @@ Entry 列表按 keyset 分页传输；控制层在打开历史树或草稿历史
 已有未发送草稿时要求二次确认覆盖，用户输入的本地草稿按 pane 作用域持久化。
 面板底部另提供“从此处新建会话”（`FORK_SESSION_DRAFT`）：把选中 ROOT 或已关闭 TURN_END 处的有效上下文
 复制到新 Session 并创建独立执行根，不走命名弹窗。
-目标列表明确区分 thread 草稿与已持久化 Thread。隐藏位置的在途接受、重命名或队列
-保持控制层挂载且惰性，直到结算才卸载；隐藏布局不解除 busy 门禁。
+目标列表明确区分 thread 草稿与已持久化 Thread。隐藏位置有在途接受、重命名、队列或未发送附件时，
+其控制层保持挂载但不可聚焦、不可响应快捷键，隐藏布局不解除 busy 门禁。缩小布局不改变同一页面内的草稿：
+已就绪附件可直接发送，在途上传继续；若失败，可在恢复 pane 后从附件条重试。附件草稿只在当前页面有效，
+刷新不恢复已就绪附件；纯文本草稿继续按原规则持久化。
 打开前按需读取 Session 的 Thread 摘要，只对执行根名称查重，同时检查同 Session 的本地草稿
 （包含隐藏位置和待消费目标，排除当前目标自身）。名称按 Unicode White_Space 折叠为单空格、
 去除首尾 ASCII 空格，最多 256 码点；大小写与兼容字符保持原值。读取失败留在弹窗中供重试，
@@ -224,8 +226,9 @@ queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明�
 pane 与布局的存储键分别以 owner 身份和 pane 隔离，
 ISSUE_AGENT 与独立地址不落 Chat target 存储。
 本地快照只保存布局与各 pane 的视图绑定；与当前槽位或格式不兼容的旧快照整份丢弃并回到默认状态，
-不迁移其中的布局与目标。服务端已保存的对话不随之丢失：空白 pane 用 `/thread` 选择既有 Session/Thread
-重开，`/history` 继续查看并延续该对话的完整历史。
+不迁移其中的布局与目标。服务端已保存的对话不随之丢失：Chat 有既有对话时，空白 pane 可点击“继续已有对话”，
+打开和 `/thread` 相同的 Session/Thread 选择面板。面板以名称和本地时间为主，分别呈现加载中、失败及重试、
+结果为空。重开后，可用 `/history` 查看并延续该对话的完整历史。
 
 PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、

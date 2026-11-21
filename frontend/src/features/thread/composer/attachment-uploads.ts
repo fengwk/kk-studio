@@ -8,7 +8,7 @@ import { ApiError } from '@/shared/api/client'
 import { loadUnknownUploads } from '@/features/thread/composer/composer-draft'
 import { mediaKindOf } from '@/shared/lib/upload-file'
 
-type AttachmentUploadStatus = 'uploading' | 'ready' | 'complete_unknown'
+type AttachmentUploadStatus = 'uploading' | 'ready' | 'complete_unknown' | 'failed'
 
 export interface AttachmentUploadError {
   filename: string

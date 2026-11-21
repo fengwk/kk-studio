@@ -1,4 +1,5 @@
-import { useCallback } from 'react'
+import { useCallback, useContext, useLayoutEffect } from 'react'
+import { AttachmentDraftContext } from '@/features/thread/composer/attachment-draft-context'
 import {
   createPreviewUrl,
   revokePreviewUrl,
@@ -49,7 +50,10 @@ export function useAttachmentUploads(options?: {
     parts: options?.parts,
     onError: options?.onError,
   })
-  const { runPipeline, retryComplete } = useUploadPipeline({ registry, service, hashFile })
+  const reportDraft = useContext(AttachmentDraftContext)
+  const { runPipeline, retryComplete } = useUploadPipeline({
+    registry, service, hashFile, keepRetryableFailures: reportDraft != null,
+  })
   const {
     uploads,
     uploadsRef,
@@ -62,6 +66,13 @@ export function useAttachmentUploads(options?: {
     releaseUpload,
     updateUploads,
   } = registry
+
+  const hasAttachments = uploads.some((upload) => !upload.detached)
+  useLayoutEffect(() => {
+    if (!hasAttachments || !reportDraft) return
+    reportDraft(true)
+    return () => reportDraft(false)
+  }, [reportDraft, hasAttachments])
 
   /**
    * 添加文件；返回创建的有效注册表条目（校验失败文件直接触发 onError，不产生条目）。

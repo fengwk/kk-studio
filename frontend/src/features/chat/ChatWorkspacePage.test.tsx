@@ -209,6 +209,8 @@ beforeEach(() => {
     firstMessagePreview: null,
     threadCount: 1,
   })
+  // 空白草稿 pane 会探测首屏 Session 摘要来决定是否给出“继续已有对话”入口。
+  vi.mocked(chatService.listChatSessions).mockResolvedValue({ items: [], nextCursor: null })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   // 根控制区以已加载的 Thread 身份为准：快照必须回显请求的 threadId，
   // 否则面板会一直停留“身份未加载”而不暴露控制区。

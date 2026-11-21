@@ -1,7 +1,10 @@
-import { expect, test, type Page } from './fixture'
-import type { Locator, Route, WebSocketRoute } from '@playwright/test'
+import fs from 'node:fs'
+import path from 'node:path'
+import { expect, test, tokenColor, type Page } from './fixture'
+import type { Locator, Route, TestInfo, WebSocketRoute } from '@playwright/test'
 import { createDefaultChatPaneState, type ChatLayout, type ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
+import { messageCatalog } from '@/shared/i18n/catalogs'
 import type { EntryType, HarnessSessionEntryDTO, HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 
 /**
@@ -18,6 +21,56 @@ const CHILD_ID = 'a2000000-0000-4000-8000-0000000000c1'
 const GRANDCHILD_ID = 'a2000000-0000-4000-8000-0000000000d1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
+const ATTACHMENT_NAME = 'layout-draft.txt'
+const DRAFT_TEXT = 'pane two draft survives'
+const UPLOAD_ID = 'c3000000-0000-4000-8000-0000000000c1'
+
+/** 可选截图输出目录：给出 `KK_BROWSER_SHOTS_DIR` 时把验收截图同时复制出去。 */
+const SHOTS_DIR = process.env.KK_BROWSER_SHOTS_DIR
+
+type HarnessLocale = 'zh-CN' | 'en-US'
+
+/** 界面文案直接取 catalog：文案调整时本文件的断言跟着变化，不复制字符串。 */
+const COPY = {
+  'zh-CN': {
+    layout: messageCatalog['ai.chat.layout']['zh-CN'],
+    send: messageCatalog['ai.runtime.composer.send']['zh-CN'],
+    continueAction: messageCatalog['ai.chat.continueConversation']['zh-CN'],
+    selectSession: messageCatalog['ai.chat.selectSession']['zh-CN'],
+    selectThread: messageCatalog['ai.chat.selectThread']['zh-CN'],
+    emptyThread: messageCatalog['ai.runtime.thread.empty']['zh-CN'],
+    singleThread: messageCatalog['ai.chat.threadCount.one']['zh-CN'],
+  },
+  'en-US': {
+    layout: messageCatalog['ai.chat.layout']['en-US'],
+    send: messageCatalog['ai.runtime.composer.send']['en-US'],
+    continueAction: messageCatalog['ai.chat.continueConversation']['en-US'],
+    selectSession: messageCatalog['ai.chat.selectSession']['en-US'],
+    selectThread: messageCatalog['ai.chat.selectThread']['en-US'],
+    emptyThread: messageCatalog['ai.runtime.thread.empty']['en-US'],
+    singleThread: messageCatalog['ai.chat.threadCount.one']['en-US'],
+  },
+} as const
+
+/** 验收要求的两个语言与两个视口：每个状态都在 2 × 2 组合下留证。 */
+const LOCALES: HarnessLocale[] = ['zh-CN', 'en-US']
+const VIEWPORTS = [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+] as const
+
+function viewportKey(viewport: { width: number; height: number }): string {
+  return `${viewport.width}x${viewport.height}`
+}
+
+/** 验收截图文件名：语言 + 视口 + 状态，与 catalog 文案、视口矩阵一一对应。 */
+function shotName(
+  locale: HarnessLocale,
+  viewport: { width: number; height: number },
+  state: string,
+): string {
+  return `${locale}-${viewportKey(viewport)}-${state}`
+}
 
 async function readAt(page: Page, transcript: Locator, position: number): Promise<number> {
   await transcript.hover()
@@ -140,6 +193,8 @@ interface Recorded {
   commandBatches: unknown[]
   branchPreviews: Array<{ startEntryId: string; commands: Array<Record<string, unknown>> }>
   modelRequestDebug: Array<{ model: unknown; environmentName: string | null }>
+  uploadCalls: string[]
+  deletedUploads: string[]
   treeReads: number
   snapshotReads: number
   completeGrandchild: () => void
@@ -147,7 +202,16 @@ interface Recorded {
 
 async function installChatApi(
   page: Page,
-  options: { usageEntries?: boolean; conflictFirstSend?: boolean; longHistory?: boolean; busyThread?: boolean } = {},
+  options: {
+    usageEntries?: boolean
+    conflictFirstSend?: boolean
+    longHistory?: boolean
+    busyThread?: boolean
+    /** 附件句柄：reserve → 直传 → complete，并记录释放（DELETE）。 */
+    uploads?: boolean
+    /** `empty` 表示该 Chat 没有任何 Session，用于空白 pane 入口的隐藏条件。 */
+    sessions?: 'one' | 'empty'
+  } = {},
 ): Promise<Recorded> {
   const entryList = entries({ usage: options.usageEntries })
   if (options.longHistory) {
@@ -197,7 +261,8 @@ async function installChatApi(
   }))
   const sockets: WebSocketRoute[] = []
   const recorded: Recorded = {
-    commandBatches: [], branchPreviews: [], modelRequestDebug: [], treeReads: 0, snapshotReads: 0,
+    commandBatches: [], branchPreviews: [], modelRequestDebug: [], uploadCalls: [], deletedUploads: [],
+    treeReads: 0, snapshotReads: 0,
     completeGrandchild: () => {
       grandCompleted = true
       const entryIdByOriginal = new Map(entryList.map((entry, index) => [
@@ -283,14 +348,15 @@ async function installChatApi(
     }
     if (path === `/api/chat/chats/${CHAT_ID}/sessions`) {
       // 归属 Session 摘要按 keyset 分页返回（ChatSessionPageDTO），首屏无下一页。
+      // 空白 pane 的“继续已有对话”入口只看 owner 是否已有会话，所以这里也用它表达空列表。
       await route.fulfill({
         json: {
-            items: [{
+            items: options.sessions === 'empty' ? [] : [{
               sessionId: SESSION_ID,
               name: 'Session One',
-              createdAt: null,
-              lastActivityAt: null,
-              firstMessagePreview: null,
+              createdAt: 1790812800000,
+              lastActivityAt: 1790812860000,
+              firstMessagePreview: 'hello',
               threadCount: 1,
             }],
             nextCursor: null,
@@ -390,9 +456,10 @@ async function installChatApi(
       return
     }
     if (path === `/api/harness/sessions/${SESSION_ID}/threads`) {
+      // Thread 摘要的时间是 epoch 毫秒，而 Thread DTO 用 epoch 秒：换算后再交给面板格式化。
       await route.fulfill({ json: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
-        createdAt: boundThread.createdAt, updatedAt: boundThread.updatedAt, status: 'IDLE',
+        createdAt: boundThread.createdAt * 1000, updatedAt: boundThread.updatedAt * 1000, status: 'IDLE',
         executionControl: 'RUNNABLE', model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: 'hello',
       }] })
       return
@@ -529,9 +596,107 @@ async function installChatApi(
       })
       return
     }
+    if (options.uploads && path === '/api/platform/storage/uploads' && method === 'POST') {
+      // 附件句柄预留：直传地址由浏览器直接 PUT（下方 storage.test 路由）。
+      recorded.uploadCalls.push('reserve')
+      await route.fulfill({
+        json: {
+          type: 'PENDING',
+          id: UPLOAD_ID,
+          presignedPut: {
+            method: 'PUT',
+            url: 'https://storage.test/branch-put',
+            headers: {},
+            expiresAt: 1786492800000,
+            mediaType: null,
+            sizeBytes: null,
+          },
+          expiresAt: 1786492800000,
+        },
+      })
+      return
+    }
+    if (options.uploads && path === `/api/platform/storage/uploads/${UPLOAD_ID}/complete`) {
+      recorded.uploadCalls.push('complete')
+      await route.fulfill({
+        json: { type: 'READY', id: UPLOAD_ID, blobId: 'blob-branch-1', expiresAt: 1786492800000 },
+      })
+      return
+    }
+    if (options.uploads && path.startsWith('/api/platform/storage/uploads/') && method === 'DELETE') {
+      recorded.deletedUploads.push(path)
+      await route.fulfill({ status: 204 })
+      return
+    }
     await route.fulfill({ json: {} })
   })
+  if (options.uploads) {
+    await page.route('https://storage.test/**', async (route) => {
+      await route.fulfill({ status: 200, body: '' })
+    })
+  }
   return recorded
+}
+
+/** 空白草稿 pane：未绑定任何 Session/Thread，等待用户开始或继续对话。 */
+async function seedBlankPane(page: Page) {
+  await seedChatTab(page, 'single', 'pane-1')
+}
+
+/** 两个 pane 绑定同一 Thread：用于证明缩小布局时被隐藏 pane 的草稿与附件原地保留。 */
+async function seedSplitDraftPanes(page: Page) {
+  await seedChatTab(page, 'split-2', 'pane-2', {
+    'pane-1': { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+    'pane-2': { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+  })
+}
+
+/** 以指定语言与视口打开基座，并用真实 `lang` 属性确认语言已生效。 */
+async function openHarness(
+  page: Page,
+  locale: HarnessLocale,
+  viewport: { width: number; height: number },
+) {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height })
+  await page.goto(`${HARNESS_URL}?locale=${locale}`)
+  await expect(page.locator('.chat-workspace')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', locale)
+}
+
+/** 通过真实的布局选择器切换可见 pane 数（选项标签就是 pane 数量）。 */
+async function chooseLayout(page: Page, locale: HarnessLocale, panes: '1' | '2') {
+  await page.locator('.chat-layout-selector .ui-select-trigger').click()
+  const listbox = page.getByRole('listbox', { name: COPY[locale].layout })
+  await expect(listbox).toBeVisible()
+  await listbox.getByRole('option', { name: panes, exact: true }).click()
+  await expect(page.locator('.chat-pane-grid'))
+    .toHaveClass(new RegExp(`layout-${panes === '1' ? 'single' : 'split-2'}`))
+}
+
+/** 上传一个已就绪附件：reserve → 直传 → complete 走完，返回可继续断言的句柄定位器。 */
+async function uploadReadyAttachment(pane: Locator) {
+  await pane.locator('input[type="file"].composer-file-input-hidden').setInputFiles({
+    name: ATTACHMENT_NAME,
+    mimeType: 'text/plain',
+    buffer: Buffer.from('layout draft attachment'),
+  })
+  const pill = pane.locator(`.composer-pill[data-part-type="attachment"][data-filename="${ATTACHMENT_NAME}"]`)
+  const reference = pane.locator(`.attachment-reference[data-filename="${ATTACHMENT_NAME}"]`)
+  await expect(pill).toHaveCount(1)
+  await expect(reference).toHaveClass(/is-ready/)
+  return { pill, reference }
+}
+
+/** 截图留在 Playwright 报告目录；给出 `KK_BROWSER_SHOTS_DIR` 时同时复制到验收截图目录。 */
+async function captureShot(page: Page, testInfo: TestInfo, name: string) {
+  const file = testInfo.outputPath(`${name}.png`)
+  await page.screenshot({ path: file })
+  await testInfo.attach(name, { path: file, contentType: 'image/png' })
+  if (SHOTS_DIR == null) {
+    return
+  }
+  fs.mkdirSync(SHOTS_DIR, { recursive: true })
+  fs.copyFileSync(file, path.join(SHOTS_DIR, `${name}.png`))
 }
 
 async function seedChatTab(
@@ -1180,3 +1345,142 @@ test('busy thread settings selection submits a standalone SET batch and shows th
   await expect(chip).toHaveText('待生效')
   await page.screenshot({ path: testInfo.outputPath('busy-settings-pending.png') })
 })
+
+/**
+ * 空白 pane 的次级动作就是 `/thread` 的选择面板：真实打开、真实选中、真实绑定。
+ *
+ * 截图只记录稳定的用户可见状态（空白 pane、Session 列表、Thread 列表），不截布局下拉。
+ */
+for (const locale of LOCALES) {
+  for (const viewport of VIEWPORTS) {
+    test(`blank pane opens the same Session/Thread selection as /thread (${locale}, ${viewportKey(viewport)})`, async ({
+      page,
+    }, testInfo) => {
+      const copy = COPY[locale]
+      const recorded = await installChatApi(page)
+      await seedBlankPane(page)
+      await openHarness(page, locale, viewport)
+
+      const pane = page.locator('[data-pane-id="pane-1"]')
+      // 空白 pane 保留原有空态与键盘提示，并多出一个可读名称的次级动作。
+      await expect(pane.locator('.thread-empty')).toContainText(copy.emptyThread)
+      const continueAction = pane.getByRole('button', { name: copy.continueAction, exact: true })
+      await expect(continueAction).toBeVisible()
+      await captureShot(page, testInfo, shotName(locale, viewport, 'blank-pane'))
+
+      // 面板条目以名称与时间为主，UUID 只作等宽弱化诊断文本。
+      await continueAction.click()
+      const panel = pane.locator('.thread-selection-panel')
+      await expect(panel).toBeVisible()
+      await expect(panel.getByRole('heading', { name: copy.selectSession })).toBeVisible()
+      const sessionRow = panel.getByRole('option', { name: /Session One/ })
+      await expect(sessionRow).toBeVisible()
+      const sessionSubtitle = sessionRow.locator('.thread-selection-item-subtitle')
+      await expect(sessionSubtitle).toContainText(copy.singleThread)
+      await expect(sessionSubtitle).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+      const badge = sessionRow.locator('.thread-selection-item-title code')
+      await expect(badge).toHaveText(SESSION_ID)
+      await expect(badge).toHaveAttribute('title', SESSION_ID)
+      expect(await badge.evaluate((element) => getComputedStyle(element).color))
+        .toBe(await tokenColor(page, '--fg-muted'))
+      await captureShot(page, testInfo, shotName(locale, viewport, 'session-selection'))
+
+      // 选择会话后同一面板切到 Thread 列表：时间与状态在前，消息预览在后。
+      await sessionRow.click()
+      await expect(panel.getByRole('heading', { name: copy.selectThread })).toBeVisible()
+      const threadRow = panel.getByRole('option', { name: /thread-name/ })
+      await expect(threadRow).toBeVisible()
+      await expect(threadRow.locator('.thread-selection-item-subtitle'))
+        .toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+      await captureShot(page, testInfo, shotName(locale, viewport, 'thread-selection'))
+
+      // 选中 Thread 就是继续已有对话：绑定真实目标并渲染历史，不提交任何命令。
+      await threadRow.click()
+      await expect(pane.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+      await expect.poll(() => readPaneTarget(page, 'pane-1'))
+        .toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+      expect(recorded.commandBatches).toEqual([])
+    })
+  }
+}
+
+/** 该 Chat 没有任何会话时不给入口：不能把“没有会话”伪造成可以继续的对话。 */
+test('a Chat without Sessions keeps the blank pane free of the continue action', async ({ page }) => {
+  await installChatApi(page, { sessions: 'empty' })
+  await seedBlankPane(page)
+  await openHarness(page, 'zh-CN', { width: 1440, height: 900 })
+
+  const pane = page.locator('[data-pane-id="pane-1"]')
+  await expect(pane.locator('.thread-empty')).toContainText(COPY['zh-CN'].emptyThread)
+  await expect(pane.getByRole('button', { name: COPY['zh-CN'].continueAction })).toHaveCount(0)
+})
+
+/**
+ * 布局 2 → 1 → 2 后被隐藏 pane 的带附件草稿：真实浏览器里的挂载/卸载、真实附件上传句柄。
+ *
+ * 除了草稿文字与附件 chip，还要证明恢复后的附件仍指向同一个已就绪句柄并能真正发送。
+ */
+for (const locale of LOCALES) {
+  for (const viewport of VIEWPORTS) {
+    test(`pane 2 keeps its text and ready attachment across layout 2 → 1 → 2 (${locale}, ${viewportKey(viewport)})`, async ({
+      page,
+    }, testInfo) => {
+      const copy = COPY[locale]
+      const recorded = await installChatApi(page, { uploads: true })
+      await seedSplitDraftPanes(page)
+      await openHarness(page, locale, viewport)
+
+      const grid = page.locator('.chat-pane-grid')
+      await expect(grid).toHaveClass(/layout-split-2/)
+      const paneTwo = page.locator('.chat-pane[data-pane-id="pane-2"]')
+      const editor = paneTwo.locator('.composer-editor')
+      await editor.click()
+      await editor.fill(DRAFT_TEXT)
+      const attachment = await uploadReadyAttachment(paneTwo)
+      await expect.poll(() => recorded.uploadCalls).toEqual(['reserve', 'complete'])
+      const uploadId = await attachment.pill.getAttribute('data-upload-id')
+      expect(uploadId, 'composer pill 携带浏览器本地 localId').not.toBeNull()
+
+      // 2 → 1：pane 2 隐藏；隐藏期间不能提交任何命令（既无点击也无快捷键入口）。
+      await chooseLayout(page, locale, '1')
+      await expect(grid).toHaveClass(/layout-single/)
+      await expect(editor).toBeHidden()
+      await expect(paneTwo).toHaveAttribute('inert', '')
+      expect(await editor.evaluate((element: HTMLElement) => {
+        element.focus()
+        return document.activeElement === element
+      })).toBe(false)
+      await expect(page.locator('.chat-pane:visible')).toHaveCount(1)
+      await page.keyboard.press('Escape')
+      expect(recorded.commandBatches).toEqual([])
+
+      // 1 → 2：文字与附件恢复到同一个已就绪句柄，上传注册表没有被重建或释放。
+      await chooseLayout(page, locale, '2')
+      await expect(grid).toHaveClass(/layout-split-2/)
+      await expect(editor, '隐藏后恢复的 pane 2 仍保留未发送文字').toContainText(DRAFT_TEXT)
+      const restoredPill = paneTwo.locator(`.composer-pill[data-filename="${ATTACHMENT_NAME}"]`)
+      await expect(restoredPill, '隐藏后恢复的 pane 2 仍保留已就绪附件 chip').toHaveCount(1)
+      await expect(restoredPill).toHaveAttribute('data-upload-id', uploadId!)
+      await expect(paneTwo.locator(`.attachment-reference[data-filename="${ATTACHMENT_NAME}"]`))
+        .toHaveClass(/is-ready/)
+      expect(recorded.uploadCalls).toEqual(['reserve', 'complete'])
+      expect(recorded.deletedUploads).toEqual([])
+      await captureShot(page, testInfo, shotName(locale, viewport, 'restored-attachment-draft'))
+
+      // 可发送：真实发送请求里的 USER_MESSAGE 同时带文字与该附件句柄。
+      const send = paneTwo.getByRole('button', { name: copy.send, exact: true })
+      await expect(send).toBeEnabled()
+      await send.click()
+      await expect.poll(() => recorded.commandBatches.length).toBe(1)
+      const batch = recorded.commandBatches[0] as { commands: Array<{ type: string; contents?: unknown[] }> }
+      expect(batch.commands.at(-1)).toMatchObject({
+        type: 'USER_MESSAGE',
+        contents: [
+          { type: 'TEXT', text: DRAFT_TEXT },
+          // 消息引用 reserve 返回的服务端句柄，而不是浏览器本地 localId。
+          { type: 'ATTACHMENT', uploadId: UPLOAD_ID },
+        ],
+      })
+    })
+  }
+}

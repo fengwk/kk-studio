@@ -113,6 +113,28 @@ describe('SelectionPanel', () => {
     expect(screen.getByText('没有匹配“missing”的选项')).toBeInTheDocument()
   })
 
+  it('shows a load failure with retry instead of an empty state', async () => {
+    const user = userEvent.setup()
+    const onRetryLoad = vi.fn()
+    render(
+      <SelectionPanel
+        title="选择 Session"
+        items={[{ id: 's1', title: 'Alpha' }]}
+        emptyText="暂无 Session"
+        loadError="读取 Session 列表失败"
+        onRetryLoad={onRetryLoad}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    // 查询失败必须暴露错误与重试，不得退化为“没有内容”。
+    expect(screen.getByRole('alert')).toHaveTextContent('读取 Session 列表失败')
+    expect(screen.queryByText('暂无 Session')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(onRetryLoad).toHaveBeenCalledOnce()
+  })
+
   it('lists agents', async () => {
     render(
       <AgentSelectionPanel
@@ -271,8 +293,9 @@ describe('SelectionPanel', () => {
     )
     const option = screen.getByRole('option', { name: /Alpha/ })
     expect(option).toHaveAttribute('aria-current', 'true')
-    expect(within(option).getByText('env-prod')).toBeInTheDocument()
-    expect(within(option).getByText('已选')).toBeInTheDocument()
+    // 诊断标识是等宽弱化文本，不是强调色胶囊。
+    expect(within(option).getByText('env-prod').tagName).toBe('CODE')
+    expect(within(option).getByText('已选').tagName).toBe('EM')
   })
 
   it('activates a row rename button with Enter without selecting the row', async () => {

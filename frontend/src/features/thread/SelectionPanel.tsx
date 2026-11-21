@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Search } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
 import { SelectionLoadMoreRow, SelectionRow, type SelectionPanelItem } from '@/features/thread/SelectionRow'
 import { useSelectionKeyboard } from '@/features/thread/useSelectionKeyboard'
@@ -18,6 +19,9 @@ export interface SelectionPanelProps {
   title: string
   inlineId?: string
   catalogError?: boolean
+  /** 列表查询失败：展示错误与重试入口，绝不用空态文案掩盖失败。 */
+  loadError?: string | null
+  onRetryLoad?: () => void
   selectionError?: string | null
   items: SelectionPanelItem[]
   selectedId?: string | null
@@ -70,6 +74,8 @@ export function SelectionPanel({
   title,
   inlineId,
   catalogError = false,
+  loadError,
+  onRetryLoad,
   selectionError,
   items,
   selectedId,
@@ -92,9 +98,10 @@ export function SelectionPanel({
   const [activeId, setActiveId] = useState<string | null>(selectedId ?? null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const loadFailed = !loading && loadError != null
   const filteredItems = useMemo(
-    () => loading || catalogError ? [] : filterItems(items, searchTokensOf(query)),
-    [items, query, loading, catalogError],
+    () => loading || catalogError || loadFailed ? [] : filterItems(items, searchTokensOf(query)),
+    [items, query, loading, catalogError, loadFailed],
   )
   const onKeyDown = useSelectionKeyboard({
     filteredItems,
@@ -162,18 +169,30 @@ export function SelectionPanel({
       {controls}
     </>
   )
-  const feedback = catalogError
-    ? t('ai.chat.agentCatalogError')
-    : loading
-      ? t('ai.chat.loadingList')
-      : filteredItems.length === 0
-        ? query.trim()
-          ? t('ai.chat.selection.noMatch', { query: query.trim() })
-          : emptyText ?? t('ai.chat.noOptions')
-        : null
+  const feedback = loadFailed
+    ? null
+    : catalogError
+      ? t('ai.chat.agentCatalogError')
+      : loading
+        ? t('ai.chat.loadingList')
+        : filteredItems.length === 0
+          ? query.trim()
+            ? t('ai.chat.selection.noMatch', { query: query.trim() })
+            : emptyText ?? t('ai.chat.noOptions')
+          : null
   const content = (
     <>
       {selectionError ? <div className="field-error" role="alert">{selectionError}</div> : null}
+      {loadFailed ? (
+        <div className="thread-selection-error" role="alert">
+          <span>{loadError}</span>
+          {onRetryLoad ? (
+            <Button variant="ghost" disabled={selectionPending} onClick={onRetryLoad}>
+              {t('shared.conflict.retry')}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {feedback ? <div className="thread-selection-empty" role="status">{feedback}</div> : null}
       <ul
         ref={listRef}
@@ -197,7 +216,7 @@ export function SelectionPanel({
             onRename={renameItem == null ? undefined : () => renameItem(item.id)}
           />
         ))}
-        {!loading && !catalogError && hasMore && onLoadMore ? (
+        {!loading && !catalogError && !loadFailed && hasMore && onLoadMore ? (
           <SelectionLoadMoreRow
             label={loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}
             disabled={selectionPending || loadingMore}
