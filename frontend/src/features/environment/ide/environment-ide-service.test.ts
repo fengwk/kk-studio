@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeIdeView,
-  listIdeDirectories,
   openIdeAttachment,
 } from '@/features/environment/ide/environment-ide-service'
 import { request } from '@/shared/api/client'
@@ -63,24 +62,6 @@ describe('environmentIdeService', () => {
         path: { environmentId: 'environment/id', viewId: 'view id', sessionId: 'session-id', resourceId: 'resource-id' },
         body: binding,
       },
-    )
-  })
-
-  /** 省略目录时不能发送空 path 查询，否则服务端会把空串当成显式目标目录。 */
-  it('omits the directory query when no path is requested', async () => {
-    await listIdeDirectories('env-1', null)
-    expect(requestMock).toHaveBeenLastCalledWith(
-      'GET /api/ide/environments/{environmentId}/directories',
-      { path: { environmentId: 'env-1' } },
-      { signal: undefined },
-    )
-
-    const controller = new AbortController()
-    await listIdeDirectories('env-1', '/home/dev', controller.signal)
-    expect(requestMock).toHaveBeenLastCalledWith(
-      'GET /api/ide/environments/{environmentId}/directories',
-      { path: { environmentId: 'env-1' }, query: { path: '/home/dev' } },
-      { signal: controller.signal },
     )
   })
 })

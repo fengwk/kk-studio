@@ -3,12 +3,13 @@ import type {
   ApiRoutes,
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
-  EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewBindingDTO,
-  EnvironmentIdeViewDTO,
-  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
+import type {
+  IdeWireSnapshotView,
+  IdeWireView,
+} from '@/features/environment/ide/ide-contract'
 
 type ReadViewQuery = ApiRoutes[
   'GET /api/ide/environments/{environmentId}/views/{viewId}'
@@ -18,7 +19,7 @@ type ReadViewQuery = ApiRoutes[
 export function openIdeView(
   environmentId: string,
   body: EnvironmentIdeOpenViewDTO,
-): Promise<EnvironmentIdeViewDTO> {
+): Promise<IdeWireView> {
   return request('POST /api/ide/environments/{environmentId}/views', {
     path: { environmentId },
     body,
@@ -33,40 +34,23 @@ export function readIdeView(
   environmentId: string,
   viewId: string,
   query: ReadViewQuery,
-): Promise<EnvironmentIdeViewSnapshotDTO> {
+): Promise<IdeWireSnapshotView> {
   return request('GET /api/ide/environments/{environmentId}/views/{viewId}', {
     path: { environmentId, viewId },
     query,
   })
 }
 
+/** 切换单个 view 的目录；目录选择与最近目录列表已由 Native Open Folder 接管。 */
 export function changeIdeViewDirectory(
   environmentId: string,
   viewId: string,
   body: EnvironmentIdeChangeDirectoryDTO,
-): Promise<EnvironmentIdeViewDTO> {
+): Promise<IdeWireView> {
   return request('PUT /api/ide/environments/{environmentId}/views/{viewId}/directory', {
     path: { environmentId, viewId },
     body,
   })
-}
-
-/**
- * 目录选择器只列直接子目录；path 省略时服务端返回宿主主目录。
- * 结果中的 path 是服务端规范化后的目录，调用方用它确认切换目标。
- */
-export function listIdeDirectories(
-  environmentId: string,
-  path?: string | null,
-  signal?: AbortSignal,
-): Promise<EnvironmentIdeDirectoryListingDTO> {
-  return request(
-    'GET /api/ide/environments/{environmentId}/directories',
-    path == null
-      ? { path: { environmentId } }
-      : { path: { environmentId }, query: { path } },
-    { signal },
-  )
 }
 
 export function focusIdeTerminal(

@@ -8,7 +8,6 @@ import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/pro
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import {
-  readRecentDirectories,
   type IdePendingClaim,
   type IdePresentation,
   type IdeTabLoadResult,
@@ -18,7 +17,6 @@ import {
   applyIdeMobileLayout,
   openIdeView,
   readIdeView,
-  listIdeDirectories,
 } from '@/features/environment/ide/environment-ide-service'
 import {
   buildOpenRequest,
@@ -584,7 +582,7 @@ export function useIdeClaimReconciliation({
     }
   }
 
-  function beginCreate(environmentId: string, directory?: string | null): string {
+  function beginCreate(environmentId: string): string {
     const viewId = createUuid()
     const claimId = createUuid()
     const attempt = startAttempt(viewId, {
@@ -598,7 +596,7 @@ export function useIdeClaimReconciliation({
     })
     onViewCreated(environmentId, viewId)
     if (canRun(viewId)) {
-      runExclusive(() => runCreate(environmentId, attempt, viewId, claimId, directory))
+      runExclusive(() => runCreate(environmentId, attempt, viewId, claimId))
     }
     return viewId
   }
@@ -809,10 +807,14 @@ export function useIdeClaimReconciliation({
     environment: IdeEnvironmentInfo | null,
     mode: IdeActionMode,
   ): string | null {
+    const view = getView(environmentId)
+    const ready = environment?.ready ?? getEnvironmentMap().get(environmentId)?.ready
+    if (view == null && ready !== true) {
+      return null
+    }
     if (mode === 'shell') {
       setPendingShell(environmentId)
     }
-    const view = getView(environmentId)
     if (view != null) {
       if (view.status === 'ready') {
         maybeRunPendingShell(environmentId)
@@ -831,39 +833,11 @@ export function useIdeClaimReconciliation({
       void reconcile(view.viewId, 'focus')
       return view.viewId
     }
-    const ready = environment?.ready ?? getEnvironmentMap().get(environmentId)?.ready
-    if (ready === true) {
-      // 用户显式打开：沿用该 Environment 最近一次确认打开的目录；无记录时由 Daemon 使用主目录。
-      return beginCreate(environmentId, readRecentDirectories(environmentId, storage)[0])
-    } else {
-      const viewId = createUuid()
-      const attempt = startAttempt(viewId, {
-        environmentId,
-        viewId,
-        mode: 'create',
-        status: 'waiting-ready',
-        claimId: createUuid(),
-        iframeLoaded: false,
-        pendingShell: takePendingShellIntent(environmentId),
-      })
-      setWaitingReady(viewId, attempt)
-      return viewId
-    }
-    return null
+    return beginCreate(environmentId)
   }
 
-  async function openNewView(environmentId: string, directory?: string): Promise<string | null> {
-    const current = getView(environmentId)
-    const candidate = directory ?? current?.directory ?? readRecentDirectories(environmentId, storage)[0]
-    const listing = await listIdeDirectories(environmentId, candidate)
-    const canonicalDirectory = listing.path
-    const duplicate = Object.values(viewsRef.current).find((view) => (
-      view.environmentId === environmentId && view.directory === canonicalDirectory
-    ))
-    if (duplicate != null) {
-      return duplicate.viewId
-    }
-    return beginCreate(environmentId, canonicalDirectory)
+  function openNewView(environmentId: string): void {
+    beginCreate(environmentId)
   }
 
   function retryClaim(environmentId: string): void {

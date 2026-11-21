@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type {
   EnvironmentIdeViewDTO,
-  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 import {
   buildOpenRequest,
   canonicalJson,
   IdeProtocolError,
+  type IdeWireSnapshotView,
+  type IdeWireView,
+  normalizeIdeView,
   validateCommandView,
   validateOpenResponse,
   validateViewSnapshot,
@@ -44,7 +46,14 @@ function malformedView(patch: Record<string, unknown>): EnvironmentIdeViewDTO {
   return { ...view(), ...patch } as EnvironmentIdeViewDTO
 }
 
-function snapshot(overrides: Partial<EnvironmentIdeViewSnapshotDTO> = {}): EnvironmentIdeViewSnapshotDTO {
+/** 无目录 workspace 的 wire 视图：服务端省略 directory。 */
+function viewWithoutDirectory(overrides: Partial<IdeWireView> = {}): IdeWireView {
+  const wire: IdeWireView = { ...view() }
+  delete wire.directory
+  return { ...wire, ...overrides }
+}
+
+function snapshot(overrides: Partial<IdeWireSnapshotView> = {}): IdeWireSnapshotView {
   return {
     daemonInstanceId: DAEMON,
     revision: '20',
@@ -82,6 +91,39 @@ describe('IDE contract validation', () => {
     expect(accepted.revision).toBe('20')
     expect(accepted.daemonInstanceId).toBe(DAEMON)
     expect(accepted.view?.bindingEpoch).toBe('10')
+  })
+
+  it('normalizes a wire null directory and an omitted directory to the same no-directory view', () => {
+    expect(normalizeIdeView({ ...view(), directory: null })).toEqual(viewWithoutDirectory())
+    expect(viewFingerprint({ ...view(), directory: null }))
+      .toBe(viewFingerprint(viewWithoutDirectory()))
+    expect(viewFingerprint(viewWithoutDirectory())).not.toBe(viewFingerprint(view()))
+  })
+
+  /** 零根 workspace 没有目录；快照指纹不能因 wire 的 null/缺省写法而冲突。 */
+  it('accepts a zero-root snapshot with a null or omitted directory', () => {
+    const nullDirectory = validateViewSnapshot(ENV, VIEW, BROWSER, snapshot({
+      view: { ...view(), directory: null },
+    }))
+    const omittedDirectory = validateViewSnapshot(ENV, VIEW, BROWSER, snapshot({
+      view: viewWithoutDirectory(),
+    }))
+    expect(nullDirectory.view?.directory).toBeUndefined()
+    expect(omittedDirectory.view?.directory).toBeUndefined()
+    expect(omittedDirectory.view?.workspacePath).toBe('/workspace/a|b')
+    expect(viewFingerprint(nullDirectory.view)).toBe(viewFingerprint(omittedDirectory.view))
+  })
+
+  it('rejects a present directory that is empty or contains control characters', () => {
+    expect(() => validateViewSnapshot(ENV, VIEW, BROWSER, snapshot({
+      view: malformedView({ directory: '' }),
+    }))).toThrow(IdeProtocolError)
+    expect(() => validateViewSnapshot(ENV, VIEW, BROWSER, snapshot({
+      view: malformedView({ directory: '/workspace/\u0000a' }),
+    }))).toThrow(IdeProtocolError)
+    expect(() => validateCommandView(ENV, BROWSER, VIEW, malformedView({
+      directory: '/workspace/\u0000a',
+    }))).toThrow(IdeProtocolError)
   })
 
   it('rejects a snapshot whose binding epoch exceeds the revision or omits workspacePath', () => {
@@ -156,6 +198,30 @@ describe('IDE contract validation', () => {
     })).toThrow(IdeProtocolError)
   })
 
+  it('accepts a zero-root OPEN receipt and command receipt without directory', () => {
+    const request = buildOpenRequest(pending(), BROWSER, {
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION,
+      heartbeatIntervalMillis: '20000',
+    })
+    const entryUrl = `/ide/${ENV}/${VIEW}/__ide/bootstrap?token=t`
+    const nullDirectory: IdeWireView = {
+      ...view({ entryUrl }),
+      directory: null,
+    }
+    const omittedDirectory: IdeWireView = { ...viewWithoutDirectory(), entryUrl }
+
+    for (const response of [nullDirectory, omittedDirectory]) {
+      const opened = validateOpenResponse(ENV, request, response)
+      expect(opened.workspacePath).toBe('/workspace/a|b')
+      expect(opened.directory).toBeUndefined()
+
+      const commanded = validateCommandView(ENV, BROWSER, VIEW, response)
+      expect(commanded.workspacePath).toBe('/workspace/a|b')
+      expect(commanded.directory).toBeUndefined()
+    }
+  })
+
   it('freezes the OPEN request from pending and only includes create directory', () => {
     const resume = buildOpenRequest(pending(), BROWSER, {
       eventNodeId: EVENT_NODE,
@@ -188,5 +254,16 @@ describe('IDE contract validation', () => {
       expectedBindingEpoch: '0',
       directory: '/workspace/new',
     })
+
+    const zeroRoot = buildOpenRequest(pending({
+      mode: 'create',
+      expectedBindingEpoch: '0',
+      directory: null,
+    }), BROWSER, {
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION,
+      heartbeatIntervalMillis: '20000',
+    })
+    expect(zeroRoot).not.toHaveProperty('directory')
   })
 })

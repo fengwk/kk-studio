@@ -83,8 +83,8 @@ export const environmentCatalog = {
     'zh-CN': '工作区',
   },
   'ai.ide.workspace': {
-    'en-US': 'Workspace',
-    'zh-CN': '工作区',
+    'en-US': 'Empty window',
+    'zh-CN': '空窗口',
   },
   'ai.ide.recoveryMigrationFailed': {
     'en-US': 'The previous IDE recovery state could not be verified. Its saved history was preserved; do not open a replacement view until you review it.',
@@ -162,82 +162,6 @@ export const environmentCatalog = {
     'en-US': 'Force Close',
     'zh-CN': '强制关闭',
   },
-  'ai.ide.openTerminal': {
-    'en-US': 'Open Terminal',
-    'zh-CN': '打开终端',
-  },
-  'ai.ide.openDirectory': {
-    'en-US': 'Open Directory',
-    'zh-CN': '打开目录',
-  },
-  'ai.ide.copyDirectory': {
-    'en-US': 'Copy directory path',
-    'zh-CN': '复制目录路径',
-  },
-  'ai.ide.directoryCopied': {
-    'en-US': 'Directory path copied',
-    'zh-CN': '目录路径已复制',
-  },
-  'ai.ide.directoryCopyFailed': {
-    'en-US': 'Could not copy the directory path',
-    'zh-CN': '无法复制目录路径',
-  },
-  'ai.ide.openDirectoryTitle': {
-    'en-US': 'Open Host Directory',
-    'zh-CN': '打开宿主目录',
-  },
-  'ai.ide.parentDirectory': {
-    'en-US': 'Parent directory',
-    'zh-CN': '上级目录',
-  },
-  'ai.ide.recentDirectories': {
-    'en-US': 'Recently opened',
-    'zh-CN': '最近打开',
-  },
-  'ai.ide.directoryTree': {
-    'en-US': 'Directory tree',
-    'zh-CN': '目录树',
-  },
-  'ai.ide.expandDirectory': {
-    'en-US': 'Expand {{name}}',
-    'zh-CN': '展开 {{name}}',
-  },
-  'ai.ide.collapseDirectory': {
-    'en-US': 'Collapse {{name}}',
-    'zh-CN': '收起 {{name}}',
-  },
-  'ai.ide.directoryEmpty': {
-    'en-US': 'No subdirectories',
-    'zh-CN': '没有子目录',
-  },
-  'ai.ide.directoryTruncated': {
-    'en-US': 'Showing the first {{count}} entries',
-    'zh-CN': '仅显示前 {{count}} 项',
-  },
-  'ai.ide.directoryLoadFailed': {
-    'en-US': 'Failed to load the directory',
-    'zh-CN': '目录加载失败',
-  },
-  'ai.ide.directoryHelpLabel': {
-    'en-US': 'Directory picker help',
-    'zh-CN': '目录选择帮助',
-  },
-  'ai.ide.directoryHelp': {
-    'en-US': 'Folders list their subdirectories only when you expand them. Use Parent directory to walk back up to the root.',
-    'zh-CN': '只有展开目录时才读取它的直接子目录；用“上级目录”可以逐级返回到根目录。',
-  },
-  'ai.ide.selectedDirectory': {
-    'en-US': 'Switch to',
-    'zh-CN': '将切换到',
-  },
-  'ai.ide.confirm': {
-    'en-US': 'Confirm',
-    'zh-CN': '确认',
-  },
-  'ai.ide.cancel': {
-    'en-US': 'Cancel',
-    'zh-CN': '取消',
-  },
   'ai.ide.loading': {
     'en-US': 'Connecting to workspace IDE...',
     'zh-CN': '正在连接工作区 IDE...',
@@ -253,14 +177,6 @@ export const environmentCatalog = {
   'ai.ide.offlineShort': {
     'en-US': 'Offline',
     'zh-CN': '离线',
-  },
-  'ai.ide.noEnvironments': {
-    'en-US': 'No available environments',
-    'zh-CN': '暂无可用环境',
-  },
-  'ai.ide.missingEnvironment': {
-    'en-US': 'Please select an environment to open IDE',
-    'zh-CN': '请选择一个环境以打开 IDE',
   },
   'ai.ide.changeDirectoryFailed': {
     'en-US': 'Failed to change directory',

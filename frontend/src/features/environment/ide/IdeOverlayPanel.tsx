@@ -1,21 +1,13 @@
-import {
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from 'react'
-import { ArrowLeft, FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
-import { OpenDirectoryModal } from '@/features/environment/ide/OpenDirectoryModal'
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { ArrowLeft, PanelRightClose, X } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
-import { CopyTextButton } from '@/shared/ui/controls/CopyTextButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { ApplicationEventConnectionState } from '@/shared/app-events/connection'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
+import { isIdeDirectory } from '@/features/environment/ide/ide-tab-state'
 import { isSameBinding, type IdeViewState } from '@/features/environment/ide/ide-view-state'
 import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
 import { IdePanelStatusBanners } from '@/features/environment/ide/IdePanelStatusBanners'
@@ -31,36 +23,24 @@ export interface IdeCloseResult {
 export interface IdeOverlayPanelProps {
   isOpen: boolean
   selectedEnvironmentId: string | null
-  selectedViewId?: string | null
+  selectedViewId: string | null
   openedEnvironmentIds: string[]
-  viewsByEnvironment?: Record<string, string[]>
+  viewsByEnvironment: Record<string, string[]>
   views: Record<string, IdeViewState>
   environments: IdeEnvironmentInfo[]
-  environmentsLoading: boolean
-  environmentsError: boolean
   sessionStatus: IdeBrowserSessionStatus
   storageUnavailable: boolean
   recoveryError?: boolean
-  /** 浏览器事件连接快照；与 IDE 会话状态、iframe 内部连接分别呈现。 */
   connectionState: ApplicationEventConnectionState
   onSelectEnvironment: (environmentId: string) => void
   onSelectView: (viewId: string) => void
   onCollapse: () => void
   onCloseEnvironment: (viewId: string, discard: boolean) => Promise<IdeCloseResult>
   onDismissCloseError: (viewId: string) => void
-  onChangeDirectory: (
-    viewId: string,
-    directory: string,
-  ) => Promise<{ ok: boolean; message?: string }>
-  onOpenTerminal: (viewId: string) => void
+  onChangeDirectory: (viewId: string, directory: string) => Promise<{ ok: boolean; message?: string }>
   onIframeLoaded: (viewId: string, entryUrl: string) => void
-  onOpenNewView: (environmentId: string, directory?: string) => void
+  onOpenNewView: (environmentId: string) => void
   onRetryClaim: (viewId: string) => void
-  onReloadEnvironments: () => void
-  /** 读取该 Environment 已确认切换成功的最近目录。 */
-  readRecentDirectories: (environmentId: string) => string[]
-  /** 目录切换成功后才记录；返回该 Environment 最新的最近目录列表。 */
-  recordRecentDirectory: (environmentId: string, directory: string) => string[]
 }
 
 const COMMAND_MESSAGES: Record<string, TranslationKey> = {
@@ -75,10 +55,7 @@ const COMMAND_MESSAGES: Record<string, TranslationKey> = {
   'close-failed': 'ai.ide.error',
 }
 
-/**
- * tab 全局 IDE 面板：只渲染当前选中 view 的可见性，其他已打开 iframe 保持挂载。
- * 面板自身不发起 claim/关闭之外的隐式动作；所有环境/目录/终端操作都由用户入口触发。
- */
+/** 收起和切换标签只改变可见性，不卸载已有的 Workbench。 */
 export function IdeOverlayPanel({
   isOpen,
   selectedEnvironmentId,
@@ -87,8 +64,6 @@ export function IdeOverlayPanel({
   viewsByEnvironment,
   views,
   environments,
-  environmentsLoading,
-  environmentsError,
   sessionStatus,
   storageUnavailable,
   recoveryError = false,
@@ -99,219 +74,161 @@ export function IdeOverlayPanel({
   onCloseEnvironment,
   onDismissCloseError,
   onChangeDirectory,
-  onOpenTerminal,
   onIframeLoaded,
   onOpenNewView,
   onRetryClaim,
-  onReloadEnvironments,
-  readRecentDirectories,
-  recordRecentDirectory,
 }: IdeOverlayPanelProps) {
   const { t } = useI18n()
-  const [directoryOpen, setDirectoryOpen] = useState(false)
-  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
-  const [directoryPending, setDirectoryPending] = useState(false)
-  const [directoryError, setDirectoryError] = useState<string | null>(null)
-  const [recentDirectories, setRecentDirectories] = useState<string[]>([])
   const [forceClose, setForceClose] = useState<{
     binding: IdeViewState
     reason: 'unknown' | 'control-unavailable'
   } | null>(null)
   const [discarding, setDiscarding] = useState(false)
-  const lastSelectedRef = useRef({ key: `${selectedEnvironmentId}:${selectedViewId ?? ''}` })
+  const [directoryError, setDirectoryError] = useState<{ binding: IdeViewState; message?: string } | null>(null)
+  const activeFrameRef = useRef<HTMLIFrameElement>(null)
   const viewsRef = useRef(views)
+  const selection = useMemo(() => ({ isOpen, selectedEnvironmentId, selectedViewId }), [
+    isOpen, selectedEnvironmentId, selectedViewId,
+  ])
+  const selectionRef = useRef(selection)
+  const pendingCommands = useRef(new Set<string>())
 
   useLayoutEffect(() => {
     viewsRef.current = views
-  }, [views])
+    selectionRef.current = selection
+  }, [views, selection])
 
   useLayoutEffect(() => {
-    const selectionKey = `${selectedEnvironmentId}:${selectedViewId ?? ''}`
-    if (lastSelectedRef.current.key === selectionKey) {
-      return
-    }
-    lastSelectedRef.current = { key: selectionKey }
-    setDirectoryOpen(false)
-    setDirectoryError(null)
-    setRecentDirectories([])
-    setDirectoryPending(false)
     setForceClose(null)
-  }, [selectedEnvironmentId, selectedViewId])
+    setDirectoryError(null)
+  }, [selection])
 
-  const selectedView = selectedViewId == null
-    ? (selectedEnvironmentId == null ? null : views[selectedEnvironmentId] ?? null)
-    : views[selectedViewId] ?? null
-  const activeViewId = selectedViewId ?? selectedView?.viewId ?? null
-  const viewById = (viewId: string) => viewsRef.current[viewId]
-    ?? Object.values(viewsRef.current).find((view) => view.viewId === viewId)
-  const selectedEnvironment = selectedEnvironmentId == null
-    ? null
-    : environments.find((environment) => environment.id === selectedEnvironmentId) ?? null
-  const openedViews = useMemo(
-    () => openedEnvironmentIds.flatMap((environmentId) => (
-      (viewsByEnvironment?.[environmentId] ?? (views[environmentId] == null ? [] : [environmentId]))
-        .map((viewId) => views[viewId]).filter(
-        (view): view is IdeViewState => view != null,
-      )
-    )),
-    [openedEnvironmentIds, viewsByEnvironment, views],
-  )
-  const environmentName = useCallback(
-    (environmentId: string) => environments.find((environment) => environment.id === environmentId)?.name
-      ?? environmentId,
-    [environments],
-  )
-  const environmentOptions = useMemo(() => {
-    const options = environments.map((environment) => ({
-      value: environment.id,
-      label: environment.ready
-        ? environment.name
-        : `${environment.name} · ${t('ai.ide.offlineShort')}`,
-    }))
-    if (
-      selectedEnvironmentId != null
-      && !options.some((option) => option.value === selectedEnvironmentId)
-    ) {
-      options.push({ value: selectedEnvironmentId, label: selectedEnvironmentId })
-    }
-    return options
-  }, [environments, selectedEnvironmentId, t])
+  const selectedView = selectedViewId == null ? null : views[selectedViewId] ?? null
+  const selectedEnvironment = environments.find(({ id }) => id === selectedEnvironmentId)
+  const openedViews = openedEnvironmentIds.flatMap((id) => (
+    (viewsByEnvironment[id] ?? []).map((viewId) => views[viewId]).filter(Boolean)
+  ))
+  const environmentOptions = environments.map(({ id, name, ready }) => ({
+    value: id,
+    label: ready ? name : `${name} · ${t('ai.ide.offlineShort')}`,
+  }))
+  if (selectedEnvironmentId != null && selectedEnvironment == null) {
+    environmentOptions.push({ value: selectedEnvironmentId, label: selectedEnvironmentId })
+  }
 
-  const commandMessage = useCallback((code: string | undefined, fallback: TranslationKey) => {
+  function commandMessage(code: string | undefined, fallback: TranslationKey) {
     if (code == null) {
       return t(fallback)
     }
     const key = COMMAND_MESSAGES[code]
     return key == null ? code : t(key)
-  }, [t])
+  }
 
-  const selectedReady = selectedView?.status === 'ready'
-  const selectedEpoch = selectedView?.bindingEpoch
-  const actionsDisabled = selectedView == null
-    || selectedView.closeInFlight === true
-    || !selectedReady
-  const closeDisabled = actionsDisabled || selectedEpoch == null
-  const forceCloseViewId = forceClose != null && selectedReady
-    && isSameBinding(selectedView ?? undefined, forceClose.binding) ? activeViewId : null
+  const forceCloseViewId = isOpen && forceClose != null
+    && forceClose.binding.environmentId === selectedEnvironmentId
+    && views[forceClose.binding.viewId]?.status === 'ready'
+    && isSameBinding(views[forceClose.binding.viewId], forceClose.binding) ? forceClose.binding.viewId : null
 
-  const handleCloseClick = useCallback(() => {
-    if (activeViewId == null) {
+  async function handleClose(view: IdeViewState, discard = false) {
+    const { viewId } = view
+    if (pendingCommands.current.has(viewId)) {
       return
     }
-    const view = viewById(activeViewId)
-    const selection = lastSelectedRef.current
-    void onCloseEnvironment(activeViewId, false).then((result) => {
-      const current = viewById(activeViewId)
-      if (!result.ok && result.requiresForceConfirmation && view?.bindingEpoch != null
-        && current?.status === 'ready' && isSameBinding(current, view)
-        && lastSelectedRef.current === selection) {
+    pendingCommands.current.add(viewId)
+    if (discard) {
+      setDiscarding(true)
+    }
+    try {
+      const result = await onCloseEnvironment(viewId, discard)
+      if (selectionRef.current !== selection) {
+        return
+      }
+      if (!result.ok && result.requiresForceConfirmation && view.bindingEpoch != null
+        && viewsRef.current[viewId]?.status === 'ready' && isSameBinding(viewsRef.current[viewId], view)) {
         setForceClose({
           binding: view,
           reason: result.message === 'close-control-unavailable' ? 'control-unavailable' : 'unknown',
         })
+      } else if (discard) {
+        setForceClose(null)
       }
-    })
-  }, [onCloseEnvironment, activeViewId])
-
-  const handleDiscardClose = useCallback(async () => {
-    if (forceCloseViewId == null || forceClose == null || discarding) {
-      return
-    }
-    if (!isSameBinding(viewById(forceCloseViewId), forceClose.binding)) {
-      setForceClose(null)
-      return
-    }
-    setDiscarding(true)
-    try {
-      const result = await onCloseEnvironment(forceCloseViewId, true)
-      if (!result.ok && result.requiresForceConfirmation) {
-        return
-      }
-      setForceClose(null)
     } finally {
-      setDiscarding(false)
+      pendingCommands.current.delete(viewId)
+      if (discard) {
+        setDiscarding(false)
+      }
     }
-  }, [forceCloseViewId, forceClose, discarding, onCloseEnvironment])
+  }
 
-  const handleDirectoryConfirm = useCallback(async (directory: string) => {
-    const environmentId = selectedEnvironmentId
-    const viewId = activeViewId
-    const selectionKey = `${environmentId}:${viewId ?? ''}`
-    if (environmentId == null || directoryPending) {
+  useLayoutEffect(() => {
+    if (!isOpen || selectedView?.status !== 'ready' || selectedView.bindingEpoch == null
+      || selectedView.environmentId !== selectedEnvironmentId || selectedView.closeInFlight
+      || selectedView.entryUrl == null || forceCloseViewId != null) {
       return
     }
-    setDirectoryPending(true)
-    setDirectoryError(null)
-    try {
-      if (newWorkspaceOpen) {
-        onOpenNewView(environmentId, directory)
-        setNewWorkspaceOpen(false)
-        setDirectoryOpen(false)
+    const binding = selectedView
+    function onMessage(event: MessageEvent) {
+      const frameWindow = activeFrameRef.current?.contentWindow
+      if (event.origin !== window.location.origin || frameWindow == null || event.source !== frameWindow) {
         return
       }
-      if (activeViewId == null) {
+      const message: unknown = event.data
+      if (message == null || typeof message !== 'object' || Array.isArray(message)) {
         return
       }
-      const result = await onChangeDirectory(activeViewId, directory)
-      if (!result.ok) {
-        setDirectoryError(commandMessage(result.message, 'ai.ide.changeDirectoryFailed'))
+      const data = message as Record<string, unknown>
+      if (data.type !== 'kk-studio.ide.native-action' || data.viewId !== binding.viewId
+        || data.bindingEpoch !== binding.bindingEpoch || pendingCommands.current.has(binding.viewId)) {
         return
       }
-      if (lastSelectedRef.current.key !== selectionKey) {
+      const allowedKeys = data.action === 'open-folder'
+        ? ['type', 'viewId', 'bindingEpoch', 'action', 'directory']
+        : ['type', 'viewId', 'bindingEpoch', 'action']
+      const keys = Object.keys(data)
+      if (keys.length !== allowedKeys.length || keys.some((key) => !allowedKeys.includes(key))) {
         return
       }
-      setRecentDirectories(recordRecentDirectory(environmentId, directory))
-      setDirectoryOpen(false)
-    } finally {
-      setDirectoryPending(false)
+      switch (data.action) {
+        case 'open-folder': {
+          if (!isIdeDirectory(data.directory)) {
+            return
+          }
+          const { viewId } = binding
+          pendingCommands.current.add(viewId)
+          setDirectoryError(null)
+          void onChangeDirectory(viewId, data.directory).then((result) => {
+            if (!result.ok && selectionRef.current === selection
+              && isSameBinding(viewsRef.current[viewId], binding)) {
+              setDirectoryError({ binding, message: result.message })
+            }
+          }).finally(() => pendingCommands.current.delete(viewId))
+          return
+        }
+        case 'new-window': {
+          if (selectedEnvironment?.ready === true) {
+            onOpenNewView(binding.environmentId)
+          }
+          return
+        }
+        case 'close-workspace': {
+          void handleClose(binding)
+        }
+      }
     }
-  }, [
-    commandMessage,
-    directoryPending,
-    onChangeDirectory,
-    onOpenNewView,
-    recordRecentDirectory,
-    selectedEnvironmentId,
-    activeViewId,
-    newWorkspaceOpen,
-  ])
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  })
 
-  const handlePanelKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
-    if (
-      event.key === 'Escape'
-      && !event.defaultPrevented
-      && !event.repeat
-      && !event.nativeEvent.isComposing
-      && event.keyCode !== 229
-    ) {
-      if (directoryOpen || forceCloseViewId != null) {
-        return
-      }
+  function handlePanelKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === 'Escape' && !event.defaultPrevented && !event.repeat
+      && !event.nativeEvent.isComposing && event.keyCode !== 229 && forceCloseViewId == null) {
       event.preventDefault()
       event.stopPropagation()
       onCollapse()
     }
-  }, [directoryOpen, forceCloseViewId, onCollapse])
+  }
 
-  const terminalError = selectedView?.terminalError
-  const closeError = selectedView?.closeError
-  const claimError = selectedView?.errorMessage
-  const viewBusy = selectedView?.status === 'reconciling'
-    || selectedView?.status === 'binding'
-  const viewLayerVisible = isOpen && selectedEnvironmentId !== null
-  const noEnvironment = selectedEnvironmentId == null
-  const environmentOffline = selectedEnvironment?.ready === false
-    || selectedView?.status === 'waiting-ready'
-  const environmentUnknown = selectedView == null
-    && !environmentsLoading
-    && !environmentsError
-    && selectedEnvironment == null
-  const directory = selectedView?.directory
-  const directorySplit = directory == null ? 0 : Math.max(
-    directory.lastIndexOf('/') + 1,
-    directory.lastIndexOf('\\') + 1,
-  )
-
+  const viewBusy = selectedView?.status === 'reconciling' || selectedView?.status === 'binding'
   return (
     <aside
       id="ide-panel"
@@ -324,142 +241,74 @@ export function IdeOverlayPanel({
       aria-label={t('ai.ide.title')}
     >
       <header className="ide-toolbar" data-testid="ide-toolbar">
-        <div className="ide-toolbar-info">
-          <Select
-            compact
-            className="ide-environment-selector"
-            value={selectedEnvironmentId ?? ''}
-            options={environmentOptions}
-            placeholder={t('ai.ide.environmentSelector')}
-            aria-label={t('ai.ide.environmentSelector')}
-            onChange={onSelectEnvironment}
-          />
-          {selectedView?.directory ? (
+        <Select
+          compact
+          className="ide-environment-selector"
+          value={selectedEnvironmentId ?? ''}
+          options={environmentOptions}
+          placeholder={t('ai.ide.environmentSelector')}
+          aria-label={t('ai.ide.environmentSelector')}
+          onChange={onSelectEnvironment}
+        />
+        <nav className="ide-workspace-tabs" data-testid="ide-tab-strip" aria-label={t('ai.ide.workspaces')}>
+          {openedViews.filter((view) => view.environmentId === selectedEnvironmentId).map((view) => {
+            const directory = view.directory
+            const label = directory?.split(/[\\/]/).filter(Boolean).at(-1) ?? directory ?? t('ai.ide.workspace')
+            return (
+              <div key={view.viewId} className="ide-workspace-tab" data-testid="ide-tab" data-ide-view={view.viewId}>
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  aria-current={view.viewId === selectedViewId ? 'page' : undefined}
+                  title={directory ?? label}
+                  onClick={() => onSelectView(view.viewId)}
+                >
+                  <span className="ide-workspace-tab-label">{label}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  onClick={() => { void handleClose(view) }}
+                  loading={view.closeInFlight === true}
+                  disabled={view.status !== 'ready' || view.bindingEpoch == null}
+                  aria-label={`${t('ai.ide.close')} · ${label}`}
+                  title={t('ai.ide.close')}
+                  data-testid="ide-close-btn"
+                >
+                  <X size={14} aria-hidden="true" />
+                </Button>
+              </div>
+            )
+          })}
+          {selectedEnvironmentId != null ? (
             <Button
               variant="ghost"
               size="compact"
-              className="ide-toolbar-directory"
-              onClick={() => {
-                if (selectedEnvironmentId == null) {
-                  return
-                }
-                setDirectoryError(null)
-                setRecentDirectories(readRecentDirectories(selectedEnvironmentId))
-                setDirectoryOpen(true)
-              }}
-              disabled={actionsDisabled}
-              aria-label={t('ai.ide.openDirectory')}
-              title={selectedView.directory}
-              data-testid="ide-open-directory-btn"
+              className="ide-open-workspace"
+              data-testid="ide-open-workspace-btn"
+              aria-label={t('ai.ide.openWorkspace')}
+              title={t('ai.ide.openWorkspace')}
+              disabled={selectedEnvironment?.ready !== true}
+              onClick={() => onOpenNewView(selectedEnvironmentId)}
             >
-              <FolderOpen size={14} aria-hidden="true" />
-              <span className="ide-toolbar-dir" data-testid="ide-directory-badge">
-                <span className="ide-toolbar-dir-prefix">
-                  {selectedView.directory.slice(0, directorySplit)}
-                </span>
-                <span className="ide-toolbar-dir-suffix">
-                  {selectedView.directory.slice(directorySplit)}
-                </span>
-              </span>
+              +
             </Button>
           ) : null}
-        </div>
-        <div className="ide-toolbar-actions">
-          {directory ? (
-            <CopyTextButton
-              className="ide-toolbar-icon"
-              source={directory}
-              label={t('ai.ide.copyDirectory')}
-              copiedLabel={t('ai.ide.directoryCopied')}
-              failedLabel={t('ai.ide.directoryCopyFailed')}
-              data-testid="ide-copy-directory-btn"
-            />
-          ) : null}
-          {selectedView != null ? (
-            <Button
-              variant="ghost"
-              size="compact"
-              className="ide-toolbar-icon"
-              onClick={() => {
-                if (selectedEnvironmentId != null) {
-                  onOpenTerminal(activeViewId ?? selectedEnvironmentId)
-                }
-              }}
-              disabled={actionsDisabled}
-              aria-label={t('ai.ide.openTerminal')}
-              title={t('ai.ide.openTerminal')}
-              data-testid="ide-terminal-btn"
-            >
-              <Terminal size={14} aria-hidden="true" />
-              <span className="ide-toolbar-action-label">{t('ai.ide.openTerminal')}</span>
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="compact"
-            className="ide-toolbar-icon"
-            onClick={onCollapse}
-            aria-label={t('ai.ide.collapse')}
-            title={t('ai.ide.collapse')}
-            data-testid="ide-collapse-btn"
-          >
-            <PanelRightClose className="ide-collapse-desktop" size={14} aria-hidden="true" />
-            <ArrowLeft className="ide-collapse-mobile" size={14} aria-hidden="true" />
-            <span className="ide-toolbar-action-label">{t('ai.ide.collapse')}</span>
-          </Button>
-          {selectedView != null ? (
-            <Button
-              variant="ghost"
-              size="compact"
-              className="ide-toolbar-icon"
-              onClick={handleCloseClick}
-              loading={selectedView.closeInFlight === true}
-              disabled={closeDisabled}
-              aria-label={t('ai.ide.close')}
-              title={t('ai.ide.close')}
-              data-testid="ide-close-btn"
-            >
-              <X size={14} aria-hidden="true" />
-              <span className="ide-toolbar-action-label">{t('ai.ide.close')}</span>
-            </Button>
-          ) : null}
-        </div>
+        </nav>
+        <Button
+          variant="ghost"
+          size="compact"
+          className="ide-toolbar-icon"
+          onClick={onCollapse}
+          aria-label={t('ai.ide.collapse')}
+          title={t('ai.ide.collapse')}
+          data-testid="ide-collapse-btn"
+        >
+          <PanelRightClose className="ide-collapse-desktop" size={14} aria-hidden="true" />
+          <ArrowLeft className="ide-collapse-mobile" size={14} aria-hidden="true" />
+          <span className="ide-toolbar-action-label">{t('ai.ide.collapse')}</span>
+        </Button>
       </header>
-      <nav className="ide-workspace-tabs" data-testid="ide-tab-strip" aria-label={t('ai.ide.workspaces')}>
-        {openedViews.filter((view) => view.environmentId === selectedEnvironmentId).map((view) => (
-          <Button
-            key={view.viewId}
-            variant={view.viewId === selectedViewId ? 'primary' : 'ghost'}
-            size="compact"
-            data-testid="ide-tab"
-            data-ide-view={view.viewId}
-            aria-current={view.viewId === selectedViewId ? 'page' : undefined}
-            title={view.directory ?? view.viewId}
-            onClick={() => onSelectView(view.viewId)}
-          >
-            {view.directory?.split(/[\\/]/).filter(Boolean).at(-1) ?? t('ai.ide.workspace')}
-          </Button>
-        ))}
-        {selectedEnvironmentId != null ? (
-          <Button
-            variant="ghost"
-            size="compact"
-            data-testid="ide-open-workspace-btn"
-            aria-label={t('ai.ide.openWorkspace')}
-            title={t('ai.ide.openWorkspace')}
-            disabled={selectedEnvironment?.ready !== true}
-            onClick={() => {
-              setNewWorkspaceOpen(true)
-              setDirectoryError(null)
-              setRecentDirectories(readRecentDirectories(selectedEnvironmentId))
-              setDirectoryOpen(true)
-            }}
-          >
-            +
-          </Button>
-        ) : null}
-      </nav>
-
       <IdePanelStatusBanners
         storageUnavailable={storageUnavailable}
         recoveryError={recoveryError}
@@ -468,163 +317,82 @@ export function IdeOverlayPanel({
         selectedView={selectedView}
         selectedEnvironmentId={selectedEnvironmentId}
         viewBusy={viewBusy}
-        claimError={claimError}
-        closeError={closeError}
-        terminalError={terminalError}
+        claimError={selectedView?.errorMessage}
+        closeError={selectedView?.closeError}
+        terminalError={selectedView?.terminalError}
         onOpenNewView={onOpenNewView}
         onRetryClaim={onRetryClaim}
         onDismissCloseError={onDismissCloseError}
         commandMessage={commandMessage}
       />
-
+      {directoryError != null && selectedView != null && isSameBinding(selectedView, directoryError.binding) ? (
+        <div className="ide-panel-error-banner" role="alert">
+          <span>{commandMessage(directoryError.message, 'ai.ide.changeDirectoryFailed')}</span>
+          <Button variant="ghost" size="compact" onClick={() => setDirectoryError(null)}>{t('ai.ide.dismiss')}</Button>
+        </div>
+      ) : null}
       <div className="ide-panel-body" data-testid="ide-panel-body">
-        {noEnvironment ? (
-          <div className="ide-panel-state is-config" data-testid="ide-select-environment-state">
-            <p>{t('ai.ide.missingEnvironment')}</p>
-            {environments.length > 0 ? (
-              <div className="ide-select-env-row">
-                <Select
-                  value=""
-                  options={environmentOptions}
-                  placeholder={t('ai.ide.environmentSelector')}
-                  aria-label={t('ai.ide.environmentSelector')}
-                  onChange={onSelectEnvironment}
-                />
-              </div>
-            ) : (
-              <p className="ide-state-muted">{t('ai.ide.noEnvironments')}</p>
-            )}
+        {selectedView?.entryUrl == null && viewBusy ? (
+          <div className="ide-panel-state" data-testid="ide-opening-state">
+            <LoadingSpinner />
+            <p>{t(selectedView?.status === 'reconciling' ? 'ai.ide.reconciling' : 'ai.ide.loading')}</p>
           </div>
         ) : null}
-
-        {selectedEnvironmentId != null && selectedView == null ? (
-          environmentsLoading ? (
-            <div className="ide-panel-state" data-testid="ide-opening-state">
-              <LoadingSpinner />
-              <p>{t('ai.ide.loading')}</p>
-            </div>
-          ) : environmentsError || environmentUnknown ? (
-            <div className="ide-panel-state is-warning" data-testid="ide-offline-state">
-              <p>{t('ai.ide.offline')}</p>
-              <Button variant="ghost" size="compact" onClick={onReloadEnvironments}>
-                {t('shared.retry')}
-              </Button>
-            </div>
-          ) : environmentOffline ? (
-            <div className="ide-panel-state is-warning" data-testid="ide-offline-state">
-              <p>{t('ai.ide.offline')}</p>
-            </div>
-          ) : (
-            <div className="ide-panel-state" data-testid="ide-opening-state">
-              <LoadingSpinner />
-              <p>{t('ai.ide.loading')}</p>
-            </div>
-          )
-        ) : null}
-
-        {selectedView != null && selectedView.entryUrl == null ? (
-          viewBusy ? (
-            <div className="ide-panel-state" data-testid="ide-opening-state">
-              <LoadingSpinner />
-              <p>{t(selectedView.status === 'reconciling' ? 'ai.ide.reconciling' : 'ai.ide.loading')}</p>
-            </div>
-          ) : selectedView.status === 'detached' ? (
-            <div className="ide-panel-state is-warning" data-testid="ide-view-detached-state">
-              <p>{t('ai.ide.viewOwnedByOther')}</p>
-            </div>
-          ) : selectedView.status === 'gone' ? (
-            <div className="ide-panel-state is-warning" data-testid="ide-view-gone-state">
-              <p>{t('ai.ide.viewGone')}</p>
-            </div>
-          ) : selectedView.status === 'error' ? (
-            <div className="ide-panel-state is-error" data-testid="ide-error-state">
-              <p>{claimError || t('ai.ide.error')}</p>
-            </div>
-          ) : selectedView.status === 'waiting-ready' || environmentOffline ? (
-            <div className="ide-panel-state is-warning" data-testid="ide-offline-state">
-              <p>{t('ai.ide.waitingReady')}</p>
-            </div>
-          ) : null
-        ) : null}
-
         <div className="ide-global-view-stack">
-          {openedViews.map((view) => (
-            <div
-              className="ide-global-view"
-              key={`${view.environmentId}:${view.viewId}`}
-              data-ide-environment={view.environmentId}
-              data-ide-view={view.viewId}
-              data-testid="ide-view-layer"
-              hidden={!viewLayerVisible || (selectedViewId != null
-                ? selectedViewId !== view.viewId
-                : selectedEnvironmentId !== view.environmentId)}
-              inert={(selectedViewId != null && selectedViewId !== view.viewId) || selectedEnvironmentId !== view.environmentId ? true : undefined}
-            >
-              {view.entryUrl != null ? (
-                <>
-                  {!view.iframeLoaded ? (
-                    <div className="ide-panel-state" data-testid="ide-iframe-loading">
-                      <LoadingSpinner />
-                      <p>{t('ai.ide.loading')}</p>
-                    </div>
-                  ) : null}
-                  <iframe
-                    className="ide-panel-iframe"
-                    data-testid="ide-iframe"
-                    data-ide-environment={view.environmentId}
-                    data-ide-view={view.viewId}
-                    title={`${t('ai.ide.title')} · ${environmentName(view.environmentId)}`}
-                    src={view.entryUrl}
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
-                    allow="clipboard-read; clipboard-write"
-                    onLoad={() => onIframeLoaded(view.viewId, view.entryUrl!)}
-                  />
-                </>
-              ) : null}
-            </div>
-          ))}
+          {openedViews.map((view) => {
+            const visible = isOpen && view.viewId === selectedViewId && view.environmentId === selectedEnvironmentId
+            const entryUrl = view.entryUrl
+            return (
+              <div
+                className="ide-global-view"
+                key={view.viewId}
+                data-ide-environment={view.environmentId}
+                data-ide-view={view.viewId}
+                data-testid="ide-view-layer"
+                hidden={!visible}
+                inert={!visible ? true : undefined}
+              >
+                {entryUrl != null ? (
+                  <>
+                    {!view.iframeLoaded ? (
+                      <div className="ide-panel-state" data-testid="ide-iframe-loading">
+                        <LoadingSpinner />
+                        <p>{t('ai.ide.loading')}</p>
+                      </div>
+                    ) : null}
+                    <iframe
+                      ref={visible ? activeFrameRef : undefined}
+                      className="ide-panel-iframe"
+                      data-testid="ide-iframe"
+                      data-ide-environment={view.environmentId}
+                      data-ide-view={view.viewId}
+                      title={`${t('ai.ide.title')} · ${environments.find(({ id }) => id === view.environmentId)?.name ?? view.environmentId}`}
+                      src={entryUrl}
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
+                      allow="clipboard-read; clipboard-write"
+                      onLoad={() => onIframeLoaded(view.viewId, entryUrl)}
+                    />
+                  </>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       </div>
-
-      {directoryOpen && selectedEnvironmentId != null && (selectedView?.directory || newWorkspaceOpen) ? (
-        <OpenDirectoryModal
-          environmentId={selectedEnvironmentId}
-          currentDirectory={selectedView?.directory ?? '/'}
-          recentDirectories={recentDirectories}
-          pending={directoryPending}
-          error={directoryError}
-          onConfirm={(directory) => {
-            void handleDirectoryConfirm(directory)
-          }}
-          onClose={() => {
-            if (directoryPending) {
-              return
-            }
-            setDirectoryOpen(false)
-            setNewWorkspaceOpen(false)
-            setDirectoryError(null)
-          }}
-        />
-      ) : null}
-
-      {forceCloseViewId != null ? (
+      {forceCloseViewId != null && forceClose != null ? (
         <ConfirmActionModal
           className="ide-confirm-modal"
           modal={{
             title: t('ai.ide.forceCloseTitle'),
-            description: t(forceClose?.reason === 'control-unavailable'
+            description: t(forceClose.reason === 'control-unavailable'
               ? 'ai.ide.forceCloseControlUnavailableMessage'
               : 'ai.ide.forceCloseUnknownMessage'),
             confirmLabel: t('ai.ide.discardAndClose'),
             tone: 'danger',
-            onConfirm: () => { void handleDiscardClose() },
+            onConfirm: () => { void handleClose(forceClose.binding, true) },
           }}
           pending={discarding}
-          onClose={() => {
-            if (!discarding) {
-              setForceClose(null)
-            }
-          }}
+          onClose={() => { if (!discarding) setForceClose(null) }}
         />
       ) : null}
     </aside>

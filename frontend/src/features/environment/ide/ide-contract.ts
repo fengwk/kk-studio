@@ -44,22 +44,51 @@ export function canonicalJson(value: unknown): string {
   return `{${entries.join(',')}}`
 }
 
+/**
+ * wire 视图：无目录 workspace 上服务端省略 directory 或返回 JSON null，而生成契约仍把它
+ * 声明为必填 string。集成改用生成类型前用 Omit 兼容两者，读入后立即规范化。
+ */
+export type IdeWireView = Omit<EnvironmentIdeViewDTO, 'directory'> & {
+  directory?: string | null
+}
+
+/** 内部规范视图：无目录用缺省表达，不再保留 null。 */
+export type IdeNormalizedView = Omit<EnvironmentIdeViewDTO, 'directory'> & {
+  directory?: string
+}
+
+/** wire 快照；view 自身仍可为 null（没有该 view 的权威事实）。 */
+export type IdeWireSnapshotView = Omit<EnvironmentIdeViewSnapshotDTO, 'view'> & {
+  view: IdeWireView | null
+}
+
+/** 把 wire 的 null/缺省目录统一成 undefined；其余字段原样保留。 */
+export function normalizeIdeView(view: IdeWireView): IdeNormalizedView {
+  const { directory, ...rest } = view
+  return directory == null ? rest : { ...rest, directory }
+}
+
+/** 目录只在存在时参与校验：无目录 workspace 是合法状态。 */
+function hasValidDirectory(directory: unknown): boolean {
+  return directory == null || isIdeDirectory(directory)
+}
+
 /** 同一 view 在同一 daemonInstance 内的内容指纹；不存在用稳定字面量。 */
-export function viewFingerprint(view: EnvironmentIdeViewDTO | null): string {
-  return canonicalJson(view)
+export function viewFingerprint(view: IdeWireView | null): string {
+  return canonicalJson(view == null ? null : normalizeIdeView(view))
 }
 
 export interface IdeSnapshotView {
   daemonInstanceId: string
   revision: string
-  view: EnvironmentIdeViewDTO | null
+  view: IdeNormalizedView | null
 }
 
 function requireSnapshotView(
   environmentId: string,
   viewId: string,
   browserSessionId: string,
-  snapshot: EnvironmentIdeViewSnapshotDTO,
+  snapshot: IdeWireSnapshotView,
 ): IdeSnapshotView {
   if (
     snapshot == null
@@ -94,7 +123,7 @@ function requireSnapshotView(
     || typeof view.bindingEpoch !== 'string'
     || !CANONICAL_POSITIVE_DECIMAL.test(view.bindingEpoch)
     || compareDecimal(view.bindingEpoch, snapshot.revision) > 0
-    || !isIdeDirectory(view.directory)
+    || !hasValidDirectory(view.directory)
     || typeof view.workspacePath !== 'string'
     || view.workspacePath.length === 0
     || (view.state !== 'OPEN' && view.state !== 'CLOSING')
@@ -106,7 +135,7 @@ function requireSnapshotView(
   return {
     daemonInstanceId: snapshot.daemonInstanceId,
     revision: snapshot.revision,
-    view,
+    view: normalizeIdeView(view),
   }
 }
 
@@ -114,7 +143,7 @@ export function validateViewSnapshot(
   environmentId: string,
   viewId: string,
   browserSessionId: string,
-  snapshot: EnvironmentIdeViewSnapshotDTO,
+  snapshot: IdeWireSnapshotView,
 ): IdeSnapshotView {
   if (!isCanonicalUuid(environmentId) || !isCanonicalUuid(viewId) || !isCanonicalUuid(browserSessionId)) {
     throw new IdeProtocolError('Invalid IDE view identity')
@@ -126,7 +155,8 @@ export interface IdeBindingResult {
   viewId: string
   daemonInstanceId: string
   bindingEpoch: string
-  directory: string
+  /** 无目录 workspace 缺省，调用方不得用 workspacePath 或宿主主目录补位。 */
+  directory?: string
   workspacePath: string
   entryUrl: string
 }
@@ -134,7 +164,7 @@ export interface IdeBindingResult {
 export function validateOpenResponse(
   environmentId: string,
   request: EnvironmentIdeOpenViewDTO,
-  response: EnvironmentIdeViewDTO,
+  response: IdeWireView,
 ): IdeBindingResult {
   if (
     response == null
@@ -157,19 +187,20 @@ export function validateOpenResponse(
     || !CANONICAL_POSITIVE_DECIMAL.test(response.bindingEpoch)
     || (request.mode === 'resume'
       && compareDecimal(response.bindingEpoch, request.expectedBindingEpoch) < 0)
-    || !isIdeDirectory(response.directory)
+    || !hasValidDirectory(response.directory)
     || typeof response.workspacePath !== 'string'
     || response.workspacePath.length === 0
     || response.state !== 'OPEN'
   ) {
     throw new IdeProtocolError('Invalid IDE binding response')
   }
+  const view = normalizeIdeView(response)
   return {
-    viewId: response.viewId,
-    daemonInstanceId: response.daemonInstanceId,
-    bindingEpoch: response.bindingEpoch,
-    directory: response.directory,
-    workspacePath: response.workspacePath,
+    viewId: view.viewId,
+    daemonInstanceId: view.daemonInstanceId,
+    bindingEpoch: view.bindingEpoch,
+    directory: view.directory,
+    workspacePath: view.workspacePath,
     entryUrl: validateIdeEntryUrl(response.entryUrl, environmentId, request.viewId),
   }
 }
@@ -177,7 +208,8 @@ export function validateOpenResponse(
 export interface IdeCommandView {
   bindingEpoch: string
   daemonInstanceId: string
-  directory: string
+  /** 无目录 workspace 缺省。 */
+  directory?: string
   workspacePath: string
   eventNodeId: string
   connectionId: string
@@ -191,7 +223,7 @@ export function validateCommandView(
   environmentId: string,
   browserSessionId: string,
   viewId: string,
-  response: EnvironmentIdeViewDTO,
+  response: IdeWireView,
 ): IdeCommandView {
   if (
     response == null
@@ -208,20 +240,21 @@ export function validateCommandView(
     || !isCanonicalUuid(response.daemonInstanceId)
     || typeof response.bindingEpoch !== 'string'
     || !CANONICAL_POSITIVE_DECIMAL.test(response.bindingEpoch)
-    || !isIdeDirectory(response.directory)
+    || !hasValidDirectory(response.directory)
     || typeof response.workspacePath !== 'string'
     || response.workspacePath.length === 0
     || response.state !== 'OPEN'
   ) {
     throw new IdeProtocolError('Invalid IDE command response')
   }
+  const view = normalizeIdeView(response)
   return {
-    bindingEpoch: response.bindingEpoch,
-    daemonInstanceId: response.daemonInstanceId,
-    directory: response.directory,
-    workspacePath: response.workspacePath,
-    eventNodeId: response.eventNodeId,
-    connectionId: response.connectionId,
+    bindingEpoch: view.bindingEpoch,
+    daemonInstanceId: view.daemonInstanceId,
+    directory: view.directory,
+    workspacePath: view.workspacePath,
+    eventNodeId: view.eventNodeId,
+    connectionId: view.connectionId,
   }
 }
 
