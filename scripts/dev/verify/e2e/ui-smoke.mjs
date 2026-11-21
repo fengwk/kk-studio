@@ -227,22 +227,13 @@ async function expectVisibleText(page, text) {
   await page.getByText(text).first().waitFor({ state: 'visible', timeout: 30_000 })
 }
 
-/**
- * 当前自定义 Select 通用选择 helper：trigger 是 .ui-select-trigger button，
- * aria-controls 指向 role=listbox。点击 trigger 展开，解析 aria-controls 找到对应
- * listbox，再按 accessible name 精确点击 option。禁止调用 native selectOption。
- */
+/** 沿 aria-controls 定位本次展开的列表，然后精确选择；搜索面板在受控容器内有一个 listbox。 */
 async function selectCustomOption(page, trigger, optionName) {
   await trigger.click()
-  const listboxId = await trigger.getAttribute('aria-controls')
-  assert(listboxId, `Select trigger ${await trigger.getAttribute('aria-label')} lacks aria-controls`)
-  // 产品 Select.tsx 将 listboxId 固定为 `ui-select-listbox-` + sanitized [A-Za-z0-9_-] instanceId，
-  // 该字符集无需 CSS.escape（Node 22 不保证 CSS global）。
-  assert(
-    /^ui-select-listbox-[A-Za-z0-9_-]+$/.test(listboxId),
-    `Select aria-controls has unexpected shape: ${listboxId}`,
-  )
-  const listbox = page.locator(`#${listboxId}`)
+  const controlledId = await trigger.getAttribute('aria-controls')
+  assert(controlledId, `Select trigger ${await trigger.getAttribute('aria-label')} lacks aria-controls`)
+  const target = `[id=${JSON.stringify(controlledId)}]`
+  const listbox = page.locator(`${target}[role="listbox"], ${target} [role="listbox"]`)
   await listbox.waitFor({ state: 'visible', timeout: 10_000 })
   const option = listbox.getByRole('option', { name: optionName, exact: true })
   await option.waitFor({ state: 'visible', timeout: 10_000 })
