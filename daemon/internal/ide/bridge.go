@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ const (
 	bridgeMaxSnapshotDocuments = 256
 	bridgeMaxSnapshotPathChars = 4096
 	bridgeMaxCommandDocuments  = 256
-	bridgeMaxViewHosts         = 256
+	bridgeMaxRetiredHosts      = 256
 	bridgeCommandTimeout       = 20 * time.Second
 )
 
@@ -75,7 +76,7 @@ type bridgeView struct {
 	epoch               int64
 	directory           string
 	latestDirectoryOpID string
-	hosts               map[string]struct{}
+	retiredHosts        []string // Oldest first, scoped to this epoch.
 	hostID              string
 	stream              *bridgeStream
 }
@@ -150,18 +151,19 @@ func NewBridge() (*Bridge, error) {
 func (b *Bridge) Assign(viewID, workspacePath string, epoch int64, directory string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	view := &bridgeView{workspacePath: workspacePath, epoch: epoch, directory: directory}
 	if old := b.views[viewID]; old != nil {
+		if old.epoch == epoch {
+			view.retiredHosts = old.retiredHosts
+			view.retireHost(old.hostID)
+		}
 		if old.stream != nil {
 			old.stream.close(true)
 		}
 		b.rejectWaitersLocked(viewID, NewError("view binding changed", "VIEW_GONE"))
 		b.settleViewLocked(viewID, BridgeResult{Code: "VIEW_GONE", Message: "view binding changed"})
 	}
-	hosts := make(map[string]struct{})
-	if old := b.views[viewID]; old != nil {
-		hosts = old.hosts
-	}
-	b.views[viewID] = &bridgeView{workspacePath: workspacePath, epoch: epoch, directory: directory, hosts: hosts}
+	b.views[viewID] = view
 }
 
 // Revoke removes only the matching epoch when one is supplied.
@@ -477,12 +479,8 @@ func (b *Bridge) admitStream(viewID string, epoch int64, hostID string, folders 
 		slog.Warn("IDE bridge rejected retired binding", "viewId", viewID, "bindingEpoch", epoch, "hostId", hostID, "reason", "stale_epoch")
 		return nil, http.StatusGone, "view binding is retired"
 	}
-	_, knownHost := view.hosts[hostID]
-	if hostID != view.hostID && knownHost {
+	if slices.Contains(view.retiredHosts, hostID) {
 		return nil, http.StatusGone, "workspace host is retired"
-	}
-	if !knownHost && len(view.hosts) >= bridgeMaxViewHosts {
-		return nil, http.StatusServiceUnavailable, "workspace host limit reached"
 	}
 	for id, pending := range b.pending {
 		if pending.viewID == viewID && pending.op == "changeDirectory" && pending.hostID == hostID {
@@ -508,10 +506,25 @@ func (b *Bridge) reclaimDirectoryChangeLocked(viewID string, epoch int64, hostID
 	return "", ""
 }
 
+// retireHost records a displaced host, dropping the oldest fence at capacity.
+func (v *bridgeView) retireHost(hostID string) {
+	if hostID == "" {
+		return
+	}
+	if len(v.retiredHosts) == bridgeMaxRetiredHosts {
+		copy(v.retiredHosts, v.retiredHosts[1:])
+		v.retiredHosts[len(v.retiredHosts)-1] = hostID
+		return
+	}
+	v.retiredHosts = append(v.retiredHosts, hostID)
+}
+
 // installStreamLocked replaces the view's host stream and settles its superseded requests.
 func (b *Bridge) installStreamLocked(viewID string, view *bridgeView, stream *bridgeStream, hostID, targetID, targetDirectory string) {
 	previous, previousHost := view.stream, view.hostID
-	view.hosts[hostID] = struct{}{}
+	if previousHost != hostID {
+		view.retireHost(previousHost)
+	}
 	view.hostID, view.stream = hostID, stream
 	for id, pending := range b.pending {
 		if pending.viewID == viewID && pending.stream != stream && id != targetID {
@@ -574,6 +587,7 @@ func (b *Bridge) streamDisconnected(viewID string, stream *bridgeStream) {
 		view.stream = nil
 		for _, pending := range b.pending {
 			if pending.viewID == viewID && pending.stream == stream && pending.op == "changeDirectory" {
+				view.retireHost(view.hostID)
 				view.hostID = ""
 				break
 			}

@@ -15,27 +15,27 @@ import (
 )
 
 type viewRecord struct {
-	viewID             string
-	browserSession     string
-	eventNode          string
-	connectionID       string
-	claimID            string
-	bindingEpoch       int64
-	bindingPending     bool
-	directory          string
-	workspacePath      string
-	state              viewState
-	cleanupFailed      bool
-	createdAt          time.Time
-	lastProofAt        time.Time
-	hasProof           bool
-	expiresAt          time.Time
-	expiryTimer        IdeTimer
-	expiryGeneration   uint64
-	streams            map[*activeIdeStream]struct{}
-	forceAllowed       bool
-	nativeClosePending bool
-	sessionGeneration  uint64
+	viewID            string
+	browserSession    string
+	eventNode         string
+	connectionID      string
+	claimID           string
+	bindingEpoch      int64
+	bindingPending    bool
+	directory         string
+	workspacePath     string
+	state             viewState
+	cleanupFailed     bool
+	createdAt         time.Time
+	lastProofAt       time.Time
+	hasProof          bool
+	expiresAt         time.Time
+	expiryTimer       IdeTimer
+	expiryGeneration  uint64
+	streams           map[*activeIdeStream]struct{}
+	forceAllowed      bool
+	nativeCloseCancel context.CancelCauseFunc
+	sessionGeneration uint64
 
 	directoryPersistenceFailed bool
 }
@@ -692,20 +692,36 @@ func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (
 	return s.performClose(ctx, view, mode)
 }
 
-// requestNativeClose asks the connected window to close, returning the window result or an outcome error.
+var errNativeCloseLeaseExpired = errors.New("IDE lease expired while waiting for native close")
+
+// requestNativeClose asks the connected window to close while holding its view key lock.
 func (s *Service) requestNativeClose(ctx context.Context, view *viewRecord, epoch int64) (*BridgeResult, error) {
+	closeCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	s.mu.Lock()
-	view.nativeClosePending = true
-	s.clearExpiryLocked(view)
+	// A due expiry may already be queued on the view key lock. Do not start an
+	// unbounded wait that its callback could no longer interrupt.
+	if !s.scheduler.Now().Before(view.expiresAt) {
+		s.mu.Unlock()
+		return nil, NewError("IDE view lease expired", "BUSY")
+	}
+	view.nativeCloseCancel = cancel
 	s.mu.Unlock()
-	closeCtx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(s.lifetime, cancel)
+	stop := context.AfterFunc(s.lifetime, func() { cancel(nil) })
+	defer stop()
 	result, requestErr := s.bridge.Request(closeCtx, view.viewID, BridgeCommand{Op: "closeView"}, BridgeRequestOptions{ExpectedEpoch: epoch})
-	stop()
-	cancel()
 	s.mu.Lock()
-	view.nativeClosePending = false
+	view.nativeCloseCancel = nil
+	expired := context.Cause(closeCtx) == errNativeCloseLeaseExpired
+	if expired {
+		view.forceAllowed = true
+	}
 	s.mu.Unlock()
+	if expired {
+		// The host may still finish its dialog. Leave the due timer in charge of
+		// recovery, rather than treating the interrupted wait as a new lease.
+		return nil, NewError("IDE close outcome is unknown", "OUTCOME_UNKNOWN")
+	}
 	if requestErr == nil && result.Code == "CANCELLED" {
 		return &result, nil
 	}
@@ -879,13 +895,28 @@ func (s *Service) cleanupFailed(view *viewRecord, err error) error {
 	return err
 }
 
+func (s *Service) expiryDueLocked(view *viewRecord, epoch int64, generation uint64) bool {
+	return !s.closed && s.views[view.viewID] == view && view.bindingEpoch == epoch && view.expiryGeneration == generation &&
+		view.state == viewOpen && !view.bindingPending && !s.scheduler.Now().Before(view.expiresAt)
+}
+
 func (s *Service) expireView(view *viewRecord, epoch int64, generation uint64) {
+	s.mu.Lock()
+	if !s.expiryDueLocked(view, epoch, generation) {
+		s.mu.Unlock()
+		return
+	}
+	// The native close owns the view key lock; end its wait before taking that lock.
+	if view.nativeCloseCancel != nil {
+		view.nativeCloseCancel(errNativeCloseLeaseExpired)
+	}
+	s.mu.Unlock()
+
 	lock := s.keyedLock(s.viewLocks, view.viewID)
 	lock.Lock()
 	defer lock.Unlock()
 	s.mu.Lock()
-	if s.closed || s.views[view.viewID] != view || view.bindingEpoch != epoch || view.expiryGeneration != generation ||
-		view.state != viewOpen || view.bindingPending || view.nativeClosePending || s.scheduler.Now().Before(view.expiresAt) {
+	if !s.expiryDueLocked(view, epoch, generation) {
 		s.mu.Unlock()
 		return
 	}
@@ -952,7 +983,7 @@ func (s *Service) ApplyLease(lease *protocol.IdeLease, roundStartedAt time.Time)
 
 func (s *Service) scheduleExpiryLocked(view *viewRecord, notBefore time.Time) {
 	s.clearExpiryLocked(view)
-	if view.state != viewOpen || view.bindingPending || view.nativeClosePending || s.closed {
+	if view.state != viewOpen || view.bindingPending || s.closed {
 		return
 	}
 	base := view.createdAt
