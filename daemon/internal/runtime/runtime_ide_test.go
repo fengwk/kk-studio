@@ -230,8 +230,17 @@ func TestRuntimeIDECommandTimeoutExcludesNormalClose(t *testing.T) {
 	if got := r.options.IDECommandCount(); got != 1 {
 		t.Fatalf("normal close was timed out; active command count = %d", got)
 	}
+	if reason := r.updateBusyReason(); reason != "IDE command is in progress" {
+		t.Fatalf("update busy reason during native close = %q", reason)
+	}
 	close(ide.release)
 	r.ideWG.Wait()
+	if got := r.options.IDECommandCount(); got != 0 {
+		t.Fatalf("native close returned but active command count = %d", got)
+	}
+	if reason := r.updateBusyReason(); reason != "" {
+		t.Fatalf("update remained blocked after native close returned: %q", reason)
+	}
 }
 
 // An absent production IDE service is represented by a correlated IDE_RESULT, not a generic ERROR.

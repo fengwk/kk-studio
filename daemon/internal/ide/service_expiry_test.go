@@ -2,6 +2,8 @@ package ide
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -186,6 +188,92 @@ func dirtySnapshot(root string) map[string]any {
 // cleanSnapshot is the explicit complete, empty snapshot of a window holding no drafts.
 func cleanSnapshot() map[string]any {
 	return map[string]any{"documents": []map[string]string{}, "omitted": 0, "complete": true}
+}
+
+// A delivered native close has no reply while the workbench waits for the user.
+// Renewing the lease preserves the wait; losing the lease ends it and requires fresh recovery proof.
+func TestLeaseExpiryEndsPendingNativeClose(t *testing.T) {
+	for _, complete := range []bool{true, false} {
+		t.Run(strconv.FormatBool(complete), func(t *testing.T) {
+			if complete && !recoveryDirectorySyncSupported {
+				t.Skip("durable recovery publication is unavailable on this platform")
+			}
+			f := newExpiryFixture(t)
+			opened, root := f.openRoot()
+			viewID, epoch := opened.GetViewId(), opened.GetBindingEpoch()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+			response, reader := openManualBridgeStream(t, ctx, f.bridge, opened.GetWorkspacePath(), hostID, root)
+			defer response.Body.Close()
+			if _, err := reader.ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+			readCommand := func(want string) string {
+				t.Helper()
+				line, err := reader.ReadBytes('\n')
+				var command struct{ ID, Op string }
+				if err != nil || json.Unmarshal(line, &command) != nil || command.Op != want || command.ID == "" {
+					t.Fatalf("command=%q err=%v; want %s", line, err, want)
+				}
+				return command.ID
+			}
+			closed := make(chan *protocol.IdeResult, 1)
+			go func() {
+				closed <- f.service.HandleCommand(ctx, viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+			}()
+			closeID := readCommand("closeView")
+			f.clock.Advance(viewLeaseDuration / 2)
+			f.service.ApplyLease(&protocol.IdeLease{Bindings: []*protocol.IdeLeaseBinding{{
+				ViewId: &viewID, BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: &epoch,
+			}}}, f.clock.Now())
+			f.clock.Advance(viewLeaseDuration / 2)
+			f.bridge.mu.Lock()
+			stillPending := f.bridge.pending[closeID] != nil
+			f.bridge.mu.Unlock()
+			if !stillPending || f.service.GetViewState(viewID).GetState() != protocol.IdeViewState_OPEN {
+				t.Fatal("renewed lease did not preserve the native close dialog")
+			}
+
+			expired := make(chan struct{})
+			go func() {
+				f.clock.Advance(viewLeaseDuration / 2)
+				close(expired)
+			}()
+			select {
+			case result := <-closed:
+				if result.GetOk() || result.GetCode() != "OUTCOME_UNKNOWN" {
+					t.Fatalf("expired native close=%v; want OUTCOME_UNKNOWN", result)
+				}
+			case <-time.After(time.Second):
+				f.bridge.mu.Lock()
+				stillPending := f.bridge.pending[closeID] != nil
+				f.bridge.mu.Unlock()
+				t.Fatalf("lease expired but CLOSE_VIEW did not return (bridge command pending=%t, view=%s)", stillPending, f.service.GetViewState(viewID).GetState())
+			}
+			snapshotID := readCommand("snapshot")
+			snapshot := dirtySnapshot(root)
+			snapshot["ok"] = true
+			snapshot["complete"] = complete
+			if status := postBridge(t, f.bridge, "/bridge/result", bridgeTestResultBody(snapshotID, viewID, epoch, hostID, snapshot)); status != http.StatusNoContent {
+				t.Fatalf("snapshot reply status=%d", status)
+			}
+			select {
+			case <-expired:
+			case <-ctx.Done():
+				t.Fatal("expiry did not finish")
+			}
+			if !complete {
+				f.requireDeferred(viewID)
+				return
+			}
+			f.requireReclaimed(viewID)
+			backup, err := ReadRecoveryBackup(f.cfg, viewID, defaultRecoveryQuota)
+			if err != nil || backup == nil || !backup.Complete || len(backup.Documents) != 1 || backup.Documents[0].Text != "unsaved" {
+				t.Fatalf("expiry backup=%#v err=%v", backup, err)
+			}
+		})
+	}
 }
 
 // Verifies a complete dirty backup reclaims the view and is stored under its binding epoch.

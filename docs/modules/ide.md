@@ -73,9 +73,9 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 
 零根视图在控制协议中省略 `directory`，在 HTTP 响应中可为 `null` 或缺省；正 `bindingEpoch` 和登记的绝对 `workspacePath` 对所有绑定都是必需的。HTTP 中 64 位整数在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
 
-正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设命令超时；用户取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。已发送但未确认的关闭以 `IDE_OUTCOME_UNKNOWN` 返回并保留视图；命令未发送或控制通道不可用时以 `IDE_CONTROL_UNAVAILABLE` 返回，用户可以显式确认强制关闭。强制关闭不伪装成原生退出成功，仍须取得 code-server 的资源清理证明。
+正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设固定命令超时；续租期间不会打断等待。用户取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。已发送但未确认的关闭以 `IDE_OUTCOME_UNKNOWN` 返回，不视为原生退出成功；若等待因租约到期而结束，视图转入下文的安全回收判定。控制通道不可用时以 `IDE_CONTROL_UNAVAILABLE` 返回，用户可以显式确认强制关闭。强制关闭不伪装成原生退出成功，仍须取得 code-server 的资源清理证明。
 
-Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
+Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。旧 epoch 的连接由绑定围栏拒绝（410，`stale_epoch`）；同一 epoch 内，最近 256 个退役 host 重连也返回 410。超过上限只淘汰最早退役的记录，不拒绝新 host，也不影响当前 host；换代时清空旧 epoch 的宿主历史。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
 
 切换目录前，扩展先用原生关闭交互处理编辑器；取消或仍有无法确认的脏草稿时不变更根。工作台接受 folder 更新（包括零根加首根）不等于更新已经生效。原窗口在扩展生命周期内持续观察；只有实际看到唯一的目标根，才退出旧控制流并重载。若工作台自行替换窗口，原窗口无需重载。实际切换只由同一 `bindingEpoch`、注册了确切目标根的新 host 确认，然后 Daemon 更新受管 `.code-workspace` 文件和视图快照。
 
@@ -130,7 +130,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。b
 
 ### 自动到期回收
 
-用户显式关闭仍走正常保存/不保存/取消与经确认的强制关闭；只有租约到期后的回收是自动动作，前提是「已证明安全」而不是「先备份再关」。到期在锁内复核当前 view 身份、`bindingEpoch`、状态与真实到期时刻后才提交 CLOSING，随后只排空该视图已有的数据流并再次复核，不等待也不影响其它 view。只有下列任一条成立才回收：快照明确报告完整且没有 dirty 或不可观察内容；或与当前 `bindingEpoch` 匹配的全部 dirty 普通文件文档已作为完整备份持久化成功。
+用户显式关闭仍走正常保存/不保存/取消与经确认的强制关闭；只有租约到期后的回收是自动动作，前提是「已证明安全」而不是「先备份再关」。有效租约到期时，Daemon 先结束同一绑定中仍在等待确认的原生关闭命令，再取得视图键锁。在锁内复核当前 view 身份、`bindingEpoch`、状态与真实到期时刻后才提交 CLOSING，随后只排空该视图已有的数据流并再次复核，不等待也不影响其它 view。只有下列任一条成立才回收：快照明确报告完整且没有 dirty 或不可观察内容；或与当前 `bindingEpoch` 匹配的全部 dirty 普通文件文档已作为完整备份持久化成功。
 
 完整性必须是显式事实，不能推断：dirty 的 untitled、虚拟文档、不可用路径、workbench 已关闭的镜像缓冲、无法观察的编辑器状态以及超出条数或字节预算的文档都记为省略，出现省略即不完整；缺少 `complete` 字段同样不算安全，只有明确的完整空快照才表示没有需要保留的草稿。干净快照不会用空数据覆盖上一条可用备份；显式强制关闭可以继续，但不完整的快照不会替换上一份有效的完整备份。
 

@@ -639,16 +639,41 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	if got := <-pending; got.Message != "directory change was not applied" {
 		t.Fatalf("same-host transition=%+v", got)
 	}
-	bridge.mu.Lock()
-	view := bridge.views[viewID]
-	view.hosts = make(map[string]struct{}, bridgeMaxViewHosts)
-	for index := 0; index < bridgeMaxViewHosts; index++ {
-		view.hosts[fmt.Sprintf("%08x-0000-4000-8000-%012x", index+1, index+1)] = struct{}{}
+}
+
+// Repeated extension restarts must not exhaust host admission or un-fence recent hosts.
+func TestBridgeRetiredHostHistory(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
 	}
-	bridge.mu.Unlock()
-	if status(url.Values{"workspacePath": {workspace}, "hostId": {"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}, "folder": {directory}}) != http.StatusServiceUnavailable {
-		t.Fatal("host limit was not enforced")
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	directory, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
+	workspace := filepath.Join(directory, "view.code-workspace")
+	host := func(i int) string { return fmt.Sprintf("%08x-0000-4000-8000-%012x", i, i) }
+	connect := func(epoch int64, i, wantStatus int, wantMessage string) {
+		t.Helper()
+		_, status, message := bridge.admitStream(viewID, epoch, host(i), []string{directory})
+		if status != wantStatus || message != wantMessage {
+			t.Fatalf("epoch %d host %d: status=%d message=%q; want %d %q", epoch, i, status, message, wantStatus, wantMessage)
+		}
+	}
+	bridge.Assign(viewID, workspace, 1, directory)
+	for i := 1; i <= 258; i++ {
+		connect(1, i, 0, "")
+	}
+	connect(1, 257, http.StatusGone, "workspace host is retired")
+	connect(1, 258, 0, "")
+	connect(1, 2, http.StatusGone, "workspace host is retired")
+	connect(1, 1, 0, "") // Only the oldest retired host was evicted.
+	connect(1, 257, http.StatusGone, "workspace host is retired")
+	bridge.Assign(viewID, workspace, 2, directory)
+	connect(1, 257, http.StatusGone, "view binding is retired")
+	connect(2, 257, 0, "")
 }
 
 // Verifies the bridge rejects non-loopback, unauthenticated, unknown, and post-close stream requests.
