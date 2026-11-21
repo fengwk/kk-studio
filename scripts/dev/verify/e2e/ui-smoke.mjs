@@ -227,7 +227,7 @@ async function expectVisibleText(page, text) {
   await page.getByText(text).first().waitFor({ state: 'visible', timeout: 30_000 })
 }
 
-/** 沿 aria-controls 定位本次展开的列表，然后精确选择；搜索面板在受控容器内有一个 listbox。 */
+/** 沿 aria-controls 定位展开的列表，再按可见标题选择；选项的可访问名还可能包含状态和描述。 */
 async function selectCustomOption(page, trigger, optionName) {
   await trigger.click()
   const controlledId = await trigger.getAttribute('aria-controls')
@@ -235,7 +235,7 @@ async function selectCustomOption(page, trigger, optionName) {
   const target = `[id=${JSON.stringify(controlledId)}]`
   const listbox = page.locator(`${target}[role="listbox"], ${target} [role="listbox"]`)
   await listbox.waitFor({ state: 'visible', timeout: 10_000 })
-  const option = listbox.getByRole('option', { name: optionName, exact: true })
+  const option = listbox.getByRole('option').filter({ has: page.getByText(optionName, { exact: true }) })
   await option.waitFor({ state: 'visible', timeout: 10_000 })
   await option.click()
 }
