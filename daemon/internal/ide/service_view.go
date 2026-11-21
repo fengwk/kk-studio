@@ -36,6 +36,8 @@ type viewRecord struct {
 	forceAllowed       bool
 	nativeClosePending bool
 	sessionGeneration  uint64
+
+	directoryPersistenceFailed bool
 }
 
 type activeIdeStream struct {
@@ -241,6 +243,11 @@ func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *view
 	if err != nil {
 		return nil, err
 	}
+	// The view lock prevents a new directory command, but a late host confirmation can
+	// cross from bridge pending into a callback waiting for this same lock.
+	if !s.bridge.directorySettled(view.viewID, command.expectedEpoch, currentDirectory) {
+		return nil, NewError("directory change has not settled", "BUSY")
+	}
 	if command.hasDirectory {
 		directory, err := CanonicalDirectory(command.directory)
 		if err != nil {
@@ -437,7 +444,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 		return nil, NewError("view binding changed", "VIEW_GONE")
 	}
 	if err := s.writeManagedWorkspace(view.workspacePath, directory); err != nil {
-		return nil, NewError("managed workspace could not be updated", "UNAVAILABLE")
+		return nil, s.failDirectoryPersistence(view, "managed workspace could not be updated")
 	}
 	s.mu.Lock()
 	_, err = s.commitRevisionLocked()
@@ -446,7 +453,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 	}
 	s.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, s.failDirectoryPersistence(view, "directory state could not be committed")
 	}
 	return successSnapshot(s.snapshot()), nil
 }
@@ -464,7 +471,7 @@ func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, operation
 		return
 	}
 	if err := s.writeManagedWorkspace(view.workspacePath, directory); err != nil {
-		s.cleanupFailed(view, NewError("directory reconciliation failed", "CLEANUP_FAILED"))
+		s.failDirectoryPersistence(view, "managed workspace could not be updated")
 		return
 	}
 	if !s.bridge.IsCurrentDirectoryOperation(viewID, epoch, operationID, directory) {
@@ -480,8 +487,16 @@ func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, operation
 	}
 	s.mu.Unlock()
 	if commitErr != nil {
-		s.cleanupFailed(view, NewError("directory reconciliation state could not be committed", "CLEANUP_FAILED"))
+		s.failDirectoryPersistence(view, "directory state could not be committed")
 	}
+}
+
+// A directory persistence failure did not close the native view or authorize discarding it.
+func (s *Service) failDirectoryPersistence(view *viewRecord, message string) error {
+	s.mu.Lock()
+	view.directoryPersistenceFailed = true
+	s.mu.Unlock()
+	return s.cleanupFailed(view, NewError(message, "CLEANUP_FAILED"))
 }
 
 const maxAttachmentTextBytes = 64 * 1024
@@ -614,11 +629,18 @@ func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (
 	}
 	s.mu.Lock()
 	state, cleanupFailed := view.state, view.cleanupFailed
+	directoryPersistenceFailed := view.directoryPersistenceFailed
 	epoch := view.bindingEpoch
 	s.mu.Unlock()
 	if state == viewClosing {
 		if !cleanupFailed {
 			return nil, NewError("view is closing", "BUSY")
+		}
+		if directoryPersistenceFailed {
+			if !command.GetDiscard() {
+				return nil, NewError("directory state could not be persisted; confirm force close to continue", "CONTROL_UNAVAILABLE")
+			}
+			s.snapshotForClose(ctx, view)
 		}
 		return s.performClose(ctx, view, ManagedViewCloseDiscard)
 	}

@@ -81,7 +81,8 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
         const next = vscode.workspace.workspaceFolders.slice()
         next.splice(start, remove, ...added.map((folder) => ({ uri: folder.uri })))
         vscode.workspace.workspaceFolders = next
-        setImmediate(() => { for (const listener of [...folderListeners]) { listener() } })
+        const notify = () => { for (const listener of [...folderListeners]) { listener() } }
+        if (options.syncFolderEvent) { notify() } else { setImmediate(notify) }
         return true
       },
       async openTextDocument(uri) {
@@ -235,7 +236,6 @@ function setup(fake = fakeVscode(), options = {}) {
     viewId: options.viewId || VIEW_ID,
     bindingEpoch: options.bindingEpoch || BINDING_EPOCH,
     reconnectMillis: options.reconnectMillis === undefined ? 5 : options.reconnectMillis,
-    directoryConfirmMillis: options.directoryConfirmMillis === undefined ? 10 : options.directoryConfirmMillis,
     http: network.http,
   })
   host.start()
@@ -528,8 +528,8 @@ test('gives a zero-root window its first managed root through a restarted host',
   } finally { context.host.dispose() }
 })
 
-test('replaces every live folder before the window restarts into the new root', async () => {
-  const fake = fakeVscode(WORKSPACE, ['/first', '/second'])
+test('handles a target notification inside the folder update before restarting', async () => {
+  const fake = fakeVscode(WORKSPACE, ['/first', '/second'], { syncFolderEvent: true })
   const context = setup(fake)
   try {
     const [start, remove] = await changeDirectory(context, { directory: '/target' })
@@ -542,29 +542,46 @@ test('replaces every live folder before the window restarts into the new root', 
 test('does not restart a window the workbench replaces for the new root', async () => {
   // Without a workspace file a folder swap opens a replacement window, whose fresh host confirms
   // the target root; asking this window to reload as well would restart it for nothing.
-  const fake = fakeVscode(WORKSPACE, ['/home/user'])
+  const fake = fakeVscode(undefined, ['/home/user'], { updateWorkspaceFolders: () => true })
   fake.vscode.workspace.workspaceFile = undefined
   const context = setup(fake)
   try {
-    const [start, remove, added] = await changeDirectory(context, { directory: '/target' })
+    await connected(context)
+    const stream = context.network.streams[0]
+    stream.response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', directory: '/target' })}\n`)
+    await waitFor(() => fake.calls.updateWorkspaceFolders.length === 1)
+    const [start, remove, added] = fake.calls.updateWorkspaceFolders[0]
     assert.deepEqual([start, remove], [0, 1])
     assert.equal(added[0].uri.fsPath, '/target')
+    assert.equal((await command(context, 'inspect')).ok, true)
+    assert.equal(stream.request.destroyed, false)
     assert.deepEqual(fake.calls.commands, [])
-    assert.equal(context.network.streams[0].request.destroyed, true)
+    assert.equal(context.network.posts.some((post) => post.payload.id === 'change'), false)
   } finally { context.host.dispose() }
+  assert.equal(fake.folderListeners.size, 0)
 })
 
-test('keeps the old root when the workbench never shows the applied folder change', async () => {
-  // Fail closed: without evidence that the new root is live, no restart is asked for and no
-  // confirmation is claimed, so the daemon keeps the change unknown instead of trusting it.
+test('keeps control until a delayed notification shows exactly the target root', async () => {
   const fake = fakeVscode(WORKSPACE, ['/home/user'], { updateWorkspaceFolders: () => true })
-  const context = setup(fake, { directoryConfirmMillis: 5 })
+  const context = setup(fake)
   try {
     await connected(context)
-    context.network.streams[0].response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', directory: '/target' })}\n`)
+    const stream = context.network.streams[0]
+    stream.response.write(`${JSON.stringify({ type: 'command', id: 'change', op: 'changeDirectory', directory: '/target' })}\n`)
     await waitFor(() => fake.calls.updateWorkspaceFolders.length === 1)
-    await waitFor(() => context.network.streams[0].request.destroyed)
+    fake.fireFolders() // The first notification still reports the old root.
+    fake.vscode.workspace.workspaceFolders.push({ uri: fake.fileUri('/target') })
+    fake.fireFolders() // The target alone, not merely one of the folders, is required.
+    assert.equal((await command(context, 'inspect')).ok, true)
+    assert.equal(stream.request.destroyed, false)
+    assert.equal(fake.folderListeners.size, 1)
     assert.deepEqual(fake.calls.commands, [])
+    fake.vscode.workspace.workspaceFolders.shift()
+    fake.fireFolders()
+    fake.fireFolders()
+    assert.deepEqual(fake.calls.commands, ['workbench.action.reloadWindow'])
+    assert.equal(stream.request.destroyed, true)
+    assert.equal(fake.folderListeners.size, 0)
     assert.equal(context.network.posts.some((post) => post.payload.id === 'change'), false)
   } finally { context.host.dispose() }
 })

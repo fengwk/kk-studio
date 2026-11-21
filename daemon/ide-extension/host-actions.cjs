@@ -27,7 +27,7 @@ const DIRECTORY_RELOAD_COMMAND = 'workbench.action.reloadWindow'
 
 function createHostActions(host) {
   const { vscode, post, reply, retire, isInactive, folderPaths, workspacePath, viewId, bindingEpoch, hostId } = host
-  const directoryConfirmMillis = host.directoryConfirmMillis
+  let directoryChange = null
 
   let terminal = null
   const terminals = []
@@ -202,27 +202,27 @@ function createHostActions(host) {
     nodePath.isAbsolute(value) &&
     !DIRECTORY_CONTROL_CHARACTERS.test(value)
 
-  // Resolves true once the workbench reports a folder list of exactly the requested root. The wait
-  // ends on the first folder notification, because a folder swap applied by replacing the window
-  // never reports a change here, and the timeout covers a workbench that never answers.
-  const awaitSingleFolder = (expected, timeoutMillis) =>
-    new Promise((resolve) => {
-      let timer = null
-      const settle = (matched) => {
-        subscription.dispose()
-        if (timer) {
-          clearTimeout(timer)
-        }
-        resolve(matched)
-      }
-      const subscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        settle(singleFolderMatches(folderPaths(), expected))
-      })
-      timer = setTimeout(() => settle(singleFolderMatches(folderPaths(), expected)), timeoutMillis)
-      if (timer.unref) {
-        timer.unref()
-      }
-    })
+  // Returns whether the notification belongs to a managed transition, even if it is not yet proof.
+  const observeDirectoryChange = () => {
+    if (!directoryChange) {
+      return false
+    }
+    if (directoryChange.accepted && singleFolderMatches(folderPaths(), directoryChange.requested)) {
+      directoryChange = null
+      // This host observed an in-place update, but only a fresh host may confirm it to the daemon.
+      retire()
+      void reloadForDirectoryChange()
+    }
+    return true
+  }
+
+  const reloadForDirectoryChange = async () => {
+    try {
+      await vscode.commands.executeCommand(DIRECTORY_RELOAD_COMMAND)
+    } catch {
+      console.error('KK Studio could not reload the window after a managed directory change')
+    }
+  }
 
   // Native tab closing decides save, discard or cancel for every editor the root change abandons.
   // 'cancelled' means the user kept the window as it was; 'unsafe' means a hidden draft or a tab the
@@ -274,24 +274,22 @@ function createHostActions(host) {
       return
     }
     const folders = vscode.workspace.workspaceFolders || []
-    const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri: vscode.Uri.file(requested) })
-    if (updated !== true) {
+    // Arm before the API call: a folder notification can arrive in the call itself. Until the
+    // update is accepted and the exact target is live, keep the old control stream untouched.
+    directoryChange = { requested, accepted: false }
+    try {
+      directoryChange.accepted = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri: vscode.Uri.file(requested) }) === true
+    } finally {
+      if (!directoryChange.accepted) {
+        directoryChange = null
+      }
+    }
+    if (!directoryChange) {
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
-    // A workspace-file window applies the folder list in place, so this host is still the one running
-    // when the new root becomes visible; only a fresh host may confirm it.
-    let observed = false
-    if (vscode.workspace.workspaceFile) {
-      observed = await awaitSingleFolder(requested, directoryConfirmMillis)
-    }
-    if (isInactive()) {
-      return
-    }
-    // Retire control either way: control belongs to a host that registers the target root.
-    retire()
-    if (observed) {
-      await vscode.commands.executeCommand(DIRECTORY_RELOAD_COMMAND)
+    if (!isInactive()) {
+      observeDirectoryChange()
     }
   }
 
@@ -446,7 +444,7 @@ function createHostActions(host) {
     await handler(message)
   }
 
-  return { execute, disposeTerminals, disposeAttachments }
+  return { execute, disposeTerminals, disposeAttachments, observeDirectoryChange }
 }
 
 module.exports = { createHostActions }

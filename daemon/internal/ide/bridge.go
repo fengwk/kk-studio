@@ -202,6 +202,23 @@ func (b *Bridge) OnDirectoryReconciled(listener func(string, int64, string, stri
 	b.mu.Unlock()
 }
 
+// directorySettled checks both sides of a late confirmation atomically. A transition can
+// leave pending before the service has persisted the new directory.
+func (b *Bridge) directorySettled(viewID string, epoch int64, directory string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	view := b.views[viewID]
+	if view == nil || view.epoch != epoch || view.directory != directory {
+		return false
+	}
+	for _, pending := range b.pending {
+		if pending.viewID == viewID && pending.epoch == epoch && pending.op == "changeDirectory" {
+			return false
+		}
+	}
+	return true
+}
+
 // IsCurrentDirectoryOperation reports whether an operation still owns the confirmed bridge directory.
 func (b *Bridge) IsCurrentDirectoryOperation(viewID string, epoch int64, operationID, directory string) bool {
 	b.mu.Lock()

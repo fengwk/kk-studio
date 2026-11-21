@@ -75,7 +75,11 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 
 正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设命令超时；用户取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。已发送但未确认的关闭以 `IDE_OUTCOME_UNKNOWN` 返回并保留视图；命令未发送或控制通道不可用时以 `IDE_CONTROL_UNAVAILABLE` 返回，用户可以显式确认强制关闭。强制关闭不伪装成原生退出成功，仍须取得 code-server 的资源清理证明。
 
-Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。目录切换命令发送后，请求方中断或超时仅停止等待：未确认意图按每个活动 view 最多一条保留，直到同代对账或 view 关闭/重绑；期间不会接受新的目录切换。只有同一 bindingEpoch、且 folder 与目标目录匹配的新 host 能确认迟到操作；旧 host、旧 epoch 或不匹配的 folder 不能夺回控制权。切换时扩展先用原生关闭交互处理编辑器；取消或发现无法确认的脏草稿时不变更根。扩展更新 folder（包括零根加首根），由再次启动的新 host 注册确认，随后 Daemon 收敛 bridge 目录、视图快照与受管 `.code-workspace` 文件。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
+Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
+
+切换目录前，扩展先用原生关闭交互处理编辑器；取消或仍有无法确认的脏草稿时不变更根。工作台接受 folder 更新（包括零根加首根）不等于更新已经生效。原窗口在扩展生命周期内持续观察；只有实际看到唯一的目标根，才退出旧控制流并重载。若工作台自行替换窗口，原窗口无需重载。实际切换只由同一 `bindingEpoch`、注册了确切目标根的新 host 确认，然后 Daemon 更新受管 `.code-workspace` 文件和视图快照。
+
+目录命令等待满 20 秒或请求方中断，只结束本次等待，不结束同代对账。每个 view 最多保留一个待确认意图；确认或明确否决前不发送新的切换命令，且在目录状态收敛前不能 resume 换代。刷新通过 `LIST_VIEWS` 读取最后提交的快照，不重放切换，也不以尚未更新的目录推断切换失败。确认后写入工作区或提交快照失败时保留 `CLOSING` 和最后提交的目录；不会自动丢弃窗口，强制关闭仍需用户显式确认。
 
 ## 结构化失败与结果对账
 
@@ -92,10 +96,10 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 | `DIRTY` | 切换目录前 Daemon 判定编辑器仍有未保存修改 | 不写工作区，等用户保存或放弃后再显式重试 |
 | `IDE_UNAVAILABLE` | Daemon 侧 `UNAVAILABLE`/`BUSY`/`VIEW_IN_USE` 拒绝，或使用意图查询不可达 | 保留当前绑定与真实原因，稍后按原意图重试，不视作已执行 |
 | `IDE_OUTCOME_UNKNOWN` | 命令已发送但没有结果确认；目录操作意图仍在同代 bridge 中等待目标 host 对账 | 纯读对账，不重放命令；待目录状态收敛前不覆盖该意图 |
-| `IDE_CLEANUP_FAILED` | 资源清理未完成 | 保留 CLOSING 与容量，等待显式重试或人工处理 |
+| `IDE_CLEANUP_FAILED` | 资源清理未完成，或已确认的目标目录未能持久化 | 保留 CLOSING 与容量，等待显式重试或人工处理 |
 | `IDE_PROTOCOL_ERROR` | 回执或快照破坏协议不变量 | 失败本调用并保留上一个已接受快照，不自行修补 |
 | `IDE_CLOSE_CANCELLED` | 用户在关闭视图或切换目录时取消原生确认 | 视图保持原绑定，不触发外层放弃确认 |
-| `IDE_CONTROL_UNAVAILABLE` | 正常关闭未发送或没有控制通道，无法检查编辑器 dirty 状态 | 保留 view，只有用户显式确认后才可强制关闭 |
+| `IDE_CONTROL_UNAVAILABLE` | 正常关闭未发送、没有控制通道，或目录持久化失败后无法正常关闭 | 保留 view，只有用户显式确认后才可强制关闭 |
 | `IDE_UNAUTHORIZED` | 跨节点内部调用被目标节点以 401 `unauthorized` 拒绝（HMAC 或目标实例不匹配） | 不重试；先对账集群密钥与时钟 |
 | `IDE_CONFLICT` | 目标节点返回 409 但未携带可识别 reason 的兜底映射 | 不自动重试，按失败回读权威快照 |
 

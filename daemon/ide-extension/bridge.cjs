@@ -18,12 +18,6 @@ const { createHostActions } = require('./host-actions.cjs')
 
 const DEFAULT_RECONNECT_MILLIS = 500
 /**
- * How long a managed directory change may take to become visible in this window. A folder swap the
- * workbench applies by replacing the window never becomes visible here, so the budget only delays
- * retirement; the daemon then keeps the outcome unknown until a matching host registers.
- */
-const DEFAULT_DIRECTORY_CONFIRM_MILLIS = 5_000
-/**
  * A command line is a bounded JSON object. Snapshot/restore carry ordinary dirty text,
  * so the line budget matches the daemon's fixed recovery quota.
  */
@@ -46,7 +40,6 @@ function createBridgeHost(vscode, options) {
     BigInt(epochText) <= 9223372036854775807n
   const http = config.http || require('node:http')
   const reconnectMillis = config.reconnectMillis || DEFAULT_RECONNECT_MILLIS
-  const directoryConfirmMillis = config.directoryConfirmMillis || DEFAULT_DIRECTORY_CONFIRM_MILLIS
 
   const framer = new LineFramer(MAX_LINE_BYTES)
   let disposed = false
@@ -192,6 +185,7 @@ function createBridgeHost(vscode, options) {
       return
     }
     retired = true
+    folderSubscription.dispose()
     framer.reset()
     clearReconnectTimer()
     destroyStreamRequest()
@@ -210,12 +204,13 @@ function createBridgeHost(vscode, options) {
     viewId,
     bindingEpoch,
     hostId,
-    directoryConfirmMillis,
   })
 
-  // A registration describes live folders, even when they change after a cancelled command.
   const folderSubscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-    failStream()
+    if (!isInactive() && !actions.observeDirectoryChange()) {
+      // Outside a managed change, refresh the registration to describe the live folders.
+      failStream()
+    }
   })
 
   const handleCommand = async (message) => {
@@ -332,7 +327,9 @@ function createBridgeHost(vscode, options) {
     },
     dispose() {
       disposed = true
-      folderSubscription.dispose()
+      if (!retired) {
+        folderSubscription.dispose()
+      }
       openSubscription.dispose()
       closeSubscription.dispose()
       actions.disposeAttachments()
