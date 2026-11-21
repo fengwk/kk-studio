@@ -202,17 +202,24 @@ function createHostActions(host) {
     nodePath.isAbsolute(value) &&
     !DIRECTORY_CONTROL_CHARACTERS.test(value)
 
-  // Returns whether the notification belongs to a managed transition, even if it is not yet proof.
-  const observeDirectoryChange = () => {
+  const finishDirectoryChange = () => {
+    if (isInactive() || !directoryChange?.accepted || !directoryChange.observed) {
+      return
+    }
+    directoryChange = null
+    // This host observed an in-place update, but only a fresh host may confirm it to the daemon.
+    retire()
+    void reloadForDirectoryChange()
+  }
+
+  // The getter can expose an optimistic list after updateWorkspaceFolders. Only a workbench
+  // notification makes its value evidence. Consume non-matching events without ending the wait.
+  const onWorkspaceFoldersChanged = () => {
     if (!directoryChange) {
       return false
     }
-    if (directoryChange.accepted && singleFolderMatches(folderPaths(), directoryChange.requested)) {
-      directoryChange = null
-      // This host observed an in-place update, but only a fresh host may confirm it to the daemon.
-      retire()
-      void reloadForDirectoryChange()
-    }
+    directoryChange.observed = singleFolderMatches(folderPaths(), directoryChange.requested)
+    finishDirectoryChange()
     return true
   }
 
@@ -276,7 +283,7 @@ function createHostActions(host) {
     const folders = vscode.workspace.workspaceFolders || []
     // Arm before the API call: a folder notification can arrive in the call itself. Until the
     // update is accepted and the exact target is live, keep the old control stream untouched.
-    directoryChange = { requested, accepted: false }
+    directoryChange = { requested, accepted: false, observed: false }
     try {
       directoryChange.accepted = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri: vscode.Uri.file(requested) }) === true
     } finally {
@@ -288,9 +295,7 @@ function createHostActions(host) {
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
-    if (!isInactive()) {
-      observeDirectoryChange()
-    }
+    finishDirectoryChange()
   }
 
   const ensureTerminal = () => {
@@ -444,7 +449,7 @@ function createHostActions(host) {
     await handler(message)
   }
 
-  return { execute, disposeTerminals, disposeAttachments, observeDirectoryChange }
+  return { execute, disposeTerminals, disposeAttachments, onWorkspaceFoldersChanged }
 }
 
 module.exports = { createHostActions }
