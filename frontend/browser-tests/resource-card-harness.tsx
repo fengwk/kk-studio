@@ -244,10 +244,18 @@ function PanelsHarness() {
   )
 }
 
+const FORM_PROVIDER: ProviderDTO = {
+  ...SAMPLE_PROVIDER,
+  name: 'demo-provider',
+  description: null,
+  baseUrl: 'https://api.example.com/v1',
+  promptCacheRetentions: ['NONE'],
+}
+
 function ResourceFormsHarness() {
-  const [provider, setProvider] = useState({ ...emptyProviderDraft(), name: 'demo-provider' })
+  const [provider, setProvider] = useState({ ...emptyProviderDraft(), name: FORM_PROVIDER.name })
   const [model, setModel] = useState({
-    ...emptyModelDraft({ name: 'demo-provider' }),
+    ...emptyModelDraft(FORM_PROVIDER),
     name: 'demo-model',
     modelId: 'wire-model',
   })
@@ -258,7 +266,7 @@ function ResourceFormsHarness() {
         <ProviderForm draft={provider} mode="edit" fieldErrors={{ baseUrl: '地址无效' }} onChange={setProvider} />
       </section>
       <section aria-label="Model form">
-        <ModelForm draft={model} mode="edit" providers={[]} onChange={setModel} />
+        <ModelForm draft={model} mode="edit" providers={[FORM_PROVIDER]} onChange={setModel} />
       </section>
       <section aria-label="Agent form">
         <AgentForm draft={agent} mode="edit" models={[]} onChange={setAgent} />
