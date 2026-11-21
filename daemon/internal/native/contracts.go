@@ -38,6 +38,19 @@ type Supervisor interface {
 	Close(context.Context) error
 }
 
+// UpdateSupervisor is a Supervisor whose process admission can be suspended reversibly.
+// Suspend refuses new Start calls and terminates every tracked process, including one that a
+// concurrent Start was still publishing. Call Resume only after Suspend returns (even on error).
+// Resume is a no-op once the supervisor is closed; Close stays terminal.
+type UpdateSupervisor interface {
+	Supervisor
+	Suspend(context.Context) error
+	Resume()
+}
+
+// ErrSuspended is matched with errors.Is when Start is refused because the supervisor is suspended.
+var ErrSuspended = errors.New("the process supervisor is suspended")
+
 // DescendantTracker tracks an IDE PTY process that intentionally starts a separate POSIX session.
 type DescendantTracker interface {
 	TrackDescendant(context.Context, int, int) error

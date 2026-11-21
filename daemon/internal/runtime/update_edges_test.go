@@ -88,6 +88,12 @@ func TestRuntimeExecuteUpdateFailureBranches(t *testing.T) {
 			if _, active := r.updateOps.Active(); active {
 				t.Fatal("failed update retained admission")
 			}
+			if resumes := tc.runner.resumeCalls.Load(); resumes != 1 {
+				t.Fatalf("resumes after update failure = %d, want 1", resumes)
+			}
+			if tc.runner.stopError != nil && tc.runner.runCalls.Load() != 0 {
+				t.Fatal("installer ran despite a failed stop")
+			}
 		})
 	}
 }

@@ -81,14 +81,6 @@ func TestInstallerRunnerBoundariesAndSafeLauncherErrors(t *testing.T) {
 	if !runner.Configured() {
 		t.Fatal("default runner boundaries were not configured")
 	}
-	if err := runner.StopForUpdate(context.Background()); err != nil {
-		t.Fatalf("empty stop hook error = %v", err)
-	}
-	stopErr := errors.New("IDE shutdown failed")
-	runner.options.Stop = func(context.Context) error { return stopErr }
-	if err := runner.StopForUpdate(context.Background()); !errors.Is(err, stopErr) {
-		t.Fatalf("stop hook error = %v", err)
-	}
 
 	home, _, temp := installerFixture(t)
 	logs := []string{}

@@ -30,7 +30,7 @@ Go 能力实现位于 [`internal/coding`](../../daemon/internal/coding/)、[`int
 
 子进程由 [`internal/native`](../../daemon/internal/native/) 的平台监管器管理。POSIX 使用独立 session 与受控 helper 收敛进程范围；Windows 使用 Job Object。工作目录不是文件系统沙箱：进程以 Daemon 运行用户的操作系统权限访问文件。宿主必须提供 Bash 及需要的语言服务器。
 
-命令与检索的较大输出写入受控本地临时存储，结果只带有界预览和文件信息；临时资源按配置策略清理。二进制资源通过 [`internal/transport`](../../daemon/internal/transport/) 申请服务端票据并直接传输，不经控制消息承载字节。技能下载与更新由 [`internal/skill`](../../daemon/internal/skill/) 和 [`internal/update`](../../daemon/internal/update/) 负责。
+命令与检索的较大输出写入受控本地临时存储，结果只带有界预览和文件信息；临时资源按配置策略清理。二进制资源通过 [`internal/transport`](../../daemon/internal/transport/) 申请服务端票据并直接传输，不经控制消息承载字节。技能下载与更新由 [`internal/skill`](../../daemon/internal/skill/) 和 [`internal/update`](../../daemon/internal/update/) 负责。受管在线更新会临时暂停监管：先停止受管原生进程并拒绝新启动。若停止受管进程失败、安装器未能准备就绪，或安装器报告失败且 Daemon 仍在运行，则恢复监管；成功交接后保持暂停。监管器关闭（`Close`）后不可恢复。
 
 ## 受管 IDE
 

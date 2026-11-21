@@ -8,7 +8,7 @@ import (
 	"runtime"
 )
 
-func NewSupervisor() (Supervisor, error) {
+func NewSupervisor() (UpdateSupervisor, error) {
 	return nil, fmt.Errorf("the native process supervisor does not support %s", runtime.GOOS)
 }
 

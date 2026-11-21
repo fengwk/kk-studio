@@ -61,7 +61,7 @@ func TestPool_RetirementFailureIsIsolated(t *testing.T) {
 	}
 }
 
-// Starts a new client after a previously leased client dies.
+// Starts a new client after the underlying process is terminated without LSP shutdown.
 func TestPool_RestartDeadClient(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: 5 * time.Millisecond})
 	first, err := pool.LeaseWithExit(context.Background(), file, nil)
@@ -69,11 +69,16 @@ func TestPool_RestartDeadClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldClient := first.Client
-	if err := oldClient.Stop(5 * time.Millisecond); err != nil {
+	if err := supervisor.process.Terminate(context.Background(), 0); err != nil {
 		t.Fatal(err)
 	}
+	select {
+	case <-oldClient.exitSignal:
+	case <-time.After(time.Second):
+		t.Fatal("client did not observe process termination")
+	}
 	if oldClient.IsAlive() {
-		t.Fatal("stopped client still reports alive")
+		t.Fatal("terminated client still reports alive")
 	}
 	second, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {

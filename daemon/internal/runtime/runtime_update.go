@@ -159,7 +159,7 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 	defer cancel()
 	runner := r.options.Update
 	if runner == nil {
-		r.finishUpdate(command.OperationID, update.PhaseFailed, "managed update is not configured")
+		r.failUpdate(command.OperationID, "managed update is not configured")
 		return true
 	}
 	if err := runner.StopForUpdate(ctx); err != nil {
@@ -173,7 +173,7 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 		return false
 	}
 	if err != nil || outcome.Phase != update.PhasePrepared {
-		r.finishUpdate(command.OperationID, update.PhaseFailed, updateFailureMessage(outcome, err))
+		r.failUpdate(command.OperationID, updateFailureMessage(outcome, err))
 		return true
 	}
 	receipt, ok := r.updateOps.Complete(command.OperationID, update.PhasePrepared, outcome.Message)
@@ -182,11 +182,25 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 	}
 	var stopWatching func()
 	if outcome.WatchFailure != nil {
+		preparedDelivered := make(chan struct{})
+		defer close(preparedDelivered)
 		stopWatching = outcome.WatchFailure(func(message string) {
-			r.failActiveUpdate(command.OperationID, safeUpdateError(errors.New(message)))
+			// The watcher may report during registration, and stopping it can wait for this callback.
+			// Publish the failure after the PREPARED delivery attempt and off the watcher goroutine.
+			r.wg.Go(func() {
+				<-preparedDelivered
+				r.failUpdate(command.OperationID, safeUpdateError(errors.New(message)))
+			})
 		})
 	}
 	r.updateMu.Lock()
+	if ctx.Err() != nil {
+		r.updateMu.Unlock()
+		if stopWatching != nil {
+			stopWatching()
+		}
+		return false
+	}
 	if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
 		r.updateMu.Unlock()
 		if stopWatching != nil {
@@ -213,7 +227,7 @@ func (r *Runtime) reportStopFailure(ctx context.Context, command update.Command,
 	if !errors.Is(err, context.Canceled) && strings.TrimSpace(err.Error()) != "" {
 		message = safeUpdateError(err)
 	}
-	r.finishUpdate(command.OperationID, update.PhaseFailed, message)
+	r.failUpdate(command.OperationID, message)
 }
 
 // publishUpdateProgress forwards runner progress for the operation that still holds admission.
@@ -241,42 +255,30 @@ func updateFailureMessage(outcome update.Outcome, err error) string {
 	return safeUpdateError(errors.New(outcome.Message))
 }
 
-func (r *Runtime) finishUpdate(operationID string, phase update.Phase, message string) {
-	receipt, ok := r.updateOps.Complete(operationID, phase, message)
+// failUpdate restores process admission before another operation can start or observe FAILED.
+func (r *Runtime) failUpdate(operationID, message string) {
+	r.admissionMu.Lock()
+	receipt, ok := r.updateOps.Complete(operationID, update.PhaseFailed, message)
 	if !ok {
+		r.admissionMu.Unlock()
 		return
+	}
+	if runner := r.options.Update; runner != nil {
+		runner.ResumeAfterFailedUpdate()
 	}
 	r.status.EndUpdate()
-	r.clearUpdateWatch()
-	_ = r.sendStatus()
-	_ = r.sendUpdateReceipt(receipt)
-}
-
-func (r *Runtime) failActiveUpdate(operationID, message string) {
-	active, ok := r.updateOps.Active()
-	if !ok || active.Command.OperationID != operationID {
-		return
-	}
-	receipt, ok := r.updateOps.FailActive(message)
-	if !ok {
-		return
-	}
-	r.status.EndUpdate()
-	r.clearUpdateWatch()
-	_ = r.sendStatus()
-	_ = r.sendUpdateReceipt(receipt)
-}
-
-func (r *Runtime) clearUpdateWatch() {
 	r.updateMu.Lock()
 	stop := r.updateWatch
 	r.updateWatch = nil
 	r.updateCancel = nil
 	r.updatePermit = nil
 	r.updateMu.Unlock()
+	r.admissionMu.Unlock()
 	if stop != nil {
 		stop()
 	}
+	_ = r.sendStatus()
+	_ = r.sendUpdateReceipt(receipt)
 }
 
 func (r *Runtime) sendUpdateReceipt(receipt update.Receipt) error {
@@ -307,11 +309,12 @@ func (r *Runtime) deliverUpdateReceipt(receipt update.Receipt) error {
 func (r *Runtime) releaseUpdatePermit() error {
 	r.updateMu.Lock()
 	permit := r.updatePermit
-	r.updateMu.Unlock()
 	if permit == nil {
+		r.updateMu.Unlock()
 		return nil
 	}
 	if err := permit(); err != nil {
+		r.updateMu.Unlock()
 		if r.options.ReportError != nil {
 			r.options.ReportError(err)
 		}
@@ -319,7 +322,6 @@ func (r *Runtime) releaseUpdatePermit() error {
 	}
 	// A later update command must not observe or re-run the permit this release already consumed; a
 	// failed release keeps it so the receipt replay can retry.
-	r.updateMu.Lock()
 	r.updatePermit = nil
 	r.updateMu.Unlock()
 	return nil
