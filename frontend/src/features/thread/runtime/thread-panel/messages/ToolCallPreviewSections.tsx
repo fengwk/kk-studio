@@ -57,14 +57,20 @@ export function LossyDecodeWarning({
   )
 }
 
-/** write 的审批审查 diff：后端冻结的 review diff，有界滚动。 */
-export function WriteReviewSection({ preview }: { preview: Extract<ToolCallPreviewData, { kind: 'write' }> }) {
+/** write 的冻结审查 diff：审批卡有界滚动，只读记录由短窗口 / 完整详情自己限定高度。 */
+export function WriteReviewSection({
+  preview,
+  bounded = true,
+}: {
+  preview: Extract<ToolCallPreviewData, { kind: 'write' }>
+  bounded?: boolean
+}) {
   const review = preview.review
   if (!review) {
     return null
   }
   return (
-    <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
+    <ToolOutputViewport bounded={bounded} className="thread-tool-preview-body is-edit">
       {review.diff.split('\n').map((line, index, lines) => (
         <span key={`diff-${index}`} className={diffLineClass(line)}>
           {line}

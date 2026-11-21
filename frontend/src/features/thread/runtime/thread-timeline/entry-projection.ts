@@ -173,7 +173,7 @@ function projectTurnStartSettings(
   context.lastSettings = settings
 }
 
-/** 回合页脚只展示用量；缺失时以 '-' 占位，分支始终绑定真实 TURN_END Entry id。 */
+/** 回合页脚只展示用量；缺失时文本为空（由渲染层给出本地化的「无用量」），分支始终绑定真实 TURN_END Entry id。 */
 type TurnEndMeta = MetaDialogueMessage & { endEntryId: string }
 
 function turnEndMeta(
@@ -188,7 +188,7 @@ function turnEndMeta(
     role: 'meta',
     kind: 'turn_usage',
     subjectEntryId: entry.entryId,
-    text: '-',
+    text: '',
     createdAt: entry.createdAt,
     status: 'done',
     endEntryId: entry.entryId,

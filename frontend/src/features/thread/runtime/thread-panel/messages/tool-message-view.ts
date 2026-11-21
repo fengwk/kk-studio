@@ -131,18 +131,26 @@ export function buildToolMessageView({
     isTerminalWithoutReview,
   })
 
+  // write 的冻结审查 diff 只在等待审批期间充当时间线材料；终态沿用既有正文展示，
+  // 仅把 review 从展示里摘掉，preview.path 仍取审查给出的权威目标。
+  const renderedPreview = preview?.kind === 'write' && isTerminal && preview.review != null
+    ? { ...preview, review: undefined }
+    : preview
+
   const hasCallPreview =
     CALL_PREVIEW_TOOLS.has(normalizedName)
-    && preview != null
+    && renderedPreview != null
     && (
-      preview.kind === 'write'
-        ? (preview.hasContent || preview.content.length > 0 || preview.path.length > 0)
+      renderedPreview.kind === 'write'
+        ? (renderedPreview.hasContent
+          || renderedPreview.content.length > 0
+          || renderedPreview.path.length > 0)
         : (
-          preview.mode === 'preparing'
-          || (preview.mode === 'input' && preview.entries.some(
+          renderedPreview.mode === 'preparing'
+          || (renderedPreview.mode === 'input' && renderedPreview.entries.some(
             (entry) => entry.oldText.length > 0 || entry.newText.length > 0,
           ))
-          || (preview.mode === 'review' && preview.lines.length > 0)
+          || (renderedPreview.mode === 'review' && renderedPreview.lines.length > 0)
         )
     )
   const hasCallRecordBody =
@@ -160,7 +168,7 @@ export function buildToolMessageView({
   return {
     callMessage,
     resultMessage,
-    preview,
+    preview: renderedPreview,
     visualState: facts.visualState,
     executionState,
     contents,

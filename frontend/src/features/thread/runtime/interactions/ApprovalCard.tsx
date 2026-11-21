@@ -150,6 +150,7 @@ export function ApprovalCard({
         <div className="interaction-actions-bar">
           <Button
             variant="ghost"
+            danger
             size="compact"
             className="interaction-deny-btn"
             disabled={busy || isNonRecoverable}

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { MetaMessageBlock } from '@/features/thread/runtime/thread-panel/messages/MetaMessageBlock'
 import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
 import type { MetaDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { setLocale } from '@/shared/i18n'
 
 describe('MetaMessageBlock', () => {
   // 意图：回合 footer 的 hover 明细必须由真实 turnUsage 事实生成完整数字与全称字段，
@@ -52,7 +53,7 @@ describe('MetaMessageBlock', () => {
       role: 'meta',
       kind: 'turn_usage',
       subjectEntryId: null,
-      text: '-',
+      text: '',
       endEntryId: 'end-nousage',
       createdAt: 1000,
     }
@@ -60,10 +61,32 @@ describe('MetaMessageBlock', () => {
     render(<MetaMessageBlock message={message} />)
 
     const block = document.querySelector('.thread-meta-text')
-    expect(block).toHaveTextContent('-')
+    expect(block).toHaveTextContent('无用量')
     expect(block).not.toHaveAttribute('title')
     expect(document.querySelector('.thread-block-meta'))
       .toHaveAttribute('data-turn-end', 'end-nousage')
+  })
+
+  // 意图：无用量占位是本地化文案，不得回落到孤立符号或英文原样。
+  it('localizes the no-usage placeholder', () => {
+    const message: MetaDialogueMessage = {
+      id: 'meta-msg-locale',
+      role: 'meta',
+      kind: 'turn_usage',
+      subjectEntryId: null,
+      text: '',
+      endEntryId: 'end-locale',
+      createdAt: 1000,
+    }
+
+    setLocale('en-US')
+    const { unmount } = render(<MetaMessageBlock message={message} />)
+    expect(screen.getByText('No usage')).toBeInTheDocument()
+    unmount()
+
+    setLocale('zh-CN')
+    render(<MetaMessageBlock message={message} />)
+    expect(screen.getByText('无用量')).toBeInTheDocument()
   })
 
   // 意图：缺失用量占位仍可分支，并且只请求真正关闭回合的 TURN_END。
@@ -74,7 +97,7 @@ describe('MetaMessageBlock', () => {
       role: 'meta',
       kind: 'turn_usage',
       subjectEntryId: null,
-      text: '-',
+      text: '',
       endEntryId: 'end-1',
       createdAt: 2000,
     }
@@ -88,7 +111,7 @@ describe('MetaMessageBlock', () => {
     expect(screen.getByTestId('thread-turn-end-branch')).toBeInTheDocument()
     const section = document.querySelector('.thread-block-meta')
     expect(section).toHaveAttribute('data-turn-end', 'end-1')
-    expect(screen.getByText('-')).not.toHaveAttribute('title')
+    expect(screen.getByText('无用量')).not.toHaveAttribute('title')
     fireEvent.click(screen.getByTestId('thread-turn-end-branch'))
     expect(request).toHaveBeenCalledExactlyOnceWith('end-1')
   })
@@ -144,7 +167,7 @@ describe('MetaMessageBlock', () => {
       role: 'meta',
       kind: 'turn_usage',
       subjectEntryId: null,
-      text: '-',
+      text: '',
       endEntryId: 'end-9',
       createdAt: 2000,
     }

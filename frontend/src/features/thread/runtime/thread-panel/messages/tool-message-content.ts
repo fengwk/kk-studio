@@ -81,7 +81,10 @@ export function withoutExactError(
   return contents.length === message.contents.length ? message : { ...message, contents }
 }
 
-/** 预览保留尾部；edit 草稿只取替换文本，各条目共享同一个窗口。 */
+/**
+ * 预览保留尾部；edit 草稿只取替换文本，各条目共享同一个窗口。待审批的 write 已有冻结
+ * 审查 diff 时与 edit 一致，只开一个 diff 尾部窗口，正文不再重复占用预览配额。
+ */
 export function windowMutationPreview(
   preview: ToolCallPreviewData | null,
   limit: number,
@@ -91,6 +94,17 @@ export function windowMutationPreview(
     return { preview, window: null }
   }
   if (preview.kind === 'write') {
+    if (preview.review != null) {
+      const window = discloseText(preview.review.diff, limit, 'end', maxChars)
+      return {
+        preview: window.text === '' ? null : {
+          ...preview,
+          review: { ...preview.review, diff: window.text },
+        },
+        window,
+        hasFullDetails: window.hiddenLines > 0 || window.truncated,
+      }
+    }
     if (!preview.hasContent) return { preview: null, window: null }
     const window = discloseText(preview.content, limit, 'end', maxChars)
     return {

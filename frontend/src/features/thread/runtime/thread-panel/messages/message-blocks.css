@@ -86,22 +86,85 @@
   color: var(--fg-muted);
 }
 
+/* 失败卡正文：可读摘要在上，完整原始错误文本折在详情里。 */
 .thread-block-model-attempt-failure-error {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: column;
+  gap: var(--space-2);
   padding: 6px 12px;
   border-left: 2px solid var(--danger-border);
   background: transparent;
 }
 
-.thread-block-model-attempt-failure-error code {
-  flex: 0 0 auto;
-  color: var(--danger);
+.thread-attempt-failure-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.thread-attempt-failure-headline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.thread-attempt-failure-kind {
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.thread-attempt-failure-http {
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+}
+
+.thread-attempt-failure-detail {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.thread-attempt-failure-raw {
+  min-width: 0;
+}
+
+.thread-attempt-failure-raw > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.thread-attempt-failure-raw > summary:hover {
+  color: var(--fg);
+}
+
+.thread-attempt-failure-raw-body {
+  position: relative;
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 
 .thread-block-model-attempt-failure-error .thread-error-raw {
   min-width: 0;
-  flex: 1;
+  padding-right: var(--space-8);
   color: var(--fg-muted);
+}
+
+/* 详情展开后复制始终可见：这里不采用代码块的 hover 显隐。 */
+.thread-block-model-attempt-failure-error .thread-attempt-failure-copy {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  opacity: 1;
+  pointer-events: auto;
 }

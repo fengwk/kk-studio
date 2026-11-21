@@ -3,7 +3,7 @@ import { ThreadComposer } from '@/features/thread/runtime/thread-panel/ThreadCom
 import type { ThreadPanelComposerInput } from '@/features/thread/runtime/thread-panel/ThreadPanel'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
 import { InteractionOwnerSource } from '@/features/thread/runtime/interactions/InteractionOwnerSource'
-import { useInteractionsController } from '@/features/thread/runtime/interactions/useInteractionsController'
+import { useRootInteractions } from '@/features/thread/runtime/interactions/root-interactions'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { interactionIdentity, manualInteractions } from '@/shared/lib/interactions'
@@ -20,7 +20,8 @@ import '@/features/thread/runtime/panes/root-thread-control-area.css'
  *
  * 只挂载在根面板（或新建草稿面板）上：草稿、上传注册表和人工执行 Hook 全部由
  * 传入的 composer 契约决定，只读子代理视图不会构造它，因此不会出现任何写入口。
- * 根交互来自 `GET /interactions?rootThreadId=`，卡片按原始调用的 threadId/invocationId
+ * 根交互来自 `GET /interactions?rootThreadId=`（由执行根 pane 的
+ * `RootInteractionsProvider` 统一持有），卡片按原始调用的 threadId/invocationId
  * 写回，根 ID 只用于过滤。
  */
 export function RootThreadControlArea({
@@ -91,7 +92,7 @@ export function RootThreadControlArea({
     >
       {rootThreadId == null
         ? null
-        : <RootInteractionList rootThreadId={rootThreadId} />}
+        : <RootInteractionList />}
       {notice}
       <ThreadComposer
         ref={composerRef}
@@ -117,15 +118,7 @@ export function RootThreadControlArea({
   )
 }
 
-/**
- * 根交互列表：只渲染可操作的人工等待（问卷/审批），归属来自会话归属 SPI，显示与全局待处理页
- * 一致；写回始终使用原始 `threadId`/`toolInvocationId`，完整分页保留，刷新失败即使已有旧数据
- * 也照常显示，不把失败伪装成“已无待决交互”。
- *
- * <p>环境等待不在这里重复呈现第二张提醒卡：它是 `(真实执行根, 所需环境)` 聚合，没有可回写的调用，
- * 只在全局待处理页与工具状态行（W3 切片）呈现。过滤后仍保留 `loadMore`，避免首页只有环境等待时
- * 把后续页的人工等待一并藏起来。
- */
+/** 历史草稿重建：文本仍走文本 part，只有具备持久资源 id 的附件才参与回填。 */
 function composerParts(contents: DialogueContent[]) {
   return contents.flatMap((content) => {
     if (content.type === 'text') {
@@ -141,8 +134,24 @@ function composerParts(contents: DialogueContent[]) {
   })
 }
 
-function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
+/**
+ * 根交互列表：渲染可操作的人工等待（问卷/审批），归属来自会话归属 SPI，显示与全局待处理页
+ * 一致；写回始终使用原始 `threadId`/`toolInvocationId`，完整分页保留，刷新失败即使已有旧数据
+ * 也照常显示，不把失败伪装成“已无待决交互”。
+ *
+ * 条目来自执行根 pane 的 `RootInteractionsProvider`：同一份列表也是时间线判断
+ * 「同一调用的审批卡是否可见」的唯一依据，两边共享同一个 controller。
+ *
+ * 环境等待不在这里重复呈现第二张提醒卡：它是 `(真实执行根, 所需环境)` 聚合，没有可回写的调用，
+ * 只在全局待处理页与工具状态行呈现。过滤后仍保留 `loadMore`，避免首页只有环境等待时
+ * 把后续页的人工等待一并藏起来。
+ */
+function RootInteractionList() {
   const { t } = useI18n()
+  const interactions = useRootInteractions()
+  if (interactions == null) {
+    return null
+  }
   const {
     items,
     isLoading,
@@ -152,7 +161,7 @@ function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
     refresh,
     loadMore,
     removeItem,
-  } = useInteractionsController(rootThreadId)
+  } = interactions
 
   const manualItems = manualInteractions(items)
   if (manualItems.length === 0 && !isError && !hasMore) {

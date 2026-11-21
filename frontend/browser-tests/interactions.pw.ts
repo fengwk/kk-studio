@@ -1,8 +1,13 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import type { Route } from '@playwright/test'
 import { expect, test, tokenColor, type Page } from './fixture'
 import type { InteractionDTO } from '../src/shared/api/generated/contracts'
 
 const HARNESS_URL = '/browser-tests/interactions-harness.html'
+const QUESTIONNAIRE_HARNESS_URL = '/browser-tests/questionnaire-card-harness.html'
+/** 问卷卡自查截图目录：未设置时不输出截图、不跳过语义断言。 */
+const QUESTIONNAIRE_SHOTS_DIR = process.env.KK_QUESTIONNAIRE_SHOTS_DIR
 
 const APPROVAL_INTERACTION_ID = 'int-approval'
 const QUESTIONNAIRE_INTERACTION_ID = 'int-questionnaire'
@@ -415,10 +420,11 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(allowStyle.border).toBe(await tokenColor(page, '--accent-border'))
       const denyStyle = await card.locator('.interaction-deny-btn').evaluate((el) => {
         const style = getComputedStyle(el)
-        return { background: style.backgroundImage, border: style.borderTopColor }
+        return { background: style.backgroundImage, border: style.borderTopColor, color: style.color }
       })
       expect(denyStyle.background).toBe('none')
-      expect(denyStyle.border).toBe(await tokenColor(page, '--border'))
+      expect(denyStyle.border).toBe(await tokenColor(page, '--danger-border'))
+      expect(denyStyle.color).toBe(await tokenColor(page, '--danger'))
 
       await expectNoHorizontalOverflow(page)
 
@@ -744,5 +750,154 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     // 过期决策禁止再次提交，但仍可刷新。
     await expect(card.locator('.interaction-allow-btn')).toBeDisabled()
     await expect(card.locator('.interaction-deny-btn')).toBeDisabled()
+  })
+})
+
+/**
+ * 问卷卡基座只渲染卡片本身：屏蔽应用事件 WS，再按语言与状态打开固定问卷。
+ */
+async function openQuestionnaireHarness(
+  page: Page,
+  state: 'single' | 'multi' | 'answered',
+  locale: 'zh-CN' | 'en-US' = 'zh-CN',
+): Promise<void> {
+  await page.routeWebSocket(/\/ws\/events$/, () => {})
+  await page.goto(`${QUESTIONNAIRE_HARNESS_URL}?locale=${locale}&state=${state}`)
+  await expect(page.locator('.interaction-questionnaire-card')).toBeVisible()
+}
+
+test.describe('questionnaire option semantics and read-only answers', () => {
+  test('single choice is one radiogroup with roving focus, arrows moving focus and space/enter selecting', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await openQuestionnaireHarness(page, 'single')
+
+    // 题目文本就是单选组的可访问名称；每个选项以 radio + aria-checked 暴露状态。
+    const group = page.getByRole('radiogroup', { name: '请选择本次发布窗口' })
+    await expect(group).toBeVisible()
+    const radios = group.getByRole('radio')
+    await expect(radios).toHaveCount(3)
+    await expect(radios.nth(0)).toHaveAttribute('aria-checked', 'false')
+    // 组内只有单一 Tab 停靠点。
+    expect(await radios.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('tabindex'))))
+      .toEqual(['0', '-1', '-1'])
+    // 单选指示器是圆形。
+    await expect(radios.nth(0).locator('.interaction-option-indicator.is-radio'))
+      .toHaveCSS('border-radius', '50%')
+
+    await radios.nth(0).focus()
+    await page.keyboard.press('ArrowDown')
+    await expect(radios.nth(1)).toBeFocused()
+    // 方向键只移动焦点，不代替回车/空格完成选择。
+    await expect(radios.nth(1)).toHaveAttribute('aria-checked', 'false')
+
+    await page.keyboard.press('Space')
+    await expect(radios.nth(1)).toHaveAttribute('aria-checked', 'true')
+    await expect(radios.nth(0)).toHaveAttribute('aria-checked', 'false')
+
+    await page.keyboard.press('ArrowDown')
+    await expect(radios.nth(2)).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(radios.nth(2)).toHaveAttribute('aria-checked', 'true')
+    await expect(radios.nth(1)).toHaveAttribute('aria-checked', 'false')
+    // 选中项沿用既有选中态视觉，与 aria-checked 同步。
+    await expect(radios.nth(2)).toHaveClass(/is-selected/)
+    await expect(radios.nth(2)).toHaveCSS('border-top-color', await tokenColor(page, '--accent'))
+    await page.keyboard.press('Space')
+    await expect(radios.nth(2)).toHaveAttribute('aria-checked', 'true')
+
+    // 向下到末尾后环绕回第一项，焦点始终留在组内。
+    await page.keyboard.press('ArrowDown')
+    await expect(radios.nth(0)).toBeFocused()
+    await expect(radios.nth(2)).toHaveAttribute('aria-checked', 'true')
+  })
+
+  test('multiple choice stays a checkbox group with square indicators and independent toggles', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await openQuestionnaireHarness(page, 'multi')
+
+    await expect(page.getByRole('radiogroup')).toHaveCount(0)
+    const group = page.getByRole('group', { name: '请选择需要归档的产物' })
+    await expect(group).toBeVisible()
+    const boxes = group.getByRole('checkbox')
+    await expect(boxes).toHaveCount(3)
+    // 复选框各自可 Tab 进入，不共享 Tab 停靠点。
+    expect(await boxes.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('tabindex'))))
+      .toEqual([null, null, null])
+
+    await boxes.nth(0).click()
+    await boxes.nth(2).click()
+    await expect(boxes.nth(0)).toHaveAttribute('aria-checked', 'true')
+    await expect(boxes.nth(1)).toHaveAttribute('aria-checked', 'false')
+    await expect(boxes.nth(2)).toHaveAttribute('aria-checked', 'true')
+    // 多选指示器是方形，选中态显示勾。
+    await expect(boxes.nth(0).locator('.interaction-option-indicator.is-checkbox'))
+      .toHaveCSS('border-radius', '3px')
+    await expect(boxes.nth(0).locator('.interaction-option-indicator svg')).toHaveCount(1)
+
+    await boxes.nth(0).click()
+    await expect(boxes.nth(0)).toHaveAttribute('aria-checked', 'false')
+    await expect(boxes.nth(2)).toHaveAttribute('aria-checked', 'true')
+  })
+
+  test('answered questionnaire is read-only and shows the chosen answers', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openQuestionnaireHarness(page, 'answered')
+
+    const card = page.locator('.interaction-questionnaire-card')
+    await expect(card.getByText('已完成')).toBeVisible()
+    await expect(card.getByText('本周日 01:00')).toBeVisible()
+    // 已回答只展示物化结果：没有选择控件、输入框或提交动作。
+    await expect(page.getByRole('radio')).toHaveCount(0)
+    await expect(page.getByRole('checkbox')).toHaveCount(0)
+    await expect(page.getByRole('textbox')).toHaveCount(0)
+    await expect(page.getByRole('button')).toHaveCount(0)
+  })
+})
+
+test.describe('questionnaire self-check screenshots', () => {
+  test.skip(
+    QUESTIONNAIRE_SHOTS_DIR == null,
+    '设置 KK_QUESTIONNAIRE_SHOTS_DIR 才输出问卷卡自查截图',
+  )
+
+  test('captures single, multiple and answered states at 1440x900 and 390x844 in both locales', async ({
+    page,
+  }) => {
+    const shotsDir = QUESTIONNAIRE_SHOTS_DIR!
+    fs.mkdirSync(shotsDir, { recursive: true })
+    await page.routeWebSocket(/\/ws\/events$/, () => {})
+
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      for (const viewport of [
+        { width: 1440, height: 900, name: '1440x900' },
+        { width: 390, height: 844, name: '390x844' },
+      ]) {
+        for (const state of ['single', 'multi', 'answered'] as const) {
+          await page.setViewportSize({ width: viewport.width, height: viewport.height })
+          await page.goto(`${QUESTIONNAIRE_HARNESS_URL}?locale=${locale}&state=${state}`)
+          await expect(page.locator('.interaction-questionnaire-card')).toBeVisible()
+          if (state !== 'answered') {
+            // 先选中一项，让截图同时呈现选中与未选中态。
+            await page.locator('.interaction-option-btn').nth(0).click()
+          }
+          if (state === 'multi') {
+            await page.locator('.interaction-option-btn').nth(2).click()
+          }
+          const metrics = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+          }))
+          expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1)
+          await page.screenshot({
+            path: path.join(shotsDir, `questionnaire-${locale}-${viewport.name}-${state}.png`),
+            fullPage: true,
+          })
+        }
+      }
+    }
   })
 })

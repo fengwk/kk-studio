@@ -5,10 +5,15 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
 import { ApprovalCard } from '@/features/thread/runtime/interactions/ApprovalCard'
+import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
+import {
+  ApprovalReviewProvider,
+  visibleApprovalInvocationIds,
+} from '@/features/thread/runtime/interactions/approval-review-context'
 import type { DialogueMessage, ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
-import type { HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
+import type { HarnessSessionEntryDTO, InteractionApproval, ToolInvocationDTO } from '@/shared/api/generated/contracts'
 import { ApplicationEventTestProvider } from '@/test-support/application-event-test-provider'
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -1377,5 +1382,230 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     const { container } = renderTimelineTool(timeline.messages)
     // 损坏的 detailsJson 解析失败后 details 为 undefined，绝不能回退透传 content.details
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
+  })
+})
+
+describe('待审批 mutation 的冻结审查材料只出现一次', () => {
+  const editArguments = JSON.stringify({
+    path: '/src/Dedup.tsx',
+    edits: [{ old_string: 'old', new_string: 'new' }],
+  })
+  const editReview = {
+    path: '/src/Dedup.tsx',
+    diff: '-01|old\n+01|new',
+    sha256: validSha,
+  }
+  const writeLines = Array.from({ length: 14 }, (_, index) => `line-${index + 1}`)
+  const writeArguments = JSON.stringify({
+    path: '/src/DedupWrite.ts',
+    workdir: '/workspace',
+    content: writeLines.join('\n'),
+  })
+  const writeReview = {
+    path: '/src/DedupWrite.ts',
+    diff: writeLines.map((line, index) => `+${index + 1}|${line}`).join('\n'),
+    sha256: null as string | null,
+  }
+  type Review = { path: string; diff: string; sha256: string | null }
+
+  /** 待审批调用：durable invocation 已冻结审查，审批卡与时间线都能读到同一份事实。 */
+  function pendingMutation(
+    toolName: 'edit' | 'write',
+    invocationId: string,
+    argumentsJson: string,
+    review: Review,
+  ): ToolDialogueMessage {
+    return {
+      id: `call-${invocationId}`,
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-dedup',
+      toolCallId: `call-${invocationId}`,
+      toolName,
+      rendererKey: toolName,
+      arguments: argumentsJson,
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'done',
+      invocationId,
+      invocationStatus: 'WAITING_APPROVAL',
+      approval: {
+        required: true,
+        decision: null,
+        decisionId: null,
+        reason: 'Permission rules require approval',
+        editReview: review,
+      },
+      editReview: review,
+    }
+  }
+
+  /** 与根控制区/待处理页相同的审批条目，卡片挂载即声明为该调用的唯一审查位。 */
+  function approvalItem(
+    invocationId: string,
+    toolName: 'edit' | 'write',
+    argumentsJson: string,
+    review: Review,
+  ): InteractionApproval {
+    return {
+      type: 'APPROVAL',
+      toolInvocationId: invocationId,
+      threadId: 'thread-1',
+      sessionId: 'sess-dedup',
+      rootThreadId: 'thread-1',
+      owner: { kind: 'CHAT', id: 'chat-1', title: 'Review' },
+      toolCallId: `call-${invocationId}`,
+      toolName,
+      argumentsJson,
+      approval: { required: true, editReview: review },
+      queuedSameFileCount: 0,
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+    }
+  }
+
+  /**
+   * 执行根 pane 视图：同一 provider 同时包住时间线与审批卡（与 RootAgentPane 一致），
+   * 审批位只由这些真实渲染的条目构成。
+   */
+  function rootPaneView(tool: ReactNode, cards: InteractionApproval[]) {
+    return (
+      <ApprovalReviewProvider toolInvocationIds={visibleApprovalInvocationIds(cards)}>
+        {tool}
+        {cards.map((card) => (
+          <InteractionCardBody key={card.toolInvocationId} item={card} />
+        ))}
+      </ApprovalReviewProvider>
+    )
+  }
+
+  it('审批卡可见时 edit 工具卡只剩名称、目标与等待审批，diff 只出现一次', () => {
+    const message = pendingMutation('edit', 'inv-edit-card', editArguments, editReview)
+    const { container } = render(
+      rootPaneView(
+        <ToolMessageBlock message={message} />,
+        [approvalItem('inv-edit-card', 'edit', editArguments, editReview)],
+      ),
+      { wrapper },
+    )
+
+    const card = container.querySelector('.thread-block-tool') as HTMLElement
+    expect(card).toHaveAttribute('data-invocation-state', 'approval')
+    expect(card.querySelector('.thread-tool-name')).toHaveTextContent('edit')
+    expect(card.querySelector('.thread-tool-summary-detail')).toHaveTextContent('/src/Dedup.tsx')
+    expect(card.querySelector('.thread-tool-state-label')).toHaveTextContent('等待审批')
+    // 等待审批期间不再展开同一 diff，也没有详情入口。
+    expect(card.querySelector('.thread-tool-preview-body')).toBeNull()
+    expect(card.querySelector('.thread-tool-details')).toBeNull()
+    expect(card.querySelector('.thread-disclosure-toggle')).toBeNull()
+
+    const approval = container.querySelector('.interaction-approval-card') as HTMLElement
+    expect(within(approval).getByText('-01|old')).toBeInTheDocument()
+    // 整页只有审批卡这一份冻结 diff。
+    expect(container.querySelectorAll('.thread-tool-preview-body.is-edit')).toHaveLength(1)
+  })
+
+  it('审批卡可见时 write 工具卡不再重复冻结正文，无卡的只读记录保留冻结 diff', () => {
+    const message = pendingMutation('write', 'inv-write-card', writeArguments, writeReview)
+    const { container, rerender } = render(
+      rootPaneView(
+        <ToolMessageBlock message={message} />,
+        [approvalItem('inv-write-card', 'write', writeArguments, writeReview)],
+      ),
+      { wrapper },
+    )
+
+    const card = container.querySelector('.thread-block-tool') as HTMLElement
+    expect(card.querySelector('.thread-tool-preview-body')).toBeNull()
+    expect(card.querySelector('.thread-disclosure-toggle')).toBeNull()
+    // 审批卡自己只展示一份待写正文（冻结 diff 收在原生 summary 里）。
+    expect(container.querySelectorAll('.thread-tool-preview-body.is-write')).toHaveLength(1)
+
+    // 只读视图（子 Agent 面板、审批卡未加载/未渲染）没有审查位，工具卡必须继续交出 diff。
+    rerender(<ToolMessageBlock message={message} />)
+    const readonlyCard = container.querySelector('.thread-block-tool') as HTMLElement
+    const readonlyDiff = readonlyCard.querySelector('.thread-tool-preview-body.is-edit')
+    expect(readonlyDiff).toBeInTheDocument()
+    expect(readonlyDiff?.textContent)
+      .toBe(writeLines.slice(-10).map((line, index) => `+${index + 5}|${line}`).join('\n'))
+    expect(readonlyCard.querySelector('.thread-tool-preview-body.is-write')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(readonlyCard.querySelector('.thread-tool-details .thread-tool-preview-body.is-edit')?.textContent)
+      .toBe(writeReview.diff)
+  })
+
+  it('只有同一调用自己的审批卡参与去重，其他调用的卡片不影响本调用的 diff', () => {
+    const message = pendingMutation('edit', 'inv-shared-a', editArguments, editReview)
+    const { container } = render(
+      rootPaneView(
+        <ToolMessageBlock message={message} />,
+        [approvalItem('inv-shared-b', 'edit', editArguments, editReview)],
+      ),
+      { wrapper },
+    )
+
+    const card = container.querySelector('.thread-block-tool') as HTMLElement
+    expect(card.querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
+    expect(card.querySelector('.thread-disclosure-toggle')).toBeNull()
+  })
+
+  it('审批结束后工具卡按既有规则展示结果，不依赖审批卡是否还在', () => {
+    const message = pendingMutation('edit', 'inv-terminal', editArguments, editReview)
+    const result: ToolDialogueMessage = {
+      id: 'result-inv-terminal',
+      role: 'tool',
+      phase: 'result',
+      subjectEntryId: 'asst-dedup',
+      toolCallId: 'call-inv-terminal',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: editArguments,
+      contents: [{ type: 'text', text: 'Edited successfully.' }],
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
+      status: 'done',
+    }
+    const card = approvalItem('inv-terminal', 'edit', editArguments, editReview)
+    const { container, rerender } = render(
+      rootPaneView(
+        <ToolMessageBlock message={{ ...message, invocationStatus: 'SUCCEEDED' }} result={result} />,
+        [card],
+      ),
+      { wrapper },
+    )
+
+    // 允许并完成：终态恢复既有展示规则（审批快照 diff 优先），不受待审批去重影响。
+    const succeededCard = container.querySelector('.thread-block-tool') as HTMLElement
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', 'succeeded')
+    expect(succeededCard.querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
+
+    // 拒绝：失败终态保留真实错误，不伪造成成功摘要。
+    rerender(
+      rootPaneView(
+        <ToolMessageBlock
+          message={{ ...message, status: 'error', invocationStatus: 'FAILED' }}
+          result={{ ...result, status: 'error', errorMessage: 'The user denied this change.' }}
+        />,
+        [card],
+      ),
+    )
+    expect(screen.getByText('The user denied this change.')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+  })
+
+  it('审批位消失后 diff 回到时间线，首屏无卡时也不会丢材料', () => {
+    const message = pendingMutation('edit', 'inv-reload', editArguments, editReview)
+    const card = approvalItem('inv-reload', 'edit', editArguments, editReview)
+    const { container, rerender } = render(<ToolMessageBlock message={message} />, { wrapper })
+    const toolCard = () => container.querySelector('.thread-block-tool') as HTMLElement
+
+    // 分页未加载 / 首屏仍在读取：没有审查位，材料留在时间线。
+    expect(toolCard().querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
+
+    rerender(rootPaneView(<ToolMessageBlock message={message} />, [card]))
+    expect(toolCard().querySelector('.thread-tool-preview-body')).toBeNull()
+
+    // 审批卡随交互列表刷新卸载：材料立即回到时间线。
+    rerender(rootPaneView(<ToolMessageBlock message={message} />, []))
+    expect(toolCard().querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
   })
 })

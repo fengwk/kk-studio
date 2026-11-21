@@ -247,7 +247,8 @@ describe('vite browser build contract', () => {
     )
     expect(keys).toContain('resource-attachment-ide-harness')
     expect(keys).toContain('workbench-not-found-harness')
-    expect(keys.length).toBe(39)
+    expect(keys).toContain('questionnaire-card-harness')
+    expect(keys.length).toBe(40)
   })
 
   // 验证静态构建目标与 MPA 模式

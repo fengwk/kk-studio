@@ -1251,6 +1251,62 @@ export const chatCatalog = {
     'en-US': 'Model request failed',
     'zh-CN': '模型请求失败',
   },
+  'ai.runtime.message.modelFailureTransient': {
+    'en-US': 'The model service is temporarily unavailable',
+    'zh-CN': '模型服务暂时不可用',
+  },
+  'ai.runtime.message.modelFailureContextLimit': {
+    'en-US': 'Context exceeds the model limit',
+    'zh-CN': '上下文超出模型限制',
+  },
+  'ai.runtime.message.modelFailureRequestBodyLimit': {
+    'en-US': 'Request body exceeds the model limit',
+    'zh-CN': '请求体超出模型限制',
+  },
+  'ai.runtime.message.modelFailureMediaLimit': {
+    'en-US': 'Attached media exceeds the model limit',
+    'zh-CN': '附件媒体超出模型限制',
+  },
+  'ai.runtime.message.modelFailureAuthentication': {
+    'en-US': 'Model authentication failed',
+    'zh-CN': '模型认证失败',
+  },
+  'ai.runtime.message.modelFailureBilling': {
+    'en-US': 'Account balance or quota exhausted',
+    'zh-CN': '账户余额或配额不足',
+  },
+  'ai.runtime.message.modelFailureInvalidRequest': {
+    'en-US': 'The model rejected the request',
+    'zh-CN': '模型拒绝了该请求',
+  },
+  'ai.runtime.message.modelFailureInvalidResponse': {
+    'en-US': 'The model returned an unusable response',
+    'zh-CN': '模型返回了无法处理的响应',
+  },
+  'ai.runtime.message.modelFailureCancelled': {
+    'en-US': 'The model request was cancelled',
+    'zh-CN': '模型请求已取消',
+  },
+  'ai.runtime.message.modelFailureNoAvailableModel': {
+    'en-US': 'No model is available',
+    'zh-CN': '没有可用的模型',
+  },
+  'ai.runtime.message.modelFailureHttpStatus': {
+    'en-US': 'HTTP {{status}}',
+    'zh-CN': 'HTTP {{status}}',
+  },
+  'ai.runtime.message.modelFailureRawResponse': {
+    'en-US': 'Raw response',
+    'zh-CN': '原始响应',
+  },
+  'ai.runtime.message.modelFailureCopyRawResponse': {
+    'en-US': 'Copy raw response',
+    'zh-CN': '复制原始响应',
+  },
+  'ai.runtime.message.noUsage': {
+    'en-US': 'No usage',
+    'zh-CN': '无用量',
+  },
   'ai.runtime.message.attemptNumber': {
     'en-US': 'Request #{{attempt}}',
     'zh-CN': '请求 #{{attempt}}',
