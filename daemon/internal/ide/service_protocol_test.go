@@ -111,8 +111,12 @@ func TestLiveRepliesProtocol(t *testing.T) {
 		t.Fatalf("host cancellation did not detach both service and bridge streams: count=%d connected=%v", count, bridge.IsConnected(opened.GetViewId(), opened.GetBindingEpoch()))
 	}
 	validateLiveIDEReply(t, changed, true)
-	if !changed.GetOk() || changed.GetDirectory() != next {
-		t.Fatalf("invalid CHANGE_DIRECTORY reply: %v", changed)
+	want := proto.CloneOf(opened.GetViews()[0])
+	want.Directory = proto.String(next)
+	if !changed.GetOk() || changed.GetRevision() <= opened.GetRevision() ||
+		changed.ViewId != nil || changed.Directory != nil ||
+		len(changed.GetViews()) != 1 || !proto.Equal(changed.GetViews()[0], want) {
+		t.Fatalf("CHANGE_DIRECTORY must confirm the same binding with the new directory only in the snapshot: %v", changed)
 	}
 
 	normalCloseUnknown := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
@@ -161,15 +165,15 @@ func validateLiveIDEReply(t *testing.T, reply *protocol.IdeResult, snapshotRequi
 		InvocationId:  stringPointer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
 		Payload:       &protocol.Envelope_IdeResult{IdeResult: reply},
 	}
-	encoded, err := proto.Marshal(envelope)
+	encoded, err := protocol.MarshalEnvelope(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded protocol.Envelope
-	if err := proto.Unmarshal(encoded, &decoded); err != nil {
+	decoded, err := protocol.UnmarshalEnvelope(encoded)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.GetMessageType() != protocol.MessageType_IDE_RESULT || decoded.GetEnvironmentId() == "" || decoded.GetInvocationId() == "" || decoded.GetIdeResult() == nil {
-		t.Fatalf("invalid IDE_RESULT envelope after protobuf round trip: %v", &decoded)
+	if !proto.Equal(decoded, envelope) {
+		t.Fatalf("IDE_RESULT changed after wire round trip: %v", decoded)
 	}
 }

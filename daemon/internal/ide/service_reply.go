@@ -36,13 +36,6 @@ func openReply(view *viewRecord, snapshot IdeSnapshot) *protocol.IdeResult {
 	return result
 }
 
-func changedDirectoryReply(view *viewRecord, snapshot IdeSnapshot) *protocol.IdeResult {
-	result := successSnapshot(snapshot)
-	result.ViewId = stringPtr(view.viewID)
-	result.Directory = stringPtr(view.directory)
-	return result
-}
-
 func viewAck(viewID string) *protocol.IdeResult {
 	return &protocol.IdeResult{Ok: boolPtr(true), ViewId: stringPtr(viewID)}
 }

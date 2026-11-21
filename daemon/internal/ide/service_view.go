@@ -448,7 +448,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 	if err != nil {
 		return nil, err
 	}
-	return changedDirectoryReply(view, s.snapshot()), nil
+	return successSnapshot(s.snapshot()), nil
 }
 
 // reconcileDirectoryChange converges service metadata and the managed workspace after a late host confirmation.

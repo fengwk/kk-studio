@@ -160,7 +160,6 @@ func TestCodec_IDEActions(t *testing.T) {
 	zeroFolder := &IdeViewSummary{ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), WorkspacePath: proto.String("managed/view.code-workspace"), State: IdeViewState_OPEN}
 	results := []*IdeResult{
 		{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID)},
-		{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID), Directory: proto.String("workspace")},
 		{Ok: proto.Bool(true), Revision: proto.Int64(1), Views: []*IdeViewSummary{zeroFolder}},
 		{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), WorkspacePath: proto.String("managed/view.code-workspace"), Revision: proto.Int64(1), Views: []*IdeViewSummary{zeroFolder}},
 		{Ok: proto.Bool(false), Code: proto.String("VIEW_GONE"), Message: proto.String("gone")},
@@ -171,7 +170,11 @@ func TestCodec_IDEActions(t *testing.T) {
 			t.Errorf("IDE result rejected: %v", err)
 		}
 	}
-	blankDirectory := proto.Clone(results[2]).(*IdeResult)
+	partialBinding := &IdeResult{Ok: proto.Bool(true), ViewId: proto.String(testEnvironmentID), Directory: proto.String("workspace")}
+	if _, err := MarshalEnvelope(testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: partialBinding})); err == nil {
+		t.Fatal("directory outside a complete binding or its snapshot accepted")
+	}
+	blankDirectory := proto.Clone(results[1]).(*IdeResult)
 	blankDirectory.Views[0].Directory = proto.String("")
 	if _, err := MarshalEnvelope(testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: blankDirectory})); err == nil {
 		t.Fatal("blank view directory accepted")

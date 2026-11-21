@@ -272,12 +272,6 @@ func validateSuccessfulIDEResult(r *IdeResult) error {
 	if hasIDEBindingFields(r) {
 		return validateIDEBinding(r)
 	}
-	if r.Directory != nil {
-		if err := uuid(r.GetViewId(), "ideResult.viewId"); err != nil {
-			return err
-		}
-		return requireIDEPath(r.GetDirectory(), "ideResult.directory")
-	}
 	if r.ViewId != nil {
 		return uuid(r.GetViewId(), "ideResult.viewId")
 	}
@@ -329,7 +323,7 @@ func hasIDEViewState(r *IdeResult) bool {
 	return r.ViewId != nil || r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.Directory != nil || r.WorkspacePath != nil
 }
 
-// hasIDEBindingFields reports whether the result declares a view binding without its view id.
+// Any top-level binding field, including directory, requires the complete binding.
 func hasIDEBindingFields(r *IdeResult) bool {
-	return r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.WorkspacePath != nil
+	return r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.Directory != nil || r.WorkspacePath != nil
 }

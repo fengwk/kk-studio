@@ -1799,7 +1799,7 @@ func TestLateDirectoryReconciliationCannotOverwriteNewerOperation(t *testing.T) 
 	}
 	select {
 	case result := <-cResult:
-		if !result.GetOk() || result.GetDirectory() != directoryC {
+		if !result.GetOk() || len(result.GetViews()) != 1 || result.GetViews()[0].GetDirectory() != directoryC {
 			t.Fatalf("confirmed C directory result=%v", result)
 		}
 	case <-time.After(time.Second):
@@ -2734,7 +2734,7 @@ func TestZeroFolderViewSwitchesToNativeDirectory(t *testing.T) {
 	}
 	select {
 	case changed := <-resultChannel:
-		if !changed.GetOk() || changed.GetDirectory() != next {
+		if !changed.GetOk() || len(changed.GetViews()) != 1 || changed.GetViews()[0].GetDirectory() != next {
 			t.Fatalf("zero-folder change reply=%v", changed)
 		}
 	case <-time.After(time.Second):

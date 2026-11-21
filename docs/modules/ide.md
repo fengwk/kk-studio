@@ -31,7 +31,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | action | 请求字段 | 成功回执 |
 | --- | --- | --- |
 | `OPEN_VIEW` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`mode(CREATE/RESUME)`、`expectedBindingEpoch`、`expectedDaemonInstanceId`、可选 `directory` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、可选 `directory`、`workspacePath`、`revision`、`views` |
-| `CHANGE_DIRECTORY` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、`directory` | `viewId`、Daemon 确认的规范 `directory`、`revision`、`views` |
+| `CHANGE_DIRECTORY` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、`directory` | `revision`、`views[]`：目标视图的摘要包含 Daemon 确认的规范 `directory` |
 | `FOCUS_TERMINAL` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` | `viewId` |
 | `OPEN_ATTACHMENT` | 绑定字段、`attachmentId`、不超过 64 KiB 的 UTF-8 `attachmentText` | `viewId` |
 | `COLLAPSE_MOBILE` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` | `viewId` |
@@ -42,8 +42,8 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 `OPEN_VIEW` 是唯一安装/恢复入口，内部明确分成“确保 view 资源”和“绑定当前连接”：create 必须携带 `expectedBindingEpoch=0`，resume 必须携带最后确认的正 epoch；两者都核对 `expectedDaemonInstanceId`。同一已提交 claim 的完全相同请求返回同一绑定且不分配新 epoch，参数漂移为 `CLAIM_CONFLICT`；同一 owner 以不同 claim 对已有 view 再次 create 返回 `STALE_BINDING`，不会创建第二个 workspace。resume 不隐式创建视图、不改目录，也不占用新 view 容量；不同 `browserSessionId` 不得借租约到期接管。每个 Daemon 进程最多 64 个视图，创建预留与 CLOSING 同样占用容量。
 
-Server 只用 `CHANGE_DIRECTORY` 的确认回执与同一提交点的完整快照确定目录和绑定；缺失或不完整的快照使调用不可用，
-不回退到客户端请求，也不自动重试。回执中的绑定若已被更新快照取代，只返回 `STALE_BINDING`，不重新发布旧授权。
+Server 只从 `CHANGE_DIRECTORY` 回执的完整快照读取目标视图的目录，并核对原绑定；缺失或不完整的快照使调用不可用。
+若该绑定已被更新快照取代，则返回 `STALE_BINDING`，不重新发布旧授权。
 
 ## 快照与 revision
 
