@@ -128,6 +128,32 @@ test.describe('Canvas editor empty canvas', () => {
     await expect.poll(() => headerText(page)).toBe(`Board ${COPY['zh-CN'].saved}`)
   })
 
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ] as const) {
+    test(`the first node is framed clear of the floating add button at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await page.goto(`${HARNESS_URL}?locale=zh-CN`)
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
+      await page.locator('.canvas-empty-guidance')
+        .getByRole('button', { name: COPY['zh-CN'].addEntry })
+        .click()
+      await page.getByRole('menuitem', { name: COPY['zh-CN'].imageFunction }).click()
+      const node = page.locator('.react-flow__node')
+      await expect(node).toHaveCount(1)
+
+      // 首个节点由初始取景居中：窄屏也不被左侧浮动 `+` 压住，且不超出舞台右缘。
+      const add = await box(page.locator('.canvas-tool-rail .dock-add'))
+      await expect.poll(async () => (await box(node)).x).toBeGreaterThan(add.x + add.width)
+      const nodeBox = await box(node)
+      expect(nodeBox.x + nodeBox.width).toBeLessThanOrEqual(viewport.width)
+      await page.screenshot({ path: shotPath(`canvas-first-node-${viewport.width}x${viewport.height}.png`) })
+    })
+  }
+
   for (const locale of ['zh-CN', 'en-US'] as const) {
     for (const viewport of [
       { width: 1440, height: 900 },

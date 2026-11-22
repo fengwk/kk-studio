@@ -1,7 +1,11 @@
+import type { FitViewOptions } from '@xyflow/react'
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { StageMetrics } from '@/features/canvas/types'
-import { preserveCanvasWorldCenter } from '@/features/canvas/viewport-framing'
+import {
+  fitPaddingClearingToolRail,
+  preserveCanvasWorldCenter,
+} from '@/features/canvas/viewport-framing'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 
 const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
@@ -9,7 +13,7 @@ const FOCUS_SELECTION_FIT = { padding: 0.22, maxZoom: 1.8, duration: 0 }
 
 /** React Flow 的 fitView 只按 options 求值；这里只需要它能接收这些字段并返回是否成功。 */
 type FitView = (options?: {
-  padding?: number
+  padding?: FitViewOptions['padding']
   maxZoom?: number
   duration?: number
   nodes?: CanvasFlowNode[]
@@ -20,6 +24,8 @@ export interface CanvasStageViewportOptions {
   viewport: StoredCanvasViewport
   stageWidth: StageMetrics['width']
   containerRef: RefObject<HTMLElement | null>
+  /** 叠在舞台左侧的浮动 `+`：取景时让出它的宽度。 */
+  toolRailRef: RefObject<HTMLElement | null>
   fitView: FitView
   getViewport: () => StoredCanvasViewport
   zoomTo: (zoom: number) => Promise<boolean>
@@ -50,6 +56,7 @@ export function useCanvasStageViewport({
   viewport,
   stageWidth,
   containerRef,
+  toolRailRef,
   fitView,
   getViewport,
   zoomTo,
@@ -111,6 +118,19 @@ export function useCanvasStageViewport({
     setViewport(next)
   }, [readFlowViewport, setViewport])
 
+  /** 取景时按当前舞台与 `+` 的实际位置计算留白，窄屏下节点不被浮动工具压住。 */
+  const clearToolRail = useCallback(<Fit extends { padding: number }>(fit: Fit) => {
+    const stage = containerRef.current?.getBoundingClientRect()
+    const rail = toolRailRef.current?.getBoundingClientRect()
+    if (!stage || !rail) {
+      return fit
+    }
+    return {
+      ...fit,
+      padding: fitPaddingClearingToolRail(fit.padding, stage.width, rail.right - stage.left),
+    }
+  }, [containerRef, toolRailRef])
+
   const emitViewport = useCallback((next: StoredCanvasViewport) => {
     const copied = { x: next.x, y: next.y, zoom: next.zoom }
     lastViewportRef.current = copied
@@ -138,7 +158,7 @@ export function useCanvasStageViewport({
       return
     }
     initialFitStartedRef.current = true
-    void fitView(INITIAL_FIT).then((fitted) => {
+    void fitView(clearToolRail(INITIAL_FIT)).then((fitted) => {
       if (!mountedRef.current) {
         return
       }
@@ -153,6 +173,7 @@ export function useCanvasStageViewport({
       completeInitialFit()
     })
   }, [
+    clearToolRail,
     completeInitialFit,
     fitView,
     initialFitPending,
@@ -165,7 +186,7 @@ export function useCanvasStageViewport({
 
   useEffect(() => {
     fitViewRef.current = () => {
-      void fitView(INITIAL_FIT).then((fitted) => {
+      void fitView(clearToolRail(INITIAL_FIT)).then((fitted) => {
         if (!fitted) {
           return
         }
@@ -178,7 +199,7 @@ export function useCanvasStageViewport({
     focusSelectionRef.current = () => {
       const selected = nodes.filter((node) => node.selected)
       void fitView({
-        ...FOCUS_SELECTION_FIT,
+        ...clearToolRail(FOCUS_SELECTION_FIT),
         nodes: selected.length > 0 ? selected : undefined,
       }).then(syncViewport)
     }
@@ -191,6 +212,7 @@ export function useCanvasStageViewport({
       zoomRef.current = null
     }
   }, [
+    clearToolRail,
     fitView,
     fitViewRef,
     focusSelectionRef,

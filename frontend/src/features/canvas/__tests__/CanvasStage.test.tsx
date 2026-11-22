@@ -191,6 +191,7 @@ function renderStage(options: {
     models: [],
     stageMetrics: { width: 960, height: 640, dockTop: 520 },
     stageElementRef: { current: null },
+    dockAddRef: { current: null },
     fitViewRef,
     focusSelectionRef,
     zoomRef,
