@@ -46,6 +46,7 @@ export function useIssueDetail({
     data: detail,
     isLoading,
     error: queryError,
+    dataUpdatedAt,
     refetch,
   } = useQuery({
     queryKey: issueQueryKey,
@@ -53,7 +54,7 @@ export function useIssueDetail({
     enabled: isOpen && Boolean(issueId),
   })
   const issue = detail?.issue
-  const activityFeed = useIssueActivityFeed({ issueId, api, detail })
+  const activityFeed = useIssueActivityFeed({ issueId, api, detail, detailFetchedAt: dataUpdatedAt })
 
   const [activeTab, setActiveTab] = useState<IssueDetailTabKey>('spec')
 
