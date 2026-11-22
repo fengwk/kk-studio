@@ -7,7 +7,7 @@ import { expect, test, type Locator, type Page } from './fixture'
  * 只在传输层替身后端（见 canvas-editor-harness.tsx）。
  *
  * 断言的是用户可见事实：头部只有标题与保存状态、空画布引导不遮挡舞台交互、
- * 引导与左侧 `+` 打开同一个添加菜单、加入第一个节点后引导消失。
+ * 引导与左侧 `+` 打开同一个添加菜单、加入第一个节点后引导消失、零节点画布不渲染缩略图。
  */
 
 const HARNESS_URL = '/browser-tests/canvas-editor-harness.html'
@@ -73,6 +73,8 @@ test.describe('Canvas editor empty canvas', () => {
     await expect(guidance).toBeVisible()
     await expect(guidance).toContainText(COPY['zh-CN'].title)
     await expect(guidance).toContainText(COPY['zh-CN'].description)
+    // 零节点画布没有可导航内容：不渲染缩略图。
+    await expect(page.locator('.react-flow__minimap')).toHaveCount(0)
 
     // 引导层本身不接收指针事件，只有添加按钮可点：舞台仍能平移、框选与拖放。
     expect(await guidance.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none')
@@ -112,12 +114,16 @@ test.describe('Canvas editor empty canvas', () => {
 
     const guidance = page.locator('.canvas-empty-guidance')
     await expect(guidance).toBeVisible()
+    // 空画布不渲染缩略图。
+    await expect(page.locator('.react-flow__minimap')).toHaveCount(0)
     await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
     await guidance.getByRole('button', { name: COPY['zh-CN'].addEntry }).click()
     await page.getByRole('menuitem', { name: COPY['zh-CN'].imageFunction }).click()
 
     await expect(page.locator('.react-flow__node')).toHaveCount(1)
     await expect(guidance).toHaveCount(0)
+    // 有节点后恢复缩略图。
+    await expect(page.locator('.react-flow__minimap')).toBeVisible()
     // 头部仍不出现版本号，即使 revision 已经前进。
     await expect.poll(() => headerText(page)).toBe(`Board ${COPY['zh-CN'].saved}`)
   })

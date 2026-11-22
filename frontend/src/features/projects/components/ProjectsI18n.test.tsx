@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setLocale, translate } from '@/shared/i18n'
 import { EditProjectModal } from './EditProjectModal'
+import { CreateIssueModal } from './CreateIssueModal'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
 import type { StorageService } from '@/shared/api/storage-service'
@@ -167,6 +168,36 @@ describe('Projects 双语渲染', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
     await user.click(help)
     expect(screen.getByRole('tooltip')).toHaveTextContent('仅这些阶段可通过正常流转到达。')
+  })
+
+  it('新建 Issue 提示使用工作流初始阶段名称，未声明时退回通用说法', () => {
+    // 初始阶段说明不得露出 INIT 编码：有阶段名时引用名称，没有时只说初始阶段。
+    const api = { createIssue: vi.fn() } as unknown as ProjectsApi
+    const withWorkflow = renderWithClient(
+      <CreateIssueModal
+        isOpen={true}
+        projectId={project.id}
+        workflow={project.workflow}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={api}
+      />,
+    )
+    expect(screen.getByText('创建后将自动进入「待开始」阶段。')).toBeInTheDocument()
+    expect(screen.queryByText(/INIT/)).toBeNull()
+    withWorkflow.unmount()
+
+    renderWithClient(
+      <CreateIssueModal
+        isOpen={true}
+        projectId={project.id}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={api}
+      />,
+    )
+    expect(screen.getByText('创建后将自动进入初始阶段。')).toBeInTheDocument()
+    expect(screen.queryByText(/INIT/)).toBeNull()
   })
 
   it('Issue 详情弹窗在 en-US 下使用英文标签与英文操作名', async () => {

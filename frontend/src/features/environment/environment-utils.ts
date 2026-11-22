@@ -6,6 +6,7 @@ import type { TranslationKey } from '@/shared/i18n'
 import type {
   EnvironmentDTO,
   EnvironmentEventLevel,
+  EnvironmentEventType,
   EnvironmentRuntimeDTO,
   EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateProgressDTO,
@@ -47,6 +48,22 @@ export function environmentDisplayStatus(environment: EnvironmentDTO): Environme
 /** 事件级别是封闭枚举，因此 class 映射只在这里定义一次，避免遗漏样式。 */
 export function environmentEventLevelClass(level: EnvironmentEventLevel): string {
   return `is-${level.toLowerCase()}`
+}
+
+/**
+ * 事件级别与类型同样按用户可读名称呈现；原始协议码只作为 title 提示，
+ * 不进入事件正文，也不替代服务端消息。
+ */
+export const ENVIRONMENT_EVENT_LEVEL_LABEL_KEY: Record<EnvironmentEventLevel, TranslationKey> = {
+  INFO: 'ai.environment.events.level.info',
+  WARN: 'ai.environment.events.level.warn',
+}
+
+export const ENVIRONMENT_EVENT_TYPE_LABEL_KEY: Record<EnvironmentEventType, TranslationKey> = {
+  CONNECTING: 'ai.environment.events.type.connecting',
+  READY: 'ai.environment.events.type.ready',
+  DISCONNECTED: 'ai.environment.events.type.disconnected',
+  UPDATE_FAILED: 'ai.environment.events.type.updateFailed',
 }
 
 export function formatTimestamp(value: number | null | undefined): string {

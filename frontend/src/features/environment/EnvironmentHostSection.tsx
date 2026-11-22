@@ -11,6 +11,7 @@ export interface EnvironmentHostSectionProps {
 export function EnvironmentHostSection({ environment }: EnvironmentHostSectionProps) {
   const { t } = useI18n()
   const lastSeen = formatTimestamp(environment.lastSeenAt)
+  const capabilityIds = (environment.capabilities ?? []).map(({ id }) => id).filter(Boolean)
 
   return (
     <section className="env-mgmt-section" aria-label={t('ai.environment.runtime.title')}>
@@ -53,7 +54,16 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.capabilities')}</span>
-          <span className="val">{environment.capabilities?.map(({ id }) => id).filter(Boolean).join(' · ') || '—'}</span>
+          {/* 能力键是完整标识符：整体不折断，超出宽度时在键之间换行。 */}
+          <span className="val env-host-capabilities">
+            {capabilityIds.length > 0
+              ? capabilityIds.map((id) => (
+                  <span key={id} className="env-host-capability">
+                    {id}
+                  </span>
+                ))
+              : '—'}
+          </span>
         </div>
       </div>
     </section>

@@ -309,7 +309,7 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
     })
 
-    const searchInput = screen.getByPlaceholderText('搜索项目名称或描述...')
+    const searchInput = screen.getByPlaceholderText('搜索项目名称或描述')
     fireEvent.change(searchInput, { target: { value: 'nonexistent-query-123' } })
 
     expect(await screen.findByText('暂无匹配项目')).toBeInTheDocument()

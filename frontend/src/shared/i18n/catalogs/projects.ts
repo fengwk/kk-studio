@@ -110,8 +110,8 @@ export const projectsCatalog = {
     'en-US': 'Search projects',
   },
   'projects.searchPlaceholder': {
-    'zh-CN': '搜索项目名称或描述...',
-    'en-US': 'Search project name or description…',
+    'zh-CN': '搜索项目名称或描述',
+    'en-US': 'Search name or description',
   },
   'projects.createCardSubtitle': {
     'zh-CN': '自定义工作流、Issue 看板与 Agent 执行',
@@ -178,8 +178,8 @@ export const projectsCatalog = {
     'en-US': 'Search issues',
   },
   'projects.detail.searchPlaceholder': {
-    'zh-CN': '搜索 Issue 标题 / 编号 / 状态...',
-    'en-US': 'Search issue title / number / state…',
+    'zh-CN': '搜索 Issue 标题或编号',
+    'en-US': 'Search issue title or number',
   },
   'projects.detail.editWorkflow': {
     'zh-CN': '编辑 / 工作流',
@@ -638,8 +638,12 @@ export const projectsCatalog = {
     'en-US': 'Describe the background, acceptance criteria and stage deliverables…',
   },
   'projects.issue.createHint': {
-    'zh-CN': '创建后将自动初始化进入 INIT 阶段。',
-    'en-US': 'The issue is initialized into the INIT stage after creation.',
+    'zh-CN': '创建后将自动进入初始阶段。',
+    'en-US': 'The issue starts in the initial stage after creation.',
+  },
+  'projects.issue.createHintStage': {
+    'zh-CN': '创建后将自动进入「{{stage}}」阶段。',
+    'en-US': 'The issue starts in the "{{stage}}" stage after creation.',
   },
   'projects.issue.titleRequired': {
     'zh-CN': 'Issue 标题不能为空',
@@ -854,10 +858,6 @@ export const projectsCatalog = {
     'zh-CN': '当前阶段:',
     'en-US': 'Current stage:',
   },
-  'projects.issue.expectedVersionLabel': {
-    'zh-CN': '期望版本号:',
-    'en-US': 'Expected version:',
-  },
   'projects.issue.blockedFromStageLabel': {
     'zh-CN': '阻塞前阶段:',
     'en-US': 'Stage before blocking:',
@@ -914,16 +914,56 @@ export const projectsCatalog = {
     'zh-CN': '系统',
     'en-US': 'System',
   },
+  'projects.issue.activityKind.comment': {
+    'zh-CN': '评论',
+    'en-US': 'Comment',
+  },
+  'projects.issue.activityKind.run': {
+    'zh-CN': '运行',
+    'en-US': 'Run',
+  },
+  'projects.issue.activityKind.instruction': {
+    'zh-CN': '指令',
+    'en-US': 'Instruction',
+  },
+  'projects.issue.activityKind.specChange': {
+    'zh-CN': '需求变更',
+    'en-US': 'Requirement change',
+  },
+  'projects.issue.activityKind.stateChange': {
+    'zh-CN': '阶段变更',
+    'en-US': 'Stage change',
+  },
+  'projects.issue.activityKind.control': {
+    'zh-CN': '控制',
+    'en-US': 'Control',
+  },
   'projects.issue.emptyRuns': {
     'zh-CN': '暂无 Run 记录',
     'en-US': 'No runs yet',
   },
-  'projects.issue.durationRemaining': {
-    'zh-CN': '耗时/余量: {{ms}}ms',
-    'en-US': 'Elapsed / remaining: {{ms}}ms',
+  'projects.issue.runElapsed': {
+    'zh-CN': '耗时 {{duration}}',
+    'en-US': 'Elapsed {{duration}}',
+  },
+  'projects.issue.runRemainingBudget': {
+    'zh-CN': '剩余执行预算 {{duration}}',
+    'en-US': 'Remaining execution budget {{duration}}',
+  },
+  'projects.issue.duration.hour': {
+    'zh-CN': '{{value}} 小时',
+    'en-US': '{{value}}h',
+  },
+  'projects.issue.duration.minute': {
+    'zh-CN': '{{value}} 分钟',
+    'en-US': '{{value}}m',
+  },
+  'projects.issue.duration.second': {
+    'zh-CN': '{{value}} 秒',
+    'en-US': '{{value}}s',
   },
   'projects.issue.entryRangeLabel': {
-    'zh-CN': 'Entry 区间:',
+    'zh-CN': '条目区间:',
     'en-US': 'Entry range:',
   },
   'projects.issue.running': {
@@ -1011,7 +1051,7 @@ export const projectsCatalog = {
     'en-US': 'Stage budgets ({{count}})',
   },
   'projects.issue.tabAgentThreads': {
-    'zh-CN': 'Agent Thread ({{count}})',
+    'zh-CN': 'Agent 线程 ({{count}})',
     'en-US': 'Agent Threads ({{count}})',
   },
   'projects.issue.tabEvidence': {

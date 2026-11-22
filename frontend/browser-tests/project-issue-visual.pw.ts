@@ -132,6 +132,13 @@ for (const width of [320, 1280]) {
     await page.goto('/browser-tests/project-workflow-harness.html?issue')
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Offline visual issue', { exact: true })).toBeVisible()
+    // 打开详情时初始焦点落在安全的关闭动作上，而不是头部的删除按钮。
+    await expect(dialog.locator('.modal-footer').getByRole('button', { name: '关闭', exact: true })).toBeFocused()
+    // 需求标题让出宽度换行，编辑需求按钮保持单行，不被挤成两行。
+    await expect(dialog.locator('.spec-title')).toHaveCSS('overflow-wrap', 'anywhere')
+    const editSpec = dialog.locator('.spec-head').getByRole('button', { name: '编辑需求' })
+    await expect(editSpec).toHaveCSS('white-space', 'nowrap')
+    expect(await editSpec.evaluate((button) => button.scrollWidth <= button.clientWidth + 1)).toBe(true)
     // 头部阶段徽标与需求事实页签都只写工作流名称，不写内部状态码。
     const headerLeft = dialog.locator('.issue-detail-header-left')
     await expect(headerLeft).toContainText(STAGE.work)

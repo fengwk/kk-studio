@@ -485,6 +485,14 @@
   flex: 1;
 }
 
+/* 窄屏换行保留完整页签，不在边缘裁掉部分标签。 */
+@media (max-width: 600px) {
+  .issue-detail-tabs > .ui-tabs {
+    flex: none;
+    flex-wrap: wrap;
+  }
+}
+
 .issue-detail-tabs .ui-tab-panel {
   display: flex;
   flex-direction: column;
@@ -535,11 +543,26 @@
   gap: 16px;
 }
 
+.spec-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 标题让出宽度换行；操作按钮保持单行，窄屏不被压成两行。 */
+.spec-head > button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .spec-title {
   margin: 0;
+  min-width: 0;
   font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .spec-desc-block {
@@ -559,6 +582,16 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+
+@media (max-width: 600px) {
+  .spec-head {
+    flex-direction: column;
+  }
+
+  .spec-meta-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .meta-item {
@@ -634,8 +667,8 @@
 
 .activity-badge-kind {
   font-weight: 600;
-  font-family: monospace;
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .activity-actor {
@@ -682,6 +715,13 @@
   margin-bottom: 8px;
 }
 
+/* 时长只表达一个事实（耗时或剩余预算），窄屏整体换行而不逐字折断。 */
+.run-card-duration {
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
 .run-card-facts {
   display: flex;
   flex-wrap: wrap;
@@ -711,8 +751,31 @@
 
 .run-detail-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+/* 字段名不收缩不折字：窄屏优先让值换行，标签始终完整可读。 */
+.run-detail-label {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 条目 UUID 是诊断信息：等宽小字、次级颜色，只在条目之间或必要时换行。 */
+.run-detail-ids {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-detail-ids code {
+  overflow-wrap: anywhere;
 }
 
 /* 阶段预算 */
@@ -772,17 +835,18 @@
   gap: 8px;
 }
 
-/* 读取失败就地说明并给重试；不冒充空数据。 */
+/* 与环境列表的刷新失败反馈一致：重试位于普通背景上。 */
 .evidence-feedback {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 14px;
-  border: 1px solid var(--danger-border);
-  border-radius: var(--radius-sm);
-  background: var(--danger-soft);
-  color: var(--fg);
+  color: var(--fg-muted);
   font-size: var(--font-size-sm);
+}
+
+.evidence-feedback > svg {
+  flex: none;
 }
 
 .evidence-card {

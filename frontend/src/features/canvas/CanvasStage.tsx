@@ -89,6 +89,8 @@ function StageInner() {
   const selectedFunctionFlowNode = selectedFunctionNode
     ? nodes.find((node) => node.id === selectedFunctionNode.id)
     : null
+  // 缩略图只在有节点时出现：零节点的画布没有可导航的内容，Function 面板会取代它。
+  const showMinimap = nodes.length > 0 && !selectedFunctionNode
 
   const {
     contextMenu,
@@ -238,7 +240,7 @@ function StageInner() {
               color="var(--stage-dot)"
               bgColor="var(--stage-bg)"
             />
-            {!selectedFunctionNode ? (
+            {showMinimap ? (
               <MiniMap
                 className="canvas-minimap"
                 pannable

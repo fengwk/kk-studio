@@ -74,6 +74,7 @@ export function ProjectDetailModals({
       <CreateIssueModal
         isOpen={isCreateIssueOpen}
         projectId={projectId}
+        workflow={workflow}
         onClose={onCloseCreateIssue}
         onSuccess={onProjectUpdated}
         api={api}

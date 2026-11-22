@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 'react-router'
+import { createBrowserRouter, RouterProvider, useNavigate } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -20,18 +20,23 @@ const client = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 })
 
+/**
+ * 视图由查询串选择：`?issue` 打开详情弹窗，`?list` 打开项目列表，其余为项目详情。
+ *
+ * <p>浏览器测试跑在 MPA 静态预览上，只按 HTML 文件提供入口；`/list` 这类子路径会被当作缺失文件，
+ * 所以列表入口与返回列表都用查询串表达，刷新或直接打开都能落到同一个 harness。
+ */
 export function HarnessRoutes() {
   const navigate = useNavigate()
-  if (new URLSearchParams(location.search).has('issue')) {
+  const params = new URLSearchParams(location.search)
+  if (params.has('issue')) {
     return <IssueVisualHarness />
   }
-  return <Routes>
-    <Route path="/browser-tests/project-workflow-harness.html" element={
-      <ProjectDetailPage projectId="a0000000-0000-0000-0000-000000000001"
-        onBack={() => navigate('/browser-tests/project-workflow-harness.html/list')} />
-    } />
-    <Route path="/browser-tests/project-workflow-harness.html/list" element={<ProjectsPage />} />
-  </Routes>
+  if (params.has('list')) {
+    return <ProjectsPage />
+  }
+  return <ProjectDetailPage projectId="a0000000-0000-0000-0000-000000000001"
+    onBack={() => navigate({ search: '?list' })} />
 }
 
 /**

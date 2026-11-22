@@ -157,7 +157,8 @@ export function IssueDetailModal({
       </IssueDetailTabs>
 
       <div className="modal-footer">
-        <Button variant="ghost" onClick={onClose}>
+        {/* 打开详情时的初始焦点落在关闭动作上：头部第一个可聚焦控件是删除，不能作为落点。 */}
+        <Button variant="ghost" data-autofocus onClick={onClose}>
           {t('projects.close')}
         </Button>
       </div>

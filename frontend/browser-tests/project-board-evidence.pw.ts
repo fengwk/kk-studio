@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Page } from './fixture'
+import { expect, test, type Locator, type Page } from './fixture'
 import type {
   IssueDTO, IssueDetailDTO, IssueRunSummaryDTO, PauseReason, ProjectSnapshotDTO,
 } from '@/shared/api/generated/contracts'
@@ -17,6 +17,20 @@ const ISSUE_DONE = 'b0000000-0000-0000-0000-000000000008'
 const ISSUE_DETAIL = 'a0000000-0000-0000-0000-000000000002'
 const STAMP = Date.UTC(2026, 9, 1)
 const BLOCK_REASON = 'Waiting for the settlement decision'
+/** 详情夹具的标题足够长：窄屏下标题必须换行，而不是把编辑动作挤出标题行。 */
+const DETAIL_TITLE = 'Refund callback drift across settlement ledger and payout batches'
+// 终态 Run 的耗时必须只由起止时戳得出；活动 Run 的剩余预算只来自服务端余额。
+const ELAPSED_MS = 3_723_000
+const REMAINING_MS = '5400000'
+const RUN_TERMINAL = 'e2000000-0000-4000-8000-000000000001'
+const RUN_ACTIVE = 'e2000000-0000-4000-8000-000000000002'
+const ENTRY_START_TERMINAL = 'e1000000-0000-4000-8000-000000000001'
+const ENTRY_END_TERMINAL = 'e1000000-0000-4000-8000-000000000002'
+const ENTRY_START_ACTIVE = 'e1000000-0000-4000-8000-000000000003'
+/** 活动时间线的类型顺序：夹具按此顺序给出，界面按同一顺序渲染。 */
+const ACTIVITY_CODES = [
+  'RUN', 'STATE_CHANGE', 'SPEC_CHANGE', 'CONTROL', 'INSTRUCTION', 'COMMENT',
+] as const
 
 /**
  * 切片自查截图目录：只有显式设置 KK_SLICE_SHOTS 时才写出图片。
@@ -61,6 +75,20 @@ const copy = {
     },
     running: '执行中',
     reason: '原因: Waiting for the settlement decision',
+    boardSearchPlaceholder: '搜索 Issue 标题或编号',
+    listTitle: '项目管理',
+    listSearchPlaceholder: '搜索项目名称或描述',
+    createHintStage: '创建后将自动进入「待开始」阶段。',
+    specTab: '需求事实',
+    activitiesTab: '活动时间线',
+    runTab: 'Run 报告',
+    editSpec: '编辑需求',
+    expectedVersionLabel: '期望版本号',
+    runElapsed: '耗时 1 小时 2 分钟',
+    runRemaining: '剩余执行预算 1 小时 30 分钟',
+    elapsedWord: '耗时',
+    remainingWord: '剩余执行预算',
+    activityKinds: ['运行', '阶段变更', '需求变更', '控制', '指令', '评论'],
     recoverTitle: '恢复至 处理中',
     evidenceTab: '公开证据',
     evidenceTabEmpty: '公开证据 (0)',
@@ -89,6 +117,20 @@ const copy = {
     },
     running: 'Running',
     reason: `Reason: ${BLOCK_REASON}`,
+    boardSearchPlaceholder: 'Search issue title or number',
+    listTitle: 'Projects',
+    listSearchPlaceholder: 'Search name or description',
+    createHintStage: 'The issue starts in the "Not started" stage after creation.',
+    specTab: 'Requirements',
+    activitiesTab: 'Activity timeline',
+    runTab: 'Run reports',
+    editSpec: 'Edit requirements',
+    expectedVersionLabel: 'Expected version',
+    runElapsed: 'Elapsed 1h 2m',
+    runRemaining: 'Remaining execution budget 1h 30m',
+    elapsedWord: 'Elapsed',
+    remainingWord: 'Remaining execution budget',
+    activityKinds: ['Run', 'Stage change', 'Requirement change', 'Control', 'Instruction', 'Comment'],
     recoverTitle: 'Recover to In progress',
     evidenceTab: 'Public evidence',
     evidenceTabEmpty: 'Public evidence (0)',
@@ -196,13 +238,81 @@ function snapshotFor(locale: Locale): ProjectSnapshotDTO {
 function issueDetail(): IssueDetailDTO {
   return {
     issue: {
-      id: ISSUE_DETAIL, projectId: PROJECT, number: '12', title: 'Refund callback drift',
+      id: ISSUE_DETAIL, projectId: PROJECT, number: '12', title: DETAIL_TITLE,
       description: 'Evidence vertical', state: 'WORK', blockedFromState: null,
       blockReason: null, pauseReason: null, pauseDetail: null,
       version: '1', createdAt: STAMP, updatedAt: STAMP,
     },
-    activities: [], nextActivityCursor: null, agentThreads: [], runs: [], stageBudgets: [],
+    // 终态 Run 与活动 Run 并排：前者已冻结结束时戳，后者只持有服务端剩余预算。
+    runs: [
+      {
+        id: RUN_TERMINAL, issueId: ISSUE_DETAIL, ordinal: '1', state: 'WORK',
+        agentName: 'backend-dev', sessionId: RUN_TERMINAL, threadId: RUN_TERMINAL,
+        status: 'COMPLETED', startEntryId: ENTRY_START_TERMINAL, endEntryId: ENTRY_END_TERMINAL,
+        finalAnswerEntryId: null, nextState: 'DONE', observedActivitySequence: '2',
+        remainingExecutionMs: '0', error: null, version: '1',
+        startedAt: STAMP, endedAt: STAMP + ELAPSED_MS,
+      },
+      {
+        id: RUN_ACTIVE, issueId: ISSUE_DETAIL, ordinal: '2', state: 'WORK',
+        agentName: null, sessionId: RUN_ACTIVE, threadId: RUN_ACTIVE,
+        status: 'RUNNING', startEntryId: ENTRY_START_ACTIVE, endEntryId: null,
+        finalAnswerEntryId: null, nextState: null, observedActivitySequence: '6',
+        remainingExecutionMs: REMAINING_MS, error: null, version: '1',
+        startedAt: STAMP, endedAt: null,
+      },
+    ],
+    // 时间线一次覆盖六种活动类型与三种行为者，供本地化文案断言。
+    activities: [
+      {
+        issueId: ISSUE_DETAIL, sequence: '1', kind: 'RUN', actorType: 'AGENT',
+        actorAgentName: 'backend-dev', runId: RUN_TERMINAL, body: 'Run started', createdAt: STAMP,
+      },
+      {
+        issueId: ISSUE_DETAIL, sequence: '2', kind: 'STATE_CHANGE', actorType: 'SYSTEM',
+        actorAgentName: null, runId: null, body: null, createdAt: STAMP + 1000,
+      },
+      {
+        issueId: ISSUE_DETAIL, sequence: '3', kind: 'SPEC_CHANGE', actorType: 'HUMAN',
+        actorAgentName: null, runId: null, body: 'Narrowed the acceptance criteria', createdAt: STAMP + 2000,
+      },
+      {
+        issueId: ISSUE_DETAIL, sequence: '4', kind: 'CONTROL', actorType: 'SYSTEM',
+        actorAgentName: null, runId: RUN_ACTIVE, body: null, createdAt: STAMP + 3000,
+      },
+      {
+        issueId: ISSUE_DETAIL, sequence: '5', kind: 'INSTRUCTION', actorType: 'HUMAN',
+        actorAgentName: null, runId: RUN_ACTIVE, body: 'Keep the ledger snapshots', createdAt: STAMP + 4000,
+      },
+      {
+        issueId: ISSUE_DETAIL, sequence: '6', kind: 'COMMENT', actorType: 'AGENT',
+        actorAgentName: 'reviewer', runId: null, body: 'Payout batches look consistent', createdAt: STAMP + 5000,
+      },
+    ],
+    nextActivityCursor: null,
+    stageBudgets: [
+      { state: 'WORK', maxRuns: 5, budgetAfterOrdinal: '0', usedRuns: '2', remainingRuns: '3' },
+    ],
+    agentThreads: [],
   }
+}
+
+/**
+ * 占位符是搜索入口里唯一的可见提示：按输入框自身的字体量出文本宽度，确认文案没被末尾裁掉。
+ */
+async function placeholderFit(input: Locator): Promise<{ placeholder: string
+  textWidth: number; boxWidth: number }> {
+  return input.evaluate((element) => {
+    const style = getComputedStyle(element)
+    const context = document.createElement('canvas').getContext('2d')!
+    context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const placeholder = (element as HTMLInputElement).placeholder
+    return {
+      placeholder,
+      textWidth: context.measureText(placeholder).width,
+      boxWidth: element.clientWidth,
+    }
+  })
 }
 
 interface TransportState {
@@ -235,6 +345,11 @@ async function transport(page: Page, locale: Locale): Promise<TransportState> {
     const path = new URL(route.request().url()).pathname
     if (path === `/api/project/projects/${PROJECT}/snapshot`) {
       await route.fulfill({ json: snapshotFor(locale) })
+      return
+    }
+    if (path === '/api/project/projects') {
+      // 项目列表：页头搜索占位符是列表里唯一的可见提示文案。
+      await route.fulfill({ json: [snapshotFor(locale).project] })
       return
     }
     if (path === `/api/project/issues/${ISSUE_DETAIL}/evidence`) {
@@ -335,6 +450,13 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await expect(page.getByRole('button', { name: copy[locale].createIssue })).toHaveClass(/btn-primary/)
       await expect(page.locator('.project-board-section .btn-primary')).toHaveCount(0)
 
+      // 看板自己的搜索占位符同样整段可读：英文文案不被输入框末尾裁字。
+      const boardSearchInput = page.locator('.project-detail-toolbar .searchbox input')
+      await expect(boardSearchInput).toBeVisible()
+      const boardSearch = await placeholderFit(boardSearchInput)
+      expect(boardSearch.placeholder).toBe(copy[locale].boardSearchPlaceholder)
+      expect(boardSearch.textWidth).toBeLessThanOrEqual(boardSearch.boxWidth)
+
       if (viewport.width < 900) {
         // 窄屏：列横向滚动，卡片操作仍完整可见、不被挤出卡片。
         const scroller = page.locator('.project-board-columns')
@@ -374,8 +496,10 @@ for (const locale of Object.keys(copy) as Locale[]) {
       const failedTab = dialog.getByRole('tab', { name: copy[locale].evidenceTab, exact: true })
       await expect(failedTab).toBeVisible()
       await failedTab.click()
-      await expect(dialog.getByText(copy[locale].evidenceFailed)).toBeVisible()
-      await expect(dialog.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
+      // 失败说明与重试同处一块（与环境诊断一致），重试就在失败块里。
+      const failure = dialog.locator('.evidence-feedback')
+      await expect(failure.getByText(copy[locale].evidenceFailed)).toBeVisible()
+      await expect(failure.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
       await expect(dialog.getByText(copy[locale].evidenceEmpty)).toHaveCount(0)
       await expect(failedTab).not.toContainText('(')
       await sliceShot(page, `project-evidence-failed-${locale}-${viewport.width}`)
@@ -391,6 +515,121 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await emptyTab.scrollIntoViewIfNeeded()
       expect(state.evidenceReads).toBeGreaterThan(failedReads)
       await sliceShot(page, `project-evidence-empty-${locale}-${viewport.width}`)
+    })
+
+    test(`issue detail wraps the spec heading and localizes activity kinds in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale)
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+
+      const dialog = page.getByRole('dialog')
+      // 需求事实是默认分区：打开详情先看到标题、描述与阶段元信息。
+      await expect(dialog.getByRole('tab', { name: copy[locale].specTab })).toHaveAttribute('aria-selected', 'true')
+      const specHead = dialog.locator('.spec-head')
+      await expect(specHead.locator('.spec-title')).toHaveText(DETAIL_TITLE)
+      // 标题让出宽度换行，编辑动作整词单行并留在标题行内。
+      const editSpec = specHead.getByRole('button', { name: copy[locale].editSpec })
+      await expect(editSpec).toHaveCSS('white-space', 'nowrap')
+      const headBox = (await specHead.boundingBox())!
+      const editBox = (await editSpec.boundingBox())!
+      expect(editBox.x + editBox.width).toBeLessThanOrEqual(headBox.x + headBox.width + 1)
+      // 阶段按工作流名称展示；并发控制用的版本号不是可见字段。
+      const specMeta = dialog.locator('.spec-meta-grid')
+      await expect(specMeta).toContainText(copy[locale].columns.WORK)
+      await expect(specMeta).not.toContainText(copy[locale].expectedVersionLabel)
+      await sliceShot(page, `project-issue-spec-${locale}-${viewport.width}`)
+
+      // 活动时间线：类型用本地化名称承载，原始枚举只留在提示里且整词不折。
+      await dialog.getByRole('tab', { name: new RegExp(copy[locale].activitiesTab) }).click()
+      const kinds = dialog.locator('.activity-badge-kind')
+      await expect(kinds).toHaveText([...copy[locale].activityKinds])
+      expect(await kinds.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('title'))))
+        .toEqual([...ACTIVITY_CODES])
+      expect(await kinds.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).whiteSpace)))
+        .toEqual(ACTIVITY_CODES.map(() => 'nowrap'))
+      for (const code of ACTIVITY_CODES) {
+        await expect(dialog.locator('.activity-timeline').getByText(code, { exact: true })).toHaveCount(0)
+      }
+      await sliceShot(page, `project-issue-timeline-${locale}-${viewport.width}`)
+      if (sliceShotsDir) {
+        await kinds.last().scrollIntoViewIfNeeded()
+        await sliceShot(page, `project-issue-timeline-scrolled-${locale}-${viewport.width}`)
+      }
+    })
+
+    test(`issue run cards keep elapsed and remaining budget apart in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale)
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('tab', { name: new RegExp(copy[locale].runTab) }).click()
+      const cards = dialog.locator('.run-card')
+      await expect(cards).toHaveCount(2)
+
+      // 终态 Run 报耗时（只由起止时戳得出），活动 Run 报服务端剩余预算：两者不互相冒充。
+      const durations = cards.locator('.run-card-duration')
+      await expect(durations).toHaveText([copy[locale].runElapsed, copy[locale].runRemaining])
+      await expect(cards.nth(0)).not.toContainText(copy[locale].remainingWord)
+      await expect(cards.nth(1)).not.toContainText(copy[locale].elapsedWord)
+
+      // 活动 Run 的终点尚未冻结：报告只列已冻结的起点，终态 Run 给出完整区间。
+      await expect(cards.nth(0).locator('.run-detail-ids code')).toHaveCount(2)
+      await expect(cards.nth(1).locator('.run-detail-ids code')).toHaveCount(1)
+
+      // 条目 UUID 是弱化诊断信息：与时长同一档小字与次级色。
+      const muted = await durations.nth(0).evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { color: style.color, fontSize: style.fontSize }
+      })
+      const ids = cards.nth(0).locator('.run-detail-ids')
+      await expect(ids).toHaveCSS('color', muted.color)
+      await expect(ids).toHaveCSS('font-size', muted.fontSize)
+
+      // 字段名不折字：标签保持单行完整，窄屏优先让值换行。
+      const labels = cards.nth(0).locator('.run-detail-label')
+      await expect(labels).toHaveCount(2)
+      expect(await labels.evaluateAll((nodes) => nodes.every((node) => (
+        getComputedStyle(node).whiteSpace === 'nowrap' && node.scrollWidth <= node.clientWidth + 1
+      )))).toBe(true)
+      await sliceShot(page, `project-issue-run-${locale}-${viewport.width}`)
+    })
+
+    test(`create issue hint names the workflow initial stage in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale)
+      await page.goto(`/browser-tests/project-workflow-harness.html?locale=${locale}`)
+      await expect(page.getByRole('heading', { name: copy[locale].project, exact: true })).toBeVisible()
+
+      await page.getByRole('button', { name: copy[locale].createIssue }).click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      // 提示直接写工作流声明的初始阶段名称，不露 INIT 编码。
+      await expect(dialog.getByText(copy[locale].createHintStage, { exact: true })).toBeVisible()
+      await expect(dialog).not.toContainText('INIT')
+      await sliceShot(page, `project-issue-create-${locale}-${viewport.width}`)
+    })
+
+    test(`projects list shows its placeholders in ${locale} at ${viewport.width}px`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale)
+      await page.goto(`/browser-tests/project-workflow-harness.html?list&locale=${locale}`)
+
+      await expect(page.getByRole('heading', { name: copy[locale].listTitle, exact: true })).toBeVisible()
+      await expect(page.getByText(copy[locale].project, { exact: true }).first()).toBeVisible()
+      // 搜索占位符按输入框字体完整显示：英文文案不被末尾裁字。
+      const searchInput = page.locator('.list-page-header .searchbox input')
+      await expect(searchInput).toBeVisible()
+      const search = await placeholderFit(searchInput)
+      expect(search.placeholder).toBe(copy[locale].listSearchPlaceholder)
+      expect(search.textWidth).toBeLessThanOrEqual(search.boxWidth)
+      await sliceShot(page, `projects-list-${locale}-${viewport.width}`)
     })
   }
 }
