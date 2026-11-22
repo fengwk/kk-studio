@@ -130,12 +130,7 @@ export function CreateChatModal({
             />
             {nameError ? <FieldError id={nameErrorId} role="alert">{nameError}</FieldError> : null}
           </div>
-          <div
-            className={`form-group${agentError ? ' is-error' : ''}`}
-            role={agentErrorId ? 'group' : undefined}
-            aria-label={agentErrorId ? t('ai.chat.agent') : undefined}
-            aria-describedby={agentErrorId}
-          >
+          <div className={`form-group${agentError ? ' is-error' : ''}`}>
             <FieldLabel required>{t('ai.chat.agent')}</FieldLabel>
             <AgentSelect
               agents={agents}
@@ -143,6 +138,7 @@ export function CreateChatModal({
               onChange={onSelectAgent}
               aria-label={t('ai.chat.agent')}
               aria-invalid={agentError ? true : undefined}
+              errorId={agentErrorId}
               disabled={pending}
               loading={agentsLoading}
               catalogError={agentsError}

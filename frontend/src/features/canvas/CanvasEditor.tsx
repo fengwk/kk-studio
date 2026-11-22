@@ -16,7 +16,7 @@ export function CanvasEditor() {
   if (snapshotQuery.isError) {
     const notFound = (snapshotQuery.error as { status?: number }).status === 404
     return (
-      <section className="canvas-editor-state" role="alert">
+      <section className="canvas-editor-state">
         <StateBlock
           tone="danger"
           title={notFound ? t('canvas.editor.notFound') : t('canvas.editor.loadFailed')}
