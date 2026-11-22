@@ -17,6 +17,10 @@ export function useActiveThreadTree(boundThreadId: string | null) {
   const applicationEvents = useApplicationEvents()
   const [snapshotFailedRootId, setSnapshotFailedRootId] = useState<string | null>(null)
   const [liveBoundThreadId, setLiveBoundThreadId] = useState<string | null>(null)
+  // 切换目标时清除旧订阅标记，保证切回后若树缓存已回收，可以重新发起 HTTP bootstrap。
+  useEffect(() => {
+    setLiveBoundThreadId(null)
+  }, [boundThreadId])
   const isLiveForBoundThread = boundThreadId != null && liveBoundThreadId === boundThreadId
   const boundQueryKey = useMemo(() => queryKeys.threads.tree(boundThreadId ?? ''), [boundThreadId])
   const fetchTreeNodes = useCallback(async ({ signal }: { signal: AbortSignal }) => {

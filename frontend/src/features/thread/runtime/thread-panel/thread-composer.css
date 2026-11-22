@@ -83,7 +83,7 @@
   right: 16px;
   transform: translateY(-100%);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
@@ -97,12 +97,14 @@
   z-index: var(--z-raised);
 }
 
+/* 失败原因完整可读：允许多行换行，极长内容在有界区域内滚动，不遮住会话。 */
 .composer-toast-message {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-height: min(24em, 50vh);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .icon-button.composer-toast-dismiss {

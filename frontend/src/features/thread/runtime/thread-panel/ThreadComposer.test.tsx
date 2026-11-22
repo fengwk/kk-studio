@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -100,6 +100,23 @@ function InteractionComposer({
       settings={settings}
     />
   )
+}
+
+/** 超过旧实现 120 码点截断阈值的长失败原因，用来验证 toast 展示完整原因。 */
+const LONG_UPLOAD_REASON =
+  '413 Payload Too Large: storage gateway rejected this object because it exceeds the per-object limit configured for the target environment'
+
+/** 沿 presentation 展示层向上找最近的 ARIA 拥有者，用于断言 option 直属 listbox。 */
+function ariaOwner(element: Element): Element | null {
+  let node = element.parentElement
+  while (node) {
+    const role = node.getAttribute('role')
+    if (role !== 'presentation' && role !== 'none') {
+      return node
+    }
+    node = node.parentElement
+  }
+  return null
 }
 
 describe('ThreadComposer and commands', () => {
@@ -720,6 +737,35 @@ describe('ThreadComposer interactions', () => {
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
   })
 
+  it('points the focused editor at the open listbox and its active command', async () => {
+    // 测试意图：焦点始终留在编辑器，编辑器用 aria-controls 声明所属 listbox，
+    // 并用 aria-activedescendant 跟随键盘游标；关闭后两个属性都消失。
+    const user = userEvent.setup()
+    render(<Harness />)
+    const editor = editorOf()
+    expect(editor).not.toHaveAttribute('aria-controls')
+    expect(editor).not.toHaveAttribute('aria-activedescendant')
+
+    await user.type(editor, '/')
+    const listbox = await screen.findByRole('listbox', { name: '命令表' })
+    expect(editor).toHaveFocus()
+    expect(editor).toHaveAttribute('aria-controls', listbox.id)
+    const firstId = editor.getAttribute('aria-activedescendant')
+    expect(firstId).toBeTruthy()
+    expect(document.getElementById(firstId!)).toHaveTextContent(/^thread/)
+
+    await user.keyboard('{ArrowDown}')
+    const nextId = editor.getAttribute('aria-activedescendant')
+    expect(nextId).not.toBe(firstId)
+    expect(document.getElementById(nextId!)).toHaveAttribute('aria-selected', 'true')
+    expect(document.getElementById(nextId!)).toHaveTextContent(/^agent/)
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox', { name: '命令表' })).not.toBeInTheDocument()
+    expect(editor).not.toHaveAttribute('aria-controls')
+    expect(editor).not.toHaveAttribute('aria-activedescendant')
+  })
+
   // 隐藏提示不会解禁命令，也不能执行上一次活动选项。
   it('does not execute a disabled complete command after dismissal', async () => {
     const user = userEvent.setup()
@@ -1228,6 +1274,7 @@ describe('ThreadCommandPalette', () => {
         <ThreadCommandPalette
           open
           query=""
+          listboxId="palette-test"
           commands={commands}
           activeIndex={activeIndex}
           onActiveIndexChange={setActiveIndex}
@@ -1258,6 +1305,7 @@ describe('ThreadCommandPalette', () => {
       <ThreadCommandPalette
         open
         query="stop"
+        listboxId="palette-test"
         activeIndex={0}
         onActiveIndexChange={vi.fn()}
         onSelect={onSelect}
@@ -1265,6 +1313,38 @@ describe('ThreadCommandPalette', () => {
     )
     await user.click(screen.getByRole('option', { name: /^stop/ }))
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop' }))
+  })
+
+  it('owns every option in the listbox and marks the active option', () => {
+    // 测试意图：list 容器只是展示层，option 必须是 listbox 的 ARIA 直属子项，
+    // 且当前项由 aria-activedescendant 表达（焦点留在编辑器）。
+    render(
+      <ThreadCommandPalette
+        open
+        query=""
+        listboxId="palette-test"
+        commands={THREAD_COMMANDS}
+        activeIndex={1}
+        onActiveIndexChange={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    )
+    const listbox = screen.getByRole('listbox', { name: '命令表' })
+    const options = within(listbox).getAllByRole('option')
+    expect(options.length).toBe(THREAD_COMMANDS.length)
+
+    for (const option of options) {
+      expect(option.id).toBeTruthy()
+      expect(ariaOwner(option)).toBe(listbox)
+    }
+    expect(new Set(options.map((option) => option.id)).size).toBe(options.length)
+
+    const activeId = listbox.getAttribute('aria-activedescendant')
+    expect(activeId).toBeTruthy()
+    const active = document.getElementById(activeId!)
+    expect(active).toHaveAttribute('role', 'option')
+    expect(active).toHaveAttribute('aria-selected', 'true')
+    expect(active).toHaveTextContent(/^agent/)
   })
 })
 
@@ -2450,8 +2530,24 @@ describe('ThreadComposer attachment pills', () => {
     expect(beforeCaret.toString()).toBe('aline1\nline2\nline3')
   })
 
-  it('automatically dismisses toast after 5 seconds', async () => {
-    // 测试意图：错误提示无需用户操作也会按约定超时清理，不永久遮挡会话内容。
+  it('shows the complete upload failure reason instead of a truncated one', async () => {
+    // 测试意图：失败原因就是用户唯一的诊断依据，必须完整呈现，不能截断成省略号。
+    const { service } = fakeStorage({
+      reserve: () => {
+        throw new Error(LONG_UPLOAD_REASON)
+      },
+    })
+    render(<PillHarness service={service} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await pasteFiles(editor, fileOf('long-reason.bin', 'application/octet-stream'))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(`long-reason.bin 上传失败：${LONG_UPLOAD_REASON}`)
+    expect(alert.textContent).not.toContain('…')
+  })
+
+  it('keeps the upload failure toast until the user dismisses it', async () => {
+    // 测试意图：失败原因需要用户读完再关闭，不能按普通提示的 5 秒超时自动消失。
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const { service } = fakeStorage({ failReserveTimes: 1 })
@@ -2465,9 +2561,15 @@ describe('ThreadComposer attachment pills', () => {
       })
 
       await vi.waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-      expect(screen.getByRole('alert')).toHaveTextContent('fail.bin 上传失败')
+      expect(screen.getByRole('alert')).toHaveTextContent('fail.bin 上传失败：reserve unavailable')
 
-      vi.advanceTimersByTime(5000)
+      await act(async () => {
+        vi.advanceTimersByTime(30_000)
+      })
+      // 30 秒后仍在：失败原因保留到用户主动关闭。
+      expect(screen.getByRole('alert')).toHaveTextContent('fail.bin 上传失败：reserve unavailable')
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭通知' }))
       await vi.waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
     } finally {
       vi.useRealTimers()

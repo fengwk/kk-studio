@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
@@ -50,19 +51,30 @@ function ProjectsHint() {
   })
   return null
 }
+/** 与 RootAgentPane 一致：草稿或非执行根目标把 null 交给执行树 hook，面板整体不渲染。 */
+function BoundTreePanel({ threadId }: { threadId: string | null }) {
+  const tree = useActiveThreadTree(threadId)
+  return threadId == null ? null : <SubagentTreePanel tree={tree} currentThreadId={threadId} />
+}
+/** 同一个 QueryClient 与 socket 上的重复渲染外壳，用于在测试中切换 bound 目标。 */
+function eventHost(client: QueryClient, sockets: FakeWebSocketHarness) {
+  return (children: ReactNode) => (
+    <QueryClientProvider client={client}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </ApplicationEventProvider>
+    </QueryClientProvider>
+  )
+}
 function renderPanel({ withProjectsHint = false }: { withProjectsHint?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
-  render(
-    <QueryClientProvider client={client}>
-      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-        <MemoryRouter>
-          <Panel />
-          {withProjectsHint ? <ProjectsHint /> : null}
-        </MemoryRouter>
-      </ApplicationEventProvider>
-    </QueryClientProvider>,
-  )
+  render(eventHost(client, sockets)(
+    <>
+      <Panel />
+      {withProjectsHint ? <ProjectsHint /> : null}
+    </>,
+  ))
   return { client, sockets }
 }
 
@@ -94,6 +106,31 @@ describe('execution tree HTTP Instant contract', () => {
     })
     await act(async () => { await Promise.resolve() })
     expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it('rebootstraps over HTTP when a Thread is re-entered after its cached tree was collected', async () => {
+    reply([node(ROOT, null), node(CHILD, ROOT)])
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const sockets = new FakeWebSocketHarness()
+    const host = eventHost(client, sockets)
+    const { rerender } = render(host(<BoundTreePanel threadId={CHILD} />))
+    await screen.findByRole('link', { name: /Explorer/ })
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
+    socket.emitServer({ type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0' })
+    await act(async () => { await Promise.resolve() })
+    expect(transport).toHaveBeenCalledTimes(1)
+
+    // 离开执行根（草稿目标），并让 TanStack Query 回收该 key：模拟长时间停留在别处。
+    rerender(host(<BoundTreePanel threadId={null} />))
+    client.removeQueries({ queryKey: ['threads', 'tree', CHILD] })
+    await act(async () => { await Promise.resolve() })
+
+    // 回到同一个 Thread 必须重新走一次权威 HTTP bootstrap，而不是沿用切换前的 live 标记。
+    rerender(host(<BoundTreePanel threadId={CHILD} />))
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+    expect(transport.mock.calls[1][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
+    expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('轮次：3 · 工具：5')
   })
 
   it.each([

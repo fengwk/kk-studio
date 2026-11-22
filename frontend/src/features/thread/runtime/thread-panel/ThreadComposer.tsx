@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -8,6 +9,7 @@ import {
 } from 'react'
 import { X } from 'lucide-react'
 import { ThreadCommandPalette } from '@/features/thread/runtime/thread-panel/ThreadCommandPalette'
+import { threadCommandOptionId } from '@/features/thread/runtime/thread-panel/thread-command-navigation'
 import type { ComposerEditorHandle } from '@/features/thread/runtime/thread-panel/ComposerEditor'
 import type { ThreadComposerControlMenu } from '@/features/thread/runtime/thread-panel/ThreadComposerControls'
 import { ThreadComposerDock } from '@/features/thread/runtime/thread-panel/ThreadComposerDock'
@@ -84,6 +86,7 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { toast, showToast, dismissToast } = useComposerToast()
+  const paletteListboxId = `thread-command-palette-${useId()}`
 
   const { changeDraft, navigate: navigateMessageHistory } = useComposerMessageHistory({
     parts,
@@ -94,14 +97,12 @@ export function ThreadComposer({
   })
 
   const handleUploadError = useCallback((err: AttachmentUploadError) => {
+    // 失败原因就是用户唯一的诊断依据：原样呈现完整文本，并按错误提示保留到用户关闭。
     const reasonText = err.reason?.trim()
-    const boundedReason = reasonText
-      ? (reasonText.length > 120 ? `${reasonText.slice(0, 117)}…` : reasonText)
-      : t('ai.runtime.composer.uploadFailed')
     showToast(t('ai.runtime.composer.uploadFailedDetail', {
       name: err.filename,
-      reason: boundedReason,
-    }))
+      reason: reasonText || t('ai.runtime.composer.uploadFailed'),
+    }), { persistent: true })
 
     // 失败 pill 的 DOM 回滚由编辑器执行；组合期间由编辑器延后到 compositionend。
     editorApiRef.current?.removeAttachmentPills([err.localId])
@@ -200,6 +201,7 @@ export function ThreadComposer({
   const {
     paletteOpen,
     query,
+    filteredCommands,
     activeIndex,
     setActiveIndex,
     keyboardScrollVersion,
@@ -228,6 +230,12 @@ export function ThreadComposer({
   })
 
   useComposerPaletteVisibilityNotice(paletteOpen, onCommandPaletteVisibilityChange)
+
+  // 焦点留在编辑器：由编辑器声明所属 listbox 与当前命令项，读屏据此播报游标位置。
+  const activeCommand = paletteOpen ? filteredCommands[activeIndex] : undefined
+  const activeCommandOptionId = activeCommand
+    ? threadCommandOptionId(paletteListboxId, activeCommand.id)
+    : undefined
 
   useImperativeHandle(ref, () => ({
     focus: () => focusComposer(true),
@@ -301,6 +309,7 @@ export function ThreadComposer({
       <ThreadCommandPalette
         open={paletteOpen}
         query={query}
+        listboxId={paletteListboxId}
         commands={commands}
         activeIndex={activeIndex}
         scrollVersion={keyboardScrollVersion}
@@ -316,6 +325,8 @@ export function ThreadComposer({
         disabled={disabled}
         canSend={canSend}
         paletteOpen={paletteOpen}
+        editorAriaControls={paletteOpen ? paletteListboxId : undefined}
+        editorAriaActiveDescendant={activeCommandOptionId}
         settings={settings}
         controlMenu={controlMenu}
         onPartsChange={changeDraft}

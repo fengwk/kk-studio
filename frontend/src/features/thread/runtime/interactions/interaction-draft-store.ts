@@ -73,6 +73,21 @@ export const interactionDraftStore = {
     notifyListeners()
   },
 
+  /**
+   * 409 回读确认事项仍待处理：解除只读围栏并作废被拒的提交身份，草稿保留供重新确认。
+   */
+  markConflictStillPending(interactionId: string, errorMessage: string) {
+    const draft = this.getDraft(interactionId)
+    draft.isSubmitting = false
+    draft.error = errorMessage
+    draft.isNonRecoverable = false
+    draft.frozenSubmissionId = undefined
+    draft.frozenAnswers = undefined
+    draft.frozenDeclined = undefined
+    draftMap.set(interactionId, { ...draft })
+    notifyListeners()
+  },
+
   setSubmitting(interactionId: string, isSubmitting: boolean) {
     const draft = this.getDraft(interactionId)
     draft.isSubmitting = isSubmitting

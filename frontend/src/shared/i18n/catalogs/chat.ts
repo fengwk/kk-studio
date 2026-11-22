@@ -2323,9 +2323,21 @@ export const chatCatalog = {
     'en-US': 'Multiple choice',
     'zh-CN': '多选',
   },
+  'ai.interaction.questionnaireInvalid': {
+    'en-US': 'This question cannot be displayed because its parameters could not be parsed.',
+    'zh-CN': '无法显示这个问题：问卷参数无法解析。',
+  },
+  'ai.interaction.rawArguments': {
+    'en-US': 'Raw parameters',
+    'zh-CN': '原始参数',
+  },
   'ai.interaction.nonRecoverable': {
     'en-US': 'This item has changed. Refresh to see the latest status.',
     'zh-CN': '此事项已变更，请刷新查看最新状态。',
+  },
+  'ai.interaction.conflictStillPending': {
+    'en-US': 'The latest state was reloaded. Review it and submit again.',
+    'zh-CN': '此事项的最新状态已重新载入，请重新确认后提交。',
   },
   'ai.interaction.allow': {
     'en-US': 'Allow',

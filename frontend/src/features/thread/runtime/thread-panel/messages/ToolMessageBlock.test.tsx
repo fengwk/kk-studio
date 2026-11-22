@@ -242,7 +242,7 @@ describe('ToolMessageBlock shell', () => {
     render(<ToolMessageBlock message={message({ phase: 'call', toolName: '', status: 'streaming' })} />)
 
     expect(screen.getByText('Tool')).toBeInTheDocument()
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'pending')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('title', 'Tool: 准备调用中')
     expect(document.querySelector('.animate-spin')).toBeNull()
@@ -334,7 +334,7 @@ describe('ToolMessageBlock shell', () => {
     const { rerender } = render(
       <ToolMessageBlock message={message({ phase: 'call', status: 'streaming' })} />,
     )
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'pending')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
 
     rerender(
@@ -343,7 +343,7 @@ describe('ToolMessageBlock shell', () => {
         result={message({ phase: 'result', status: 'done', contents: [text('result text')] })}
       />,
     )
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'success')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
 
     rerender(
@@ -357,12 +357,21 @@ describe('ToolMessageBlock shell', () => {
         })}
       />,
     )
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'error')
   })
 
   it('treats a standalone result with missing status as success', () => {
     render(<ToolMessageBlock message={message({ phase: 'result', status: undefined, contents: [text('ok')] })} />)
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'success')
+  })
+
+  it('exposes the visual state through data attributes without a state class on the shell', () => {
+    render(<ToolMessageBlock message={message({ phase: 'call', status: 'streaming' })} />)
+
+    // 外壳只有布局类：状态只由 Header 标签与 data-* 属性表达，不渲染无样式的测试钩子类。
+    expect((document.querySelector('.thread-turn-tool') as HTMLElement).className)
+      .toBe('thread-turn thread-turn-tool')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'pending')
   })
 })
 
@@ -553,7 +562,7 @@ describe('ToolMessageBlock failures', () => {
     )
 
     // 无原文错误不补通用「工具执行失败」文案，也不展开空框，只保留错误态。
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'error')
     expect(container.querySelector('.thread-tool-error')).not.toBeInTheDocument()
     expect(container.querySelector('.thread-disclosure-toggle')).not.toBeInTheDocument()
     expect(screen.queryByText('工具执行失败。')).not.toBeInTheDocument()
@@ -575,7 +584,7 @@ describe('ToolMessageBlock failures', () => {
     )
 
     // read 默认收起，但失败事实优先：错误块始终可见，原文只出现一次。
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'error')
     expect(container.querySelector('.thread-tool-error')).toHaveTextContent('file appears to be binary')
     expect(screen.getAllByText('file appears to be binary')).toHaveLength(1)
     expect(container.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
@@ -597,7 +606,7 @@ describe('ToolMessageBlock failures', () => {
     )
 
     expect(screen.getByText('boom')).toBeInTheDocument()
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'error')
   })
 })
 
@@ -1053,7 +1062,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'pending')
     const viewport = container.querySelector('.thread-tool-output')
     // 预览固定为最后 10 个逻辑行；前面的行以静态计数说明。
     expect(viewport?.textContent).toBe(tail)

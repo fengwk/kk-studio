@@ -12,6 +12,11 @@ export function useFilteredThreadCommands(
   return useMemo(() => filterThreadCommands(query, commandSource), [commandSource, query])
 }
 
+/** 命令表 option 的 DOM id：listbox id 由持有编辑器的 Composer 生成，两边共用同一格式。 */
+export function threadCommandOptionId(listboxId: string, commandId: string): string {
+  return `${listboxId}-option-${commandId}`
+}
+
 /** 在过滤后的命令列表中获取下一个/上一个可用项的索引；支持环绕。 */
 export function stepEnabledCommandIndex(
   commands: ThreadCommand[],

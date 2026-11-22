@@ -7,8 +7,8 @@ import { AskUserRecord } from '@/features/thread/runtime/thread-panel/messages/A
 import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 import { setLocale, type AppLocale } from '@/shared/i18n'
 
-/** 问卷卡真实浏览器基座：`?locale=zh-CN|en-US&state=single|multi|answered` 直接渲染三种状态。 */
-type QuestionnaireState = 'single' | 'multi' | 'answered'
+/** 问卷卡真实浏览器基座：`?locale=zh-CN|en-US&state=single|multi|answered|invalid` 直接渲染各状态。 */
+type QuestionnaireState = 'single' | 'multi' | 'answered' | 'invalid'
 
 interface QuestionnaireFixture {
   argumentsJson: string
@@ -19,7 +19,7 @@ const params = new URLSearchParams(window.location.search)
 const locale: AppLocale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
 const stateParam = params.get('state')
 const state: QuestionnaireState =
-  stateParam === 'multi' || stateParam === 'answered' ? stateParam : 'single'
+  stateParam === 'multi' || stateParam === 'answered' || stateParam === 'invalid' ? stateParam : 'single'
 setLocale(locale)
 
 const SINGLE_ZH = JSON.stringify({
@@ -48,6 +48,12 @@ const SINGLE_EN = JSON.stringify({
   ],
 })
 
+/** 无法解析的问卷参数：单行截断的 JSON，展开诊断时必须以换行完整呈现。 */
+const INVALID_ZH =
+  '{"questions":[{"question":"请选择本次发布窗口","options":[{"label":"本周六 01:00","description":"保留两小时回滚窗口","recommended":true},{"label":"本周日 01:00"}'
+const INVALID_EN =
+  '{"questions":[{"question":"Choose the release window","options":[{"label":"Saturday 01:00","description":"Keeps a two-hour rollback window","recommended":true},{"label":"Sunday 01:00"}'
+
 const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixture>> = {
   'zh-CN': {
     single: { argumentsJson: SINGLE_ZH },
@@ -66,6 +72,7 @@ const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixtur
       argumentsJson: SINGLE_ZH,
       result: { declined: false, answers: [['本周日 01:00']] },
     },
+    invalid: { argumentsJson: INVALID_ZH },
   },
   'en-US': {
     single: { argumentsJson: SINGLE_EN },
@@ -84,6 +91,7 @@ const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixtur
       argumentsJson: SINGLE_EN,
       result: { declined: false, answers: [['Sunday 01:00']] },
     },
+    invalid: { argumentsJson: INVALID_EN },
   },
 }
 
@@ -99,7 +107,7 @@ if (rootEl) {
   createRoot(rootEl).render(
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <div className="questionnaire-harness">
+        <div className="questionnaire-harness" data-invalid-arguments={fixture.argumentsJson}>
           <div className="interaction-feed-item">
             {titleView === 'submitted' ? (
               <AskUserRecord arguments={fixture.argumentsJson} contents={[{ type: 'json', value: longResult }]} />

@@ -1,4 +1,5 @@
 import { AlertCircle, Check, X } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
 import { Code } from '@/shared/ui/data/Mono'
 import type { useI18n } from '@/shared/i18n'
 import type { AskUserQuestionnaire } from './questionnaire-types'
@@ -30,12 +31,10 @@ export function QuestionnaireCompletedView({
 
   return (
     <div className="interaction-questionnaire-card is-completed">
-      <div className="interaction-questionnaire-header">
-        <span className="interaction-questionnaire-badge completed">
-          <Check aria-hidden="true" size={14} />
-          <span>{t('shared.completed')}</span>
-        </span>
-      </div>
+      <span className="interaction-questionnaire-badge completed">
+        <Check aria-hidden="true" size={14} />
+        <span>{t('shared.completed')}</span>
+      </span>
       <div className="interaction-questions-list">
         {questionnaire?.questions.map((q, idx) => {
           const ans = completed.answers?.[idx] || []
@@ -60,20 +59,50 @@ export function QuestionnaireCompletedView({
   )
 }
 
-/** 问卷参数无法解析时的回退：保留原始 JSON 供排查。 */
+/**
+ * 问卷参数无法解析：先说明当前阻塞与可继续的动作，原始参数只作按需诊断。
+ *
+ * 拒答是现有的退出路径，失败仍由同一草稿 store 公布错误。
+ */
 export function QuestionnaireInvalidView({
   argumentsJson,
+  onDecline,
+  disabled,
+  error,
+  nonRecoverable,
   t,
 }: {
   argumentsJson: string
+  onDecline: () => void
+  disabled: boolean
+  error?: string | null
+  nonRecoverable: boolean
   t: Translate
 }) {
   return (
     <div className="interaction-questionnaire-card is-invalid">
-      <span className="interaction-error-text">
-        {t('ai.common.operationFailed')}
-      </span>
-      <Code className="interaction-raw-pre">{argumentsJson}</Code>
+      <div className="interaction-error-banner" role="alert">
+        <AlertCircle size={16} aria-hidden="true" />
+        <span>{t('ai.interaction.questionnaireInvalid')}</span>
+      </div>
+      {error ? (
+        <QuestionnaireErrorBanner error={error} nonRecoverable={nonRecoverable} />
+      ) : null}
+      <details className="interaction-diagnostics">
+        <summary>{t('ai.interaction.rawArguments')}</summary>
+        <Code className="interaction-raw-pre">{argumentsJson}</Code>
+      </details>
+      <div className="interaction-actions-bar">
+        <Button
+          variant="ghost"
+          danger
+          className="interaction-decline-btn"
+          disabled={disabled}
+          onClick={onDecline}
+        >
+          {t('ai.interaction.decline')}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -89,6 +118,7 @@ export function QuestionnaireErrorBanner({
   return (
     <div
       className={`interaction-error-banner ${nonRecoverable ? 'is-non-recoverable' : ''}`}
+      role="alert"
     >
       <AlertCircle size={16} aria-hidden="true" />
       <span>{error}</span>

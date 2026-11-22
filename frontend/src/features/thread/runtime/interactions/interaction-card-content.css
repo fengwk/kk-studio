@@ -94,6 +94,10 @@
 .interaction-completed-answers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .interaction-answer-tag { padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-hover); color: var(--fg); font-size: var(--font-size-xs); }
 pre.interaction-raw-pre { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg); white-space: pre-wrap; word-break: break-all; }
+/* 无法解析的参数只作诊断：默认收起，展开后按原始文本换行。 */
+.interaction-diagnostics { min-width: 0; color: var(--fg-muted); font-size: var(--font-size-sm); }
+.interaction-diagnostics summary { cursor: pointer; }
+.interaction-diagnostics pre.interaction-raw-pre { margin-top: var(--space-1); }
 @media (max-width: 480px) {
   .interaction-approval-footer { align-items: stretch; flex-wrap: wrap; }
   .interaction-approval-deny-reason { flex-basis: 100%; }

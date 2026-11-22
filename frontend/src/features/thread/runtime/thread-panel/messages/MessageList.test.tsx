@@ -219,7 +219,7 @@ describe('MessageList tool renderer dispatch', () => {
       arguments: '{"path":"README.md"}',
     }
     const { container, rerender } = render(<MessageList messages={[call]} />)
-    expect(container.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'pending')
 
     const result: ToolDialogueMessage = {
       ...message,
@@ -229,7 +229,7 @@ describe('MessageList tool renderer dispatch', () => {
       contents: [{ type: 'text', text: 'ok' }],
     }
     rerender(<MessageList messages={[call, result]} />)
-    expect(container.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'success')
   })
 
   it('colors each sibling independently: success, error, and waiting approval', () => {
@@ -295,9 +295,9 @@ describe('MessageList tool renderer dispatch', () => {
     )
     const cards = container.querySelectorAll('.thread-turn-tool')
     expect(cards).toHaveLength(3)
-    expect(cards[0]).toHaveClass('tool-state-success')
-    expect(cards[1]).toHaveClass('tool-state-error')
-    expect(cards[2]).toHaveClass('tool-state-pending')
+    expect(cards[0].querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'success')
+    expect(cards[1].querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'error')
+    expect(cards[2].querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'pending')
     expect(screen.getByText('listed files failed')).toBeInTheDocument()
     expect(screen.getByText('listed files')).toBeInTheDocument()
     expect(screen.getAllByText('listed files')).toHaveLength(1)
@@ -361,8 +361,8 @@ describe('MessageList tool renderer dispatch', () => {
     const cards = container.querySelectorAll('.thread-turn-tool')
     // 两张卡片（不是四张）且 key 不冲突：复用同一 toolCallId 时按 callIdentity 区分。
     expect(cards).toHaveLength(2)
-    expect(cards[0]).toHaveClass('tool-state-success')
-    expect(cards[1]).toHaveClass('tool-state-success')
+    expect(cards[0].querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'success')
+    expect(cards[1].querySelector('.thread-block-tool')).toHaveAttribute('data-tool-state', 'success')
     expect(screen.getAllByText('old output')).toHaveLength(1)
     expect(screen.getAllByText('current output')).toHaveLength(1)
   })
