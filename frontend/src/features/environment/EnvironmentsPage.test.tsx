@@ -192,9 +192,10 @@ describe('EnvironmentsPage', () => {
     ]) {
       expect((await cardFor(name)).querySelectorAll('.resource-card-meta-row')).toHaveLength(2)
     }
-    // 有版本记录的卡片标注为“上次”版本；从未上报的卡片明确未上报而不是伪装成发布版本。
-    expect(screen.getAllByText('上次 Daemon 版本')).toHaveLength(3)
-    expect(screen.getAllByText('Daemon 版本')).toHaveLength(2)
+    // 同一信息行在兄弟卡片间共用同一标签；有版本记录的卡片与从未上报的卡片不改写行名。
+    expect(screen.getAllByText('Daemon 版本')).toHaveLength(5)
+    expect(screen.queryByText('上次 Daemon 版本')).toBeNull()
+    expect(screen.queryByText('当前 Daemon 版本')).toBeNull()
     expect(screen.getByText('1.2.3')).toBeInTheDocument()
     expect(screen.getByText('development')).toBeInTheDocument()
     expect(screen.getByText('0.9.0')).toBeInTheDocument()
@@ -484,7 +485,7 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     expect(await screen.findByText('connecting-box')).toBeInTheDocument()
-    expect(await screen.findByText('当前 Daemon 版本')).toBeInTheDocument()
+    expect(await screen.findByText('Daemon 版本')).toBeInTheDocument()
     expect(screen.getByText('1.2.3')).toBeInTheDocument()
     expect(await screen.findByText('无进行中的更新')).toBeInTheDocument()
     expect(environmentService.getEnvironmentRuntime).toHaveBeenCalledWith('env-connecting')
@@ -679,7 +680,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    expect(await screen.findByText('当前 Daemon 版本')).toBeInTheDocument()
+    expect(await screen.findByText('Daemon 版本')).toBeInTheDocument()
     expect(screen.getByText('1.2.1')).toBeInTheDocument()
     expect(screen.queryByText('1.2.0')).not.toBeInTheDocument()
     expect(
@@ -962,7 +963,7 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(runtimeStatus('1.2.1'))
     const { queryClient } = renderPage()
 
-    expect(await screen.findByText('当前 Daemon 版本')).toBeInTheDocument()
+    expect(await screen.findByText('Daemon 版本')).toBeInTheDocument()
     expect(screen.getByText('1.2.1')).toBeInTheDocument()
     expect(await screen.findByText('无进行中的更新')).toBeInTheDocument()
 
@@ -981,9 +982,8 @@ describe('EnvironmentsPage', () => {
 
     expect(await screen.findByText('状态不可用，等待 Daemon 重连')).toBeInTheDocument()
     expect(screen.queryByText('无进行中的更新')).toBeNull()
-    expect(screen.queryByText('当前 Daemon 版本')).toBeNull()
-    // 缓存快照里的版本降级为“上次 Daemon 版本”，不再代表当前进程。
-    expect(screen.getByText('上次 Daemon 版本')).toBeInTheDocument()
+    // 统一标签：降级后同一行仍是同一个行名，值保留上次上报的版本，不再宣称当前进程。
+    expect(screen.getAllByText('Daemon 版本')).toHaveLength(1)
     expect(screen.getByText('1.2.1')).toBeInTheDocument()
     // 有版本记录后不再提供安装入口，只剩管理。
     expect(within(await cardFor('flaky-box')).getAllByRole('button')).toHaveLength(1)

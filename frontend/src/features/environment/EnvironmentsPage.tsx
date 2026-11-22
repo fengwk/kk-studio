@@ -265,12 +265,11 @@ export function EnvironmentsPage() {
                 runtimeText = t('ai.environment.update.none')
               }
 
-              const versionLabel = liveVersion ? 'ai.environment.currentDaemonVersion'
-                : lastVersion ? 'ai.environment.lastDaemonVersion' : 'ai.environment.daemonVersion'
               const showConfigIssue = runtimeStatus && !runtimeStatus.update && !matchesReceipt &&
                 (configView.state === 'failed' || configView.state === 'pendingApply')
               const rows: ResourceCardMetaRow[] = [
-                [t(versionLabel), daemonVersion],
+                // 同一信息行在兄弟卡片上共用同一标签：版本来源（实时或上次上报）不改写行名。
+                [t('ai.environment.daemonVersion'), daemonVersion],
                 {
                   label: t(showConfigIssue ? 'ai.environment.config.status' : 'ai.environment.updateStatus'),
                   value: showConfigIssue ? <EnvironmentConfigStatusBadge view={configView} />
