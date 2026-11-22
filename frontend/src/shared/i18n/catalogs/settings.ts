@@ -35,7 +35,7 @@ export const settingsCatalog = {
   },
   'settings.allSaved': {
     'en-US': 'All changes saved',
-    'zh-CN': '已是最新',
+    'zh-CN': '所有更改已保存',
   },
   'settings.tabs.ariaLabel': {
     'en-US': 'Settings sections',

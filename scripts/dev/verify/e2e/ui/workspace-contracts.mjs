@@ -674,7 +674,7 @@ export async function runWorkspaceContractMatrix(ui) {
         )
         await base.fill(changed)
         await page.getByRole('button', { name: '保存', exact: true }).click()
-        await page.getByText('已是最新').waitFor({ state: 'visible', timeout: 15_000 })
+        await page.getByText('所有更改已保存').waitFor({ state: 'visible', timeout: 15_000 })
         await shot(caseArt, 'settings-system-contract-cas')
 
         const after = await readSettings()

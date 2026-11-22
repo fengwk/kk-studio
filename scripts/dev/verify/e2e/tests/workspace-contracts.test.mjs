@@ -162,10 +162,10 @@ function createSettingsPage(world) {
       }
     },
     getByText(text) {
-      assert.equal(text, '已是最新')
+      assert.equal(text, '所有更改已保存')
       return {
         async waitFor() {
-          assert.equal(view.latestVisible, true, '"已是最新" must be visible')
+          assert.equal(view.latestVisible, true, '"所有更改已保存" must be visible')
         },
       }
     },
