@@ -257,12 +257,17 @@ describe('History tree search', () => {
     expect(historyRowSearchPreview(row, [])).toBe(row.preview)
   })
 
-  // 是否换成全文窗口由首个命中的起点决定。
-  it('keeps the plain preview while the hit starts inside the retained characters', () => {
-    const inside = searchRow(`${'甲'.repeat(218)}hit ${'乙'.repeat(300)}`)
-    expect(inside.preview).toContain('h')
+  // 是否换成全文窗口由首个命中能否完整留在普通预览里决定。
+  it('keeps the plain preview only while the first hit fits in the retained characters', () => {
+    const inside = searchRow(`${'甲'.repeat(216)}hit ${'乙'.repeat(300)}`)
+    expect(inside.preview).toContain('hit')
     expect(historyRowSearchPreview(inside, historySearchTokens('hit'))).toBe(inside.preview)
-    // 越过保留字符的首位后该位置已被省略号取代，命中在普通预览里看不到，改用全文窗口。
+    // 命中跨过保留字符的末位时普通预览只剩半个命中，高亮不到，改用全文窗口。
+    const straddling = searchRow(`${'甲'.repeat(217)}hit ${'乙'.repeat(300)}`)
+    expect(straddling.preview).not.toContain('hit')
+    expect(historyRowSearchPreview(straddling, historySearchTokens('hit')).startsWith('…甲甲甲甲甲甲hit '))
+      .toBe(true)
+    // 命中完全在保留字符之外时同样改用全文窗口。
     const beyond = searchRow(`${'甲'.repeat(219)}hit ${'乙'.repeat(300)}`)
     expect(beyond.preview).not.toContain('hit')
     expect(historyRowSearchPreview(beyond, historySearchTokens('hit')).startsWith('…甲甲甲甲甲甲hit '))

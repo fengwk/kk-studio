@@ -198,26 +198,28 @@ export function historyRowMatches(row: HistoryTreeRow, tokens: string[]): boolea
 }
 
 /**
- * 搜索时的行预览：命中已经在预览保留的字符内时沿用普通预览，由行内布局保证命中优先显示；
- * 只有命中超出预览时才从全文命中处前少量上下文开始截取（以 … 开头并按预览上限截断），
+ * 搜索时的行预览：首个命中完整落在预览保留的字符内时沿用普通预览，由行内布局保证命中优先显示；
+ * 命中超出或跨过预览末位时才从全文命中处前少量上下文开始截取（以 … 开头并按预览上限截断），
  * 用户也能看到这一行为什么匹配。没有命中同样沿用普通预览。
  */
 export function historyRowSearchPreview(row: HistoryTreeRow, tokens: string[]): string {
   if (row.text.length <= PROJECTED_PREVIEW_LIMIT) {
     return row.preview
   }
-  let first = Infinity
+  let hitStart = Infinity
+  let hitEnd = 0
   for (const token of tokens) {
     if (token.length === 0) {
       continue
     }
     const index = row.searchText.indexOf(token)
-    if (index >= 0) {
-      first = Math.min(first, index)
+    if (index >= 0 && index < hitStart) {
+      hitStart = index
+      hitEnd = index + token.length
     }
   }
-  return Number.isFinite(first) && first >= PROJECTED_PREVIEW_KEPT
-    ? windowAroundHit(row.text, first)
+  return Number.isFinite(hitStart) && hitEnd > PROJECTED_PREVIEW_KEPT
+    ? windowAroundHit(row.text, hitStart)
     : row.preview
 }
 
