@@ -114,12 +114,12 @@ export function EditMcpServerDialog({
             </label>
 
             <label className="form-group">
-              <FieldLabel>{t('ai.catalog.card.timeout')}</FieldLabel>
+              <FieldLabel>{t('ai.mcp.timeout')}</FieldLabel>
               <NumberInput
                 value={String(form.timeoutMillis)}
                 min={1}
                 onChange={(timeoutMillis) => edit({ timeoutMillis })}
-                aria-label={t('ai.catalog.card.timeout')}
+                aria-label={t('ai.mcp.timeout')}
                 disabled={busy}
               />
             </label>

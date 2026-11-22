@@ -8,7 +8,9 @@ const HEADER_NAME_MAX_LENGTH = 256
 const HEADER_VALUE_MAX_LENGTH = 8192
 const NAME_MAX_LENGTH = 32
 
-const NAME_PATTERN = /^[a-z][a-z0-9_]*$/
+/** 名字正则源码：界面原样展示，校验用同一份源码构造，避免展示与规则漂移。 */
+export const MCP_NAME_PATTERN_SOURCE = '^[a-z][a-z0-9_]*$'
+const NAME_PATTERN = new RegExp(MCP_NAME_PATTERN_SOURCE)
 
 function hasIsoControl(str: string): boolean {
   for (let i = 0; i < str.length; i++) {
@@ -38,7 +40,7 @@ export interface TimeoutValidationResult {
 }
 
 /**
- * 校验 MCP Server 唯一名：^[a-z][a-z0-9_]*$，长度 <= 32。
+ * 校验 MCP Server 唯一名：`MCP_NAME_PATTERN_SOURCE`，长度 <= 32。
  */
 export function validateMcpName(name: string): ValidationResult {
   if (!name || !name.trim()) {

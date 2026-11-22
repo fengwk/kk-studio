@@ -191,39 +191,6 @@
   color: var(--fg-muted);
 }
 
-.resource-card-pairs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px;
-  min-width: 0;
-}
-
-.resource-card-pair {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: 8px;
-  min-width: 0;
-}
-
-.resource-card-pair-label {
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
-.resource-card-pair-value {
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-sm);
-  line-height: 1.5;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
-}
-
 .resource-card-actions {
   margin-top: auto;
   display: flex;

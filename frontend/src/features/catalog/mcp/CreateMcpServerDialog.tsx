@@ -4,9 +4,11 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { Mono } from '@/shared/ui/data/Mono'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import type { FormEvent } from 'react'
+import { MCP_NAME_PATTERN_SOURCE } from './mcp-utils'
 import type { CreateMcpServerFormState } from './mcp-server-forms'
 
 const HEADERS_PLACEHOLDER = '{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'
@@ -52,7 +54,10 @@ export function CreateMcpServerDialog({
               required
               autoFocus
             />
-            <span className="inline-hint">{t('ai.mcp.nameHint')}</span>
+            <span className="inline-hint">
+              {t('ai.mcp.nameHint')}{' '}
+              <Mono className="mcp-name-pattern">{MCP_NAME_PATTERN_SOURCE}</Mono>
+            </span>
           </label>
 
           <label className="form-group">
@@ -82,12 +87,12 @@ export function CreateMcpServerDialog({
           </label>
 
           <label className="form-group">
-            <FieldLabel>{t('ai.catalog.card.timeout')}</FieldLabel>
+            <FieldLabel>{t('ai.mcp.timeout')}</FieldLabel>
             <NumberInput
               value={String(form.timeoutMillis)}
               min={1}
               onChange={(timeoutMillis) => edit({ timeoutMillis })}
-              aria-label={t('ai.catalog.card.timeout')}
+              aria-label={t('ai.mcp.timeout')}
               disabled={pending}
             />
           </label>

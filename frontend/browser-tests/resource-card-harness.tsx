@@ -64,7 +64,8 @@ export function ResourceCardHarnessApp() {
           meta={[
             ['类型', 'agent'],
             { label: '工具', tags: ['read', 'bash', 'grep', 'write'], limit: 2 },
-            { pairs: [{ label: '超时', value: '180s' }, { label: '空闲', value: '1500ms' }] },
+            ['超时', '180s'],
+            ['空闲', '1500ms'],
           ]}
           actions={
             <>

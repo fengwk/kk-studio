@@ -1361,9 +1361,12 @@ export const resourcesCatalog = {
     'zh-CN': '服务名称',
   },
   'ai.mcp.nameHint': {
-    'en-US':
-      'Lowercase letters, numbers, and underscores; must start with a letter. Pattern: ^[a-z][a-z0-9_]*$',
-    'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：^[a-z][a-z0-9_]*$',
+    'en-US': 'Lowercase letters, numbers, and underscores; must start with a letter. Pattern:',
+    'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：',
+  },
+  'ai.mcp.timeout': {
+    'en-US': 'Timeout (ms)',
+    'zh-CN': '超时（毫秒）',
   },
   'ai.mcp.url': {
     'en-US': 'Endpoint URL',

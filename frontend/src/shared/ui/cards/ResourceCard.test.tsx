@@ -48,7 +48,7 @@ describe('ResourceCard', () => {
         meta={[
           ['Kind', 'agent'],
           { label: 'Tools', tags: ['read', 'bash', 'grep', 'write'], limit: 2 },
-          { pairs: [{ label: 'Timeout', value: '180s' }, { label: 'Idle', value: '1500ms' }] },
+          ['Idle', '180s'],
         ]}
       />,
     )

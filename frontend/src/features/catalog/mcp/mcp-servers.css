@@ -11,3 +11,16 @@
   font-size: var(--font-size-xs);
   resize: vertical;
 }
+
+/* 名字正则整体呈现：不在 token 中断行；放不下时整体换行，超长再在自身内横向滚动。 */
+.ui-mono.mcp-name-pattern {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  overflow-wrap: normal;
+  white-space: nowrap;
+  overflow-x: auto;
+}
