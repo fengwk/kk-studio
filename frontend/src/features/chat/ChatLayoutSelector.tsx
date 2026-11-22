@@ -22,7 +22,8 @@ interface ChatLayoutSelectorProps {
 
 /**
  * 面板布局选择器：选项名带量词（中文「3 个窗格」、英文按数量区分单复数），
- * 读屏不再只听到裸数字；未识别的值回落到 single。
+ * 读屏不再只听到裸数字；触发器上只写数量，避免量词把窄屏顶栏挤宽。
+ * 未识别的值回落到 single。
  */
 export function ChatLayoutSelector({
   layout,
@@ -35,6 +36,7 @@ export function ChatLayoutSelector({
     label: panes === 1
       ? t('ai.chat.paneCount.one')
       : t('ai.chat.paneCount.other', { count: panes }),
+    triggerLabel: String(panes),
   }))
   return (
     <Select

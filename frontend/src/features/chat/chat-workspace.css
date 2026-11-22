@@ -57,7 +57,8 @@
 }
 
 .chat-workspace-breadcrumb-item {
-  min-width: 0;
+  /* 留出省略号的宽度，避免只裁出半个字符。 */
+  min-width: 1em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -141,7 +142,39 @@
   gap: 10px;
 }
 
+.chat-workspace-title-lead {
+  display: contents;
+}
+
 @container chat-workspace (max-width: 560px) {
+  /* 动作只占第一行；面包屑使用整行宽度，不因右上角控件提前截断。 */
+  .chat-workspace-header-with-breadcrumb {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+  }
+
+  .chat-workspace-header-with-breadcrumb .chat-workspace-title {
+    display: contents;
+  }
+
+  .chat-workspace-title-lead {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    grid-area: 1 / 1;
+  }
+
+  .chat-workspace-header-with-breadcrumb .chat-workspace-actions {
+    grid-area: 1 / 2;
+  }
+
+  .chat-workspace-breadcrumb {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
   /* 窄屏顶栏：身份文字先让位，短 ID 与复制保持完整，名称仍占一行并保留省略号。 */
   .chat-workspace-header .chat-workspace-title {
     gap: 6px;
@@ -157,9 +190,14 @@
   }
 
   /* 先保证返回、身份与复制动作可读，标题另起稳定一行，避免 320px 时挤成零宽。 */
-  .chat-workspace-title > h1,
-  .chat-workspace-title .chat-workspace-breadcrumb {
+  .chat-workspace-title > h1 {
     flex: 1 0 100%;
+  }
+
+  /* 当前 Thread 优先保留名称：短名不参与压缩，长名最多占约三分之一。 */
+  .chat-workspace-breadcrumb-item[data-breadcrumb='branch'] {
+    flex: 0 0 auto;
+    max-width: 36%;
   }
 
   .chat-workspace-title > .thread-breadcrumb-separator {
