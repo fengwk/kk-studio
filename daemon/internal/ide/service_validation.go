@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
@@ -82,17 +81,6 @@ func (s *Service) isCurrentOpen(view *viewRecord) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.views[view.viewID] == view && view.state == viewOpen && !view.bindingPending
-}
-
-func (s *Service) keyedLock(locks map[string]*sync.Mutex, key string) *sync.Mutex {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	lock := locks[key]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		locks[key] = lock
-	}
-	return lock
 }
 
 func (s *Service) replayClaim(claimID, shape string) (*protocol.IdeResult, error) {

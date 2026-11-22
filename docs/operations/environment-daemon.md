@@ -241,6 +241,10 @@ Studio 保存的完整卡片配置：
 - `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值不能是空白或含
   控制字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
   `daemon.json` 与运行快照保存的仍是配置里写下的字符串，真正的路径解析发生在执行时。
+  命令通过非交互的登录 shell（`bash -lc`）执行。宿主登录配置可以修改 PATH 等环境变量，因此命令看到的
+  环境可能与 Daemon 进程不同。Daemon 用自身的 PATH 查找 `bashExecutable` 和 LSP 服务器命令，两者可用
+  不代表 `bash` 工具也能找到同一程序。要让工具在命令中可见，请在 Daemon 运行用户实际加载的登录配置
+  （如 `~/.bash_profile` 或 `~/.profile`）中设置 PATH。
 - `lsp` 可选；整个字段省略或 `null` 表示禁用 LSP。一旦声明就必须至少有一个 server，空表非法。server id 匹配
   `[A-Za-z0-9_.-]+`。每个 server 的 `command` 与 `extensions` 都必须是非空字符串数组；每个后缀须带前导点且不含路径分隔符。
   Studio 卡片、控制协议与 Daemon 在输入边界统一校验。`rootMarkers` / `firstMatchMarkers` 可选，

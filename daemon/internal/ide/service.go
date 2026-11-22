@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengwk/kk-studio/daemon/internal/coding/keylock"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
@@ -86,8 +87,8 @@ type Service struct {
 	reservations     map[string]struct{}
 	claims           map[string]claimRecord
 	claimOrder       []string
-	viewLocks        map[string]*sync.Mutex
-	claimLocks       map[string]*sync.Mutex
+	viewLocks        keylock.Locks
+	claimLocks       keylock.Locks
 	workspaceMu      sync.Mutex
 	recoveryMu       sync.Mutex // Serializes quota checks and publication across all views.
 	activeStreams    map[*activeIdeStream]struct{}
@@ -145,8 +146,7 @@ func NewService(cfg config.DaemonConfig, processes native.Supervisor, tracker na
 		bridge: bridge, resolver: NewResolver(), scheduler: scheduler, onEvent: options.OnEvent,
 		recoveryQuota: quota, maxViews: maxViews, daemonInstance: options.DaemonInstanceID,
 		views: make(map[string]*viewRecord), reservations: make(map[string]struct{}),
-		claims: make(map[string]claimRecord), viewLocks: make(map[string]*sync.Mutex),
-		claimLocks: make(map[string]*sync.Mutex), activeStreams: make(map[*activeIdeStream]struct{}),
+		claims: make(map[string]claimRecord), activeStreams: make(map[*activeIdeStream]struct{}),
 		refreshQueue:   make(chan explorerRefreshRequest, maxQueuedExplorerRefreshes),
 		refreshPending: make(map[explorerRefreshKey]struct{}),
 		lifetime:       lifetime, cancelLifetime: cancel,

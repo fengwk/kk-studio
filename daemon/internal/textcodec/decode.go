@@ -31,7 +31,7 @@ func Decode(path string, data []byte) ([]byte, Encoding, int, error) {
 	if checkBinaryWindow(data, 0) {
 		return nil, Encoding{}, 0, ErrBinary
 	}
-	label, where := findDeclaration(path, data)
+	label, where := findDeclaration(path, data[:min(len(data), binaryProbeBytes)])
 	if label == "" {
 		return decodeText(data, Encoding{Name: "UTF-8", Source: SourceUTF8}, false)
 	}
