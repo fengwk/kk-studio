@@ -20,7 +20,7 @@ type runningCall struct {
 	progressError  string
 }
 
-func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope, readiness ...bool) error {
+func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope, ready bool) error {
 	if e.InvocationId == nil || *e.InvocationId == "" {
 		return r.sendError(nil, "invocationId is required")
 	}
@@ -32,7 +32,7 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope, readin
 	if !start.Created {
 		return r.replay(start.Entry)
 	}
-	if len(readiness) > 0 && !readiness[0] {
+	if !ready {
 		return r.rejectCall(id, "INVOKE requires a READY bound connection")
 	}
 	call, executor, admitted, err := r.admitInvoke(id, e)
@@ -232,9 +232,6 @@ func (r *Runtime) encodeResult(ctx context.Context, id string, result Capability
 	}
 	if len(result.Contents) > maxResultContents {
 		return nil, errors.New("capability result contains too many content items")
-	}
-	if !progress && budget <= 0 {
-		return nil, errors.New("maximumResourceBytes must be positive")
 	}
 	if err := checkResultBudget(result.Contents, budget, progress); err != nil {
 		return nil, err

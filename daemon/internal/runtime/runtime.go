@@ -80,7 +80,6 @@ type Runtime struct {
 	ideLeaseConsumed       bool
 	wg                     sync.WaitGroup
 	runMu                  sync.Mutex
-	running                bool
 	hasRun                 bool
 	sendCtx                context.Context
 	runCancel              context.CancelFunc
@@ -92,7 +91,6 @@ type Runtime struct {
 	updatePermit           func() error
 	admissionMu            sync.Mutex
 	admissionPaused        bool
-	configReconnectPending bool
 	candidateSuspension    *bool
 	resourcePolicyMu       sync.Mutex
 	resourceTTL            time.Duration
@@ -183,7 +181,7 @@ func applyOptionDefaults(options *RuntimeOptions) error {
 // reach the published snapshot.
 func resolveHostInfo(hostInfo *protocol.HostInfo) (*protocol.HostInfo, error) {
 	if hostInfo == nil {
-		return detectHostInfo()
+		return DetectHostInfo()
 	}
 	return proto.Clone(hostInfo).(*protocol.HostInfo), nil
 }
@@ -232,11 +230,10 @@ func (r *Runtime) bindEnvironmentHooks(environmentConfig *EnvironmentConfigRunti
 			reconnect := endpointsChanged(previous, next)
 			r.admissionMu.Lock()
 			r.admissionPaused = reconnect
-			r.configReconnectPending = reconnect
 			r.candidateSuspension = nil
 			r.admissionMu.Unlock()
 			if reconnect {
-				r.dropActiveConnection()
+				r.reconnectForConfigChange()
 			}
 		},
 	)

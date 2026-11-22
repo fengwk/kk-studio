@@ -63,13 +63,9 @@ func bootstrapH2XConnect(args []string) {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	forwardDone := make(chan struct{})
-	go func() {
-		select {
-		case received := <-signals:
-			_ = command.Process.Signal(received)
-		case <-forwardDone:
-		}
-	}()
+	go forwardSignals(signals, forwardDone, func(received os.Signal) {
+		_ = command.Process.Signal(received)
+	})
 	waitErr := command.Wait()
 	close(forwardDone)
 	signal.Stop(signals)
@@ -82,6 +78,18 @@ func bootstrapH2XConnect(args []string) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+// forwardSignals relays every received signal to the bootstrap child until the child exits.
+func forwardSignals(signals <-chan os.Signal, childExited <-chan struct{}, forward func(os.Signal)) {
+	for {
+		select {
+		case received := <-signals:
+			forward(received)
+		case <-childExited:
+			return
+		}
+	}
 }
 
 func runNativeHelper(args []string) int {

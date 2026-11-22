@@ -22,7 +22,7 @@ func TestRuntimeRejectsInvocationBeyondConcurrentLimit(t *testing.T) {
 		},
 	}
 	runtime, connection := newReadyRuntimeForTest(t, options)
-	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("first", `{}`)); err != nil {
+	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("first", `{}`), true); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -33,7 +33,7 @@ func TestRuntimeRejectsInvocationBeyondConcurrentLimit(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first invocation did not enter the executor")
 	}
-	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("second", `{}`)); err != nil {
+	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("second", `{}`), true); err != nil {
 		t.Fatal(err)
 	}
 	frames := connection.frames()
@@ -73,7 +73,7 @@ func TestRuntimeProgressEncodingFailureCancelsCallAndFails(t *testing.T) {
 		},
 	}
 	runtime, connection := newReadyRuntimeForTest(t, options)
-	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("progress-failure", `{}`)); err != nil {
+	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("progress-failure", `{}`), true); err != nil {
 		t.Fatal(err)
 	}
 	select {

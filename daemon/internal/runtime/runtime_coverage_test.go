@@ -167,7 +167,6 @@ func TestRuntimeEncodeResultRejectsInvalidPayloads(t *testing.T) {
 		{"call id", CapabilityResult{CallID: "other"}, 1, "callId does not match"},
 		{"details object", CapabilityResult{CallID: testInvocationID, Details: []byte(`[]`)}, 1, "details is not a JSON object"},
 		{"too many contents", CapabilityResult{CallID: testInvocationID, Contents: make([]ResultContent, maxResultContents+1)}, 1, "too many content items"},
-		{"budget must be positive", CapabilityResult{CallID: testInvocationID}, 0, "maximumResourceBytes must be positive"},
 		{"negative resource size", CapabilityResult{CallID: testInvocationID, Contents: []ResultContent{{Type: "resource", Size: -1}}}, 1, "resource size must not be negative"},
 		{"unknown content", CapabilityResult{CallID: testInvocationID, Contents: []ResultContent{{Type: "other"}}}, 1, "content type is invalid"},
 		{"missing uploader", CapabilityResult{CallID: testInvocationID, Contents: []ResultContent{{Type: "binary", Bytes: []byte("x")}}}, 1, "resource upload is not configured"},
@@ -199,6 +198,11 @@ type failingSendConnection struct {
 
 func (c *failingSendConnection) Send(context.Context, *protocol.Envelope) error { return c.err }
 
+// Require callers to make an explicit READY decision, even in direct tests.
+var _ interface {
+	handleInvoke(context.Context, *protocol.Envelope, bool) error
+} = (*Runtime)(nil)
+
 // Rejects malformed invocation fields and preserves one-execution admission limits.
 func TestRuntimeHandleInvokeRejectsMalformedCalls(t *testing.T) {
 	options := runtimeOptionsForTest()
@@ -225,7 +229,7 @@ func TestRuntimeHandleInvokeRejectsMalformedCalls(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := r.handleInvoke(context.Background(), tc.e); err != nil {
+			if err := r.handleInvoke(context.Background(), tc.e, true); err != nil {
 				t.Fatal(err)
 			}
 			frames := r.connection.connection.(*testConnection).frames()
@@ -240,13 +244,13 @@ func TestRuntimeHandleInvokeRejectsMalformedCalls(t *testing.T) {
 			}
 		})
 	}
-	if err := r.handleInvoke(context.Background(), &protocol.Envelope{}); err != nil {
+	if err := r.handleInvoke(context.Background(), &protocol.Envelope{}, true); err != nil {
 		t.Fatal(err)
 	}
 	r.admissionMu.Lock()
 	r.admissionPaused = true
 	r.admissionMu.Unlock()
-	if err := r.handleInvoke(context.Background(), invokeWithArgs("paused", `{}`)); err != nil {
+	if err := r.handleInvoke(context.Background(), invokeWithArgs("paused", `{}`), true); err != nil {
 		t.Fatal(err)
 	}
 	r.admissionMu.Lock()
@@ -255,7 +259,7 @@ func TestRuntimeHandleInvokeRejectsMalformedCalls(t *testing.T) {
 	if decision, err := r.updateOps.Decide(updateCommandForTest(), "1", true, ""); err != nil || decision.Action != "admit" {
 		t.Fatalf("update admission = %+v, %v", decision, err)
 	}
-	if err := r.handleInvoke(context.Background(), invokeWithArgs("update-held", `{}`)); err != nil {
+	if err := r.handleInvoke(context.Background(), invokeWithArgs("update-held", `{}`), true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -299,7 +303,7 @@ func TestRuntimeMapsAbsentExpectedFileSHA256ToEmptyString(t *testing.T) {
 	envelope := invokeWithArgs("write-create-only", `{}`)
 	envelope.GetInvoke().CapabilityId = stringPtr("fs.write")
 	envelope.GetInvoke().ExpectedFile = &protocol.ExpectedFile{Path: stringPtr("/tmp/new-file")}
-	if err := r.handleInvoke(context.Background(), envelope); err != nil {
+	if err := r.handleInvoke(context.Background(), envelope, true); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -331,7 +335,9 @@ func TestRuntimeRecoveryAndSendFailureEdges(t *testing.T) {
 		t.Fatalf("progress for an unknown call = %v", err)
 	}
 	failed := &failingSendConnection{testConnection: newTestConnection(), err: errors.New("disconnected")}
-	r.dropActiveConnection()
+	if err := r.closeActiveConnection(); err != nil {
+		t.Fatal(err)
+	}
 	active := r.attachConnection(failed)
 	if err := r.sendFrame(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT}); err == nil {
 		t.Fatal("expected send failure")

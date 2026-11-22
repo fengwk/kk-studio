@@ -37,7 +37,6 @@ func (r *Runtime) sendReady() error {
 	}
 	r.admissionMu.Lock()
 	r.admissionPaused = false
-	r.configReconnectPending = false
 	r.candidateSuspension = nil
 	r.admissionMu.Unlock()
 	if err := r.resendUnacknowledgedExits(); err != nil {
@@ -97,6 +96,9 @@ func (r *Runtime) writeControlFrame(ctx context.Context, active *activeConnectio
 	if err := active.connection.Send(ctx, e); err != nil {
 		r.dropConnection(active)
 		return err
+	}
+	if e.MessageType == protocol.MessageType_READY {
+		active.sentReady = true
 	}
 	return nil
 }

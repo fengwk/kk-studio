@@ -127,7 +127,7 @@ func TestRuntimeHandlesInFlightCancelAndRecoverBeforeReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !runtime.journal.Complete("in-flight", InvocationCancelled, data) {
+	if !completeJournalForTest(t, runtime.journal, "in-flight", InvocationCancelled, data) {
 		t.Fatal("terminal state was not stored")
 	}
 	connection.mu.Lock()

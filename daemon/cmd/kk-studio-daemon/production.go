@@ -28,20 +28,26 @@ type productionRuntime struct {
 	updateRunner update.Runner
 }
 
-func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (runErr error) {
+func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) error {
+	return r.run(ctx, initial, startProcessSupervision)
+}
+
+func (r productionRuntime) run(ctx context.Context, initial config.DaemonConfig, startSupervision func(*error) (native.UpdateSupervisor, func(), error)) (runErr error) {
 	if _, err := config.ReleaseKey(runtime.GOOS, runtime.GOARCH); err != nil {
 		return productionFailure("daemon platform is unsupported", err)
 	}
-	processes, cleanupProcesses, err := startProcessSupervision(&runErr)
-	if err != nil {
-		return err
-	}
-	defer cleanupProcesses()
+	// The directory lock is held for the whole daemon lifetime: it is acquired before process
+	// supervision starts and released after the supervisor converged its managed children.
 	temporaryResources, cleanupDataDirectory, err := prepareDataDirectory(ctx, initial, &runErr)
 	if err != nil {
 		return err
 	}
 	defer cleanupDataDirectory()
+	processes, cleanupProcesses, err := startSupervision(&runErr)
+	if err != nil {
+		return err
+	}
+	defer cleanupProcesses()
 	networks, cleanupNetworks, err := startNetworks(initial, &runErr)
 	if err != nil {
 		return err
@@ -194,11 +200,19 @@ type productionAssembly struct {
 // assembleRuntime wires the started services into the runtime session, sharing the environment
 // config runtime's status tracker so both observe the same published configuration.
 func (r productionRuntime) assembleRuntime(initial config.DaemonConfig, assembly productionAssembly) (*daemonruntime.Runtime, *runtimeResourceControl, error) {
+	hostInfo, err := daemonruntime.DetectHostInfo()
+	if err != nil {
+		return nil, nil, productionFailure("daemon host facts are unavailable", err)
+	}
+	platform, err := daemonruntime.HostPlatform(hostInfo)
+	if err != nil {
+		return nil, nil, productionFailure("daemon platform is unsupported", err)
+	}
 	environmentConfig := assembly.environmentConfig
 	connections := connectionFactory(func(ctx context.Context, observer daemonruntime.ControlObserver) (daemonruntime.Connection, error) {
 		applied := environmentConfig.Current()
 		return transport.Dial(ctx, transport.DialConfig{
-			Applied: applied, InstanceID: assembly.instanceID, Platform: runtime.GOOS,
+			Applied: applied, InstanceID: assembly.instanceID, Platform: platform,
 			Observer: observer, Resolver: assembly.ideService,
 		})
 	})
@@ -227,6 +241,7 @@ func (r productionRuntime) assembleRuntime(initial config.DaemonConfig, assembly
 		},
 		Resources:             dynamicResourceUploader{networks: assembly.networks, control: resourceControl},
 		TemporaryResources:    assembly.temporaryResources,
+		HostInfo:              hostInfo,
 		EnvironmentConfig:     environmentConfig,
 		Status:                environmentConfig.StatusTracker(),
 		InvocationJournalPath: filepath.Join(initial.DataDir, "runtime-invocations.json"),

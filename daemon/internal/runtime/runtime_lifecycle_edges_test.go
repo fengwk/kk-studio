@@ -67,7 +67,7 @@ func TestRuntimeReplayAndTerminalEdges(t *testing.T) {
 	if err := r.finish("finished", protocol.MessageType_FAILED, terminal, InvocationFailed); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.journal.ConfirmExit("finished"); !err {
+	if !confirmExitForTest(t, r.journal, "finished") {
 		t.Fatal("could not record exit confirmation")
 	}
 	entry, ok := r.journal.Get("finished")
@@ -84,7 +84,9 @@ func TestRuntimeReplayAndTerminalEdges(t *testing.T) {
 		t.Fatalf("CANCEL for unknown invocation = %v", err)
 	}
 	r.journal.Start("broken")
-	r.journal.Complete("broken", InvocationFailed, []byte("not a protobuf"))
+	if !completeJournalForTest(t, r.journal, "broken", InvocationFailed, []byte("not a protobuf")) {
+		t.Fatal("completion failed")
+	}
 	broken, _ := r.journal.Get("broken")
 	if err := r.replay(broken); err == nil || err.Error() != "journal terminal frame is invalid" {
 		t.Fatalf("malformed journal frame error = %v", err)

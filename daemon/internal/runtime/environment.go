@@ -144,7 +144,8 @@ func isWSL(getenv func(string) string, readFile func(string) ([]byte, error)) bo
 	return false
 }
 
-func detectHostInfo() (*protocol.HostInfo, error) {
+// DetectHostInfo reports the host facts used by the control handshake and READY.
+func DetectHostInfo() (*protocol.HostInfo, error) {
 	wsl := runtime.GOOS == "linux" && isWSL(os.Getenv, os.ReadFile)
 	identity, _ := user.Current()
 	userName, home := "", ""
@@ -153,4 +154,32 @@ func detectHostInfo() (*protocol.HostInfo, error) {
 	}
 	timeZone := detectTimeZone(runtime.GOOS, os.LookupEnv, os.Readlink, currentZoneOffset)
 	return localHostInfo(runtime.GOOS, runtime.GOARCH, wsl, timeZone, userName, home, os.TempDir())
+}
+
+// HostPlatform renders host facts as the `<os>-<arch>` wire value the platform admission endpoint
+// resolves a release target from: one of windows, wsl, linux or macos with amd64 or arm64.
+func HostPlatform(info *protocol.HostInfo) (string, error) {
+	var operatingSystem string
+	switch info.GetOperatingSystem() {
+	case protocol.OperatingSystem_WINDOWS:
+		operatingSystem = "windows"
+	case protocol.OperatingSystem_WSL:
+		operatingSystem = "wsl"
+	case protocol.OperatingSystem_LINUX:
+		operatingSystem = "linux"
+	case protocol.OperatingSystem_MACOS:
+		operatingSystem = "macos"
+	default:
+		return "", errors.New("unsupported operating system")
+	}
+	var architecture string
+	switch info.GetArchitecture() {
+	case protocol.Architecture_AMD64:
+		architecture = "amd64"
+	case protocol.Architecture_ARM64:
+		architecture = "arm64"
+	default:
+		return "", errors.New("unsupported architecture")
+	}
+	return operatingSystem + "-" + architecture, nil
 }

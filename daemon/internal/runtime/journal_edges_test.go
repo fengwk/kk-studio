@@ -11,7 +11,7 @@ func TestJournalTerminalStateAndExitEvidenceEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if journal.Complete("missing", InvocationFailed, []byte("failed")) {
+	if completeJournalForTest(t, journal, "missing", InvocationFailed, []byte("failed")) {
 		t.Fatal("unknown invocation was completed")
 	}
 	for _, terminal := range []struct {
@@ -26,13 +26,13 @@ func TestJournalTerminalStateAndExitEvidenceEdges(t *testing.T) {
 		if !started.Created {
 			t.Fatalf("start %q failed", terminal.state)
 		}
-		if journal.Complete(string(terminal.state), InvocationRunning, []byte("not terminal")) {
+		if completeJournalForTest(t, journal, string(terminal.state), InvocationRunning, []byte("not terminal")) {
 			t.Fatalf("RUNNING state completed as terminal for %q", terminal.state)
 		}
-		if !journal.Complete(string(terminal.state), terminal.state, []byte(string(terminal.state))) {
+		if !completeJournalForTest(t, journal, string(terminal.state), terminal.state, []byte(string(terminal.state))) {
 			t.Fatalf("terminal transition %q failed", terminal.state)
 		}
-		if journal.Complete(string(terminal.state), InvocationFailed, []byte("replacement")) {
+		if completeJournalForTest(t, journal, string(terminal.state), InvocationFailed, []byte("replacement")) {
 			t.Fatalf("terminal state %q was replaced", terminal.state)
 		}
 		entry, ok := journal.Get(string(terminal.state))
@@ -40,17 +40,17 @@ func TestJournalTerminalStateAndExitEvidenceEdges(t *testing.T) {
 			t.Fatalf("terminal mapping for %q = %+v, present=%t", terminal.state, entry, ok)
 		}
 	}
-	if journal.ConfirmExit("unknown") {
+	if confirmExitForTest(t, journal, "unknown") {
 		t.Fatal("exit was confirmed for unknown invocation")
 	}
-	if !journal.ConfirmExit(string(InvocationCompleted)) {
+	if !confirmExitForTest(t, journal, string(InvocationCompleted)) {
 		t.Fatal("exit confirmation did not apply to a terminal invocation")
 	}
 	entry, ok := journal.Get(string(InvocationCompleted))
 	if !ok || !entry.Exited || entry.State != InvocationCompleted {
 		t.Fatalf("exit confirmation changed terminal state: %+v", entry)
 	}
-	if journal.ConfirmExit(string(InvocationCompleted)) {
+	if confirmExitForTest(t, journal, string(InvocationCompleted)) {
 		t.Fatal("duplicate exit confirmation succeeded")
 	}
 }
