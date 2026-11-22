@@ -9,7 +9,13 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlFraming;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolValidator;
+import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
+import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentConfig;
+import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
+import fun.fengwk.kkstudio.platform.daemon.transport.DaemonControlStream;
+import fun.fengwk.kkstudio.platform.environment.server.DaemonConfigProtocolMapper;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -25,8 +31,8 @@ import java.util.Set;
  *
  * <p>错误只包含字段路径与规则，不包含输入值或解析器异常。parse 严格校验 JSON 的实际类型且拒绝未知字段；validate 同样校验程序构造的模型，返回独立、 规范化的完整配置。
  *
- * <p>字段上限直接引用 {@link ControlProtocolValidator} 的 {@code MAX_*} 常量，与 {@code ENVIRONMENT_CONFIG}
- * 出站校验同口径：卡片能保存的配置 一定能下发，不会出现保存成功而连接在下发时被关闭。
+ * <p>上限直接引用协议侧定义：字段上限来自 {@link ControlProtocolValidator} 的 {@code MAX_*}
+ * 常量，整条消息上限来自发送方的消息与帧预算。卡片能保存的配置一定能下发，不会出现保存成功而连接在下发时被关闭。
  */
 public final class DaemonConfigCodec {
   private static final ObjectMapper MAPPER =
@@ -109,7 +115,47 @@ public final class DaemonConfigCodec {
     result.setBashExecutable(bashExecutable(config.getBashExecutable()));
     result.setLsp(config.getLsp() == null ? null : validateLsp(config.getLsp()));
     result.setProxyUrl(proxy(config.getProxyUrl()));
+    requireDeliverable(result);
     return result;
+  }
+
+  /**
+   * 最坏情况下一条 {@code ENVIRONMENT_CONFIG} 的序列化字节上限。
+   *
+   * <p>发送方（{@code DaemonConnectionSession}）固定使用 {@code ENVIRONMENT_CONFIG} 信封；它必须同时满足消息上限 {@link
+   * ControlFraming#MAX_MESSAGE_BYTES} 与出站队列的成帧长度预算 {@link
+   * DaemonControlStream#MAX_PENDING_BYTES}，超出后发送方只会得到 BUSY 并关闭连接。
+   */
+  private static final int MAX_DELIVERABLE_MESSAGE_BYTES =
+      Math.min(
+          ControlFraming.MAX_MESSAGE_BYTES,
+          DaemonControlStream.MAX_PENDING_BYTES - ControlFraming.PREFIX_BYTES);
+
+  /** 信封里与配置无关的部分取最坏情况：canonical UUID 环境 id 与最大合法版本。 */
+  private static final String SERIALIZED_ENVIRONMENT_ID = "00000000-0000-4000-8000-000000000000";
+
+  /**
+   * 单条字段都合法不等于能下发：LSP 列表没有条数上限，累加后可能超过一条控制帧的字节预算。
+   *
+   * <p>这里按发送方的真实结构（{@link DaemonConfigProtocolMapper} 映射后的 {@code ENVIRONMENT_CONFIG}）计算序列化大小，环境 id
+   * 与版本取最坏情况， 因此通过校验的卡片在任何合法版本下都能进入一帧。
+   */
+  private static void requireDeliverable(DaemonConfigDTO config) {
+    Envelope update =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.ENVIRONMENT_CONFIG)
+            .setEnvironmentId(SERIALIZED_ENVIRONMENT_ID)
+            .setEnvironmentConfig(
+                EnvironmentConfig.newBuilder()
+                    .setVersion(Long.MAX_VALUE)
+                    .setConfig(DaemonConfigProtocolMapper.toProtocol(config))
+                    .build())
+            .build();
+    if (update.getSerializedSize() > MAX_DELIVERABLE_MESSAGE_BYTES) {
+      throw invalid(
+          "daemonConfig",
+          "must fit in a " + MAX_DELIVERABLE_MESSAGE_BYTES + " byte ENVIRONMENT_CONFIG message");
+    }
   }
 
   /**

@@ -14,14 +14,16 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlFraming;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
-import fun.fengwk.kkstudio.platform.daemon.protocol.DaemonConfiguration;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentConfig;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
+import fun.fengwk.kkstudio.platform.daemon.transport.DaemonControlStream;
 import fun.fengwk.kkstudio.platform.environment.server.DaemonConfigProtocolMapper;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Consumer;
@@ -418,6 +420,36 @@ class DaemonConfigCodecTest {
     assertSameAcceptance(config -> config.setProxyUrl("http://" + "a".repeat(2041) + ":8080"));
   }
 
+  /**
+   * 单项上限之外还需要整体上限：把同一个最长的合法列表项重复足够多次，序列化后的 {@code ENVIRONMENT_CONFIG}
+   * 会超出控制消息与出站帧预算，这种卡片保存成功后永远无法下发。
+   */
+  @Test
+  void rejectsCardConfigThatCannotFitInOneEnvironmentConfigFrame() {
+    String item = "j".repeat(4096);
+
+    DaemonConfigDTO overLimit = basic();
+    overLimit.setLsp(lsp());
+    overLimit.getLsp().getServers().get("java").setCommand(Collections.nCopies(4200, item));
+    // 可下发上限是消息上限与成帧后队列预算中较小者：16 MiB 减 4 字节长度前缀。
+    assertEquals(
+        "daemonConfig: must fit in a 16777212 byte ENVIRONMENT_CONFIG message",
+        assertThrows(IllegalArgumentException.class, () -> DaemonConfigCodec.validate(overLimit))
+            .getMessage());
+
+    DaemonConfigDTO deliverable = basic();
+    deliverable.setLsp(lsp());
+    deliverable.getLsp().getServers().get("java").setCommand(Collections.nCopies(4000, item));
+    DaemonConfigDTO validated = DaemonConfigCodec.validate(deliverable);
+    byte[] message = ControlProtocolCodec.encodeBinary(environmentConfigEnvelope(validated, 1L));
+    assertTrue(
+        message.length <= ControlFraming.MAX_MESSAGE_BYTES,
+        "a savable card must fit the control message limit");
+    assertTrue(
+        message.length + Integer.BYTES <= DaemonControlStream.MAX_PENDING_BYTES,
+        "a savable card must fit the single-frame transport budget");
+  }
+
   private static void assertSameAcceptance(Consumer<DaemonConfigDTO> mutation) {
     DaemonConfigDTO config = basic();
     config.setLsp(lsp());
@@ -428,20 +460,25 @@ class DaemonConfigCodecTest {
     } catch (IllegalArgumentException error) {
       return;
     }
-    DaemonConfiguration protocol = DaemonConfigProtocolMapper.toProtocol(validated);
-    Envelope update =
-        Envelope.newBuilder()
-            .setMessageType(MessageType.ENVIRONMENT_CONFIG)
-            .setEnvironmentId("11111111-1111-4111-8111-111111111111")
-            .setEnvironmentConfig(
-                EnvironmentConfig.newBuilder().setVersion(1L).setConfig(protocol).build())
-            .build();
     try {
-      ControlProtocolCodec.encodeFrame(update);
+      ControlProtocolCodec.encodeFrame(environmentConfigEnvelope(validated, 1L));
     } catch (ControlProtocolException error) {
       throw new AssertionError(
           "a card that passes validation must be deliverable: " + error.getMessage(), error);
     }
+  }
+
+  /** 按发送方的结构构造一条 {@code ENVIRONMENT_CONFIG}；环境 id 取与真实卡片同宽的 canonical UUID。 */
+  private static Envelope environmentConfigEnvelope(DaemonConfigDTO validated, long version) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.ENVIRONMENT_CONFIG)
+        .setEnvironmentId("11111111-1111-4111-8111-111111111111")
+        .setEnvironmentConfig(
+            EnvironmentConfig.newBuilder()
+                .setVersion(version)
+                .setConfig(DaemonConfigProtocolMapper.toProtocol(validated))
+                .build())
+        .build();
   }
 
   private static DaemonConfigDTO basic() {

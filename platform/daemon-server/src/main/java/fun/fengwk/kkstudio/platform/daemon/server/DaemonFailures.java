@@ -25,10 +25,10 @@ final class DaemonFailures {
   }
 
   /**
-   * 记录一次控制协议自定义拒绝的字段路径与规则。
+   * 记录一次控制协议校验器拒绝的字段路径与规则。
    *
-   * <p>{@link ControlProtocolException} 的文案由校验器用固定字段路径与固定规则短语构造，不含输入值、远端内容或凭据，因此可以安全地作为失败原因写出；
-   * 这正是“无声关闭连接”与“可诊断拒绝”的区别。其它 throwable 仍走 {@link #log}，只记异常类名。
+   * <p>只用于确认异常来自协议校验器的路径（如 {@code ENVIRONMENT_CONFIG} 出站成帧）：这些拒绝的正文由校验器用固定字段路径与固定规则短语构造，
+   * 不含输入值、远端内容或凭据。同一异常类型的其它来源（本地状态与存储失败）可能带内部细节，必须走 {@link #log} 只记异常类名。
    */
   static void logRejection(Class<?> owner, String stage, ControlProtocolException rejection) {
     Logger logger = System.getLogger(owner.getName());

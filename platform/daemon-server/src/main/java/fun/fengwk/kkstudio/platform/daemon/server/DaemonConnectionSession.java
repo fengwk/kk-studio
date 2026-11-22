@@ -265,7 +265,9 @@ final class DaemonConnectionSession implements DaemonSession {
       try {
         result = control.offer(update);
       } catch (ControlProtocolException rejection) {
-        // 卡片配置不满足出站协议约束：记录字段路径与规则，保留原因后按连接不可用处理。
+        // 此处抛出的 ControlProtocolException 只可能来自 control.offer → ControlProtocolCodec.encodeFrame →
+        // ControlProtocolValidator：
+        // ENVIRONMENT_CONFIG 的每条拒绝都由协议校验器构造，正文只是字段路径与规则，不含配置值或存储细节。
         DaemonFailures.logRejection(
             DaemonConnectionSession.class, configStage(snapshot), rejection);
         result = DaemonOfferResult.CLOSED;
