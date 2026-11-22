@@ -3,14 +3,17 @@ import { createRoot } from 'react-dom/client'
 import { useEffect } from 'react'
 import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 'react-router'
 import '@/styles.css'
-import { setLocale } from '@/shared/i18n'
+import { setLocale, type AppLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type { AgentDTO, EnvironmentDTO } from '@/shared/api/generated/contracts'
 
-setLocale('zh-CN')
+const harnessParams = new URLSearchParams(window.location.search)
+/** `?locale=` 覆盖界面语言（默认 zh-CN，与既有基座断言一致）。 */
+const harnessLocale: AppLocale = harnessParams.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
+setLocale(harnessLocale)
 
 export const HARNESS_ROOT_THREAD_ID = 'a1000000-0000-4000-8000-0000000000a1'
 export const HARNESS_CHILD_THREAD_ID = 'a1000000-0000-4000-8000-0000000000a2'
@@ -56,21 +59,31 @@ const queryClient = new QueryClient({
  * Pane 控制面真实浏览器基座。
  *
  * 挂载真实 `AgentPane`（根 Composer、活跃子代理树、根交互汇聚）与真实
- * `ThreadWorkspacePage`（子代理深链），后端全部由 Playwright `page.route` 提供，
+ * `ThreadWorkspacePage`（子代理与执行根深链），后端全部由 Playwright `page.route` 提供，
  * 不启动后端、模型或任何主机服务。
  *
  * `?scenario=` 选择被验证的入口：
  * - `pane-root`（默认）：绑定执行根的 pane；
  * - `pane-child`：绑定子代理目标的 pane（不得出现 Composer）；
- * - `thread-child`：子代理独立地址 `/threads/{child}`。
+ * - `thread-child`：子代理独立地址 `/threads/{child}`；
+ * - `thread-root`：执行根独立地址 `/threads/{root}`（独立工作区顶栏的普通与 Debug 标题）。
+ *
+ * `?locale=zh-CN|en-US` 选择界面语言，默认 zh-CN。
  */
 function PaneControlRoutes() {
-  const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 'pane-root'
-  if (scenario === 'thread-child') {
+  const scenario = harnessParams.get('scenario') ?? 'pane-root'
+  if (scenario === 'thread-child' || scenario === 'thread-root') {
     return (
       <Routes>
         <Route path="/threads/:threadId" element={<ThreadWorkspacePage />} />
-        <Route path="*" element={<ChildThreadDeepLinkEntry />} />
+        <Route
+          path="*"
+          element={(
+            <ThreadDeepLinkEntry
+              threadId={scenario === 'thread-root' ? HARNESS_ROOT_THREAD_ID : HARNESS_CHILD_THREAD_ID}
+            />
+          )}
+        />
       </Routes>
     )
   }
@@ -116,12 +129,12 @@ export function PaneControlHarnessApp() {
   )
 }
 
-/** 基座加载后跳到子代理的独立地址，等价于用户直接打开该深链。 */
-function ChildThreadDeepLinkEntry() {
+/** 基座加载后跳到目标 Thread 的独立地址，等价于用户直接打开该深链。 */
+function ThreadDeepLinkEntry({ threadId }: { threadId: string }) {
   const navigate = useNavigate()
   useEffect(() => {
-    navigate(`/threads/${HARNESS_CHILD_THREAD_ID}`, { replace: true })
-  }, [navigate])
+    navigate(`/threads/${threadId}`, { replace: true })
+  }, [navigate, threadId])
   return null
 }
 

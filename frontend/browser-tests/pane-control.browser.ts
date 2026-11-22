@@ -1,5 +1,7 @@
-import { expect, test, type Page } from './fixture'
+import path from 'node:path'
+import { expect, test, type Locator, type Page } from './fixture'
 import type { Route } from '@playwright/test'
+import { messageCatalog } from '@/shared/i18n/catalogs'
 
 /**
  * Pane 根控制面真实浏览器回归（独立基座、独立端口 5184）。
@@ -758,3 +760,135 @@ test('thread status three-state and execution facts in real browser', async ({ p
   const approvalAnim = await approvalDot.evaluate((el) => getComputedStyle(el).animationName)
   expect(approvalAnim).toBe('none')
 })
+
+/**
+ * 独立 Thread 工作区（`/threads/{id}`）顶栏只渲染一段 Thread 名，不走 Chat 的
+ * Chat / Session / branch 三段面包屑，因此窄屏下不存在“上级段先收缩”的竞争；
+ * 这里锁定普通与 Debug 标题在 1440/390 的真实几何：名称完整可见或带省略号截断，
+ * 标题不越出顶栏，返回/关闭入口也不被挤掉。
+ *
+ * 名称长度选在两端之间：约 500px 宽，390 必定截断，1440 必定完整。
+ */
+const STANDALONE_NAME = '独立 Thread 工作区标题在窄屏显示省略号并保留可辨认前缀用于第二轮验收'
+const STANDALONE_SCENARIO = 'thread-root'
+
+/** 可选验收截图目录：给出 `KK_PANE_SHOTS_DIR` 时写到 worktree 之外。 */
+const PANE_SHOTS_DIR = process.env.KK_PANE_SHOTS_DIR
+
+async function shootStandalone(page: Page, name: string) {
+  await page.screenshot({
+    path: PANE_SHOTS_DIR
+      ? path.join(PANE_SHOTS_DIR, `${name}.png`)
+      : test.info().outputPath(`${name}.png`),
+    fullPage: false,
+  })
+}
+
+interface StandaloneCopy {
+  back: string
+  closeDebug: string
+  openCommands: string
+}
+
+const STANDALONE_COPY: Record<'zh-CN' | 'en-US', StandaloneCopy> = {
+  'zh-CN': {
+    back: messageCatalog['ai.chat.backToConversation']['zh-CN'],
+    closeDebug: messageCatalog['ai.runtime.debug.close']['zh-CN'],
+    openCommands: messageCatalog['ai.runtime.composer.openCommands']['zh-CN'],
+  },
+  'en-US': {
+    back: messageCatalog['ai.chat.backToConversation']['en-US'],
+    closeDebug: messageCatalog['ai.runtime.debug.close']['en-US'],
+    openCommands: messageCatalog['ai.runtime.composer.openCommands']['en-US'],
+  },
+}
+
+/** 验收选定的两个视口：390 下名称必须截断，1440 下必须完整。 */
+const STANDALONE_VIEWPORTS = [
+  { name: '1440', width: 1440, height: 900, truncated: false },
+  { name: '390', width: 390, height: 844, truncated: true },
+] as const
+
+/** 标题只占一行且以省略号收尾：不换行、不越出顶栏、仍保留可辨认前缀。 */
+async function expectStandaloneHeading(
+  header: Locator,
+  options: { truncated: boolean },
+) {
+  const heading = header.locator('.chat-workspace-title > h1')
+  await expect(heading).toHaveText(STANDALONE_NAME)
+  const headerBox = (await header.boundingBox())!
+  const metrics = await heading.evaluate((node) => {
+    const style = getComputedStyle(node)
+    const box = node.getBoundingClientRect()
+    return {
+      clientWidth: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+      nowrap: style.whiteSpace === 'nowrap',
+      ellipsis: style.textOverflow === 'ellipsis',
+      right: box.right,
+    }
+  })
+  expect(metrics.nowrap).toBe(true)
+  expect(metrics.ellipsis).toBe(true)
+  // 顶栏自身不横向溢出，标题也不越出顶栏内边距。
+  expect(await header.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1)
+  expect(metrics.right).toBeLessThanOrEqual(headerBox.x + headerBox.width - 15)
+  // 可辨认前缀：窄屏也给标题整行宽度，远大于几个字符。
+  expect(metrics.clientWidth).toBeGreaterThan(120)
+  if (options.truncated) {
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth + 1)
+  } else {
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1)
+  }
+}
+
+/** 返回入口（普通）或关闭 Debug（调试）仍在顶栏内完整可点。 */
+async function expectLeadingEntryVisible(header: Locator, entry: Locator) {
+  await expect(entry).toBeVisible()
+  const headerBox = (await header.boundingBox())!
+  const box = (await entry.boundingBox())!
+  expect(box.width).toBeGreaterThan(20)
+  expect(box.height).toBeGreaterThan(20)
+  expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 1)
+}
+
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  test(`standalone thread workspace heading stays readable in normal and Debug views: ${locale}`, async ({ page }) => {
+    const copy = STANDALONE_COPY[locale]
+    await installPaneApi(page, { rootThreadOverrides: { name: STANDALONE_NAME } })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(`${HARNESS_URL}?scenario=${STANDALONE_SCENARIO}&locale=${locale}`)
+    await expect(page.locator('.thread-control-area')).toBeVisible()
+
+    const header = page.locator('.chat-workspace-header')
+    // 独立工作区顶栏与 Chat 顶栏结构不同：只有一段 Thread 名，没有面包屑与动作区。
+    await expect(header.locator('.chat-workspace-breadcrumb')).toHaveCount(0)
+    await expect(header.locator('.chat-workspace-breadcrumb-item')).toHaveCount(0)
+    await expect(header.locator('.chat-workspace-actions')).toHaveCount(0)
+    await expect(header.locator('.thread-breadcrumb-separator')).toHaveCount(1)
+    // 桌面下保留「返回入口 / 标题」的原样分隔符（窄屏由共享容器查询隐藏，不影响可读性断言）。
+    await expect(header.locator('.thread-breadcrumb-separator')).toBeVisible()
+    const backEntry = header.getByRole('link', { name: copy.back })
+
+    for (const viewport of STANDALONE_VIEWPORTS) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await expectLeadingEntryVisible(header, backEntry)
+      await expectStandaloneHeading(header, { truncated: viewport.truncated })
+      await shootStandalone(page, `standalone-heading-normal-${locale}-${viewport.name}`)
+    }
+
+    // Debug 视图沿用同一段标题：仍然没有面包屑，名称与截断行为不变。
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.getByRole('button', { name: copy.openCommands }).click()
+    await page.getByRole('option', { name: /debug/ }).click()
+    const closeDebug = header.getByRole('button', { name: copy.closeDebug, exact: true })
+    await expect(closeDebug).toBeVisible()
+    await expect(header.locator('.chat-workspace-breadcrumb')).toHaveCount(0)
+    for (const viewport of STANDALONE_VIEWPORTS) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await expectLeadingEntryVisible(header, closeDebug)
+      await expectStandaloneHeading(header, { truncated: viewport.truncated })
+      await shootStandalone(page, `standalone-heading-debug-${locale}-${viewport.name}`)
+    }
+  })
+}

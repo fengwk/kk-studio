@@ -9,6 +9,8 @@ import './controls.css'
 export interface SelectOption {
   value: string
   label: string
+  /** 触发器上显示的短文案；缺省时沿用 label。选项文案与可访问名始终是 label。 */
+  triggerLabel?: string
   disabled?: boolean
 }
 
@@ -62,7 +64,8 @@ export function Select({
     options.findIndex((option) => option.value === value && !option.disabled),
   )
   const selected = options.find((option) => option.value === value)
-  const triggerLabel = selected?.label ?? placeholder ?? t('shared.selectPlaceholder')
+  const triggerText =
+    selected?.triggerLabel ?? selected?.label ?? placeholder ?? t('shared.selectPlaceholder')
 
   const { open, activeIndex, modalTouchOptions, setActiveIndex, closeListbox, openListbox, selectValue, moveActive } =
     useSelectListbox({
@@ -164,7 +167,7 @@ export function Select({
         onClick={() => (open ? closeListbox() : handleOpen())}
         onKeyDown={handleTriggerKeyDown}
       >
-        <span className="ui-select-value">{triggerLabel}</span>
+        <span className="ui-select-value">{triggerText}</span>
         <ChevronDown className={`ui-select-chevron${open ? ' is-open' : ''}`} aria-hidden="true" />
       </button>
       {open

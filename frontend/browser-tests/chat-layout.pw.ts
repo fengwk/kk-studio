@@ -8,26 +8,42 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const REPORTS_DIR = process.env.KK_LAYOUT_REPORTS_DIR ?? path.resolve(__dirname, '../../reports/layout')
 
+type HarnessLocale = 'zh-CN' | 'en-US'
+
+async function openHarness(page: Page, locale: HarnessLocale, viewport: { width: number; height: number }) {
+  await page.setViewportSize(viewport)
+  await page.goto(`/browser-tests/chat-layout-harness.html?locale=${locale}`)
+  await expect(page.locator('.chat-workspace')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', locale)
+}
+
 /**
- * 布局选项的无障碍名带量词（中文「3 个窗格」、英文按数量区分单复数）。chat-layout 基座
- * 固定 zh-CN，因此按 pane 数量从 catalog 取名称定位选项，不使用裸数字。
+ * 布局选项的无障碍名带量词（中文「3 个窗格」、英文按数量区分单复数）。
+ * 触发器视觉上只写数量，量词只在选项与它的可访问名里，因此菜单按数量取名称定位。
  */
-function paneCountLabel(panes: number): string {
+function paneCountLabel(locale: HarnessLocale, panes: number): string {
   const messages = panes === 1
     ? messageCatalog['ai.chat.paneCount.one']
     : messageCatalog['ai.chat.paneCount.other']
-  return messages['zh-CN'].replace('{{count}}', String(panes))
+  return messages[locale].replace('{{count}}', String(panes))
 }
 
-async function selectLayoutOption(page: Page, value: string, panes: number) {
+async function selectLayoutOption(
+  page: Page,
+  value: string,
+  panes: number,
+  locale: HarnessLocale = 'zh-CN',
+) {
   const trigger = page.locator('#chat-layout-select')
   await trigger.click()
   const listbox = page.getByRole('listbox')
   await expect(listbox).toBeVisible()
-  const option = listbox.getByRole('option', { name: paneCountLabel(panes), exact: true })
+  const option = listbox.getByRole('option', { name: paneCountLabel(locale, panes), exact: true })
   await option.click()
   await expect(listbox).toHaveCount(0)
   await expect(trigger).toHaveAttribute('data-value', value)
+  // 触发器只显示数量，避免量词把窄屏顶栏挤宽。
+  await expect(trigger.locator('.ui-select-value')).toHaveText(String(panes))
 }
 
 test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () => {
@@ -270,7 +286,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
 
     await expect(listbox).toHaveCount(0)
     await expect(trigger).toHaveAttribute('data-value', 'split-3')
-    await expect(trigger.locator('.ui-select-value')).toHaveText(paneCountLabel(3))
+    await expect(trigger.locator('.ui-select-value')).toHaveText('3')
     await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()
     await expect(trigger).toBeFocused()
   })
@@ -312,38 +328,43 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     expect(menuBox768.x).toBeGreaterThanOrEqual(0)
   })
 
-  test('Generate desktop and mobile open-state screenshots for layout review', async ({
+  test('Generate localized open-state screenshots for the layout selector review', async ({
     page,
   }) => {
-    // 1. Desktop 展开截图 (1280x800)
-    await page.setViewportSize({ width: 1280, height: 800 })
-    await page.goto('/browser-tests/chat-layout-harness.html')
+    fs.mkdirSync(REPORTS_DIR, { recursive: true })
+    const VIEWPORTS = [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]
+    for (const locale of ['zh-CN', 'en-US'] as HarnessLocale[]) {
+      for (const viewport of VIEWPORTS) {
+        await openHarness(page, locale, viewport)
 
-    const trigger = page.locator('#chat-layout-select')
-    await trigger.click()
-    await expect(page.getByRole('listbox')).toBeVisible()
+        const trigger = page.locator('#chat-layout-select')
+        // 触发器只有数量：顶栏宽度不再被量词占用。
+        await expect(trigger.locator('.ui-select-value')).toHaveText(/^\d+$/)
 
-    const desktopPath = path.join(REPORTS_DIR, 'chat-layout-select-desktop-open.png')
-    await page.screenshot({
-      path: desktopPath,
-      fullPage: false,
-    })
+        await trigger.click()
+        const listbox = page.getByRole('listbox', { name: messageCatalog['ai.chat.layout'][locale] })
+        await expect(listbox).toBeVisible()
+        // 菜单选项与它的可访问名仍是本地化量词文案，单复数按数量区分。
+        await expect(listbox.getByRole('option')).toHaveCount(8)
+        await expect(
+          listbox.getByRole('option', { name: paneCountLabel(locale, 1), exact: true }),
+        ).toBeVisible()
+        await expect(
+          listbox.getByRole('option', { name: paneCountLabel(locale, 8), exact: true }),
+        ).toBeVisible()
 
-    await page.keyboard.press('Escape')
+        await page.screenshot({
+          path: path.join(REPORTS_DIR, `layout-selector-${locale}-${viewport.width}x${viewport.height}.png`),
+          fullPage: false,
+        })
 
-    // 2. Mobile 展开截图 (375x667)
-    await page.setViewportSize({ width: 375, height: 667 })
-    await page.goto('/browser-tests/chat-layout-harness.html')
-
-    const mobileTrigger = page.locator('#chat-layout-select')
-    await mobileTrigger.click()
-    await expect(page.getByRole('listbox')).toBeVisible()
-
-    const mobilePath = path.join(REPORTS_DIR, 'chat-layout-select-mobile-open.png')
-    await page.screenshot({
-      path: mobilePath,
-      fullPage: false,
-    })
+        await page.keyboard.press('Escape')
+        await expect(listbox).toHaveCount(0)
+      }
+    }
   })
 
   test('ThreadStatusFooter keeps a single grouped line with ellipsis and complete hover facts', async ({

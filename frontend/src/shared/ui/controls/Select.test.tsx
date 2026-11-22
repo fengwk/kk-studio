@@ -39,6 +39,32 @@ describe('Select', () => {
     expect(options[2]).toBeDisabled()
   })
 
+  it('shows the optional short trigger label while options keep their full label', async () => {
+    const user = userEvent.setup()
+    const options = [
+      { value: 'a', label: 'Alpha one', triggerLabel: '1' },
+      { value: 'c', label: 'Charlie three' },
+    ]
+    const { rerender } = render(
+      <Select aria-label="Choose" value="a" options={options} onChange={() => undefined} />,
+    )
+    const trigger = screen.getByRole('button', { name: 'Choose' })
+    expect(trigger).toHaveTextContent(/^1$/)
+
+    // 菜单里的选项文案（也是读屏读到的可访问名）仍用完整 label。
+    await user.click(trigger)
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Alpha one',
+      'Charlie three',
+    ])
+    expect(trigger).toHaveTextContent(/^1$/)
+
+    // 未声明 triggerLabel 的选项照旧把 label 写在触发器上。
+    await user.keyboard('{Escape}')
+    rerender(<Select aria-label="Choose" value="c" options={options} onChange={() => undefined} />)
+    expect(screen.getByRole('button', { name: 'Choose' })).toHaveTextContent('Charlie three')
+  })
+
   it('forwards onChange with the chosen value', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()

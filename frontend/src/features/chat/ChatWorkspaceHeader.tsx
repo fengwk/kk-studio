@@ -56,32 +56,34 @@ export function ChatWorkspaceHeader({
   const { t } = useI18n()
   const branchName = currentView?.parentThreadId ? currentView.name : focusedBranchName
   return (
-    <header className="chat-workspace-header">
+    <header className="chat-workspace-header chat-workspace-header-with-breadcrumb">
       <div className="chat-workspace-title">
-        {debugging ? <Button variant="ghost" size="compact" onClick={onCloseDebug}>
-          {t('ai.runtime.debug.close')}
-        </Button> : currentView?.parentThreadId ? <ThreadPresentationActions view={currentView} /> : <Link
-          className="chat-workspace-back"
-          to="/chats"
-          title={t('ai.chat.backToConversation')}
-          aria-label={t('ai.chat.backToConversation')}
-        >
-          <ArrowLeft aria-hidden="true" />
-          <span>{t('ai.chat.backToConversation')}</span>
-        </Link>}
+        <div className="chat-workspace-title-lead">
+          {debugging ? <Button variant="ghost" size="compact" onClick={onCloseDebug}>
+            {t('ai.runtime.debug.close')}
+          </Button> : currentView?.parentThreadId ? <ThreadPresentationActions view={currentView} /> : <Link
+            className="chat-workspace-back"
+            to="/chats"
+            title={t('ai.chat.backToConversation')}
+            aria-label={t('ai.chat.backToConversation')}
+          >
+            <ArrowLeft aria-hidden="true" />
+            <span>{t('ai.chat.backToConversation')}</span>
+          </Link>}
+        </div>
         <nav
           className="chat-workspace-breadcrumb"
           aria-label={t('ai.chat.branch.breadcrumb')}
           data-focused-pane={focusedPaneId}
         >
-          <h1 className="chat-workspace-breadcrumb-item" data-breadcrumb="chat">{title}</h1>
+          <h1 className="chat-workspace-breadcrumb-item" data-breadcrumb="chat" title={title}>{title}</h1>
           {currentView?.parentThreadId == null && focusedSessionId != null ? (
             <>
               <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
               <span
                 className="chat-workspace-breadcrumb-item"
                 data-breadcrumb="session"
-                title={focusedSessionId}
+                title={focusedSessionName ?? focusedSessionId}
               >
                 {focusedSessionName ?? focusedSessionId}
               </span>
@@ -90,7 +92,7 @@ export function ChatWorkspaceHeader({
           {branchName ? (
             <>
               <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
-              <span className="chat-workspace-breadcrumb-item" data-breadcrumb="branch">
+              <span className="chat-workspace-breadcrumb-item" data-breadcrumb="branch" title={branchName}>
                 {branchName}
               </span>
             </>

@@ -69,8 +69,9 @@ it.each([
   expect(onChange).toHaveBeenCalledWith(layout)
 })
 
-// 选中后触发器展示同一份带量词文案，组合框自身的名字保持稳定。
-it('shows the selected pane count on the trigger and keeps the combobox name', async () => {
+// 触发器视觉上只显示窗格数量：量词会把顶栏挤窄，数量足够辨识当前布局。
+// 选项的可访问名仍保留本地化量词（见上面的用例），读屏播报不受影响。
+it('shows only the pane number on the trigger and keeps the combobox name', async () => {
   function Harness() {
     const [layout, setLayout] = useState<ChatLayout>('single')
     return <ChatLayoutSelector layout={layout} onChange={setLayout} />
@@ -79,10 +80,10 @@ it('shows the selected pane count on the trigger and keeps the combobox name', a
   render(<Harness />)
 
   const trigger = screen.getByRole('button', { name: '布局' })
-  expect(trigger).toHaveTextContent('1 个窗格')
+  expect(trigger).toHaveTextContent(/^1$/)
 
   const listbox = await openLayoutListbox(user)
   await user.click(within(listbox).getByRole('option', { name: '8 个窗格' }))
 
-  expect(screen.getByRole('button', { name: '布局' })).toHaveTextContent('8 个窗格')
+  expect(screen.getByRole('button', { name: '布局' })).toHaveTextContent(/^8$/)
 })

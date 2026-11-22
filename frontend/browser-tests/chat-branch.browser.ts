@@ -61,6 +61,7 @@ const COPY = {
     singleThread: messageCatalog['ai.chat.threadCount.one']['zh-CN'],
     search: messageCatalog['ai.chat.selection.search']['zh-CN'],
     composer: messageCatalog['ai.runtime.composer.ariaLabel']['zh-CN'],
+    closeDebug: messageCatalog['ai.runtime.debug.close']['zh-CN'],
   },
   'en-US': {
     layout: messageCatalog['ai.chat.layout']['en-US'],
@@ -72,6 +73,7 @@ const COPY = {
     singleThread: messageCatalog['ai.chat.threadCount.one']['en-US'],
     search: messageCatalog['ai.chat.selection.search']['en-US'],
     composer: messageCatalog['ai.runtime.composer.ariaLabel']['en-US'],
+    closeDebug: messageCatalog['ai.runtime.debug.close']['en-US'],
   },
 } as const
 
@@ -113,10 +115,10 @@ const rootPayload = { settings: {
   environmentName: null,
 } }
 
-function chat() {
+function chat(title = 'Branch Chat') {
   return {
     id: CHAT_ID,
-    title: 'Branch Chat',
+    title,
     agentName: 'assistant',
     environmentName: null,
     yoloEnabled: false,
@@ -192,9 +194,9 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
   ]
 }
 
-function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
+function thread(headEntryId = 'entry-3', options: { busy?: boolean; name?: string } = {}) {
   return {
-    name: 'thread-name',
+    name: options.name ?? 'thread-name',
     threadId: THREAD_ID,
     sessionId: SESSION_ID,
     headEntryId,
@@ -239,9 +241,12 @@ async function installChatApi(
     sessions?: 'one' | 'empty'
     /** 预览用 Markdown 源：Session 首条消息与 Thread 头部消息都带标记，用于验收只显示纯文本。 */
     markdownPreviews?: boolean
+    /** 顶栏面包屑夹具：Chat 标题、Session 名（取自已发送的第一条消息）与绑定的 Thread 名。 */
+    names?: { chatTitle?: string; sessionName?: string; threadName?: string }
   } = {},
 ): Promise<Recorded> {
   const messagePreview = options.markdownPreviews ? MARKDOWN_PREVIEW : 'hello'
+  const sessionName = options.names?.sessionName ?? 'Session One'
   const entryList = entries({ usage: options.usageEntries })
   if (options.longHistory) {
     entryList.push(...Array.from({ length: 24 }, (_, index) => ({
@@ -256,7 +261,7 @@ async function installChatApi(
   }
   const boundThread = thread(
     options.longHistory ? 'scroll-23' : options.usageEntries ? 'entry-turn' : 'entry-3',
-    { busy: options.busyThread },
+    { busy: options.busyThread, name: options.names?.threadName },
   )
   let createdThread: ReturnType<typeof thread> | null = null
   // 既有 Thread 的设置提交：接受响应推进 version 并回显 durable 的 SET 命令；后续快照读取
@@ -372,7 +377,21 @@ async function installChatApi(
     const method = request.method()
 
     if (path === `/api/chat/chats/${CHAT_ID}`) {
-      await route.fulfill({ json: chat() })
+      await route.fulfill({ json: chat(options.names?.chatTitle) })
+      return
+    }
+    if (path === `/api/chat/chats/${CHAT_ID}/sessions/${SESSION_ID}`) {
+      // 顶栏面包屑按 id 单读会话名：默认名称取自已发送的第一条消息。
+      await route.fulfill({
+        json: {
+            sessionId: SESSION_ID,
+            name: sessionName,
+            createdAt: 1790812800000,
+            lastActivityAt: 1790812860000,
+            firstMessagePreview: messagePreview,
+            threadCount: 1,
+        },
+      })
       return
     }
     if (path === `/api/chat/chats/${CHAT_ID}/sessions`) {
@@ -382,7 +401,7 @@ async function installChatApi(
         json: {
             items: options.sessions === 'empty' ? [] : [{
               sessionId: SESSION_ID,
-              name: 'Session One',
+              name: sessionName,
               createdAt: 1790812800000,
               lastActivityAt: 1790812860000,
               firstMessagePreview: messagePreview,
@@ -1409,8 +1428,11 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await expect(header.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
     await expect(header.getByRole('button', { name: '查看子 Agent 执行' })).toHaveCount(0)
     await expect(header.getByRole('link', { name: '回到对话' })).toHaveCount(0)
-    expect(await header.evaluate((element) => element.querySelector('.chat-workspace-title')?.firstElementChild?.textContent))
-      .toBe('回到父 Agent')
+    const backToParent = header.getByRole('button', { name: '回到父 Agent' })
+    const parentButton = await backToParent.boundingBox()
+    const identity = await header.locator('.workspace-view-identity').boundingBox()
+    expect(parentButton!.x).toBeLessThan(identity!.x)
+    await backToParent.click({ trial: true })
     await expect(source.locator('.chat-pane-layer[hidden]').first()).toHaveAttribute('inert', '')
     expect(await savedEditor?.evaluate((element) => element.isConnected)).toBe(true)
     const treeReads = recorded.treeReads
@@ -1660,6 +1682,205 @@ for (const locale of LOCALES) {
           { type: 'ATTACHMENT', uploadId: UPLOAD_ID },
         ],
       })
+    })
+  }
+}
+
+/**
+ * 第 2 轮返工：390 宽工作区顶栏面包屑的可辨认性与省略号。
+ *
+ * 夹具长度同时满足两个视口：三段在 1440 下整行放得下（桌面不回退），在 390 下必然
+ * 溢出，只有上级段先收缩才能给当前 Thread 段腾出位置。会话名取自已发送的第一条消息
+ * （真实默认命名的来源）；Thread 名同时覆盖短名 main 与长名。
+ */
+const BREADCRUMB_NAMES: Record<HarnessLocale, {
+  chatTitle: string
+  sessionName: string
+  shortThread: string
+  longThread: string
+}> = {
+  'zh-CN': {
+    chatTitle: '季度发布复盘与回归计划',
+    sessionName: '帮我把季度发布流程整理成可执行的检查清单并补上回滚步骤与责任人',
+    shortThread: 'main',
+    longThread: '回滚检查清单复核讨论会',
+  },
+  'en-US': {
+    chatTitle: 'Quarterly release retrospective',
+    sessionName: 'Turn the quarterly release checklist into verifiable steps with rollback notes and owners',
+    shortThread: 'main',
+    longThread: 'rollback checklist review',
+  },
+}
+
+/**
+ * 被压缩后当前 Thread 段至少要保留的可见字符数。中文单字约占两个西文字符宽度，
+ * 5 个汉字的可辨认程度与 8 个西文字符相当。
+ */
+const THREAD_PREFIX_CHARS: Record<HarnessLocale, number> = { 'zh-CN': 5, 'en-US': 8 }
+
+/** 一段面包屑的真实排版读数：可见字符数、截断状态与省略号是否有位置画。 */
+interface BreadcrumbSegmentGeometry {
+  text: string
+  /** 在可见框内以同款字体完整容纳的最长字符前缀长度。 */
+  visibleChars: number
+  /** 完整文本比可见框宽：内容被截断。 */
+  truncated: boolean
+  /** 可见框放得下「…」：放不下时浏览器只会硬裁剪，用户看不到省略号。 */
+  ellipsisRoom: boolean
+  textOverflow: string
+  overflowX: string
+}
+
+/** 用与元素一致的计算字体测文本：可见字符数与省略号位置都由真实字体宽度推导。 */
+function readBreadcrumbSegment(segment: Locator): Promise<BreadcrumbSegmentGeometry> {
+  return segment.evaluate((element) => {
+    const style = window.getComputedStyle(element)
+    const text = element.textContent ?? ''
+    const canvas = document.createElement('canvas').getContext('2d')!
+    canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const textWidth = (value: string) => canvas.measureText(value).width
+    // clientWidth 为整数可见宽度（不含 padding/border），即能画出多少内容的上限。
+    const limit = element.clientWidth
+    let visibleChars = 0
+    while (visibleChars < text.length && textWidth(text.slice(0, visibleChars + 1)) <= limit + 0.5) {
+      visibleChars += 1
+    }
+    return {
+      text,
+      visibleChars,
+      truncated: textWidth(text) > limit + 0.5,
+      ellipsisRoom: limit >= textWidth('…'),
+      textOverflow: style.textOverflow,
+      overflowX: style.overflowX,
+    }
+  })
+}
+
+/** 被截断的段必须以省略号收尾：省略号截断样式 + 可见框真的容得下「…」。 */
+function expectEllipsisTail(geometry: BreadcrumbSegmentGeometry, label: string) {
+  expect(geometry.truncated, `${label} 被截断`).toBe(true)
+  expect(geometry.textOverflow, `${label} 使用省略号截断`).toBe('ellipsis')
+  expect(geometry.overflowX, `${label} 裁掉溢出的内容`).not.toBe('visible')
+  expect(geometry.ellipsisRoom, `${label} 的可见宽度容得下省略号`).toBe(true)
+}
+
+/**
+ * 面包屑几何验收。
+ *
+ * - 容器不横向溢出，三段都在容器内；
+ * - 当前 Thread 段：短名整段显示，长名至少保留可辨认前缀，被截断时必须画出省略号；
+ * - 上级段（Chat 标题与 Session）：390 先收缩并画省略号，1440 完整显示（桌面不回退）。
+ */
+async function expectBreadcrumb({
+  page,
+  locale,
+  viewport,
+  wholeThreadName,
+}: {
+  page: Page
+  locale: HarnessLocale
+  viewport: { width: number; height: number }
+  wholeThreadName: boolean
+}) {
+  const names = BREADCRUMB_NAMES[locale]
+  const narrow = viewport.width < WIDE
+  const breadcrumb = page.locator('.chat-workspace-breadcrumb')
+  await expect(breadcrumb).toBeVisible()
+  const segments = {
+    chat: breadcrumb.locator('[data-breadcrumb="chat"]'),
+    session: breadcrumb.locator('[data-breadcrumb="session"]'),
+    branch: breadcrumb.locator('[data-breadcrumb="branch"]'),
+  }
+  await expect(segments.chat).toHaveText(names.chatTitle)
+  await expect(segments.session).toHaveText(names.sessionName)
+  await expect(segments.branch).toHaveText(wholeThreadName ? names.shortThread : names.longThread)
+
+  expect(await breadcrumb.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    `${locale} ${viewportKey(viewport)} 面包屑不横向溢出`).toBe(true)
+  const header = page.locator('.chat-workspace-header')
+  expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    `${locale} ${viewportKey(viewport)} 顶栏不横向溢出`).toBe(true)
+  if (narrow) {
+    const availableWidth = await header.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    })
+    expect((await breadcrumb.boundingBox())!.width).toBeCloseTo(availableWidth, 0)
+  }
+  for (const [label, segment] of Object.entries(segments)) {
+    expect(await isInside(segment, breadcrumb), `${label} 段落在面包屑内`).toBe(true)
+    expect(await segment.evaluate((element) => element.getBoundingClientRect().width > 0),
+      `${label} 段未被压成零宽`).toBe(true)
+  }
+
+  // 当前 Thread 段：短名完整、长名保留可辨认前缀。
+  const branch = await readBreadcrumbSegment(segments.branch)
+  if (wholeThreadName || !narrow) {
+    expect(branch.truncated, `${locale} Thread 名 ${branch.text} 整段显示`).toBe(false)
+    expect(branch.visibleChars, `${locale} Thread 名 ${branch.text} 全部字符可见`)
+      .toBe(branch.text.length)
+  } else {
+    const keep = Math.min(THREAD_PREFIX_CHARS[locale], branch.text.length)
+    expect(branch.visibleChars, `${locale} 长 Thread 名至少保留 ${keep} 个可辨认字符`)
+      .toBeGreaterThanOrEqual(keep)
+    if (branch.truncated) {
+      expectEllipsisTail(branch, `${locale} 当前 Thread 段`)
+    }
+  }
+
+  // 上级段先收缩：390 两个上级段都必须保留省略号，1440 完整显示。
+  for (const [label, segment] of [
+    [`${locale} Chat 标题段`, segments.chat],
+    [`${locale} Session 段`, segments.session],
+  ] as const) {
+    const geometry = await readBreadcrumbSegment(segment)
+    if (narrow) {
+      expectEllipsisTail(geometry, label)
+    } else {
+      expect(geometry.truncated, `${label} 在 ${viewport.width} 宽完整显示`).toBe(false)
+    }
+  }
+}
+
+for (const locale of LOCALES) {
+  for (const viewport of VIEWPORTS) {
+    test(`breadcrumb keeps a short Thread name whole while parents shrink (${locale}, ${viewportKey(viewport)})`, async ({
+      page,
+    }, testInfo) => {
+      const names = BREADCRUMB_NAMES[locale]
+      await installChatApi(page, {
+        names: { chatTitle: names.chatTitle, sessionName: names.sessionName, threadName: names.shortThread },
+      })
+      await bindFirstPaneToThread(page)
+      await openHarness(page, locale, viewport)
+
+      await expect(page.locator('.chat-workspace-breadcrumb')).toHaveAttribute('data-focused-pane', 'pane-1')
+      await expectBreadcrumb({ page, locale, viewport, wholeThreadName: true })
+      await captureShot(page, testInfo, shotName(locale, viewport, 'breadcrumb-short-thread'))
+    })
+
+    test(`breadcrumb keeps a long Thread name recognizable in Chat and Debug topbar (${locale}, ${viewportKey(viewport)})`, async ({
+      page,
+    }, testInfo) => {
+      const names = BREADCRUMB_NAMES[locale]
+      await installChatApi(page, {
+        names: { chatTitle: names.chatTitle, sessionName: names.sessionName, threadName: names.longThread },
+      })
+      await bindFirstPaneToThread(page)
+      await openHarness(page, locale, viewport)
+
+      await expectBreadcrumb({ page, locale, viewport, wholeThreadName: false })
+      await captureShot(page, testInfo, shotName(locale, viewport, 'breadcrumb-long-thread'))
+
+      // Debug 顶栏与 Chat 顶栏共用同一面包屑：覆盖层里同样先收缩上级段。
+      const composer = page.getByLabel(COPY[locale].composer).first()
+      await composer.click()
+      await composer.pressSequentially('/debug')
+      await page.keyboard.press('Enter')
+      await expect(page.getByRole('button', { name: COPY[locale].closeDebug, exact: true })).toBeVisible()
+      await expectBreadcrumb({ page, locale, viewport, wholeThreadName: false })
+      await captureShot(page, testInfo, shotName(locale, viewport, 'breadcrumb-debug'))
     })
   }
 }
