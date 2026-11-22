@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
+import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import type {
@@ -93,7 +94,7 @@ export function useResourceFormErrors(modal: ResourceModal | null) {
   return { formError, fieldErrors, setFormError, setFieldErrors, clear, showFailure }
 }
 
-/** 删除确认弹窗的文案与待确认动作。 */
+/** 删除确认弹窗的文案、待确认动作与本次删除的失败。 */
 export function useResourceDeleteConfirm() {
   const { t } = useI18n()
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
@@ -112,13 +113,23 @@ export function useResourceDeleteConfirm() {
       description: t(options.descriptionKey, { name: options.name }),
       confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
-      onConfirm: options.onConfirm,
+      onConfirm: () => {
+        setDeleteConfirm((modal) => modal ? { ...modal, error: null } : null)
+        options.onConfirm()
+      },
     })
+  }
+
+  /** 失败只属于当前弹窗：重试或关闭后不再保留。 */
+  function failDelete(error: unknown) {
+    const message = toUserFacingErrorMessage(error)
+    setDeleteConfirm((modal) => modal ? { ...modal, error: message } : null)
   }
 
   return {
     deleteConfirm,
     requestDelete,
+    failDelete,
     closeDeleteConfirm: () => setDeleteConfirm(null),
   }
 }

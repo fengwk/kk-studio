@@ -25,6 +25,8 @@ export function ModelSelectionPicker({
   modelUnavailable = false,
   variantUnavailable = false,
   modelRequired = false,
+  modelInvalid = false,
+  variantInvalid = false,
   modelDescribedBy,
   variantDescribedBy,
   modelId,
@@ -49,6 +51,10 @@ export function ModelSelectionPicker({
   modelUnavailable?: boolean
   variantUnavailable?: boolean
   modelRequired?: boolean
+  /** 校验失败：把 aria-invalid 交给模型选择控件。 */
+  modelInvalid?: boolean
+  /** 校验失败：把 aria-invalid 交给预设选择控件。 */
+  variantInvalid?: boolean
   modelDescribedBy?: string
   variantDescribedBy?: string
   modelId?: string
@@ -91,6 +97,7 @@ export function ModelSelectionPicker({
         id={modelFieldId}
         aria-label={modelLabel}
         aria-describedby={modelDescribedBy}
+        aria-invalid={modelInvalid}
         value={modelName}
         placeholder={modelPlaceholder}
         options={modelOptions}
@@ -107,6 +114,7 @@ export function ModelSelectionPicker({
           <Select
             aria-label={variantLabel}
             aria-describedby={variantDescribedBy}
+            aria-invalid={variantInvalid}
             value={variant}
             placeholder={variantPlaceholder}
             options={variantOptions}

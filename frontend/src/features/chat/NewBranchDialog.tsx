@@ -1,8 +1,10 @@
 import { useEffect, useId, useState } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { normalizeThreadName } from '@/features/thread/thread-name'
 import { useI18n } from '@/shared/i18n'
@@ -52,6 +54,7 @@ export function NewBranchDialog({
       ?? '',
   )
   const [nameError, setNameError] = useState<string | null>(null)
+  const nameErrorId = useFieldErrorId(nameError)
 
   // 目标缺省值变化（如触发分支的 pane 改变）时收敛到合法值。
   useEffect(() => {
@@ -97,15 +100,15 @@ export function NewBranchDialog({
           {formError ? (
             <div className="form-error-banner" role="alert">{formError}</div>
           ) : null}
-          <label className={`form-group${nameError ? ' is-error' : ''}`} htmlFor={nameId}>
-            <FieldLabel required>{t('ai.chat.branch.name')}</FieldLabel>
+          <div className={`form-group${nameError ? ' is-error' : ''}`}>
+            <FieldLabel required htmlFor={nameId}>{t('ai.chat.branch.name')}</FieldLabel>
             <TextInput
               id={nameId}
               className="new-branch-name"
               value={name}
               autoFocus
-              aria-label={t('ai.chat.branch.name')}
               invalid={nameError != null}
+              aria-describedby={nameErrorId}
               disabled={pending}
               onChange={(event) => {
                 onInputChange?.()
@@ -113,8 +116,8 @@ export function NewBranchDialog({
                 setNameError(null)
               }}
             />
-            {nameError ? <span className="field-error">{nameError}</span> : null}
-          </label>
+            {nameError ? <FieldError id={nameErrorId} role="alert">{nameError}</FieldError> : null}
+          </div>
           <label className="form-group">
             <FieldLabel required>{t('ai.chat.branch.destination')}</FieldLabel>
             <Select

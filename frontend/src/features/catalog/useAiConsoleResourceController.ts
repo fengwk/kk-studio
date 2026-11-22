@@ -53,6 +53,7 @@ export function useAiConsoleResourceController(
   const mutations = useAiConsoleResourceMutations({
     onResourceSaved: closeResourceModal,
     onDeleteCompleted: deleteConfirmState.closeDeleteConfirm,
+    onDeleteError: deleteConfirmState.failDelete,
   })
 
   useDraftResourceSync({

@@ -25,6 +25,7 @@ function ProvidersFrame({ children }: ExtensionComponentProps) {
       onSearchChange={controller.setSearch}
       busy={controller.busy}
       error={controller.error}
+      onRetry={controller.retry}
       mutationError={controller.mutationError}
       content={<ProvidersResourcePanel />}
     >

@@ -1,8 +1,11 @@
+import { useId } from 'react'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { joinDescribedBy, useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { useI18n } from '@/shared/i18n'
 import type { ModelInputModality } from '@/shared/api/generated/contracts'
 import { MODEL_INPUT_MODALITY_VALUES } from '@/shared/api/generated/contracts'
@@ -19,57 +22,70 @@ export function ModelLimitFields({
   onChange: (draft: ModelDraft) => void
 }) {
   const { t } = useI18n()
+  const contextWindowId = useId()
+  const inputLimitId = useId()
+  const maxOutputTokensId = useId()
+  const contextWindowErrorId = useFieldErrorId(fieldErrors.contextWindow)
+  const inputLimitErrorId = useFieldErrorId(fieldErrors.inputLimit)
+  const maxOutputTokensErrorId = useFieldErrorId(fieldErrors.maxOutputTokens)
   return (
     <section className="structured-section" aria-labelledby="model-limit-heading">
       <div className="structured-section-head">
         <h3 id="model-limit-heading">{t('ai.catalog.form.limit')}</h3>
       </div>
       <div className="form-grid-2">
-        <label className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
-          <FieldLabel required>{t('ai.catalog.form.contextWindow')}</FieldLabel>
+        <div className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
+          <FieldLabel required htmlFor={contextWindowId}>{t('ai.catalog.form.contextWindow')}</FieldLabel>
           <NumberInput
+            id={contextWindowId}
             value={draft.contextWindow}
             min={1}
             placeholder="128000"
             onChange={(contextWindow) => onChange({ ...draft, contextWindow })}
             aria-label={t('ai.catalog.form.contextWindow')}
+            aria-describedby={contextWindowErrorId}
+            invalid={Boolean(fieldErrors.contextWindow)}
           />
           {fieldErrors.contextWindow ? (
-            <span className="field-error">{fieldErrors.contextWindow}</span>
+            <FieldError id={contextWindowErrorId}>{fieldErrors.contextWindow}</FieldError>
           ) : null}
-        </label>
-        <label className={`form-group${fieldErrors.inputLimit ? ' is-error' : ''}`}>
-          <FieldLabel>{t('ai.catalog.form.inputLimit')}</FieldLabel>
+        </div>
+        <div className={`form-group${fieldErrors.inputLimit ? ' is-error' : ''}`}>
+          <FieldLabel htmlFor={inputLimitId}>{t('ai.catalog.form.inputLimit')}</FieldLabel>
           <NumberInput
+            id={inputLimitId}
             value={draft.inputLimit}
             min={1}
             placeholder="272000"
             onChange={(inputLimit) => onChange({ ...draft, inputLimit })}
             aria-label={t('ai.catalog.form.inputLimit')}
-            aria-describedby="model-input-limit-hint"
+            aria-describedby={joinDescribedBy('model-input-limit-hint', inputLimitErrorId)}
             invalid={Boolean(fieldErrors.inputLimit)}
           />
           <span id="model-input-limit-hint" className="inline-hint">
             {t('ai.catalog.form.inputLimitHint')}
           </span>
           {fieldErrors.inputLimit ? (
-            <span className="field-error">{fieldErrors.inputLimit}</span>
+            <FieldError id={inputLimitErrorId}>{fieldErrors.inputLimit}</FieldError>
           ) : null}
-        </label>
-        <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
-          <FieldLabel required>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
+        </div>
+        <div className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
+          <FieldLabel required htmlFor={maxOutputTokensId}>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
           <NumberInput
+            id={maxOutputTokensId}
             value={draft.maxOutputTokens}
             min={1}
             placeholder="8192"
             onChange={(maxOutputTokens) => onChange({ ...draft, maxOutputTokens })}
             aria-label={t('ai.catalog.form.maxOutputTokens')}
+            aria-describedby={maxOutputTokensErrorId}
+            invalid={Boolean(fieldErrors.maxOutputTokens)}
           />
           <span className="inline-hint">{t('ai.catalog.form.maxOutputLimitHint')}</span>
           {fieldErrors.maxOutputTokens ? (
-            <span className="field-error">{fieldErrors.maxOutputTokens}</span>
+            <FieldError id={maxOutputTokensErrorId}>{fieldErrors.maxOutputTokens}</FieldError>
           ) : null}
-        </label>
+        </div>
       </div>
     </section>
   )
@@ -128,11 +144,15 @@ export function ModelInputModalityField({
   onChange: (draft: ModelDraft) => void
 }) {
   const { t } = useI18n()
+  const errorId = useFieldErrorId(error)
   function toggle(value: ModelInputModality) {
     onChange({ ...draft, inputModalities: toggleInputModality(draft.inputModalities, value) })
   }
   return (
-    <fieldset className={`form-group capability-picker${error ? ' is-error' : ''}`}>
+    <fieldset
+      className={`form-group capability-picker${error ? ' is-error' : ''}`}
+      aria-describedby={errorId}
+    >
       <legend>
         <FieldLabel required>{t('ai.catalog.form.inputTypes')}</FieldLabel>
       </legend>
@@ -152,7 +172,7 @@ export function ModelInputModalityField({
           )
         })}
       </div>
-      {error ? <span className="field-error">{error}</span> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : null}
     </fieldset>
   )
 }

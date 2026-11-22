@@ -1,9 +1,11 @@
-import { useMemo, type FormEventHandler } from 'react'
+import { useId, useMemo, type FormEventHandler } from 'react'
 import { Switch } from '@/shared/ui/controls/Switch'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/controls/Button'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
+import { useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { environmentService } from '@/features/environment/environment-service'
 import { AgentSelect } from '@/features/thread/AgentSelect'
@@ -59,6 +61,10 @@ export function CreateChatModal({
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
   const { t } = useI18n()
+  const nameId = useId()
+  const yoloDescriptionId = useId()
+  const nameErrorId = useFieldErrorId(nameError)
+  const agentErrorId = useFieldErrorId(agentError)
 
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
@@ -85,6 +91,10 @@ export function CreateChatModal({
     return list
   }, [environmentsQuery.data, environmentsQuery.isSuccess, selectedEnvironmentName, t])
 
+  const environmentErrorId = useFieldErrorId(
+    environmentsQuery.isError ? t('ai.chat.environmentLoadFailed') : undefined,
+  )
+
   if (!open) {
     return null
   }
@@ -107,17 +117,25 @@ export function CreateChatModal({
               {formError}
             </div>
           ) : null}
-          <label className={`form-group${nameError ? ' is-error' : ''}`}>
-            <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
+          <div className={`form-group${nameError ? ' is-error' : ''}`}>
+            <FieldLabel required htmlFor={nameId}>{t('ai.catalog.form.name')}</FieldLabel>
             <input
+              id={nameId}
               value={title}
               onChange={(event) => onTitleChange(event.target.value)}
               placeholder={t('ai.chat.namePlaceholder')}
               disabled={pending}
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameErrorId}
             />
-            {nameError ? <span className="field-error">{nameError}</span> : null}
-          </label>
-          <div className={`form-group${agentError ? ' is-error' : ''}`}>
+            {nameError ? <FieldError id={nameErrorId} role="alert">{nameError}</FieldError> : null}
+          </div>
+          <div
+            className={`form-group${agentError ? ' is-error' : ''}`}
+            role={agentErrorId ? 'group' : undefined}
+            aria-label={agentErrorId ? t('ai.chat.agent') : undefined}
+            aria-describedby={agentErrorId}
+          >
             <FieldLabel required>{t('ai.chat.agent')}</FieldLabel>
             <AgentSelect
               agents={agents}
@@ -131,13 +149,13 @@ export function CreateChatModal({
               catalogReady={agentsReady}
               required
             />
-            {agentError ? <span className="field-error">{agentError}</span> : null}
+            {agentError ? <FieldError id={agentErrorId} role="alert">{agentError}</FieldError> : null}
           </div>
           <div className="form-group">
             <div className="create-chat-yolo-row">
               <div className="create-chat-yolo-text">
                 <FieldLabel>{t('projects.yolo')}</FieldLabel>
-                <span className="create-chat-yolo-description">
+                <span id={yoloDescriptionId} className="create-chat-yolo-description">
                   {t('ai.chat.yoloDescription')}
                 </span>
               </div>
@@ -145,11 +163,12 @@ export function CreateChatModal({
                 checked={yoloEnabled}
                 onChange={onYoloChange}
                 label={t('projects.yolo')}
+                aria-describedby={yoloDescriptionId}
                 disabled={pending}
               />
             </div>
           </div>
-          <label className={`form-group${environmentsQuery.isError ? ' is-error' : ''}`}>
+          <div className={`form-group${environmentsQuery.isError ? ' is-error' : ''}`}>
             <FieldLabel>{t('ai.chat.defaultEnvironment')}</FieldLabel>
             <Select
               aria-label={t('ai.chat.defaultEnvironment')}
@@ -159,6 +178,7 @@ export function CreateChatModal({
               onChange={(value) => onSelectEnvironment(value ? value : null)}
               disabled={pending}
               aria-invalid={environmentsQuery.isError}
+              aria-describedby={environmentErrorId}
             />
             {environmentsQuery.isLoading ? (
               <span className="field-hint" role="status" aria-live="polite">
@@ -166,11 +186,11 @@ export function CreateChatModal({
               </span>
             ) : null}
             {environmentsQuery.isError ? (
-              <span className="field-error" role="status" aria-live="assertive">
+              <FieldError id={environmentErrorId} role="alert">
                 {t('ai.chat.environmentLoadFailed')}
-              </span>
+              </FieldError>
             ) : null}
-          </label>
+          </div>
         </div>
         <div className="modal-footer">
           <Button variant="ghost" onClick={onClose} disabled={pending}>

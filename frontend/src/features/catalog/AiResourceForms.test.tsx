@@ -388,7 +388,7 @@ describe('AiResourceForms', () => {
     // ProviderUpdateDTO 没有 providerType：编辑模式只读显示，创建后不可改协议。
     expect(screen.getByLabelText('提供商类型')).toHaveValue('openai')
     expect(screen.getByLabelText('提供商类型')).toHaveAttribute('readonly')
-    const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
+    const labels = Array.from(container.querySelectorAll('.field-label')).map((label) => label.textContent)
     expect(labels[0]).toBe('名称 *')
     expect(labels[1]).toBe('API Key')
     // 没有已配置密钥时没有可清除的对象。
@@ -450,7 +450,7 @@ describe('AiResourceForms', () => {
   it('does not infer model abilities from provider model IDs', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
-    const modelId = screen.getByLabelText('模型 ID')
+    const modelId = screen.getByLabelText(/模型 ID/)
     const capability = screen.getByRole('checkbox', { name: '对话中的系统消息更新' })
 
     await user.type(modelId, 'anthropic/claude-opus-4.8')
@@ -478,12 +478,12 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('思考强度 1')).not.toBeRequired()
 
     // 新建时 Name 跟随 Model ID，直到单独编辑 Name。
-    await user.type(screen.getByLabelText('模型 ID'), 'upstream-claude-3')
-    expect(screen.getByLabelText('模型 ID')).toHaveValue('upstream-claude-3')
+    await user.type(screen.getByLabelText(/模型 ID/), 'upstream-claude-3')
+    expect(screen.getByLabelText(/模型 ID/)).toHaveValue('upstream-claude-3')
     expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('upstream-claude-3')
     await user.clear(screen.getByRole('textbox', { name: '名称' }))
     await user.type(screen.getByRole('textbox', { name: '名称' }), 'claude')
-    await user.type(screen.getByLabelText('模型 ID'), '-x')
+    await user.type(screen.getByLabelText(/模型 ID/), '-x')
     expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('claude')
 
     await user.click(screen.getByRole('button', { name: '添加预设' }))

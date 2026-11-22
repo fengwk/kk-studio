@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { isConflictError, request } from '@/shared/api/client'
+import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { PluginCard } from '@/features/extensions/PluginCard'
@@ -138,12 +140,18 @@ export function PluginsTab() {
   if (pluginsQuery.isError) {
     return (
       <StateBlock
-        title={
-          pluginsQuery.error instanceof Error
-            ? pluginsQuery.error.message
-            : String(pluginsQuery.error)
-        }
+        title={toUserFacingErrorMessage(pluginsQuery.error)}
         tone="danger"
+        action={
+          <Button
+            size="compact"
+            variant="ghost"
+            disabled={pluginsQuery.isFetching}
+            onClick={() => void pluginsQuery.refetch()}
+          >
+            {t('shared.retry')}
+          </Button>
+        }
       />
     )
   }

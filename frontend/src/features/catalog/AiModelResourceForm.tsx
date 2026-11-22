@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react'
+import { useId, useLayoutEffect, useState } from 'react'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
@@ -21,9 +21,11 @@ import {
   variantSelection,
 } from '@/features/catalog/ai-model-form-rules'
 import { Button } from '@/shared/ui/controls/Button'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
+import { joinDescribedBy, useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { useI18n } from '@/shared/i18n'
 import { RemoteModelIdPicker } from '@/features/catalog/AiRemoteModelIdPicker'
 import './capability-picker.css'
@@ -93,6 +95,12 @@ export function ModelForm({
     }
   }, [modelCapabilities, draft, mode, onChange])
   const defaultVariant = selectedDefaultVariant(draft)
+  const nameId = useId()
+  const modelIdFieldId = useId()
+  const providerNameErrorId = useFieldErrorId(fieldErrors.providerName)
+  const nameErrorId = useFieldErrorId(fieldErrors.name)
+  const modelIdErrorId = useFieldErrorId(fieldErrors.modelId)
+  const defaultVariantErrorId = useFieldErrorId(fieldErrors.defaultVariant)
 
   /** 新建时 Name 跟随 Model ID，直到用户单独编辑 Name。 */
   function setModelId(modelId: string) {
@@ -107,11 +115,15 @@ export function ModelForm({
   return (
     <>
       <CatalogEditorSection name="basics">
-        <label className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
+        <div className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
           <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
           <Select
             aria-label={t('ai.catalog.form.provider')}
-            aria-describedby={provider.unavailable ? 'model-provider-identity-status' : undefined}
+            aria-describedby={joinDescribedBy(
+              provider.unavailable ? 'model-provider-identity-status' : undefined,
+              providerNameErrorId,
+            )}
+            aria-invalid={Boolean(fieldErrors.providerName)}
             value={draft.providerName}
             required
             disabled={mode === 'edit'}
@@ -129,29 +141,33 @@ export function ModelForm({
             </span>
           ) : null}
           {fieldErrors.providerName ? (
-            <span className="field-error">{fieldErrors.providerName}</span>
+            <FieldError id={providerNameErrorId}>{fieldErrors.providerName}</FieldError>
           ) : null}
-        </label>
+        </div>
 
-        <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-          <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
+        <div className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
+          <FieldLabel required htmlFor={nameId}>{t('ai.catalog.form.name')}</FieldLabel>
           <TextInput
-            invalid={Boolean(fieldErrors.name)}
+            id={nameId}
             aria-label={t('ai.catalog.form.name')}
+            invalid={Boolean(fieldErrors.name)}
+            aria-describedby={nameErrorId}
             value={draft.name}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
             placeholder="MiniMax-M2.7"
             required
           />
           <span className="inline-hint">{t('ai.catalog.form.nameHint')}</span>
-          {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
-        </label>
+          {fieldErrors.name ? <FieldError id={nameErrorId}>{fieldErrors.name}</FieldError> : null}
+        </div>
 
-        <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
-          <FieldLabel required>{t('ai.catalog.form.modelId')}</FieldLabel>
+        <div className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
+          <FieldLabel required htmlFor={modelIdFieldId}>{t('ai.catalog.form.modelId')}</FieldLabel>
           <TextInput
-            invalid={Boolean(fieldErrors.modelId)}
+            id={modelIdFieldId}
             aria-label={t('ai.catalog.form.modelId')}
+            invalid={Boolean(fieldErrors.modelId)}
+            aria-describedby={modelIdErrorId}
             value={draft.modelId}
             onChange={(event) => setModelId(event.target.value)}
             placeholder="minimax-m2.7"
@@ -166,8 +182,10 @@ export function ModelForm({
               load={loadRemoteModelIds}
             />
           ) : null}
-          {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
-        </label>
+          {fieldErrors.modelId ? (
+            <FieldError id={modelIdErrorId}>{fieldErrors.modelId}</FieldError>
+          ) : null}
+        </div>
 
         <label className="form-group">
           <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
@@ -208,18 +226,20 @@ export function ModelForm({
       </CatalogEditorSection>
 
       <CatalogEditorSection name="presets">
-        <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
+        <div className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
           <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>
           <Select
             aria-label={t('ai.catalog.form.defaultVariant')}
+            aria-describedby={defaultVariantErrorId}
+            aria-invalid={Boolean(fieldErrors.defaultVariant)}
             value={defaultVariant}
             options={variantOptions.map((name) => ({ value: name, label: name }))}
             onChange={(variant) => onChange({ ...draft, defaultVariant: variant })}
           />
           {fieldErrors.defaultVariant ? (
-            <span className="field-error">{fieldErrors.defaultVariant}</span>
+            <FieldError id={defaultVariantErrorId}>{fieldErrors.defaultVariant}</FieldError>
           ) : null}
-        </label>
+        </div>
 
         <div className={fieldErrors.variants ? 'is-error' : undefined}>
           <VariantListEditor

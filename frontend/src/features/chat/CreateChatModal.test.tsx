@@ -61,6 +61,14 @@ function renderModal(ui: ReactElement, queryClient = new QueryClient({ defaultOp
   )
 }
 
+/** 控件 aria-describedby 指向的文案，验证错误与说明确实能被读屏读到。 */
+function describedByText(control: HTMLElement): string[] {
+  return (control.getAttribute('aria-describedby') ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent?.trim() ?? '')
+}
+
 describe('CreateChatModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -101,9 +109,9 @@ describe('CreateChatModal', () => {
 
     expect(screen.getByText('名称')).toBeInTheDocument()
     expect(screen.getAllByText('*')).toHaveLength(2)
-    expect(screen.getByRole('alert')).toHaveTextContent('请填写 Chat 名称')
+    expect(screen.getByText('请填写 Chat 名称')).toHaveAttribute('role', 'alert')
     expect(screen.getByText('请填写名称')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('对话名称').closest('label')).toHaveClass('is-error')
+    expect(screen.getByPlaceholderText('对话名称').closest('.form-group')).toHaveClass('is-error')
 
     await user.type(screen.getByPlaceholderText('对话名称'), 'My Chat')
     expect(onTitleChange).toHaveBeenCalled()
@@ -135,6 +143,53 @@ describe('CreateChatModal', () => {
   })
 
   // 验证编辑模式下共用表单布局与字段，展示编辑标题、保存按钮和取消动作，完整回显 YOLO 与环境
+  // 字段错误必须与控件程序化关联：控件 aria-invalid，错误文案带 id 并经 aria-describedby 可达，
+  // 且错误文案不并入控件的可访问名称（不放在包裹输入框的 label 内）。
+  it('programmatically associates field errors and the YOLO description with their controls', () => {
+    renderModal(
+      <CreateChatModal
+        {...createModalProps({
+          nameError: '请填写名称',
+          agentError: 'Agent 已不可用',
+        })}
+      />,
+    )
+
+    const nameInput = screen.getByRole('textbox', { name: '名称' })
+    expect(nameInput).toHaveAttribute('aria-invalid', 'true')
+    expect(describedByText(nameInput)).toEqual(['请填写名称'])
+    expect(screen.getByText('请填写名称').closest('label')).toBeNull()
+
+    // YOLO 说明经 aria-describedby 关联到开关。
+    const yoloSwitch = screen.getByRole('switch', { name: 'YOLO 模式' })
+    expect(describedByText(yoloSwitch)).toEqual(['自动批准工具调用，跳过人工确认'])
+
+    // Agent 选择的可访问名称只是字段名；错误文案以 alert 插入，不进入字段名，也不在 label 内。
+    expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument()
+    const agentError = screen.getByText('Agent 已不可用')
+    expect(agentError).toHaveAttribute('role', 'alert')
+    expect(describedByText(screen.getByRole('group', { name: 'Agent' }))).toEqual(['Agent 已不可用'])
+    expect(agentError.closest('label')).toBeNull()
+  })
+
+  // 环境列表读取失败是环境的字段错误：select 自身标 aria-invalid 并由 aria-describedby 指向失败文案。
+  it('describes the environment field error from the select trigger', async () => {
+    vi.mocked(environmentService.listEnvironments).mockRejectedValueOnce(new Error('network error'))
+
+    renderModal(
+      <CreateChatModal
+        {...createModalProps({ selectedAgentName: 'assistant', title: 'Chat' })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('环境列表加载失败，已保留当前选择')).toBeInTheDocument()
+    })
+    const environmentTrigger = screen.getByLabelText('默认环境')
+    expect(environmentTrigger).toHaveAttribute('aria-invalid', 'true')
+    expect(describedByText(environmentTrigger)).toEqual(['环境列表加载失败，已保留当前选择'])
+  })
+
   it('renders edit mode with shared layout, edit title, save button, cancel action, and echoes values', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()

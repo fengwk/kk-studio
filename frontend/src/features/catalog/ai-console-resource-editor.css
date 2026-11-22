@@ -77,33 +77,27 @@
   font-weight: 600;
 }
 
-/* 模型与模型组的类型切换常驻正文滚动区之外。 */
+/* 模型与模型组的类型切换复用共享 Tabs：页签栏固定在正文滚动区之外，
+   tabpanel 只做布局透传，正文仍由 .modal-body 承担内边距与纵向滚动。 */
 .model-kind-tabs {
-  display: inline-flex;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--wash-1);
-  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* tab 自带 12px 内边距，页签文字据此与正文（24px）左边缘对齐。 */
+.model-kind-tabs .ui-tabs {
   flex: 0 0 auto;
-  margin: var(--space-3) 24px 0;
+  padding: 0 var(--space-3);
 }
 
-.model-kind-tabs button {
-  border: 0;
-  border-radius: calc(var(--radius-md) - 2px);
-  padding: 6px 12px;
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-
-.model-kind-tabs button.is-selected {
-  background: var(--wash-3);
-  color: var(--fg);
+.model-kind-tabs .ui-tab-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0;
 }
 
 @media (max-width: 860px) {
@@ -117,8 +111,8 @@
     padding-top: 0;
   }
 
-  .model-kind-tabs {
-    margin: var(--space-2) 16px;
+  .model-kind-tabs .ui-tabs {
+    padding: 0 var(--space-1);
   }
 
   /* 窄屏单栏：跳转条停在正文顶部，横向滚动而不是换行，避免挤压表单首屏。 */

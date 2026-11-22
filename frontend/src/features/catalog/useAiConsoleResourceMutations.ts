@@ -13,9 +13,11 @@ import type {
 export function useAiConsoleResourceMutations({
   onResourceSaved,
   onDeleteCompleted,
+  onDeleteError,
 }: {
   onResourceSaved: () => void
   onDeleteCompleted: () => void
+  onDeleteError: (error: unknown) => void
 }) {
   const createProviderMutation = useInvalidateMutation({
     mutationFn: (provider: ProviderCreateDTO) => agentService.createProvider(provider),
@@ -81,9 +83,9 @@ export function useAiConsoleResourceMutations({
 
   return {
     resourceMutationError:
-      createProviderMutation.error || updateProviderMutation.error || deleteProviderMutation.error ||
-      createModelMutation.error || updateModelMutation.error || deleteModelMutation.error ||
-      createAgentMutation.error || updateAgentMutation.error || deleteAgentMutation.error,
+      createProviderMutation.error || updateProviderMutation.error ||
+      createModelMutation.error || updateModelMutation.error ||
+      createAgentMutation.error || updateAgentMutation.error,
     providerDeletePending: deleteProviderMutation.isPending,
     modelDeletePending: deleteModelMutation.isPending,
     agentDeletePending: deleteAgentMutation.isPending,
@@ -96,16 +98,16 @@ export function useAiConsoleResourceMutations({
     updateProvider: (name: string, data: ProviderUpdateDTO) =>
       updateProviderMutation.mutate({ name, data }),
     deleteProvider: (name: string, expectedVersion: string) =>
-      deleteProviderMutation.mutate({ name, expectedVersion }),
+      deleteProviderMutation.mutate({ name, expectedVersion }, { onError: onDeleteError }),
     createModel: (data: ModelCreateDTO) => createModelMutation.mutate(data),
     updateModel: (name: string, data: ModelUpdateDTO) =>
       updateModelMutation.mutate({ name, data }),
     deleteModel: (name: string, expectedVersion: string) =>
-      deleteModelMutation.mutate({ name, expectedVersion }),
+      deleteModelMutation.mutate({ name, expectedVersion }, { onError: onDeleteError }),
     createAgent: (data: AgentCreateDTO) => createAgentMutation.mutate(data),
     updateAgent: (name: string, data: AgentUpdateDTO) =>
       updateAgentMutation.mutate({ name, data }),
     deleteAgent: (name: string, expectedVersion: string) =>
-      deleteAgentMutation.mutate({ name, expectedVersion }),
+      deleteAgentMutation.mutate({ name, expectedVersion }, { onError: onDeleteError }),
   }
 }

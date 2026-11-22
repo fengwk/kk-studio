@@ -169,7 +169,7 @@
 .ui-select-trigger:focus-visible {
   outline: none;
   border-color: var(--border-hover);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .ui-select-trigger[data-invalid='true'],
@@ -424,7 +424,7 @@
 
 .ui-checkbox-input:focus-visible + .ui-checkbox-box {
   border-color: var(--border-hover);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .ui-checkbox.is-invalid .ui-checkbox-box {

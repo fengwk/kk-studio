@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type FormEventHandler } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
+import { Tabs } from '@/shared/ui/controls/Tabs'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { AgentForm } from '@/features/catalog/AiAgentResourceForm'
 import { ModelForm } from '@/features/catalog/AiModelResourceForm'
@@ -144,6 +145,9 @@ export function ResourceEditorModal({
 
   const title = resourceTitle(modal)
   const sections = editorSections(modal)
+  const bodyClassName = ['modal-body', 'catalog-editor-body', sections.length > 0 ? 'is-split' : '']
+    .filter(Boolean)
+    .join(' ')
 
   function jumpToSection(name: CatalogSectionName) {
     const target = bodyRef.current?.querySelector<HTMLElement>(
@@ -155,6 +159,69 @@ export function ResourceEditorModal({
     target.focus({ preventScroll: true })
     target.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
+
+  const body = (
+    <div ref={bodyRef} className={bodyClassName}>
+      {sections.length > 0 ? (
+        <nav className="catalog-editor-nav" aria-label={t('ai.catalog.sectionNavigation')}>
+          {sections.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className="catalog-editor-nav-link"
+              onClick={() => jumpToSection(name)}
+            >
+              {t(`ai.catalog.section.${name}`)}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+      <div className="catalog-editor-content">
+        {formError ? (
+          <div ref={bannerRef} className="form-error-banner" role="alert">
+            {formError}
+          </div>
+        ) : null}
+        {modal.kind === 'provider' && (
+          <ProviderForm
+            draft={providerDraft}
+            mode={modal.mode}
+            fieldErrors={fieldErrors}
+            onChange={onProviderDraftChange}
+          />
+        )}
+        {modal.kind === 'model' && (modal.resourceKind === 'GROUP' ? (
+          <ModelGroupForm
+            draft={modelGroupDraft}
+            models={models}
+            fieldErrors={fieldErrors}
+            onChange={onModelGroupDraftChange}
+          />
+        ) : (
+          <ModelForm
+            draft={modelDraft}
+            mode={modal.mode}
+            providers={providers}
+            fieldErrors={fieldErrors}
+            onChange={onModelDraftChange}
+          />
+        ))}
+        {modal.kind === 'agent' && (
+          <AgentForm
+            draft={agentDraft}
+            mode={modal.mode}
+            models={models}
+            agents={agents}
+            toolCatalog={toolCatalog}
+            skills={skills}
+            capabilityDirectories={capabilityDirectories}
+            fieldErrors={fieldErrors}
+            onChange={onAgentDraftChange}
+          />
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <Dialog
@@ -169,94 +236,30 @@ export function ResourceEditorModal({
     >
       <form className="modal-card-form" aria-label={title} onSubmit={onSubmit} noValidate>
         {modal.kind === 'model' && modal.mode === 'create' ? (
-          <div className="model-kind-tabs" role="tablist" aria-label={t('ai.catalog.form.modelKind')}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={modal.resourceKind === 'MODEL'}
-              className={modal.resourceKind === 'MODEL' ? 'is-selected' : undefined}
-              disabled={pending}
-              onClick={() => onModelCreateKindChange('MODEL')}
-            >
-              {t('ai.catalog.resourceType.model')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={modal.resourceKind === 'GROUP'}
-              className={modal.resourceKind === 'GROUP' ? 'is-selected' : undefined}
-              disabled={pending}
-              onClick={() => onModelCreateKindChange('GROUP')}
-            >
-              {t('ai.catalog.resourceType.modelGroup')}
-            </button>
-          </div>
-        ) : null}
-        <div
-          ref={bodyRef}
-          className={['modal-body', 'catalog-editor-body', sections.length > 0 ? 'is-split' : '']
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {sections.length > 0 ? (
-            <nav className="catalog-editor-nav" aria-label={t('ai.catalog.sectionNavigation')}>
-              {sections.map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  className="catalog-editor-nav-link"
-                  onClick={() => jumpToSection(name)}
-                >
-                  {t(`ai.catalog.section.${name}`)}
-                </button>
-              ))}
-            </nav>
-          ) : null}
-          <div className="catalog-editor-content">
-            {formError ? (
-              <div ref={bannerRef} className="form-error-banner" role="alert">
-                {formError}
-              </div>
-            ) : null}
-            {modal.kind === 'provider' && (
-              <ProviderForm
-                draft={providerDraft}
-                mode={modal.mode}
-                fieldErrors={fieldErrors}
-                onChange={onProviderDraftChange}
-              />
-            )}
-            {modal.kind === 'model' && (modal.resourceKind === 'GROUP' ? (
-              <ModelGroupForm
-                draft={modelGroupDraft}
-                models={models}
-                fieldErrors={fieldErrors}
-                onChange={onModelGroupDraftChange}
-              />
-            ) : (
-              <ModelForm
-                draft={modelDraft}
-                mode={modal.mode}
-                providers={providers}
-                fieldErrors={fieldErrors}
-                onChange={onModelDraftChange}
-              />
-            ))}
-            {modal.kind === 'agent' && (
-              <AgentForm
-                draft={agentDraft}
-                mode={modal.mode}
-                models={models}
-                agents={agents}
-                toolCatalog={toolCatalog}
-                skills={skills}
-                capabilityDirectories={capabilityDirectories}
-                fieldErrors={fieldErrors}
-                onChange={onAgentDraftChange}
-              />
-            )}
-          </div>
-        </div>
+          /* 资源类型就是当前表单的页签：选中项决定下面渲染哪一个表单。 */
+          <Tabs
+            className="model-kind-tabs"
+            tabs={[
+              {
+                id: 'MODEL',
+                label: t('ai.catalog.resourceType.model'),
+                disabled: pending,
+              },
+              {
+                id: 'GROUP',
+                label: t('ai.catalog.resourceType.modelGroup'),
+                disabled: pending,
+              },
+            ]}
+            activeId={modal.resourceKind}
+            onChange={(id) => onModelCreateKindChange(id === 'GROUP' ? 'GROUP' : 'MODEL')}
+            ariaLabel={t('ai.catalog.form.modelKind')}
+          >
+            {body}
+          </Tabs>
+        ) : (
+          body
+        )}
         <div className="modal-footer">
           <Button variant="inline" disabled={pending} onClick={onClose}>
             {t('shared.cancel')}
