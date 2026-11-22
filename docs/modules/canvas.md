@@ -133,7 +133,7 @@ Function 的能力契约（adapter、函数定义、冻结运行计划、执行�
 
 Run 启动时冻结的事实写在 [`CanvasFunctionFrozenRun`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java)：canvas/node 身份、保存完整函数定义的 [`CanvasFunctionBinding`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionBinding.java)、args、引用 manifest、按槽位预分配的 [`CanvasFunctionFrozenOutput`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenOutput.java)、[`CanvasFunctionSubmitState`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionSubmitState.java)、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存启动瞬间的 source node、resource、blob 身份与权威媒体事实，图中的引用关系或源资源之后的变化不会改写它们。
 
-Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询并按计划顺序物化输出、返回 `run.outputResourceIds()`。[`CanvasFunctionExecutionContext`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 只给最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读冻结原件的 `openOriginal`，以及只接受计划内槽位的 `materializeOutput`（媒体 Blob）与 `materializeTextOutput`（内联文本）；槽位身份或类型与冻结计划不一致时立即拒绝。`checkpoint` 只用于需要跨进程恢复外部任务身份或已完成外部产物的 adapter（ComfyUI/H3、OpenCLI 付费任务与引用上传）；本地确定且可重复执行的内置 fake 与 Media 插件的 `image.crop` 不写 checkpoint，提交事实由 Runtime 的 `SUBMITTING`/`SUBMITTED` 两阶段状态表达。外部结果无法确认时抛 [`CanvasFunctionUnknownException`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownException.java)，Run 转入人工决议而不是重试提交。adapter 看不到数据库、对象 key 或 pin 表。
+Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询并按计划顺序物化输出、返回 `run.outputResourceIds()`。[`CanvasFunctionExecutionContext`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 只给最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读冻结原件的 `openOriginal`，以及只接受计划内槽位的 `materializeOutput`（媒体 Blob）与 `materializeTextOutput`（内联文本）；槽位身份或类型与冻结计划不一致时立即拒绝。`openOriginal` 返回的 [`CanvasFunctionResourceStream`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionResourceStream.java) 在打开时冻结读取预算（`blobReadBudgetMillis`），长度与冻结事实不一致即拒绝；adapter 读完前关闭时中止连接而不是排空剩余响应体。`checkpoint` 只用于需要跨进程恢复外部任务身份或已完成外部产物的 adapter（ComfyUI/H3、OpenCLI 付费任务与引用上传）；本地确定且可重复执行的内置 fake 与 Media 插件的 `image.crop` 不写 checkpoint，提交事实由 Runtime 的 `SUBMITTING`/`SUBMITTED` 两阶段状态表达。外部结果无法确认时抛 [`CanvasFunctionUnknownException`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownException.java)，Run 转入人工决议而不是重试提交。adapter 看不到数据库、对象 key 或 pin 表。
 
 ### 目录冻结与插件投影
 
@@ -233,9 +233,12 @@ canonical UUID 由宿主的严格 HTTP mapper 统一校验，客户端输入错�
 workerConcurrency       = 2        maxDispatchTasks        = 2
 leaseDurationMillis     = 30000    heartbeatIntervalMillis = 10000
 pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
+blobReadBudgetMillis    = 300000
 ```
 
 校验要求 `1 <= maxDispatchTasks <= workerConcurrency`、时间参数为正，且 heartbeat 间隔小于租约时长。adapter 的 `submit`/`execute` 在固定并发 worker 上同步执行，外部等待会占用 worker 槽位，续租由独立 heartbeat scheduler 维持。
+
+`blobReadBudgetMillis` 是 adapter 打开冻结原件的读取总预算（S3 握手与响应体消费合计），默认 5 分钟，与平台受管资源下载的读取预算同量级；在 `openOriginal` 调用时冻结成一个绝对截止点；到点或读取线程被取消时中断阻塞中的读取并中止连接，以可区分的读取超时/取消失败结束，不排空剩余响应体。adapter 读完前放弃并关闭流时同样中止连接，因此停滞的读取不会永久占用 worker 槽位。
 
 ## 不变量
 

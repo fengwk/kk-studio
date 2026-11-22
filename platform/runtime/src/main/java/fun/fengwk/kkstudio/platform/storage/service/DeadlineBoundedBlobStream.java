@@ -23,6 +23,10 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * 受管 Blob 响应流的绝对截止看门狗。
  *
+ * <p>需要自管 Blob 引用、不能用 {@link StorageBlobContentService#withBlobStream} 的调用方（如 Canvas Function
+ * 只读冻结原件）用 {@link #open} 直接复用本流：{@link #contentLength()} 给出 S3 权威长度以便调用方先校验，{@link #close()}
+ * 已内建“未读完即 abort”。
+ *
  * <p>AWS SDK 同步 {@code getObject} 返回的响应流不受调用方截止时间约束：{@code apiCallTimeout} 只覆盖到响应头返回，socket
  * 超时只在空闲时生效，因此这里在冻结的绝对截止点主动 abort 响应流，打断阻塞中的 {@code read}：
  *
@@ -34,7 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>看门狗任务挂在共享单线程 daemon 调度器上，并在 {@link #close()} 中注销。
  * </ul>
  */
-final class DeadlineBoundedBlobStream extends InputStream {
+public final class DeadlineBoundedBlobStream extends InputStream {
 
   /** 共享单线程 daemon 调度器：任务只做 abort，随读取结束注销，不让 JVM 因它而无法退出。 */
   private static final ScheduledThreadPoolExecutor WATCHDOG = newWatchdog();
@@ -52,10 +56,11 @@ final class DeadlineBoundedBlobStream extends InputStream {
   /**
    * 在截止时间内打开响应流。
    *
+   * @param deadline 调用方在读取入口冻结的绝对截止，覆盖 S3 握手与响应体消费
    * @throws StorageReadInterruptedException 打开前读取线程已处于中断状态
    * @throws StorageReadTimeoutException 打开前截止已过，或 S3 握手超过截止
    */
-  static DeadlineBoundedBlobStream open(
+  public static DeadlineBoundedBlobStream open(
       S3StorageService s3StorageService, String objectKey, ReadDeadline deadline) {
     Objects.requireNonNull(s3StorageService, "s3StorageService");
     Objects.requireNonNull(objectKey, "objectKey");
@@ -125,6 +130,11 @@ final class DeadlineBoundedBlobStream extends InputStream {
     this.watchdogTask =
         WATCHDOG.schedule(
             this::onDeadline, Math.max(deadline.remainingNanos(), 0L), TimeUnit.NANOSECONDS);
+  }
+
+  /** S3 权威内容长度；调用方据此在消费前做长度断言。 */
+  public long contentLength() {
+    return object.metadata().contentLength();
   }
 
   @Override

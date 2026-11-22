@@ -22,6 +22,7 @@ class CanvasFunctionRuntimePropertiesTest {
     assertEquals(10_000, properties.getHeartbeatIntervalMillis());
     assertEquals(1_000, properties.getPollIntervalMillis());
     assertEquals(1_000, properties.getRejectionDelayMillis());
+    assertEquals(300_000, properties.getBlobReadBudgetMillis());
   }
 
   /** worker executor 必须固定 N + SynchronousQueue + AbortPolicy，不能形成第二个内存等待队列。 */
