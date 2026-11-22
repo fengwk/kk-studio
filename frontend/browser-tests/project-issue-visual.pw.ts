@@ -185,8 +185,11 @@ for (const width of [320, 1280]) {
     // 阶段预算卡的标题也只写阶段名称，不写内部状态码。
     await expect(dialog.locator('.budget-card .ui-badge')).toHaveText([STAGE.work, STAGE.done])
     const budgets = dialog.locator('.budget-card')
-    const positive = budgets.nth(0).locator('.budget-stats > div').nth(1).locator('strong')
-    const exhausted = budgets.nth(1).locator('.budget-stats > div').nth(1).locator('strong')
+    // 剩余额度按标签定位：预算事实行以文案而不是行序区分，新增事实不会移位。
+    const remainingOf = (card: Locator) =>
+      card.locator('.budget-stats > div').filter({ hasText: '剩余可用' }).locator('strong')
+    const positive = remainingOf(budgets.nth(0))
+    const exhausted = remainingOf(budgets.nth(1))
     await expect(positive).toHaveText('4')
     await expect(positive).toHaveCSS('color', await token(positive, 'color', '--green-primary'))
     await expect(exhausted).toHaveText('0')
@@ -325,3 +328,68 @@ test('unknown ERROR resume remains accessible and replays the same request after
   await expect(banner).toHaveCount(0)
   expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull()
 })
+
+/** 预算卡四个事实的双语文案：标签不带冒号也不含值，额度值英文区分单复数。 */
+const BUDGET_FACTS = {
+  'zh-CN': {
+    tab: /阶段预算/,
+    labels: ['最大额度', '已用次数', '剩余可用', '额度从此序号后起算'],
+    maxRuns: ['5 次', '1 次'],
+  },
+  'en-US': {
+    tab: /Stage budgets/,
+    labels: ['Max budget', 'Used runs', 'Remaining', 'Budget counts from this ordinal'],
+    maxRuns: ['5 runs', '1 run'],
+  },
+} as const
+
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  for (const [width, height] of [[390, 844], [1440, 900]] as const) {
+    test(`stage budget facts keep labels and values apart in ${locale} at ${width}x${height}`, async ({ page }, info) => {
+      // 预算卡四行都是“标签 + 值”：标签共用一列且不拆词，值独占一列不粘连，中英文宽窄屏都一致。
+      await page.setViewportSize({ width, height })
+      await transport(page)
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue${locale === 'en-US' ? '&locale=en-US' : ''}`)
+      const dialog = page.getByRole('dialog')
+      const facts = BUDGET_FACTS[locale]
+      await dialog.getByRole('tab', { name: facts.tab }).click()
+
+      const cards = dialog.locator('.budget-card')
+      await expect(cards).toHaveCount(2)
+      for (const [index, card] of (await cards.all()).entries()) {
+        await expect(card.locator('.budget-stats > div > span')).toHaveText([...facts.labels])
+        // 额度值单独成元素：与标签分开，英文单复数随数值变化。
+        await expect(card.locator('.budget-stats > div > strong').first()).toHaveText(facts.maxRuns[index]!)
+        const rows = await card.evaluate((element) =>
+          Array.from(element.querySelectorAll('.budget-stats > div'), (row) => {
+            const [label, value] = Array.from(row.children) as HTMLElement[]
+            const labelBox = label!.getBoundingClientRect()
+            const valueBox = value!.getBoundingClientRect()
+            return {
+              labelLeft: Math.round(labelBox.left),
+              labelRight: Math.round(labelBox.right),
+              labelTop: Math.round(labelBox.top),
+              valueLeft: Math.round(valueBox.left),
+              valueTop: Math.round(valueBox.top),
+              valueClipped: value!.scrollWidth > value!.clientWidth + 1,
+            }
+          }),
+        )
+        expect(rows).toHaveLength(4)
+        for (const row of rows) {
+          // 标签与值之间保留列间距：不出现“已用次数:2”这类粘连。
+          expect(row.valueLeft - row.labelRight).toBeGreaterThanOrEqual(8)
+          // 值与标签同一行，不因粘连被挤到下一行。
+          expect(Math.abs(row.valueTop - row.labelTop)).toBeLessThanOrEqual(2)
+          expect(row.valueClipped).toBe(false)
+        }
+        // 同一卡片共用标签列：四行的标签与值分别左对齐。
+        expect(new Set(rows.map((row) => row.labelLeft)).size).toBe(1)
+        expect(new Set(rows.map((row) => row.valueLeft)).size).toBe(1)
+      }
+
+      await noOverflow(dialog)
+      await page.screenshot({ path: info.outputPath(`stage-budgets-${locale}-${width}x${height}.png`) })
+    })
+  }
+}

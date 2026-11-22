@@ -253,8 +253,11 @@ describe('IssueDetailModal', () => {
     expect(screen.queryByText('IN_PROGRESS')).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: /阶段预算/ }))
-    const budget = await screen.findByText('最大额度: 5 次')
-    expect(budget.closest('.budget-card')).toHaveTextContent('进行中')
+    // 测试意图：预算事实按“标签 + 值”成对呈现，额度值与标签是两个元素，不拼成一句话。
+    const budgetLabel = await screen.findByText('最大额度')
+    const budgetCard = budgetLabel.closest('.budget-card')
+    expect(budgetCard).toHaveTextContent('5 次')
+    expect(budgetCard).toHaveTextContent('进行中')
     expect(screen.queryByText('IN_PROGRESS')).toBeNull()
   })
 
@@ -353,7 +356,7 @@ describe('IssueDetailModal', () => {
     fireEvent.click(screen.getByRole('tab', { name: /阶段预算/i }))
 
     // budgetAfterOrdinal 是排除边界，不是已用次数；新额度只计入此序号之后的 Run。
-    expect(screen.getByText('额度从此序号后起算:').parentElement).toHaveTextContent('#0')
+    expect(screen.getByText('额度从此序号后起算').parentElement).toHaveTextContent('#0')
 
     // 点击重置阶段预算
     fireEvent.click(screen.getByRole('button', { name: '重置阶段预算' }))

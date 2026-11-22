@@ -790,16 +790,35 @@
 .budget-card-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: var(--font-size-sm);
 }
 
+/* 同一卡片的预算事实共用标签列：标签只在词间换行，值独占一列可换行，两者不粘连。 */
 .budget-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
   font-size: var(--font-size-sm);
   color: var(--fg-muted);
+}
+
+.budget-stats > div {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: var(--space-3);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.budget-stats > div > span {
+  word-break: keep-all;
+}
+
+.budget-stats > div > strong,
+.budget-stats > div > code {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* Agent Thread */

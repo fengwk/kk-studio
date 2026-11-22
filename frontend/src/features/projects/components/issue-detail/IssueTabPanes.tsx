@@ -148,9 +148,17 @@ export function IssueStageBudgetList({
         <div key={b.state} className="budget-card">
           <div className="budget-card-title">
             <Badge tone="info" title={b.state}>{stateNameOf(stateNames, b.state)}</Badge>
-            <span>{t('projects.issue.maxRunsBudget', { max: b.maxRuns })}</span>
           </div>
+          {/* 额度、用量与起算序号都是“标签 + 值”：标签共用一列，值独占一列且不与标签粘连。 */}
           <div className="budget-stats">
+            <div>
+              <span>{t('projects.issue.maxRunsLabel')}</span>
+              <strong>
+                {b.maxRuns === 1
+                  ? t('projects.issue.maxRunsValue.one', { max: b.maxRuns })
+                  : t('projects.issue.maxRunsValue.other', { max: b.maxRuns })}
+              </strong>
+            </div>
             <div>
               <span>{t('projects.issue.usedRunsLabel')}</span>
               <strong>{b.usedRuns}</strong>

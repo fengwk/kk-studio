@@ -990,21 +990,30 @@ export const projectsCatalog = {
     'zh-CN': '阶段预算尚未授权或暂无工作阶段预算',
     'en-US': 'No stage budget has been granted yet',
   },
-  'projects.issue.maxRunsBudget': {
-    'zh-CN': '最大额度: {{max}} 次',
-    'en-US': 'Max budget: {{max}} runs',
+  // 阶段预算的四个事实都是“标签 + 值”：标签只命名字段，不带冒号也不含值。
+  'projects.issue.maxRunsLabel': {
+    'zh-CN': '最大额度',
+    'en-US': 'Max budget',
+  },
+  'projects.issue.maxRunsValue.one': {
+    'zh-CN': '{{max}} 次',
+    'en-US': '{{max}} run',
+  },
+  'projects.issue.maxRunsValue.other': {
+    'zh-CN': '{{max}} 次',
+    'en-US': '{{max}} runs',
   },
   'projects.issue.usedRunsLabel': {
-    'zh-CN': '已用次数:',
-    'en-US': 'Used runs:',
+    'zh-CN': '已用次数',
+    'en-US': 'Used runs',
   },
   'projects.issue.remainingRunsLabel': {
-    'zh-CN': '剩余可用:',
-    'en-US': 'Remaining:',
+    'zh-CN': '剩余可用',
+    'en-US': 'Remaining',
   },
   'projects.issue.budgetAfterOrdinalLabel': {
-    'zh-CN': '额度从此序号后起算:',
-    'en-US': 'Budget counts from this ordinal:',
+    'zh-CN': '额度从此序号后起算',
+    'en-US': 'Budget counts from this ordinal',
   },
   'projects.issue.emptyAgentThreads': {
     'zh-CN': '暂无 Agent Thread',
