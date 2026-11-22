@@ -6,6 +6,10 @@
  * No version is hard-coded here, so bumping the version never requires editing this script or the
  * workflow that runs it.
  *
+ * Shell scripts must derive the distribution Fat JAR name from the root POM version: a pinned
+ * `kk-studio-web-<version>.jar` is reported as a mismatch instead of silently breaking after a
+ * version bump.
+ *
  * Absent `RELEASE_TAG` checks only the repository's internal versions. An explicitly supplied tag,
  * including a blank or otherwise invalid value, is always checked and never ignored.
  *
@@ -13,13 +17,16 @@
  * Release: `RELEASE_TAG=v1.2.3 node scripts/dev/verify/repository/check-version-alignment.mjs`
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { repositoryRoot } from '../../lib/repo-root.mjs'
 
 const DAEMON_VERSION_DECLARATION = /^var DaemonVersion\s*=\s*"([^"\r\n]+)"\s*$/gm
+// 脚本里的发行 Fat JAR 引用；版本段必须由 shell 展开，否则版本升级后指向不存在的产物。
+const DISTRIBUTION_JAR_REFERENCE = /kk-studio-web-([^\s'"`]+)\.jar/g
+const SHELL_EXPANDED_VERSION = /^\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/
 
 /** The text of the first `<name>` element, or throws when it is absent or blank. */
 function requiredText(xml, name, label) {
@@ -82,6 +89,42 @@ export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackag
   return { expected, mismatches }
 }
 
+/** 返回写死发行 JAR 版本的脚本引用；`sources` 是 `{ path, text }` 列表。 */
+function checkScriptJarVersions(sources) {
+  const mismatches = []
+  for (const { path: file, text } of sources) {
+    text.split('\n').forEach((line, index) => {
+      for (const [, version] of line.matchAll(DISTRIBUTION_JAR_REFERENCE)) {
+        if (!SHELL_EXPANDED_VERSION.test(version)) {
+          mismatches.push(
+            `${file}:${index + 1} hard-codes the distribution JAR version in ` +
+              `${JSON.stringify(`kk-studio-web-${version}.jar`)}; derive it from the root POM version`,
+          )
+        }
+      }
+    })
+  }
+  return mismatches
+}
+
+/** `directory` 下全部 `*.sh` 源文件（递归）。 */
+function shellSources(directory, prefix = 'scripts') {
+  if (!existsSync(directory)) {
+    return []
+  }
+  const sources = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relative = `${prefix}/${entry.name}`
+    const absolute = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      sources.push(...shellSources(absolute, relative))
+    } else if (entry.isFile() && entry.name.endsWith('.sh')) {
+      sources.push({ path: relative, text: readFileSync(absolute, 'utf8') })
+    }
+  }
+  return sources
+}
+
 export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
   let result
   let ideExtensionChecked = false
@@ -106,6 +149,7 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
       daemonConfig,
       tag,
     })
+    result.mismatches.push(...checkScriptJarVersions(shellSources(path.join(root, 'scripts'))))
   } catch (error) {
     process.stderr.write(`${error.message}\n`)
     return 1

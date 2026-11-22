@@ -163,15 +163,32 @@ function writeSummaryAndReport(
   finishedAt,
   durationMs,
 ) {
-  const passed = results.filter((r) => r.status === 'pass')
-  const failed = results.filter((r) => r.status === 'fail')
-  const skipped = results.filter((r) => r.status === 'skip')
-  const byLevel = {}
+  const { summary, report } = buildSummary(runId, args, results, startedAt, finishedAt, durationMs)
+  writeReportArtifact(path.join(runDir, 'summary.json'), JSON.stringify(summary))
+  const reportPath = path.join(runDir, 'report.md')
+  writeReportArtifact(reportPath, report)
+  return reportPath
+}
+
+/**
+ * 一次运行的计数口径：totals 与 By Level 共用同一组 pass/fail/skip 状态，skip 不并入 fail。
+ * 状态只来自本 runner（pass/fail/skip），报告与终端摘要都从这里取值。
+ */
+function countResults(results) {
+  const totals = { total: results.length, pass: 0, fail: 0, skip: 0, byLevel: {} }
   for (const r of results) {
-    byLevel[r.level] ||= { total: 0, pass: 0, fail: 0 }
-    byLevel[r.level].total++
-    byLevel[r.level][r.status === 'pass' ? 'pass' : 'fail']++
+    const level = (totals.byLevel[r.level] ||= { total: 0, pass: 0, fail: 0, skip: 0 })
+    level.total++
+    level[r.status]++
+    totals[r.status]++
   }
+  return totals
+}
+
+/** 汇总一次运行：summary.json 与 report.md 用同一组计数，totals 与 By Level 表不会口径不一。 */
+export function buildSummary(runId, args, results, startedAt, finishedAt, durationMs) {
+  const totals = countResults(results)
+  const failed = results.filter((r) => r.status === 'fail')
   const summary = {
     runId,
     startedAt,
@@ -190,18 +207,11 @@ function writeSummaryAndReport(
       only: args.only,
       level: args.level,
     },
-    totals: {
-      total: results.length,
-      pass: passed.length,
-      fail: failed.length,
-      skip: skipped.length,
-      byLevel,
-    },
+    totals,
     failedCaseIds: failed.map((r) => r.id),
     results,
     reportMarkdown: 'report.md',
   }
-  writeReportArtifact(path.join(runDir, 'summary.json'), JSON.stringify(summary))
 
   const lines = []
   lines.push(`# E2E Report \`${runId}\``)
@@ -216,17 +226,17 @@ function writeSummaryAndReport(
     `- Flags: real=${args.real} tools=${args.withTools} branch=${args.withBranch} distributed=${args.distributed}`,
   )
   lines.push(
-    `- Totals: total=${results.length} pass=${passed.length} fail=${failed.length} skip=${skipped.length}`,
+    `- Totals: total=${totals.total} pass=${totals.pass} fail=${totals.fail} skip=${totals.skip}`,
   )
   lines.push(`- Result: **${failed.length ? 'FAIL' : 'PASS'}**`)
   lines.push('')
   lines.push('## By Level')
   lines.push('')
-  lines.push('| Level | Total | Pass | Fail |')
-  lines.push('| --- | ---: | ---: | ---: |')
-  for (const level of Object.keys(byLevel).sort()) {
-    const x = byLevel[level]
-    lines.push(`| ${level} | ${x.total} | ${x.pass} | ${x.fail} |`)
+  lines.push('| Level | Total | Pass | Fail | Skip |')
+  lines.push('| --- | ---: | ---: | ---: | ---: |')
+  for (const level of Object.keys(totals.byLevel).sort()) {
+    const x = totals.byLevel[level]
+    lines.push(`| ${level} | ${x.total} | ${x.pass} | ${x.fail} | ${x.skip} |`)
   }
   lines.push('')
   lines.push('## Case Matrix')
@@ -274,9 +284,7 @@ function writeSummaryAndReport(
     lines.push('All selected cases passed.')
     lines.push('')
   }
-  const reportPath = path.join(runDir, 'report.md')
-  writeReportArtifact(reportPath, `${lines.join('\n')}\n`)
-  return reportPath
+  return { summary, report: `${lines.join('\n')}\n` }
 }
 
 function publishLatest(reportRoot, runDir) {
@@ -581,9 +589,10 @@ async function main(argv) {
   const finishedAt = new Date().toISOString()
   const runDurationMs = runElapsed()
   const failed = results.filter((r) => r.status === 'fail').map((r) => r.id)
+  const totals = countResults(results)
   console.log(`\n${'='.repeat(60)}`)
   console.log(
-    `total=${results.length} pass=${results.length - failed.length} fail=${failed.length}`,
+    `total=${totals.total} pass=${totals.pass} fail=${totals.fail} skip=${totals.skip}`,
   )
   if (failed.length) console.log(`failed: ${failed.join(', ')}`)
 

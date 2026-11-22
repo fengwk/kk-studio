@@ -33,6 +33,14 @@ test('daemon CI builds all six static targets and is reusable by release and Doc
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
 })
 
+test('Daemon CI checkouts do not persist runner credentials', () => {
+  const checkouts = [...daemonCi.matchAll(/^      - uses: actions\/checkout@.*(?:\n(?!      - |\S).*)*/gm)]
+  assert.ok(checkouts.length > 0)
+  for (const [checkout] of checkouts) {
+    assert.match(checkout, /\n        with:\n          persist-credentials: false(?:\n|$)/)
+  }
+})
+
 test('Daemon CI watches its script suites and local composite actions for both push and pull requests', () => {
   for (const dependency of [
     'scripts/dev/lib/**',

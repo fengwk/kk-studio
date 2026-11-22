@@ -466,7 +466,7 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 | `GET /api/platform/environments/{id}/runtime` | 只读当前 owner 的运行快照 `{daemonVersion, update, configuration}`；`update` 只在正在更新时存在（否则显式 null），包含 `targetVersion`、`downloadedBytes` 与可空 `totalBytes`；`configuration` 包含 `appliedVersion`、`proxyUrl` 与可空 `error` |
 
 更新目标是**运行中 Platform 版本对应的官方 GitHub Release**：必须是非草稿、tag 匹配、五件套资产
-齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、确定性元数据、`LICENSE`、
+齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、记录构建提交与归档摘要的 `.json`、`LICENSE`、
 `THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到目标版本后下载该 tag 的官方
 安装脚本，由安装脚本校验官方归档及校验文件，并以 `update` 动作替换程序。
 

@@ -30,8 +30,10 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
-test -f web/target/kk-studio-web-1.2.5.jar
-"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.2.5.jar
+# 执行前将 <version> 替换为根 POM 的版本
+jar='web/target/kk-studio-web-<version>.jar'
+test -f "$jar"
+"$JAVA_HOME_21/bin/java" -jar "$jar"
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -54,7 +56,7 @@ test -f web/target/kk-studio-web-1.2.5.jar
 验证静态资源已进入产物：
 
 ```bash
-"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.2.5.jar \
+"$JAVA_HOME_21/bin/jar" tf "$jar" \
   | grep -E '^BOOT-INF/classes/static/(index.html|assets/)'
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```

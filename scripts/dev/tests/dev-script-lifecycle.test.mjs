@@ -70,9 +70,14 @@ test('test intent: frontend dependencies are reinstalled only when the lock chan
     mkdirSync(path.join(appHome, 'scripts/dev'), { recursive: true })
     // 仓库根由 worktree 标记向上解析，因此夹具必须是一个可识别的 checkout。
     mkdirSync(path.join(appHome, '.git'))
+    // 入口在 source 期就从根 POM 版本推导 JAR 路径。
+    writeFileSync(
+      path.join(appHome, 'pom.xml'),
+      '<project>\n  <artifactId>kk-studio-parent</artifactId>\n  <version>1.0.0</version>\n</project>\n',
+    )
     copyFileSync(DEV_SCRIPT, path.join(appHome, 'scripts/dev/app.sh'))
     mkdirSync(path.join(appHome, 'scripts/dev/lib'))
-    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh', 'e2e-credentials.sh']) {
+    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'backend-jar.sh', 'port-cleanup.sh', 'e2e-credentials.sh']) {
       copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib', name), path.join(appHome, 'scripts/dev/lib', name))
     }
     const frontend = path.join(appHome, 'frontend')
