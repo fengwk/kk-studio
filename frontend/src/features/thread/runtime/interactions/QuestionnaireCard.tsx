@@ -35,7 +35,7 @@ interface QuestionnaireCardProps {
   threadId: string
   argumentsJson: string
   result?: unknown
-  onSuccess?: (result: HarnessToolInputResultDTO) => void
+  onSuccess?: (result?: HarnessToolInputResultDTO) => void
 }
 
 export function QuestionnaireCard({
@@ -66,13 +66,8 @@ export function QuestionnaireCard({
   if (completed) {
     return <QuestionnaireCompletedView completed={completed} questionnaire={questionnaire} t={t} />
   }
-  if (!questionnaire) {
-    return <QuestionnaireInvalidView argumentsJson={argumentsJson} t={t} />
-  }
 
-  const validAnswers = normalizeAnswers(questionnaire, draft.questionDrafts)
-  const canSubmit = validAnswers != null && !draft.isSubmitting && !draft.isNonRecoverable
-  const locked = draft.isSubmitting || draft.isNonRecoverable
+  const locked = Boolean(draft.isSubmitting || draft.isNonRecoverable)
 
   const submit = (
     submissionId: string,
@@ -88,10 +83,41 @@ export function QuestionnaireCard({
       queryClient,
       applicationEvents,
       conflictErrorText: t('ai.interaction.nonRecoverable'),
+      conflictStillPendingText: t('ai.interaction.conflictStillPending'),
       fallbackErrorText: t('ai.common.operationFailed'),
       onSuccess,
     })
   }
+
+  const handleDecline = () => {
+    if (locked) {
+      return
+    }
+    // 失败重试沿用已冻结的拒答身份，避免重复决定。
+    if (draft.frozenSubmissionId && draft.frozenDeclined) {
+      submit(draft.frozenSubmissionId, undefined, true)
+      return
+    }
+    const submissionId = createUuid()
+    interactionDraftStore.freezeSubmission(interactionId, submissionId, undefined, true)
+    submit(submissionId, undefined, true)
+  }
+
+  if (!questionnaire) {
+    return (
+      <QuestionnaireInvalidView
+        argumentsJson={argumentsJson}
+        onDecline={handleDecline}
+        disabled={locked}
+        error={draft.error}
+        nonRecoverable={Boolean(draft.isNonRecoverable)}
+        t={t}
+      />
+    )
+  }
+
+  const validAnswers = normalizeAnswers(questionnaire, draft.questionDrafts)
+  const canSubmit = validAnswers != null && !locked
 
   const handleSelectOption = (qIdx: number, label: string, multiple: boolean) => {
     if (locked) {
@@ -154,15 +180,6 @@ export function QuestionnaireCard({
       return
     }
     submit(draft.frozenSubmissionId, draft.frozenAnswers, draft.frozenDeclined)
-  }
-
-  const handleDecline = () => {
-    if (locked) {
-      return
-    }
-    const submissionId = createUuid()
-    interactionDraftStore.freezeSubmission(interactionId, submissionId, undefined, true)
-    submit(submissionId, undefined, true)
   }
 
   return (
@@ -270,6 +287,8 @@ export function QuestionnaireCard({
                 <TextInput
                   type="text"
                   className="interaction-custom-input"
+                  // 复用题干 id：读屏在输入第几题时能听到对应的问题。
+                  aria-labelledby={questionLabelId}
                   placeholder={t('ai.interaction.customInputPlaceholder')}
                   value={qDraft.customText}
                   disabled={locked}

@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { Route } from '@playwright/test'
 import { expect, test, tokenColor, type Page } from './fixture'
 import type { InteractionDTO } from '../src/shared/api/generated/contracts'
+import './runtime-visual-matrix'
 
 const HARNESS_URL = '/browser-tests/interactions-harness.html'
 const QUESTIONNAIRE_HARNESS_URL = '/browser-tests/questionnaire-card-harness.html'
@@ -728,7 +729,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expectNoHorizontalOverflow(page)
   })
 
-  test('a stale approval explains the change instead of claiming it is unrecoverable', async ({ page }) => {
+  test('a stale approval becomes actionable after rereading the still-pending interaction', async ({ page }) => {
     await mockPendingApi(page, { approvalStatus: 409 })
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto(HARNESS_URL)
@@ -737,19 +738,18 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await card.locator('.interaction-allow-btn').click()
 
     const banner = card.locator('.interaction-error-banner')
-    await expect(banner).toHaveText('此事项已变更，请刷新查看最新状态。')
+    await expect(banner).toHaveText('此事项的最新状态已重新载入，请重新确认后提交。')
     const bannerStyle = await banner.evaluate((el) => ({
       color: window.getComputedStyle(el).color,
       background: window.getComputedStyle(el).backgroundColor,
       border: window.getComputedStyle(el).borderTopColor,
     }))
-    expect(bannerStyle.color).toBe(await tokenColor(page, '--warning'))
-    expect(bannerStyle.background).toBe(await tokenColor(page, '--warning-soft'))
-    expect(bannerStyle.border).toBe(await tokenColor(page, '--warning-border'))
+    expect(bannerStyle.color).toBe(await tokenColor(page, '--danger'))
+    expect(bannerStyle.background).toBe(await tokenColor(page, '--danger-soft'))
+    expect(bannerStyle.border).toBe(await tokenColor(page, '--danger-border'))
 
-    // 过期决策禁止再次提交，但仍可刷新。
-    await expect(card.locator('.interaction-allow-btn')).toBeDisabled()
-    await expect(card.locator('.interaction-deny-btn')).toBeDisabled()
+    await expect(card.locator('.interaction-allow-btn')).toBeEnabled()
+    await expect(card.locator('.interaction-deny-btn')).toBeEnabled()
   })
 })
 

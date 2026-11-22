@@ -5,11 +5,20 @@ import {
   type ThreadCommand,
 } from '@/features/thread/runtime/thread-panel/thread-commands'
 import { useI18n } from '@/shared/i18n'
+import { threadCommandOptionId } from '@/features/thread/runtime/thread-panel/thread-command-navigation'
 import './thread-command-palette.css'
 
+/**
+ * 命令表：`role="listbox"` 的可选命令列表。
+ *
+ * 列表容器与行只是展示层（`role="presentation"`），使 `role="option"` 成为 listbox 的
+ * ARIA 直属子项；焦点始终留在编辑器，由 listbox 的 `aria-activedescendant`（以及
+ * 编辑器上的 `aria-controls`）表达键盘游标所在项。
+ */
 export function ThreadCommandPalette({
   open,
   query,
+  listboxId,
   commands: commandSource = THREAD_COMMANDS,
   activeIndex,
   scrollVersion = 0,
@@ -18,6 +27,8 @@ export function ThreadCommandPalette({
 }: {
   open: boolean
   query: string
+  /** listbox 的 DOM id，同时是 option id 的前缀；由持有编辑器的 Composer 生成。 */
+  listboxId: string
   commands?: ThreadCommand[]
   /** 过滤后列表的索引（父组件跳过禁用项时，可能指向一个已禁用的行）。 */
   activeIndex: number
@@ -34,6 +45,7 @@ export function ThreadCommandPalette({
     [commands],
   )
   const totalCount = commandSource.length
+  const activeCommand = commands[activeIndex]
 
   useEffect(() => {
     if (!open) {
@@ -48,10 +60,18 @@ export function ThreadCommandPalette({
   }
 
   return (
-    <div className="thread-command-palette" role="listbox" aria-label={t('ai.runtime.command.palette')}>
-      <ul ref={listRef} className="thread-command-list">
+    <div
+      id={listboxId}
+      className="thread-command-palette"
+      role="listbox"
+      aria-label={t('ai.runtime.command.palette')}
+      aria-activedescendant={
+        activeCommand ? threadCommandOptionId(listboxId, activeCommand.id) : undefined
+      }
+    >
+      <ul ref={listRef} className="thread-command-list" role="presentation">
         {commands.length === 0 ? (
-          <li className="thread-command-empty">{t('ai.runtime.command.noMatch')}</li>
+          <li className="thread-command-empty" role="presentation">{t('ai.runtime.command.noMatch')}</li>
         ) : null}
         {commands.map((command, commandIndex) => {
           const disabled = Boolean(command.disabled)
@@ -64,9 +84,10 @@ export function ThreadCommandPalette({
             ? t(command.disabledReasonKey)
             : command.disabledReason
           return (
-            <li key={command.id}>
+            <li key={command.id} role="presentation">
               <button
                 type="button"
+                id={threadCommandOptionId(listboxId, command.id)}
                 role="option"
                 aria-selected={active}
                 aria-disabled={disabled}

@@ -29,6 +29,8 @@ export function ThreadComposerDock({
   disabled,
   canSend,
   paletteOpen,
+  editorAriaControls,
+  editorAriaActiveDescendant,
   settings,
   controlMenu,
   onPartsChange,
@@ -53,6 +55,10 @@ export function ThreadComposerDock({
   disabled: boolean
   canSend: boolean
   paletteOpen: boolean
+  /** 命令表打开时编辑器声明的 listbox id；关闭时为 undefined。 */
+  editorAriaControls?: string
+  /** 命令表当前游标项的 option id，供编辑器用 aria-activedescendant 播报。 */
+  editorAriaActiveDescendant?: string
   settings?: ThreadComposerSettingsInput
   controlMenu: ThreadComposerControlMenu
   onPartsChange: (parts: ComposerPart[]) => void
@@ -84,6 +90,8 @@ export function ThreadComposerDock({
         editorRef={editorRef}
         parts={parts}
         disabled={disabled}
+        ariaControls={editorAriaControls}
+        ariaActiveDescendant={editorAriaActiveDescendant}
         onPartsChange={onPartsChange}
         onEditStart={onEditStart}
         onEditorMouseDown={onEditorMouseDown}

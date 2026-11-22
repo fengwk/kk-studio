@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { interactionService } from '@/shared/api/interaction-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { ApplicationEventTestProvider } from '@/test-support/application-event-test-provider'
 import { QuestionnaireCard } from './QuestionnaireCard'
 import { interactionDraftStore } from './interaction-draft-store'
+import { toggleSingleOrMultiOption } from './questionnaire-submission'
 
 const SINGLE_ARGUMENTS = JSON.stringify({
   questions: [
@@ -27,6 +29,20 @@ const MULTI_ARGUMENTS = JSON.stringify({
       question: '选择需要归档的产物',
       multiple: true,
       options: [{ label: '构建日志' }, { label: '测试报告' }, { label: '截图' }],
+    },
+  ],
+})
+
+const TWO_QUESTION_ARGUMENTS = JSON.stringify({
+  questions: [
+    {
+      question: '选择迁移窗口',
+      options: [{ label: '本周六凌晨' }],
+    },
+    {
+      question: '选择需要归档的产物',
+      multiple: true,
+      options: [{ label: '构建日志' }],
     },
   ],
 })
@@ -188,5 +204,102 @@ describe('QuestionnaireCard 选项语义与只读状态', () => {
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
     expect(screen.queryByPlaceholderText('输入自定义回答')).toBeNull()
     expect(screen.queryByRole('button', { name: '提交回答' })).toBeNull()
+  })
+
+  it('每道题的自定义输入框以该题题干作为可访问名称', () => {
+    renderCard({ argumentsJson: TWO_QUESTION_ARGUMENTS, interactionId: 'int-labels' })
+
+    const inputs = screen.getAllByRole('textbox')
+    expect(inputs).toHaveLength(2)
+    // 题干 id 同时标记选项组与自定义输入框，读屏能播报第几题与该题的题面。
+    expect(inputs[0]).toHaveAccessibleName('选择迁移窗口')
+    expect(inputs[1]).toHaveAccessibleName('选择需要归档的产物')
+    const labelledBy = inputs[0].getAttribute('aria-labelledby')
+    expect(labelledBy).not.toBeNull()
+    expect(document.getElementById(labelledBy!)).toHaveTextContent('选择迁移窗口')
+  })
+
+  it('单选再次点击已选项保持选中', () => {
+    renderCard({ argumentsJson: SINGLE_ARGUMENTS })
+
+    const radios = screen.getAllByRole('radio')
+    fireEvent.click(radios[1])
+    expect(radios[1]).toHaveAttribute('aria-checked', 'true')
+    // 单选点击已选项不产生取消：选择只会被新的选项替换。
+    fireEvent.click(radios[1])
+    expect(radios[1]).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('单选切换函数对同一标签只返回该标签，不存在取消分支', () => {
+    expect(
+      toggleSingleOrMultiOption(
+        { selectedLabels: ['本周六凌晨'], customText: '边输入边修改' },
+        '本周六凌晨',
+        false,
+      ),
+    ).toEqual({ selectedLabels: ['本周六凌晨'], customText: '' })
+  })
+
+  it('参数无法解析时用告警横幅说明具体原因，原始参数默认收起', () => {
+    renderCard({ argumentsJson: '{oops', interactionId: 'int-invalid' })
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveClass('interaction-error-banner')
+    expect(alert).toHaveTextContent('无法显示这个问题')
+    expect(alert.querySelector('svg')).not.toBeNull()
+    expect(document.querySelector('.interaction-error-text')).toBeNull()
+
+    const diagnostics = document.querySelector('details')
+    expect(diagnostics).not.toBeNull()
+    expect(diagnostics).not.toHaveAttribute('open')
+    expect(diagnostics).toHaveTextContent('{oops')
+  })
+
+  it('无效问卷仍能用拒答让 Thread 继续，拒答后回读待处理事实', async () => {
+    const user = userEvent.setup()
+    const submitSpy = vi.spyOn(interactionService, 'submitToolInput').mockResolvedValue({
+      threadId: 'thread-1',
+      toolInvocationId: 'int-invalid',
+      submissionId: 'sub-invalid',
+      actor: 'local-user',
+      acceptedAt: 1790467200000,
+      materialized: false,
+    })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    renderCard({ argumentsJson: '{oops', interactionId: 'int-invalid' })
+
+    // 无法作答时不能留在死路：拒答是唯一可继续的操作。
+    expect(screen.queryByRole('button', { name: '提交回答' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: '拒绝回答' }))
+
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(1))
+    expect(submitSpy).toHaveBeenCalledWith('thread-1', 'int-invalid', {
+      type: 'DECLINE',
+      submissionId: expect.any(String),
+    })
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.interactions.all }),
+    )
+  })
+
+  it('拒答失败后再次拒答复用同一 submissionId，不产生第二个决定', async () => {
+    const user = userEvent.setup()
+    const submissionIds: string[] = []
+    const submitSpy = vi.spyOn(interactionService, 'submitToolInput').mockImplementation(
+      async (_threadId, _toolInvocationId, body) => {
+        submissionIds.push(body.submissionId)
+        throw new Error('Connection reset')
+      },
+    )
+    renderCard({ argumentsJson: '{oops', interactionId: 'int-invalid-retry' })
+
+    await user.click(screen.getByRole('button', { name: '拒绝回答' }))
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(1))
+    // 失败原因留在卡片上，拒答入口仍可重试。
+    expect(await screen.findByText('Connection reset')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '拒绝回答' }))
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(2))
+    expect(submissionIds[1]).toBe(submissionIds[0])
   })
 })

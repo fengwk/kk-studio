@@ -146,7 +146,7 @@ function composerParts(contents: DialogueContent[]) {
  * 只在全局待处理页与工具状态行呈现。过滤后仍保留 `loadMore`，避免首页只有环境等待时
  * 把后续页的人工等待一并藏起来。
  */
-function RootInteractionList() {
+export function RootInteractionList() {
   const { t } = useI18n()
   const interactions = useRootInteractions()
   if (interactions == null) {

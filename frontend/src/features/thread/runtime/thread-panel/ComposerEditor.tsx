@@ -23,6 +23,10 @@ export interface ComposerEditorProps {
   parts: ComposerPart[]
   /** 不可编辑时只保留草稿展示（contentEditable=false + aria-disabled）。 */
   disabled: boolean
+  /** 命令表打开时声明的 listbox id；焦点留在编辑器，由它表达所属列表。 */
+  ariaControls?: string
+  /** 命令表当前游标项的 option id；读屏据此播报当前命令。 */
+  ariaActiveDescendant?: string
   /** 草稿回流入口：DOM 提取结果或键盘整颗删除 pill 后的 parts。 */
   onPartsChange: (parts: ComposerPart[]) => void
   /** 编辑交互（输入/粘贴/拖放/pill 编辑/预览前对齐）通知：外层据此关闭覆盖层。 */
@@ -55,6 +59,8 @@ export function ComposerEditor({
   ref,
   parts,
   disabled,
+  ariaControls,
+  ariaActiveDescendant,
   onPartsChange,
   onEditStart,
   onEditorMouseDown,
@@ -150,6 +156,8 @@ export function ComposerEditor({
       aria-multiline="true"
       aria-label={t('ai.runtime.composer.ariaLabel')}
       aria-disabled={disabled}
+      aria-controls={ariaControls}
+      aria-activedescendant={ariaActiveDescendant}
       data-placeholder={t('ai.runtime.composer.placeholder')}
       data-placeholder-visible={draftIsEmpty}
       onCompositionStart={handleCompositionStart}

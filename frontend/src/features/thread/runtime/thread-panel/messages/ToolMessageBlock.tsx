@@ -262,7 +262,7 @@ export function ToolMessageBlock({
     .includes(view.executionState)
 
   return (
-    <div className={`thread-turn thread-turn-tool tool-state-${view.visualState}`}>
+    <div className="thread-turn thread-turn-tool">
       <ThreadDisclosure
         className="thread-block-tool"
         data-tool-state={view.visualState}
