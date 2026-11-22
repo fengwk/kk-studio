@@ -29,7 +29,6 @@ final class TurnPathValidator {
   private Entry openTurnStart;
   private TurnStartReason openReason;
   private UUID openOwnerThreadId;
-  private UUID pendingContinuationOwnerThreadId;
   private boolean pendingNotificationInput;
   private boolean inputSeen;
   private boolean assistantSeen;
@@ -118,10 +117,6 @@ final class TurnPathValidator {
     openReason = start.reason();
     openOwnerThreadId = start.ownerThreadId();
     requireCompactionBranchInstructionOrder();
-    if (openReason != TurnStartReason.COMPACTION) {
-      // INPUT 覆盖旧 obligation；CONTINUATION 在打开时消费前一个 continueModel=true。
-      pendingContinuationOwnerThreadId = null;
-    }
     inputSeen = openReason == TurnStartReason.INPUT && pendingNotificationInput;
     if (openReason == TurnStartReason.INPUT) {
       // 回合之间的通知由紧随其后的 INPUT 接纳；CONTINUATION / COMPACTION 都不消费它。
@@ -177,12 +172,6 @@ final class TurnPathValidator {
       case CANCELLED -> {
         // history cut 可在任意 open phase 关闭。
       }
-    }
-    if (openReason != TurnStartReason.COMPACTION) {
-      pendingContinuationOwnerThreadId =
-          end.outcome() == TurnEndOutcome.COMPLETED && end.continueModel()
-              ? openOwnerThreadId
-              : null;
     }
     openTurnStart = null;
     openOwnerThreadId = null;
@@ -436,8 +425,6 @@ final class TurnPathValidator {
     }
     requireCancelBarrier(barrier);
     requireCompleteToolResults("stopped");
-    // 显式停止后没有待偿还的模型义务。
-    pendingContinuationOwnerThreadId = null;
     openTurnStart = null;
     openOwnerThreadId = null;
   }

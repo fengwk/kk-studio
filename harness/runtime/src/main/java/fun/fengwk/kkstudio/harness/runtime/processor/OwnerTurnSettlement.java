@@ -24,9 +24,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
-import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -45,12 +43,7 @@ import java.util.UUID;
  */
 final class OwnerTurnSettlement {
 
-  private final DriverRegistry driverRegistry;
   private final ThreadLifecycleCoordinator coordinator = new ThreadLifecycleCoordinator();
-
-  OwnerTurnSettlement(DriverRegistry driverRegistry) {
-    this.driverRegistry = driverRegistry;
-  }
 
   /**
    * 开放 Turn 的结算票据 id：只有 owner 自身持有的 COMPACTION Turn 携带 {@link JoinDelivery#SETTLE_OWNER_TURN} 票据（由
@@ -208,7 +201,6 @@ final class OwnerTurnSettlement {
         trigger == CompactionTrigger.USER_REQUEST
             && queued.stream().anyMatch(command -> command.type().isSetting());
     EntryPath endPath = tx.entries().loadPath(turnEndId);
-    AgentDriver driver = driverRegistry.of(endPath.baseSettings());
     boolean compactionCancelled = outcome == TurnEndOutcome.STOPPED;
     boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
     boolean requestThread =

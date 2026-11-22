@@ -28,6 +28,24 @@ class ContextPressureDetectorTest {
             null, new ModelUsage(100_000, 10, 27_999, 0, Map.of(), 0L, 127_999L), window));
   }
 
+  /** 首次写入缓存的前缀也占用 prompt 窗口。 */
+  @Test
+  void cacheWriteCountsTowardContextPressure() {
+    assertTrue(
+        ContextPressureDetector.detectResponse(
+            GenerationStopReason.LENGTH,
+            new ModelUsage(0, 0, 0, 126_720, Map.of(), null, null),
+            128_000));
+  }
+
+  /** 用量总和溢出仍应被识别为超窗，不中断响应结算。 */
+  @Test
+  void overflowingPromptUsageExceedsAnyContextWindow() {
+    assertTrue(
+        ContextPressureDetector.detectResponse(
+            null, new ModelUsage(Long.MAX_VALUE, 0, 1, 0, Map.of(), null, null), Long.MAX_VALUE));
+  }
+
   /** 意图：严格 LENGTH 恢复条件——LENGTH + output==0 + prompt ≥ ceil(window*0.99) 才成立；低于边界或含 output 不成立。 */
   @Test
   void strictLengthIsContextPressureOnlyAtTheWindowEdge() {

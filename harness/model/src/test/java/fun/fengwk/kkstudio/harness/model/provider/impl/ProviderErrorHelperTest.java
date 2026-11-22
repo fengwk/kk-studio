@@ -117,6 +117,8 @@ class ProviderErrorHelperTest {
     assertEquals(ProviderErrorKind.AUTHENTICATION, ProviderErrorHelper.classifyHttpStatus(403));
     assertEquals(ProviderErrorKind.BILLING, ProviderErrorHelper.classifyHttpStatus(402));
     assertEquals(ProviderErrorKind.REQUEST_BODY_LIMIT, ProviderErrorHelper.classifyHttpStatus(413));
+    // Request Timeout 不是请求参数错误。
+    assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(408));
     assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(429));
     assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(500));
     assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(503));

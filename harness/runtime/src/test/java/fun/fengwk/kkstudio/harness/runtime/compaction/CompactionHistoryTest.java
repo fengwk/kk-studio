@@ -126,79 +126,19 @@ class CompactionHistoryTest {
     assertNull(CompactionHistory.latestClosedTurn(openPath));
   }
 
+  /** 重试窗口不区分 trigger，且只由当前请求之前的成功模型回合关闭。 */
   @Test
-  void immediatePostCompactionRetryRequiresCompleteCompactionThenContinuation() {
-    // 压缩后 owner 的唯一一次恢复请求：前一回合必须是 complete 且 continueModel=true 的 COMPACTION。
-    EntryPath retryAfterManual = overflowRetryPath(CompactionTrigger.MANUAL);
-    assertTrue(CompactionHistory.isImmediatePostCompactionRetry(retryAfterManual));
-
-    EntryPath plainInput =
-        new EntryPath(
-            List.of(
-                root(),
-                entry(
-                    TURN_START_ID,
-                    ROOT_ID,
-                    new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, THREAD_ID)),
-                message(USER_ID, TURN_START_ID, AgentMessageRole.USER, "input"),
-                message(ASSISTANT_ID, USER_ID, AgentMessageRole.ASSISTANT, "answer"),
-                turnEnd(TURN_END_ID, ASSISTANT_ID, TURN_START_ID, true)));
-    assertFalse(CompactionHistory.isImmediatePostCompactionRetry(plainInput));
-    assertFalse(CompactionHistory.isImmediatePostCompactionRetry(new EntryPath(List.of(root()))));
-  }
-
-  @Test
-  void overflowRecoveryRequiresCompleteOverflowCompactionAndContinuation() {
-    EntryPath retryPath = overflowRetryPath(CompactionTrigger.OVERFLOW);
-    CompactionHistory.ClosedTurn latest = CompactionHistory.latestClosedTurn(retryPath);
-    assertNotNull(latest);
-    assertTrue(CompactionHistory.isOverflowRecoveryRetry(retryPath, latest));
-
-    EntryPath manualPath =
-        new EntryPath(
-            List.of(
-                root(),
-                compactionStartEntry(
-                    COMPACTION_START_ID, ROOT_ID, THREAD_ID, CompactionTrigger.MANUAL),
-                entry(id(45), COMPACTION_START_ID, new CompactionPayload("summary", null)),
-                turnEnd(id(46), id(45), COMPACTION_START_ID, true)));
-    CompactionHistory.ClosedTurn manualLatest = CompactionHistory.latestClosedTurn(manualPath);
-    assertNotNull(manualLatest);
-    assertFalse(CompactionHistory.isOverflowRecoveryRetry(manualPath, manualLatest));
-
-    EntryPath inputPath =
-        new EntryPath(
-            List.of(
-                root(),
-                entry(
-                    TURN_START_ID,
-                    ROOT_ID,
-                    new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, THREAD_ID)),
-                message(USER_ID, TURN_START_ID, AgentMessageRole.USER, "input"),
-                message(ASSISTANT_ID, USER_ID, AgentMessageRole.ASSISTANT, "answer"),
-                turnEnd(TURN_END_ID, ASSISTANT_ID, TURN_START_ID, false)));
-    CompactionHistory.ClosedTurn inputLatest = CompactionHistory.latestClosedTurn(inputPath);
-    assertNotNull(inputLatest);
-    assertFalse(CompactionHistory.isOverflowRecoveryRetry(inputPath, inputLatest));
-
-    EntryPath noPreviousPath =
-        new EntryPath(
-            List.of(
-                root(),
-                entry(
-                    CONTINUATION_START_ID,
-                    ROOT_ID,
-                    new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, THREAD_ID)),
-                message(
-                    CONT_ASSISTANT_ID,
-                    CONTINUATION_START_ID,
-                    AgentMessageRole.ASSISTANT,
-                    "continued"),
-                turnEnd(CONT_END_ID, CONT_ASSISTANT_ID, CONTINUATION_START_ID, false)));
-    CompactionHistory.ClosedTurn noPreviousLatest =
-        CompactionHistory.latestClosedTurn(noPreviousPath);
-    assertNotNull(noPreviousLatest);
-    assertFalse(CompactionHistory.isOverflowRecoveryRetry(noPreviousPath, noPreviousLatest));
+  void compactionRetryWindowEndsAfterSuccessfulModelTurn() {
+    for (CompactionTrigger trigger : CompactionTrigger.values()) {
+      EntryPath path = compactionThenModelTurn(trigger);
+      var modelTurn = CompactionHistory.latestClosedTurn(path);
+      assertTrue(
+          CompactionHistory.isPostCompactionRetry(
+              path, CompactionHistory.previousClosedTurn(path, modelTurn)),
+          trigger.name());
+      assertFalse(CompactionHistory.isPostCompactionRetry(path, modelTurn), trigger.name());
+    }
+    assertFalse(CompactionHistory.isPostCompactionRetry(new EntryPath(List.of(root())), null));
   }
 
   @Test
@@ -250,7 +190,23 @@ class CompactionHistoryTest {
                     null))));
   }
 
-  private static EntryPath overflowRetryPath(CompactionTrigger trigger) {
+  private static EntryPath compactionThenModelTurn(CompactionTrigger trigger) {
+    boolean continueModel = trigger != CompactionTrigger.USER_REQUEST;
+    if (!continueModel) {
+      return new EntryPath(
+          List.of(
+              root(),
+              compactionStartEntry(COMPACTION_START_ID, ROOT_ID, THREAD_ID, trigger),
+              entry(id(40), COMPACTION_START_ID, new CompactionPayload("summary", null)),
+              turnEnd(id(41), id(40), COMPACTION_START_ID, false),
+              entry(
+                  TURN_START_ID,
+                  id(41),
+                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, THREAD_ID)),
+              message(USER_ID, TURN_START_ID, AgentMessageRole.USER, "input"),
+              message(ASSISTANT_ID, USER_ID, AgentMessageRole.ASSISTANT, "answer"),
+              turnEnd(TURN_END_ID, ASSISTANT_ID, TURN_START_ID, false)));
+    }
     UUID compactionResultId = id(40);
     UUID compactionEndId = id(41);
     UUID continuationStartId = id(42);
@@ -272,10 +228,6 @@ class CompactionHistoryTest {
                 "continued"),
             turnEnd(id(44), continuationAssistantId, continuationStartId, false)));
   }
-
-  private static final UUID CONTINUATION_START_ID = id(50);
-  private static final UUID CONT_ASSISTANT_ID = id(51);
-  private static final UUID CONT_END_ID = id(52);
 
   private static Entry compactionStartEntry(
       UUID entryId, UUID parentId, UUID ownerThreadId, CompactionTrigger trigger) {

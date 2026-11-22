@@ -20,8 +20,8 @@ import java.util.regex.Pattern;
  * <p>{@code blob-upload:<uploadId>} 是 Environment Daemon 上传的瞬时引用：字节已由 Daemon 直传对象存储，Platform 只持有 全局
  * Blob 上传行 id。它必须携带非空 size/sha，并且只在一个 Tool 调用终态到 durable history 插入之间短暂存在。
  *
- * <p>{@code resource://files/<uuid>} 是 Platform 全局资源的 durable 引用；权限由 Session 持有记录判定，不是资源 ID
- * 本身提供的。它必须携带非空 size/sha。
+ * <p>{@code resource://files/<uuid>} 是 Platform 全局 Blob 的 durable 引用，必须携带非空 size/sha。工具读取 ACTIVE
+ * Blob 时将其登记为当前 Session 的持有，无需该 Session 预先持有。
  *
  * <p>非 base64 data 载荷使用 frozen 表示：percent 解码后按字节重新编码并精确相等——原始 ASCII 只能是 RFC unreserved 与原始 {@code
  * '/'}，其余任何可表示字节都必须是大写 {@code %XX}（原始逗号/分号/冒号/问号/井号被拒绝，其编码形式被接受； 编码 slash/NUL

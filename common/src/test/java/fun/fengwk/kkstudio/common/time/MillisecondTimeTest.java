@@ -70,6 +70,16 @@ class MillisecondTimeTest {
                 Duration.ofNanos(1_500_000), "duration"));
   }
 
+  /** 正时长超出毫秒表示范围时也是参数校验错误。 */
+  @Test
+  void positiveDurationRejectsMillisecondOverflow() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            MillisecondTime.requireWholeMillisecondDuration(
+                Duration.ofSeconds(Long.MAX_VALUE), "duration"));
+  }
+
   @Test
   void rescheduleDurationsMustBeNonNegativeWholeMillisecondsWithinMillisecondRange() {
     Duration canonical = Duration.ofMillis(1500);

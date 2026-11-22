@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -102,6 +104,21 @@ class OpenAiChatStreamAccumulatorTest {
           public void onError(ProviderException error) {}
         };
     bridge = new ProviderStreamBridge(handler);
+  }
+
+  /** 畸形工具坐标不能在语义层被静默丢弃。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"", "\"index\":3000000000,", "\"index\":\"0\",", "\"index\":-1,"})
+  void rejectsInvalidToolCallIndex(String indexField) {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    String frame =
+        "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{"
+            + indexField
+            + "\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]},"
+            + "\"finish_reason\":\"tool_calls\"}]}";
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> accumulator.handleData(frame));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
   }
 
   /** 测试意图：[DONE] 后重复终止帧无操作，非空语义帧必须拒绝且不能改写已累积文本。 */

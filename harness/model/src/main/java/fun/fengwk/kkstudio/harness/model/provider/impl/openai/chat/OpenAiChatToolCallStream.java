@@ -38,12 +38,18 @@ final class OpenAiChatToolCallStream {
     this.nativeMessage = nativeMessage;
   }
 
-  /** 合并一帧 {@code choices[0].delta.tool_calls}；只识别带整数 index 的片段。 */
+  /** 合并一帧 {@code choices[0].delta.tool_calls}；每个片段都必须携带可转 int 的非负整数 index。 */
   void mergeDelta(ArrayNode toolCalls) {
     for (JsonNode toolCall : toolCalls) {
-      if (toolCall.isObject() && toolCall.has("index") && toolCall.get("index").isInt()) {
-        mergeFragment(toolCall.get("index").asInt(0), toolCall);
+      JsonNode index = toolCall.get("index");
+      if (index == null
+          || !index.isIntegralNumber()
+          || !index.canConvertToInt()
+          || index.intValue() < 0) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "tool call index must be a non-negative integer");
       }
+      mergeFragment(index.intValue(), toolCall);
     }
   }
 
