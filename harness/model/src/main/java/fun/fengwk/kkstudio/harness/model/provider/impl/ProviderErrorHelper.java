@@ -114,7 +114,7 @@ public final class ProviderErrorHelper {
     if (status == 413) {
       return ProviderErrorKind.REQUEST_BODY_LIMIT;
     }
-    if (status == 429 || (status >= 500 && status <= 599)) {
+    if (status == 408 || status == 429 || (status >= 500 && status <= 599)) {
       return ProviderErrorKind.TRANSIENT;
     }
     if (status >= 400 && status < 500) {

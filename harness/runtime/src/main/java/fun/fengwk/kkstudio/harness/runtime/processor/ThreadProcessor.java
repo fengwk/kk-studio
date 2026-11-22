@@ -136,7 +136,7 @@ public final class ThreadProcessor {
     this.threadContextProbe = new ThreadContextProbe(driverRegistry);
     this.coordinator = new ThreadLifecycleCoordinator();
     this.compactionGate = new CompactionGate(config.compactionProvider());
-    this.ownerTurnSettlement = new OwnerTurnSettlement(driverRegistry);
+    this.ownerTurnSettlement = new OwnerTurnSettlement();
   }
 
   /**
@@ -605,15 +605,17 @@ public final class ThreadProcessor {
             thread.id());
         resolution = new TurnResolution.Rejected(DETERMINISTIC_FAILURE);
       } else {
-        // 请求预算不足：先压缩同一历史；压缩后的请求只重试一次，仍放不下则直接失败，绝不递归压缩。
-        CompactionPreparation preparation =
-            compactionGate.preparation(
-                path, CompactionTrigger.THRESHOLD, required.conversationContextWindow());
-        if (preparation != null
-            && thread.constraints().allowAutoCompaction()
-            && !CompactionHistory.isImmediatePostCompactionRetry(path)) {
-          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
-          return;
+        // 当前 INPUT / CONTINUATION 尚未提交；用它之前的历史判定重试窗口，不区分上次压缩的 trigger。
+        if (thread.constraints().allowAutoCompaction()
+            && !CompactionHistory.isPostCompactionRetry(
+                path, CompactionHistory.latestClosedTurn(path))) {
+          CompactionPreparation preparation =
+              compactionGate.preparation(
+                  path, CompactionTrigger.THRESHOLD, required.conversationContextWindow());
+          if (preparation != null) {
+            planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+            return;
+          }
         }
         resolution = new TurnResolution.Rejected(CONTEXT_BUDGET_EXCEEDED);
       }
@@ -624,7 +626,7 @@ public final class ThreadProcessor {
   /**
    * 失败请求若由上下文溢出导致，立即在同一事务内启动一次 OVERFLOW 压缩；压缩成功后 owner 以普通 CONTINUATION 重试同一输入。
    *
-   * <p>溢出重试本身再次溢出时不再压缩，保留真实失败事实并等待用户下一步。返回 {@code true} 表示已启动压缩并完成 claim。
+   * <p>压缩后的重试再次溢出时不再压缩，保留真实失败。返回 {@code true} 表示已启动压缩并完成 claim。
    */
   private boolean startOverflowCompaction(
       HarnessStore.Transaction tx,

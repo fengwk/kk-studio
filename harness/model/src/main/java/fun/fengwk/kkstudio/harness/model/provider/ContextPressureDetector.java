@@ -11,7 +11,7 @@ import java.util.Objects;
  * 状态/status，也不解析 Provider 错误文本。命中任一规则即返回 true：
  *
  * <ol>
- *   <li>authoritative usage 的 prompt tokens（input + cacheRead）达到/超过 contextWindow。
+ *   <li>authoritative usage 的 prompt tokens（input + cacheRead + cacheWrite）达到/超过 contextWindow。
  *   <li>严格 LENGTH：stopReason 为 LENGTH 且 outputTokens == 0 且 prompt tokens ≥ ceil(contextWindow *
  *       0.99)。
  * </ol>
@@ -29,15 +29,16 @@ public final class ContextPressureDetector {
       throw new IllegalArgumentException("contextWindow must be positive");
     }
     Objects.requireNonNull(usage, "usage");
-    return promptTokens(usage) >= contextWindow
+    long promptTokens;
+    try {
+      promptTokens = usage.contextTokens();
+    } catch (ArithmeticException overflow) {
+      // 用量分量均非负：总和溢出意味着已超过任意可表示的窗口。
+      return true;
+    }
+    return promptTokens >= contextWindow
         || (stopReason == GenerationStopReason.LENGTH
             && usage.outputTokens() == 0
-            && promptTokens(usage) >= (long) Math.ceil(contextWindow * 0.99d));
-  }
-
-  private static long promptTokens(ModelUsage usage) {
-    long input = usage.inputTokens();
-    long cache = usage.cacheReadTokens();
-    return cache > Long.MAX_VALUE - input ? Long.MAX_VALUE : input + cache;
+            && promptTokens >= (long) Math.ceil(contextWindow * 0.99d));
   }
 }

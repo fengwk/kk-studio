@@ -34,13 +34,10 @@ public final class MillisecondTime {
   /** 返回适合 durable 时间运算的正整毫秒 duration。 */
   public static Duration requireWholeMillisecondDuration(Duration value, String name) {
     Objects.requireNonNull(value, name);
-    if (value.isZero() || value.isNegative() || value.toMillis() <= 0) {
+    if (value.compareTo(Duration.ofMillis(1)) < 0) {
       throw new IllegalArgumentException(name + " must be at least one millisecond");
     }
-    if (value.getNano() % 1_000_000 != 0) {
-      throw new IllegalArgumentException(name + " must use whole milliseconds");
-    }
-    return value;
+    return requireNonNegativeWholeMillisecondDuration(value, name);
   }
 
   /** 返回适合 durable 时间运算的非负整毫秒 duration；零表示立即，合法。负值、亚毫秒精度与毫秒范围溢出都被拒绝。 */

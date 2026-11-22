@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
@@ -118,53 +117,25 @@ public final class CompactionHistory {
     return null;
   }
 
-  /** 当前失败 turn 是否正是 complete OVERFLOW compaction 创建的 immediate CONTINUATION 重试。 */
-  public static boolean isOverflowRecoveryRetry(EntryPath path, ClosedTurn latestTurn) {
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(latestTurn, "latestTurn");
-    if (((TurnStartPayload) latestTurn.start().payload()).reason()
-        != TurnStartReason.CONTINUATION) {
-      return false;
-    }
-    int latestStartIndex = indexOfEntry(path.entries(), latestTurn.start().id());
-    if (latestStartIndex < 0) {
-      return false;
-    }
-    ClosedTurn previousTurn = latestClosedTurn(path, latestStartIndex);
-    if (previousTurn == null
-        || previousTurn.end().outcome() != TurnEndOutcome.COMPLETED
-        || !previousTurn.end().continueModel()
-        || ((TurnStartPayload) previousTurn.start().payload()).reason()
-            != TurnStartReason.COMPACTION) {
-      return false;
-    }
-    CompactionTurns.CompactionTurn previousCompaction =
-        compactionTurnAtStart(path, previousTurn.start().id());
-    return previousCompaction.complete()
-        && previousCompaction.trigger() == CompactionTrigger.OVERFLOW;
-  }
-
   /**
-   * 最新 closed turn 是否是某个 complete compaction 之后立即恢复的 CONTINUATION。该请求是压缩后的唯一一次重试；若它仍放不下，
-   * 必须直接失败，绝不再启动第二次压缩。
+   * 从当前请求之前最近的 closed turn 回溯：最近一次完整压缩之后尚无成功完成的 INPUT / CONTINUATION， 即仍处于压缩后的重试窗口，与压缩 trigger
+   * 无关。当前请求本身不参与判断。
    */
-  public static boolean isImmediatePostCompactionRetry(EntryPath path) {
-    Objects.requireNonNull(path, "path");
-    ClosedTurn latestTurn = latestClosedTurn(path);
-    if (latestTurn == null
-        || ((TurnStartPayload) latestTurn.start().payload()).reason()
-            != TurnStartReason.CONTINUATION) {
-      return false;
+  public static boolean isPostCompactionRetry(EntryPath path, ClosedTurn precedingTurn) {
+    for (ClosedTurn turn = precedingTurn; turn != null; turn = previousClosedTurn(path, turn)) {
+      if (turn.end().outcome() != TurnEndOutcome.COMPLETED) {
+        continue;
+      }
+      TurnStartReason reason = ((TurnStartPayload) turn.start().payload()).reason();
+      if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
+        return false;
+      }
+      if (reason == TurnStartReason.COMPACTION
+          && compactionTurnAtStart(path, turn.start().id()).complete()) {
+        return true;
+      }
     }
-    ClosedTurn previousTurn = previousClosedTurn(path, latestTurn);
-    if (previousTurn == null
-        || previousTurn.end().outcome() != TurnEndOutcome.COMPLETED
-        || !previousTurn.end().continueModel()
-        || ((TurnStartPayload) previousTurn.start().payload()).reason()
-            != TurnStartReason.COMPACTION) {
-      return false;
-    }
-    return compactionTurnAtStart(path, previousTurn.start().id()).complete();
+    return false;
   }
 
   /** 判断是否达到上下文边界/溢出墙（ProviderErrorKind.CONTEXT_LIMIT 或 ContextPressureDetector 判定）。 */

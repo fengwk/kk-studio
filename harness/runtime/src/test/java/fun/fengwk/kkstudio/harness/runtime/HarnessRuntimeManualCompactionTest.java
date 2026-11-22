@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
@@ -31,6 +33,8 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
@@ -54,20 +58,28 @@ import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
+import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
+import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
+import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -76,7 +88,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * HarnessRuntime 手动压缩入口：availability 与单事务 candidate 构造 / resolve / 提交。
+ * HarnessRuntime 压缩入口与运行时结算：显式压缩的 availability 与提交、自动压缩后的重试。
  *
  * <p>用户显式触发的压缩冻结 {@link CompactionTrigger#USER_REQUEST}：{@link CompactionTrigger#MANUAL} 只保留给内置
  * {@code compact} 工具与既有历史。已持久 STOPPED 的 Thread 不再一概拒绝，而是只允许这类显式压缩；是否放行由复用 {@code resumeConverged}
@@ -98,6 +110,158 @@ class HarnessRuntimeManualCompactionTest {
           BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO);
+
+  @Test
+  void thresholdCompactionDoesNotRepeatWhenInputRetryStillExceedsBudget() {
+    Fixture fixture = fixture();
+    UUID ownerId = seedClosedTurn(fixture.store, 50_000, 50_000).threadId();
+    HarnessRuntimeTestSupport.inTransaction(
+        fixture.store,
+        tx -> {
+          ThreadState owner = tx.threads().lock(ownerId).orElseThrow();
+          appendCompletedInput(tx, owner, userMessage("x".repeat(30_000)), null);
+          appendCompletedInput(
+              tx, tx.threads().find(ownerId).orElseThrow(), userMessage("y".repeat(30_000)), null);
+        });
+    // 重试窗口收紧，确保 planner 仍有第二个合法切点；不能靠无切点掩盖重复压缩。
+    var retry = new TurnResolution.CompactionRequired(20_000);
+    fixture.resolver.results.addAll(
+        List.of(
+            new TurnResolution.CompactionRequired(CONTEXT_WINDOW),
+            FakeTurnResolver.compaction(),
+            retry,
+            FakeTurnResolver.compaction()));
+    fixture.runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(ownerId),
+            List.of(HarnessRuntimeTestSupport.userMessageCommand(UUID.randomUUID(), "new input"))),
+        AcceptancePreflight.IDENTITY);
+    processThread(fixture, ownerId);
+    EntryPath firstPath = path(fixture.store, ownerId);
+    assertEquals(2, fixture.resolver.calls, "the initial input must trigger compaction planning");
+    var first = CompactionTurns.scan(firstPath).getFirst();
+    assertEquals(CompactionTrigger.THRESHOLD, first.trigger());
+    completeSummary(fixture, first.freezing().childThreadId(), first.freezing().joinInvocationId());
+    processThread(fixture, ownerId);
+    EntryPath compacted = path(fixture.store, ownerId);
+    assertTrue(CompactionTurns.latestComplete(compacted).isPresent());
+    assertTrue(
+        new CompactionPlanner(new CompactionConfig(20_000))
+            .prepare(compacted, CompactionTrigger.THRESHOLD, retry.conversationContextWindow())
+            .isPresent());
+
+    processThread(fixture, ownerId);
+    EntryPath failed = path(fixture.store, ownerId);
+    assertEquals(1, CompactionTurns.scan(failed).size());
+    assertEquals(
+        List.of(first.freezing().childThreadId()),
+        fixture.store.transaction(
+            tx -> tx.threads().listChildren(ownerId).stream().map(ThreadState::id).toList()));
+    TurnEndPayload end = (TurnEndPayload) failed.head().payload();
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertEquals(
+        TurnStartReason.INPUT,
+        ((TurnStartPayload) entry(failed, end.turnStartEntryId()).payload()).reason());
+    assertEquals(
+        "CONTEXT_LIMIT",
+        ((AssistantErrorPayload) entry(failed, failed.head().parentEntryId()).payload())
+            .error()
+            .code());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, ownerId)));
+    assertEquals(3, fixture.resolver.calls);
+  }
+
+  private static ClaimedWork claimThread(InMemoryHarnessStore store, UUID threadId) {
+    ClaimedWork claim =
+        store
+            .transaction(
+                tx ->
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
+            .orElseThrow();
+    assertEquals(threadId, claim.target().id());
+    return claim;
+  }
+
+  private static void processThread(Fixture fixture, UUID threadId) {
+    assertEquals(
+        ThreadProcessResult.COMPLETED,
+        fixture.processor.process(claimThread(fixture.store, threadId)));
+  }
+
+  /** 在模型边界注入成功摘要，仍由真实 Join 交付与 ThreadProcessor 结算父回合。 */
+  private static void completeSummary(Fixture fixture, UUID childId, UUID joinId) {
+    ClaimedWork claim = claimThread(fixture.store, childId);
+    HarnessRuntimeTestSupport.inTransaction(
+        fixture.store,
+        tx -> {
+          ExecutionExitLedger.lockAncestorChain(tx, childId);
+          ThreadState child = tx.threads().lock(childId).orElseThrow();
+          ThreadJoin join = tx.joins().find(joinId).orElseThrow();
+          ThreadCommand source = tx.commands().loadQueued(childId).getFirst();
+          assertEquals(join.sourceCommandSequence(), source.sequence());
+          var prompt = (CustomMessageCommandPayload) source.payload();
+          UUID answer = appendCompletedInput(tx, child, prompt.message(), source);
+          ThreadState done = tx.threads().lock(childId).orElseThrow();
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              tx, done, done.headEntryId(), answer, NOW, false);
+          tx.work().lockClaimed(claim);
+          tx.work().complete(claim);
+        });
+  }
+
+  private static UUID appendCompletedInput(
+      HarnessStore.Transaction tx, ThreadState thread, AgentMessage input, ThreadCommand source) {
+    UUID sid = thread.sessionId();
+    UUID start = tx.nextId();
+    UUID user = tx.nextId();
+    UUID answer = tx.nextId();
+    UUID end = tx.nextId();
+    if (source == null) {
+      tx.entries().insert(turnStart(start, sid, thread.headEntryId(), thread.id()));
+      tx.entries().insert(message(user, sid, start, input, null));
+    } else {
+      var settings = tx.entries().loadBranchSettings(thread.headEntryId());
+      tx.entries()
+          .insert(
+              new Entry(
+                  start,
+                  sid,
+                  thread.headEntryId(),
+                  new TurnStartPayload(
+                      TurnStartReason.COMPACTION_BRANCH_INPUT,
+                      settings,
+                      thread.id(),
+                      CONTEXT_WINDOW,
+                      MAX_OUTPUT_TOKENS,
+                      null,
+                      null),
+                  NOW));
+      tx.entries()
+          .insert(
+              new Entry(
+                  user,
+                  sid,
+                  start,
+                  new CustomMessagePayload(
+                      CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+                      CustomMessagePayload.CORE_CUSTOM_TYPE,
+                      CustomMessagePayload.CORE_RENDERER_KEY,
+                      input,
+                      CustomMessagePayload.CORE_DETAILS_JSON),
+                  NOW));
+    }
+    tx.entries().insert(message(answer, sid, user, assistantMessage("summary"), metadata()));
+    tx.entries().insert(turnEnd(end, sid, answer, start));
+    if (source == null) {
+      tx.threads().update(thread.advanceHead(end, NOW));
+    } else {
+      tx.commands().update(List.of(source.markApplied(start)));
+      tx.threads().update(thread.advanceHeadAndInputThroughSequence(end, source.sequence(), NOW));
+    }
+    return answer;
+  }
 
   @Test
   void availabilityUsesTheCompactionCutRuleAndRejectsBusyThreads() {
@@ -599,12 +763,16 @@ class HarnessRuntimeManualCompactionTest {
 
   private static Fixture fixture(InMemoryHarnessStore store, HarnessStore runtimeStore) {
     FakeTurnResolver resolver = new FakeTurnResolver();
+    DriverRegistry registry = new DriverRegistry(List.of(new FakeAgentDriver(resolver::resolve)));
     HarnessRuntime runtime =
-        new HarnessRuntime(
+        new HarnessRuntime(runtimeStore, registry, () -> new CompactionConfig(20_000));
+    ThreadProcessor processor =
+        new ThreadProcessor(
             runtimeStore,
-            new DriverRegistry(List.of(new FakeAgentDriver(resolver::resolve))),
-            () -> new CompactionConfig(20_000));
-    return new Fixture(store, resolver, runtime);
+            registry,
+            new ThreadProcessorConfig(
+                () -> Duration.ofSeconds(1), () -> new CompactionConfig(20_000)));
+    return new Fixture(store, resolver, runtime, processor);
   }
 
   private static TurnResolution.Rejected rejection() {
@@ -989,7 +1157,10 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   private record Fixture(
-      InMemoryHarnessStore store, FakeTurnResolver resolver, HarnessRuntime runtime) {}
+      InMemoryHarnessStore store,
+      FakeTurnResolver resolver,
+      HarnessRuntime runtime,
+      ThreadProcessor processor) {}
 
   private record ClosedTurnBaseline(UUID threadId, UUID turnEndEntryId) {}
 
@@ -1005,19 +1176,20 @@ class HarnessRuntimeManualCompactionTest {
       if (onResolve != null) {
         onResolve.run();
       }
-      if (autoConsistent) {
-        return new TurnResolution.Compaction(
-            new CompactionResolution(
-                HarnessRuntimeTestSupport.executionSelection(),
-                4096L,
-                CONTEXT_WINDOW,
-                MAX_OUTPUT_TOKENS,
-                new BranchSettings(
-                    "compaction",
-                    HarnessRuntimeTestSupport.executionSelection(),
-                    HarnessRuntimeTestSupport.settings().environmentName())));
-      }
-      return results.poll();
+      return autoConsistent ? compaction() : results.poll();
+    }
+
+    static TurnResolution.Compaction compaction() {
+      return new TurnResolution.Compaction(
+          new CompactionResolution(
+              HarnessRuntimeTestSupport.executionSelection(),
+              4096L,
+              CONTEXT_WINDOW,
+              MAX_OUTPUT_TOKENS,
+              new BranchSettings(
+                  "compaction",
+                  HarnessRuntimeTestSupport.executionSelection(),
+                  HarnessRuntimeTestSupport.settings().environmentName())));
     }
   }
 }

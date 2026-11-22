@@ -35,7 +35,7 @@ final class CompactionGate {
   /**
    * 失败请求若由上下文溢出导致，返回启动一次 OVERFLOW 压缩所需的切分事实。
    *
-   * <p>溢出重试本身再次溢出时不再压缩，保留真实失败事实并等待用户下一步；返回 {@code null} 表示本次失败不触发压缩。
+   * <p>压缩后的重试再次溢出时不再压缩，保留真实失败；返回 {@code null} 表示本次失败不触发压缩。
    */
   CompactionPreparation overflowRecovery(ThreadState thread, EntryPath path) {
     if (path.openTurnStart().isPresent() || !thread.constraints().allowAutoCompaction()) {
@@ -51,7 +51,8 @@ final class CompactionGate {
     }
     Entry result = CompactionHistory.turnResultEntry(path, latest.start());
     if (!CompactionHistory.isContextWall(start, result)
-        || CompactionHistory.isOverflowRecoveryRetry(path, latest)) {
+        || CompactionHistory.isPostCompactionRetry(
+            path, CompactionHistory.previousClosedTurn(path, latest))) {
       return null;
     }
     return preparation(path, CompactionTrigger.OVERFLOW, start.contextWindow());

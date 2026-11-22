@@ -60,7 +60,7 @@
 - **canonical 选项**（variant 的 `protocolOptions`）按既有 canonical 语义移除无语义尾零（`1.10` → `1.1`），但绝不把数值改写成字符串或浮点数。
 - **自由 payload**（工具 `inputSchemaJson`、原生 opaque item / part / block、usage 原文等）按 `BigDecimal` 原样穿过 encoder / stream / replay：`1e309`、`1e-324` 与高精度小数都不退化为 `Infinity` / `0`，尾零也不被移除，保证同一 native payload 的数值类型与值可在下一轮原样回放。
 - **JSON null** 按声明语义处理：可缺省的字符串/标识（如 Chat `id`/`service_tier`、Responses `id`、Anthropic 缺省 `message.id`）回落为缺省，不产生字面量 `"null"`；必需字段（如 usage 计数、显式 `message.id`）以 `INVALID_RESPONSE` fail closed，也不静默读成 `0` 或 `"null"`。
-- **opaque 槽位坐标**不受 `int` 宽度限制：仅 OpenAI Chat 原生 opaque 数组的条目 `index` 与 OpenAI Responses 未知 item 的 `output_index` 这两处坐标按完整整数值定位槽位，合法的 `0` 索引与大整数索引各自独立，不因截断互相合并或覆盖。已知协议索引（如 Chat `tool_calls.index`、Anthropic `content_block.index`）保持各自规则，越界按协议 fail closed。
+- **opaque 槽位坐标**不受 `int` 宽度限制：仅 OpenAI Chat 原生 opaque 数组的条目 `index` 与 OpenAI Responses 未知 item 的 `output_index` 这两处坐标按完整整数值定位槽位，合法的 `0` 索引与大整数索引各自独立，不因截断互相合并或覆盖。已知协议索引保持各自规则，越界按协议拒绝。Chat 流式 `tool_calls` 的每个片段都必须携带 `0` 到 `Integer.MAX_VALUE` 范围内的整数 `index`，否则整次响应以 `INVALID_RESPONSE` 失败。
 
 variant 的 `reasoningEffort` 是厂商自定义自由字符串，不是跨协议统一枚举：保存与解码只去除首尾空白并**原样保留大小写**，长度不超过 64 字符。精确小写 `off` 表示显式关闭推理，`null` 表示不声明、由协议默认决定，二者语义不同，也不与其它大小写形式互为别名。Gemini 2.5 的 `minimal/low/medium/high` 映射为官方 `thinkingBudget`；2.5 Pro 的最低预算为 128，不能关闭，`off` 明确拒绝，Flash 与 Flash Lite 使用预算 0 表示关闭。已验证的 Gemini 3/4 型号按各自支持档位写入 REST `thinkingLevel` 大写枚举（如 `HIGH`、`XHIGH`），这些型号不支持 `off`，也不会将最小档冒充关闭。型号或档位未被明确支持时拒绝运行时 effort，不套用其他型号的 wire。OpenAI Chat / Responses 写入 `reasoning_effort` / `reasoning.effort`，Anthropic 原样写入 `output_config.effort`。需要预算思考的模型可在不声明 `reasoningEffort` 时通过原生选项指定 `thinking`。
 
