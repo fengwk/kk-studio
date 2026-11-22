@@ -53,6 +53,11 @@ function ids(rows: HistoryTreeRow[]): string[] {
   return rows.map((row) => row.entry.entryId)
 }
 
+/** 单个 MESSAGE Entry 对应的历史树行，用于预览与搜索断言。 */
+function searchRow(text: string): HistoryTreeRow {
+  return buildHistoryTree([messageEntry('m', 'ASSISTANT', text, null)])[0]!
+}
+
 describe('History tree lane projection', () => {
   it('keeps a linear chain on one lane without directory-style depth growth', () => {
     const entries = [
@@ -239,16 +244,54 @@ describe('History tree search', () => {
     expect(historyRowMatches(row, historySearchTokens('x'.repeat(250)))).toBe(true)
   })
 
-  // 测试意图：命中落在预览上限之外时，搜索预览从全文命中处截取，用户能看到为什么这一行匹配。
+  // 测试意图：命中落在预览保留的字符之外时，搜索预览从全文命中处截取，用户能看到为什么这一行匹配。
   it('builds the search preview from the full text when the hit lies beyond the preview limit', () => {
     const text = `${'背景'.repeat(150)} 最后调大 terminationGracePeriodSeconds 即可`
-    const row = buildHistoryTree([messageEntry('m', 'ASSISTANT', text, null)])[0]!
+    const row = searchRow(text)
     expect(row.preview).not.toContain('termination')
     const preview = historyRowSearchPreview(row, historySearchTokens('terminationGracePeriodSeconds'))
     expect(preview).toBe('…最后调大 terminationGracePeriodSeconds 即可')
-    // 开头附近的命中与无命中都沿用普通预览。
+    // 在预览内的命中与无命中都沿用普通预览。
     expect(historyRowSearchPreview(row, historySearchTokens('背景'))).toBe(row.preview)
     expect(historyRowSearchPreview(row, historySearchTokens('parser'))).toBe(row.preview)
+    expect(historyRowSearchPreview(row, [])).toBe(row.preview)
+  })
+
+  // 是否换成全文窗口由首个命中的起点决定。
+  it('keeps the plain preview while the hit starts inside the retained characters', () => {
+    const inside = searchRow(`${'甲'.repeat(218)}hit ${'乙'.repeat(300)}`)
+    expect(inside.preview).toContain('h')
+    expect(historyRowSearchPreview(inside, historySearchTokens('hit'))).toBe(inside.preview)
+    // 越过保留字符的首位后该位置已被省略号取代，命中在普通预览里看不到，改用全文窗口。
+    const beyond = searchRow(`${'甲'.repeat(219)}hit ${'乙'.repeat(300)}`)
+    expect(beyond.preview).not.toContain('hit')
+    expect(historyRowSearchPreview(beyond, historySearchTokens('hit')).startsWith('…甲甲甲甲甲甲hit '))
+      .toBe(true)
+    // 全文恰好 220 字时预览不截断，末位的命中仍然看得见。
+    const exact = searchRow(`${'甲'.repeat(219)}h`)
+    expect(exact.preview).toHaveLength(220)
+    expect(historyRowSearchPreview(exact, historySearchTokens('h'))).toBe(exact.preview)
+  })
+
+  // 测试意图：从全文截取时沿用原有的拉丁词边界规则，不把命中前的词截成半个。
+  it('starts the full-text window at the word boundary before a deep Latin hit', () => {
+    const row = searchRow(`${'abcd'.repeat(60)} termination`)
+    expect(historyRowSearchPreview(row, historySearchTokens('termination'))).toBe('…termination')
+  })
+
+  // 测试意图：截取起点落在代理对中间时向前退一格，不把 emoji 拆成坏字符。
+  it('never starts the full-text window in the middle of a surrogate pair', () => {
+    const row = searchRow(`${'😀'.repeat(150)}ahit`)
+    expect(historyRowSearchPreview(row, historySearchTokens('hit'))).toBe(`…${'😀'.repeat(3)}ahit`)
+  })
+
+  // 测试意图：全文窗口仍受预览上限约束，长命中后的正文不会让单行预览变长。
+  it('caps the full-text window at the preview limit', () => {
+    const row = searchRow(`${'甲'.repeat(219)}hit ${'乙'.repeat(300)}`)
+    const preview = historyRowSearchPreview(row, historySearchTokens('hit'))
+    expect(preview).toContain('hit')
+    expect(preview).toHaveLength(220)
+    expect(preview.endsWith('…')).toBe(true)
   })
 
   it('excludes explicit thinking content from preview and search', () => {

@@ -1,8 +1,43 @@
 import { expect, test, type Locator, type Page } from './fixture'
+import {
+  captureSearchHitShot,
+  expectFirstMarkVisible,
+  expectNoLeadingClipping,
+  readSearchHitText,
+  recordSearchHitMetrics,
+} from './search-hit-geometry'
+import {
+  DEEP_HIT,
+  DEEP_PREVIEW,
+  DEEP_PREVIEW_HIT,
+  DEEP_TITLE,
+  HISTORY_TEXT,
+  LONG_HIT,
+  SHORT_HIT,
+  SHORT_TITLE,
+} from './search-hit-fixtures'
 
 const LOCALES = [
-  { locale: 'zh-CN', historyTree: '历史树', search: '搜索记录', selected: '已选', sessionPanel: '选择会话', threadPanel: '选择 Thread' },
-  { locale: 'en-US', historyTree: 'History tree', search: 'Search records', selected: 'Selected', sessionPanel: 'Select Session', threadPanel: 'Select Thread' },
+  {
+    locale: 'zh-CN',
+    historyTree: '历史树',
+    /** 历史树搜索框：ai.chat.history.search。 */
+    historySearch: '搜索记录',
+    /** 选择面板搜索框：ai.chat.selection.search，与历史树不是同一文案。 */
+    listSearch: '搜索',
+    selected: '已选',
+    sessionPanel: '选择会话',
+    threadPanel: '选择 Thread',
+  },
+  {
+    locale: 'en-US',
+    historyTree: 'History tree',
+    historySearch: 'Search records',
+    listSearch: 'Search',
+    selected: 'Selected',
+    sessionPanel: 'Select Session',
+    threadPanel: 'Select Thread',
+  },
 ] as const
 
 const VIEWPORTS = [
@@ -10,20 +45,8 @@ const VIEWPORTS = [
   { width: 1440, height: 900 },
 ] as const
 
-/** 历史树搜索词：只命中助手正文第 40 个字符处，单行省略默认会把它挤出可见区。 */
-const HIT = '停机耗时'
-/** 长拉丁命中词：位于 220 字预览上限之外，普通预览里根本没有它。 */
-const LONG_HIT = 'terminationGracePeriodSeconds'
-
-/** 行内命中片段必须完整落在单行预览的可见框内，不能被省略裁掉。 */
-async function expectMarkVisibleInsideRow(preview: Locator) {
-  const previewBox = await preview.boundingBox()
-  const markBox = await preview.locator('mark').boundingBox()
-  expect(previewBox, 'preview box').not.toBeNull()
-  expect(markBox, 'mark box').not.toBeNull()
-  expect(markBox!.x).toBeGreaterThanOrEqual(previewBox!.x - 0.5)
-  expect(markBox!.x + markBox!.width).toBeLessThanOrEqual(previewBox!.x + previewBox!.width + 0.5)
-}
+/** 1440 宽下文字放得下：从开头完整显示，不能被前导省略裁掉。 */
+const WIDE = 1440
 
 /** 绑定行的已选标记：aria-current 与行内“已选”文案同时存在。 */
 async function expectCurrentRow(panel: Locator, title: RegExp, selectedLabel: string) {
@@ -55,34 +78,63 @@ for (const copy of LOCALES) {
   for (const viewport of VIEWPORTS) {
     const size = `${viewport.width}x${viewport.height}`
 
-    test(`${copy.locale} ${size}: history row preview starts at the deep search hit`, async ({ page }, testInfo) => {
+    test(`${copy.locale} ${size}: history row keeps the original preview for an in-preview hit`, async ({ page }, testInfo) => {
       await openHarness(page, copy.locale, viewport)
       const region = page.getByRole('region', { name: copy.historyTree })
       await expect(region).toBeVisible()
-      await region.getByRole('searchbox', { name: copy.search }).fill(HIT)
+      await region.getByRole('searchbox', { name: copy.historySearch }).fill(DEEP_HIT)
 
-      const row = region.getByRole('button').filter({ hasText: HIT }).first()
+      const row = region.getByRole('button').filter({ hasText: DEEP_HIT }).first()
       const preview = row.locator('.history-tree-entry-preview')
-      await expect(preview).toContainText(`…`)
-      await expect(preview.locator('mark')).toHaveText(HIT)
-      // 无障碍标签仍带完整预览：摘录省掉的标题前缀仍出现在标签里。
-      await expect(row).toHaveAttribute('aria-label', /## 结论 服务停机时先停止接收新请求/)
-      await expectMarkVisibleInsideRow(preview)
-      await page.screenshot({ path: testInfo.outputPath(`history-${copy.locale}-${size}.png`), fullPage: true })
+      await expect(preview.locator('mark')).toHaveText(DEEP_HIT)
+      // 无障碍标签仍带完整预览：视觉上省略的标题前缀仍出现在标签里。
+      expect(await row.getAttribute('aria-label')).toContain(HISTORY_TEXT)
+      const geometry = await readSearchHitText(preview)
+      expect(geometry.text).toBe(HISTORY_TEXT)
+      expectFirstMarkVisible(geometry, `${copy.locale} ${size} 历史预览内深层命中`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(geometry, `${copy.locale} ${size} 历史预览内深层命中`)
+      }
+
+      await region.getByRole('searchbox', { name: copy.historySearch }).fill('停止接收新请求')
+      await expect(preview.locator('mark')).toHaveText('停止接收新请求')
+      expectFirstMarkVisible(await readSearchHitText(preview), `${copy.locale} ${size} 历史浅命中`)
+      await captureSearchHitShot(region, testInfo, `tree-shallow-hit-${copy.locale}-${size}`)
     })
 
     test(`${copy.locale} ${size}: a long hit beyond the preview limit is shown inside the row`, async ({ page }, testInfo) => {
       await openHarness(page, copy.locale, viewport)
       const region = page.getByRole('region', { name: copy.historyTree })
-      await region.getByRole('searchbox', { name: copy.search }).fill(LONG_HIT)
+      await region.getByRole('searchbox', { name: copy.historySearch }).fill(LONG_HIT)
 
-      // 搜索预览从全文命中处截取：长命中词在窄行里也完整可见。
-      const preview = region.locator('.history-tree-entry-preview')
-        .filter({ has: page.locator('mark', { hasText: LONG_HIT }) })
+      // 搜索预览从全文命中处截取：长命中词在窄行里也完整可见，预览以字面量 … 开头。
+      const mark = page.locator('mark', { hasText: LONG_HIT })
+      const preview = region.locator('.history-tree-entry-preview').filter({ has: mark })
       await expect(preview).toHaveCount(1)
-      await expect(preview).toContainText('…')
-      await expectMarkVisibleInsideRow(preview)
-      await page.screenshot({ path: testInfo.outputPath(`history-long-hit-${copy.locale}-${size}.png`), fullPage: true })
+      await expect(preview).toHaveText(/^…/)
+      const row = region.getByRole('button').filter({ has: mark })
+      await expect(row).toHaveCount(1)
+      await expect(row).toHaveAttribute('aria-pressed', 'false')
+
+      // R7 场景之一：行未被选中时，长命中词同样完整可见。
+      const unselected = await readSearchHitText(preview)
+      expectFirstMarkVisible(unselected, `${copy.locale} ${size} R7 未选中行`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(unselected, `${copy.locale} ${size} R7 未选中行`)
+      }
+      recordSearchHitMetrics(testInfo, `tree-r7-unselected-${copy.locale}-${size}`, unselected)
+
+      // R7 场景之二：选中同一行（选中只改变底色与光标字形），可用宽度与命中可见性不变。
+      await row.click()
+      await expect(row).toHaveAttribute('aria-pressed', 'true')
+      const selected = await readSearchHitText(preview)
+      expectFirstMarkVisible(selected, `${copy.locale} ${size} R7 选中行`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(selected, `${copy.locale} ${size} R7 选中行`)
+      }
+      expect(selected.availableWidth, '选中前后文字框可用宽度').toBeCloseTo(unselected.availableWidth, 0)
+      recordSearchHitMetrics(testInfo, `tree-r7-selected-${copy.locale}-${size}`, selected)
+      await captureSearchHitShot(region, testInfo, `tree-r7-selected-${copy.locale}-${size}`)
     })
 
     test(`${copy.locale} ${size}: bound Thread and its Session are the current selection`, async ({ page }, testInfo) => {
@@ -116,6 +168,83 @@ for (const copy of LOCALES) {
         await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
       ).toBe(true)
       await page.screenshot({ path: testInfo.outputPath(`unbound-${copy.locale}-${size}.png`), fullPage: true })
+    })
+
+    test(`${copy.locale} ${size}: session list keeps deep title and subtitle hits fully visible`, async ({ page }, testInfo) => {
+      await openHarness(page, copy.locale, viewport)
+      const region = page.getByTestId('bound-sessions').getByRole('region', { name: copy.sessionPanel })
+      const search = region.getByRole('searchbox', { name: copy.listSearch })
+
+      // 标题深处的命中：长标题在窄行里放不下，命中词必须完整可见。
+      await search.fill(DEEP_HIT)
+      const titleRow = region.getByRole('option').filter({ has: page.locator('mark', { hasText: DEEP_HIT }) })
+      await expect(titleRow).toHaveCount(1)
+      const title = await readSearchHitText(titleRow.locator('.thread-selection-item-title'))
+      expect(title.text, 'DOM 保留完整标题').toBe(DEEP_TITLE)
+      expectFirstMarkVisible(title, `${copy.locale} ${size} 会话标题深层命中`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(title, `${copy.locale} ${size} 会话标题深层命中`)
+      }
+      recordSearchHitMetrics(testInfo, `list-title-deep-hit-${copy.locale}-${size}`, title)
+      await captureSearchHitShot(region, testInfo, `list-title-deep-hit-${copy.locale}-${size}`)
+
+      // 副标题深处的命中：命中词在预览 40 多字之后。
+      await search.fill(DEEP_PREVIEW_HIT)
+      const subtitleRow = region.getByRole('option').filter({ has: page.locator('mark', { hasText: DEEP_PREVIEW_HIT }) })
+      await expect(subtitleRow).toHaveCount(1)
+      const subtitle = await readSearchHitText(subtitleRow.locator('.thread-selection-item-subtitle'))
+      expect(subtitle.text.endsWith(DEEP_PREVIEW), 'DOM 保留完整副标题预览').toBe(true)
+      expectFirstMarkVisible(subtitle, `${copy.locale} ${size} 会话副标题深层命中`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(subtitle, `${copy.locale} ${size} 会话副标题深层命中`)
+      }
+      recordSearchHitMetrics(testInfo, `list-subtitle-deep-hit-${copy.locale}-${size}`, subtitle)
+      await captureSearchHitShot(region, testInfo, `list-subtitle-deep-hit-${copy.locale}-${size}`)
+    })
+
+    test(`${copy.locale} ${size}: session list keeps a short hit at the row start`, async ({ page }, testInfo) => {
+      await openHarness(page, copy.locale, viewport)
+      const region = page.getByTestId('bound-sessions').getByRole('region', { name: copy.sessionPanel })
+      await region.getByRole('searchbox', { name: copy.listSearch }).fill(SHORT_HIT)
+
+      const row = region.getByRole('option').filter({ has: page.locator('mark', { hasText: SHORT_HIT }) })
+      await expect(row).toHaveCount(1)
+      const title = await readSearchHitText(row.locator('.thread-selection-item-title'))
+      expect(title.text, 'DOM 保留完整标题').toBe(SHORT_TITLE)
+      // 命中就在开头：没有可收缩的前文，标题从内容区起点开始显示。
+      expect(title.prefixWidth, '短命中标题没有前文框').toBeNull()
+      expectFirstMarkVisible(title, `${copy.locale} ${size} 会话短命中`)
+      expectNoLeadingClipping(title, `${copy.locale} ${size} 会话短命中`)
+      recordSearchHitMetrics(testInfo, `list-short-hit-${copy.locale}-${size}`, title)
+      await captureSearchHitShot(region, testInfo, `list-short-hit-${copy.locale}-${size}`)
+    })
+
+    test(`${copy.locale} ${size}: thread list keeps deep title and subtitle hits fully visible`, async ({ page }, testInfo) => {
+      await openHarness(page, copy.locale, viewport)
+      const region = page.getByTestId('bound-threads').getByRole('region', { name: copy.threadPanel })
+      const search = region.getByRole('searchbox', { name: copy.listSearch })
+
+      await search.fill(DEEP_HIT)
+      const titleRow = region.getByRole('option').filter({ has: page.locator('mark', { hasText: DEEP_HIT }) })
+      await expect(titleRow).toHaveCount(1)
+      const title = await readSearchHitText(titleRow.locator('.thread-selection-item-title'))
+      expect(title.text, 'DOM 保留完整标题').toBe(DEEP_TITLE)
+      expectFirstMarkVisible(title, `${copy.locale} ${size} Thread 标题深层命中`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(title, `${copy.locale} ${size} Thread 标题深层命中`)
+      }
+      recordSearchHitMetrics(testInfo, `thread-title-deep-hit-${copy.locale}-${size}`, title)
+
+      await search.fill(DEEP_PREVIEW_HIT)
+      const subtitleRow = region.getByRole('option').filter({ has: page.locator('mark', { hasText: DEEP_PREVIEW_HIT }) })
+      await expect(subtitleRow).toHaveCount(1)
+      const subtitle = await readSearchHitText(subtitleRow.locator('.thread-selection-item-subtitle'))
+      expect(subtitle.text.endsWith(DEEP_PREVIEW), 'DOM 保留完整副标题预览').toBe(true)
+      expectFirstMarkVisible(subtitle, `${copy.locale} ${size} Thread 副标题深层命中`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(subtitle, `${copy.locale} ${size} Thread 副标题深层命中`)
+      }
+      recordSearchHitMetrics(testInfo, `thread-subtitle-deep-hit-${copy.locale}-${size}`, subtitle)
     })
   }
 }

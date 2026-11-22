@@ -1,12 +1,3 @@
-/** 首个命中从这么多字符内开始时，窄行开头也看得到它，原样显示。 */
-const EXCERPT_THRESHOLD = 12
-
-/** 摘录在首个命中前保留的上下文字数：留一点上下文，窄行仍给长命中词留出位置。 */
-const EXCERPT_LEAD = 6
-
-/** 以空格分词的拉丁词字符；中文等不以空格分词的文字按字截取即可。 */
-const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u
-
 export interface HighlightSegment {
   text: string
   match: boolean
@@ -61,27 +52,10 @@ export function highlightSegments(text: string, tokens: string[]): HighlightSegm
   return segments
 }
 
-/**
- * 单行省略文本的搜索摘录：首个命中位置靠后时，从命中处前少量上下文开始并以省略号开头，
- * 窄行也能看到命中词。起点落在拉丁词中间时从该词之后的空格开始，不截半个词；不从代理对中间切开。
- * 没有命中或命中已在开头附近时原样返回。
- */
-export function searchExcerpt(text: string, tokens: string[]): string {
-  const haystack = text.toLowerCase()
-  const first = Math.min(...tokens
-    .map((token) => (token.length > 0 ? haystack.indexOf(token) : -1))
-    .filter((index) => index >= 0))
-  if (!Number.isFinite(first) || first <= EXCERPT_THRESHOLD) {
-    return text
-  }
-  let start = first - EXCERPT_LEAD
-  if (/[\uDC00-\uDFFF]/.test(text[start] ?? '')) {
-    start -= 1
-  } else if (LATIN_WORD_CHAR.test(text[start - 1] ?? '') && LATIN_WORD_CHAR.test(text[start] ?? '')) {
-    const space = text.indexOf(' ', start)
-    if (space >= 0 && space < first) {
-      start = space + 1
-    }
-  }
-  return `…${text.slice(start).trimStart()}`
+/** Split at the first hit without losing any text, including boundary whitespace. */
+export function splitSearchHit(text: string, tokens: string[]) {
+  const segments = highlightSegments(text, tokens)
+  return segments[1]?.match
+    ? { prefix: segments[0].text, segments: segments.slice(1) }
+    : { prefix: '', segments }
 }

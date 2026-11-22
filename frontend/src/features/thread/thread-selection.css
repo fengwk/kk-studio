@@ -149,8 +149,6 @@
   overflow: hidden;
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 搜索命中词：与历史树命中同样式；底色在普通、活动（--surface-active）和已选（--accent-soft）行上都可辨。 */

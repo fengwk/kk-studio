@@ -64,6 +64,12 @@
   overflow: hidden;
 }
 
+@media (max-width: 480px) {
+  .history-tree-entry {
+    gap: var(--space-1);
+  }
+}
+
 .history-tree-entry:hover:not(:disabled),
 .history-tree-entry:focus-visible:not(:disabled),
 .history-tree-entry.selected {
@@ -119,8 +125,6 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 400;
   color: var(--fg-muted);
 }

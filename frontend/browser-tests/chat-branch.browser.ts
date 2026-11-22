@@ -1,6 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, tokenColor, type Page } from './fixture'
+import {
+  expectFirstMarkVisible,
+  expectNoLeadingClipping,
+  readSearchHitText,
+  recordSearchHitMetrics,
+} from './search-hit-geometry'
 import type { Locator, Route, TestInfo, WebSocketRoute } from '@playwright/test'
 import { createDefaultChatPaneState, type ChatLayout, type ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
@@ -72,6 +78,9 @@ const VIEWPORTS = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ] as const
+
+/** 1440 宽下副标题整行放得下：此时要求开头不被前导省略裁掉。 */
+const WIDE = 1440
 
 function viewportKey(viewport: { width: number; height: number }): string {
   return `${viewport.width}x${viewport.height}`
@@ -1400,13 +1409,27 @@ for (const locale of LOCALES) {
       const search = panel.getByRole('searchbox', { name: copy.search })
       await search.fill('verify，细节见 运行手册')
       await expect(sessionRow).toBeVisible()
-      // 预览末尾的命中：副标题从命中处附近开始显示，高亮的命中词完整落在可见区域内。
+      // 命中就在预览开头：命中及之后从右侧省略，命中词本身不看字符数启发式截断。
+      await search.fill('发布前必读')
+      const shallow = await readSearchHitText(sessionSubtitle)
+      expect(shallow.text.endsWith(PREVIEW_TEXT), 'DOM 保留完整预览').toBe(true)
+      expectFirstMarkVisible(shallow, `${locale} ${viewportKey(viewport)} 会话副标题开头命中`)
+      recordSearchHitMetrics(testInfo, shotName(locale, viewport, 'chat-page-subtitle-shallow-hit'), shallow)
+      if (viewport.width >= WIDE) {
+        // 1440 下副标题整行放得下：开头也必须从起点显示。
+        expectNoLeadingClipping(shallow, `${locale} ${viewportKey(viewport)} 会话副标题开头命中`)
+      }
+      // 390 下 dock 列比整行文字窄：前文框按设计先收缩，只验收首个 mark 完整可见。
+      // 预览末尾的命中：高亮的命中词完整落在可见区域内。
       await search.fill('引用结论照旧')
       const deepHit = sessionSubtitle.locator('mark')
       await expect(deepHit).toHaveText('引用结论照旧')
-      const hitBox = (await deepHit.boundingBox())!
-      const subtitleBox = (await sessionSubtitle.boundingBox())!
-      expect(hitBox.x + hitBox.width).toBeLessThanOrEqual(subtitleBox.x + subtitleBox.width + 0.5)
+      const deep = await readSearchHitText(sessionSubtitle)
+      expectFirstMarkVisible(deep, `${locale} ${viewportKey(viewport)} 会话副标题深层命中`)
+      recordSearchHitMetrics(testInfo, shotName(locale, viewport, 'chat-page-subtitle-deep-hit'), deep)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(deep, `${locale} ${viewportKey(viewport)} 会话副标题深层命中`)
+      }
       // 唯一的结果行就是活动行：命中底色必须与活动行底色不同。
       await expect(sessionRow).toHaveAttribute('aria-selected', 'true')
       expect(await deepHit.evaluate((element) => getComputedStyle(element).backgroundColor))

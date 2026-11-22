@@ -1,5 +1,5 @@
 import { Pencil } from 'lucide-react'
-import { highlightSegments, searchExcerpt } from '@/features/thread/search-highlight'
+import { SearchHitText } from '@/features/thread/SearchHitText'
 
 export interface SelectionPanelItem {
   id: string
@@ -31,7 +31,7 @@ export interface SelectionRowProps {
  *
  * 行本身是 `role=option` 按钮：鼠标按下不抢焦点（否则会打断搜索框输入），
  * hover/move 只登记活动项。重命名动作是行内独立按钮，Enter/空格不冒泡成整行提交。
- * 搜索时标题与副标题高亮命中词；副标题是单行省略，命中靠后时从命中处附近开始显示。
+ * 标题与副标题按可用宽度单行省略，搜索时优先显示命中词。
  */
 export function SelectionRow({
   item,
@@ -46,11 +46,6 @@ export function SelectionRow({
   onSelect,
   onRename,
 }: SelectionRowProps) {
-  const highlighted = (text: string) => highlightSegments(text, searchTokens).map((segment, index) => (
-    segment.match
-      ? <mark key={index} className="thread-selection-mark">{segment.text}</mark>
-      : <span key={index}>{segment.text}</span>
-  ))
   return (
     <li className="thread-selection-row">
       <button
@@ -58,6 +53,7 @@ export function SelectionRow({
         role="option"
         id={optionId}
         tabIndex={optionId == null ? undefined : -1}
+        aria-label={[item.title, current ? selectedLabel : '', item.badge, item.subtitle].filter(Boolean).join(' ')}
         aria-selected={active}
         aria-current={current ? 'true' : undefined}
         className={[
@@ -71,13 +67,13 @@ export function SelectionRow({
         onClick={onSelect}
       >
         <span className="thread-selection-item-title">
-          <span>{highlighted(item.title)}</span>
+          <SearchHitText text={item.title} tokens={searchTokens} markClassName="thread-selection-mark" />
           {current ? <em>{selectedLabel}</em> : null}
           {item.badge ? <code title={item.badge}>{item.badge}</code> : null}
         </span>
         {item.subtitle ? (
           <span className="thread-selection-item-subtitle">
-            {highlighted(searchExcerpt(item.subtitle, searchTokens))}
+            <SearchHitText text={item.subtitle} tokens={searchTokens} markClassName="thread-selection-mark" />
           </span>
         ) : null}
       </button>

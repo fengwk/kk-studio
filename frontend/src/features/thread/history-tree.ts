@@ -1,7 +1,6 @@
 import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import { FORK_NOTICE_TEXT } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
-import { searchExcerpt } from '@/features/thread/search-highlight'
 import { translate } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
@@ -31,7 +30,7 @@ export interface HistoryTreeRow {
   kind: HistoryEntryKind
   /** 单行预览：折叠空白并按上限截断；没有可见文本时为占位文案。 */
   preview: string
-  /** 折叠空白后的完整可见文本；搜索摘录从这里截取，不受 preview 长度限制。 */
+  /** 折叠空白后的完整可见文本；只在命中超出 preview 上限时从这里截取搜索预览。 */
   text: string
   /** `text` 的小写形式，用于搜索匹配。 */
   searchText: string
@@ -46,6 +45,15 @@ export interface HistoryTreeRow {
 
 /** 预览文本在每一行渲染时的最大长度。 */
 const PROJECTED_PREVIEW_LIMIT = 220
+
+/** 预览截断时保留的字符数：最后一位换成省略号。 */
+const PROJECTED_PREVIEW_KEPT = PROJECTED_PREVIEW_LIMIT - 1
+
+/** 从全文截取命中窗口时，命中前保留的上下文字数；窄行仍给长命中词留出位置。 */
+const HIT_LEAD = 6
+
+/** 以空格分词的拉丁词字符；中文等不以空格分词的文字按字截取即可。 */
+const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u
 
 export interface BuildHistoryTreeOptions {
   /** 当前 head Entry id；用于标记路径与当前位置，不改变图形结构。 */
@@ -190,12 +198,44 @@ export function historyRowMatches(row: HistoryTreeRow, tokens: string[]): boolea
 }
 
 /**
- * 搜索时的行预览：命中在全文深处（包括超出预览上限的部分）时从命中处附近截取并按预览上限截断，
- * 单行省略也能看到命中；命中已在开头附近或没有命中时沿用普通预览。
+ * 搜索时的行预览：命中已经在预览保留的字符内时沿用普通预览，由行内布局保证命中优先显示；
+ * 只有命中超出预览时才从全文命中处前少量上下文开始截取（以 … 开头并按预览上限截断），
+ * 用户也能看到这一行为什么匹配。没有命中同样沿用普通预览。
  */
 export function historyRowSearchPreview(row: HistoryTreeRow, tokens: string[]): string {
-  const excerpt = searchExcerpt(row.text, tokens)
-  return excerpt === row.text ? row.preview : truncatePreview(excerpt, PROJECTED_PREVIEW_LIMIT)
+  if (row.text.length <= PROJECTED_PREVIEW_LIMIT) {
+    return row.preview
+  }
+  let first = Infinity
+  for (const token of tokens) {
+    if (token.length === 0) {
+      continue
+    }
+    const index = row.searchText.indexOf(token)
+    if (index >= 0) {
+      first = Math.min(first, index)
+    }
+  }
+  return Number.isFinite(first) && first >= PROJECTED_PREVIEW_KEPT
+    ? windowAroundHit(row.text, first)
+    : row.preview
+}
+
+/**
+ * 从全文命中处前少量上下文开始截取：起点落在拉丁词中间时从该词之后的空格开始，不截半个词；
+ * 不从代理对中间切开；结果以 … 开头并按预览上限截断。
+ */
+function windowAroundHit(text: string, hitIndex: number): string {
+  let start = hitIndex - HIT_LEAD
+  if (/[\uDC00-\uDFFF]/.test(text[start] ?? '')) {
+    start -= 1
+  } else if (LATIN_WORD_CHAR.test(text[start - 1] ?? '') && LATIN_WORD_CHAR.test(text[start] ?? '')) {
+    const space = text.indexOf(' ', start)
+    if (space >= 0 && space < hitIndex) {
+      start = space + 1
+    }
+  }
+  return truncatePreview(`…${text.slice(start).trimStart()}`, PROJECTED_PREVIEW_LIMIT)
 }
 
 function historyEntryKind(entry: HarnessSessionEntryDTO): HistoryEntryKind {
