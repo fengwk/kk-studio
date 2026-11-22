@@ -35,7 +35,7 @@ export function ProviderResourceCard({
       subtitle={provider.description || provider.baseUrl || provider.providerType}
       rows={[
         [t('ai.catalog.card.type'), provider.providerType],
-        [t('ai.catalog.card.url'), provider.baseUrl || t('ai.catalog.card.emptyValue')],
+        [t('ai.catalog.form.baseUrl'), provider.baseUrl || t('ai.catalog.card.emptyValue')],
         [
           t('ai.catalog.card.apiKey'),
           provider.credential.configured

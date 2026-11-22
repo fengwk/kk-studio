@@ -292,4 +292,77 @@ test.describe('Chat defaults & metadata contracts', () => {
     await expect(page.getByRole('button', { name: '创建' })).toBeVisible()
     await expect(page.getByRole('button', { name: '取消' })).toBeVisible()
   })
+
+  // YOLO 行排版契约：标签与说明各自独立成行，开关垂直居中留在文字块右侧。
+  const yoloRowCopy = {
+    'zh-CN': {
+      label: 'YOLO 模式',
+      description: '自动批准工具调用，跳过人工确认',
+    },
+    'en-US': {
+      label: 'YOLO Mode',
+      description: 'Automatically approve tool calls without manual confirmation',
+    },
+  } as const
+
+  const yoloRowViewports = [
+    { name: 'desktop', width: 1440, height: 900 },
+    { name: 'mobile', width: 390, height: 844 },
+  ] as const
+
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    for (const viewport of yoloRowViewports) {
+      test(`create Chat YOLO row: separate label/description with the switch centered beside (${locale} ${viewport.width}x${viewport.height})`, async ({ page }, testInfo) => {
+        const copy = yoloRowCopy[locale]
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await setupEnvironmentRoute(page)
+        await page.goto(`${HARNESS_URL}?open=create&locale=${locale}`)
+
+        const dialog = page.getByRole('dialog')
+        await expect(dialog).toBeVisible()
+
+        const row = dialog.locator('.create-chat-yolo-row')
+        const text = row.locator('.create-chat-yolo-text')
+        const label = row.locator('.field-label')
+        const description = row.locator('.create-chat-yolo-description')
+        const yoloSwitch = row.getByRole('switch')
+
+        // 标签与说明是两个独立元素，文案各自完整，开关仍由标签提供无障碍名称。
+        await expect(label).toHaveText(copy.label)
+        await expect(description).toHaveText(copy.description)
+        await expect(yoloSwitch).toHaveAccessibleName(copy.label)
+        await expect(yoloSwitch).toHaveAttribute('aria-checked', 'false')
+
+        // 滚到行可见位置，让几何断言和截图都基于同一个稳定状态。
+        await row.scrollIntoViewIfNeeded()
+
+        const labelBox = (await label.boundingBox())!
+        const descriptionBox = (await description.boundingBox())!
+        const textBox = (await text.boundingBox())!
+        const switchBox = (await yoloSwitch.boundingBox())!
+
+        // 标签在上、说明在下且左缘对齐：说明换行也不会挤回标签同一行。
+        expect(labelBox.y + labelBox.height).toBeLessThanOrEqual(descriptionBox.y + 0.5)
+        expect(Math.abs(descriptionBox.x - labelBox.x)).toBeLessThanOrEqual(1)
+
+        // 开关在文字块右侧，并与文字块的垂直中心对齐。
+        expect(switchBox.x).toBeGreaterThanOrEqual(textBox.x + textBox.width)
+        const textCenterY = textBox.y + textBox.height / 2
+        const switchCenterY = switchBox.y + switchBox.height / 2
+        expect(Math.abs(switchCenterY - textCenterY)).toBeLessThanOrEqual(1)
+
+        // 该行与弹窗、页面都不产生横向溢出。
+        expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+        expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+        ).toBe(true)
+
+        await page.screenshot({
+          path: testInfo.outputPath(`chat-yolo-row-${locale}-${viewport.name}-${viewport.width}x${viewport.height}.png`),
+          animations: 'disabled',
+        })
+      })
+    }
+  }
 })

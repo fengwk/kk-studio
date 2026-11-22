@@ -352,3 +352,51 @@ test.describe('Real Models and Providers panels layout and CreateCard contract',
     await expect(actionLog).toHaveText('create-provider-populated')
   })
 })
+
+const PROVIDER_CARD_URL = '/browser-tests/resource-card-harness.html?provider=1'
+
+/** 供应商卡片文案的截图矩阵：中英双语 × 桌面/窄屏视口。 */
+const PROVIDER_CARD_VIEWPORTS = [
+  { name: '1440x900', width: 1440, height: 900 },
+  { name: '390x844', width: 390, height: 844 },
+] as const
+
+const PROVIDER_CARD_LOCALES = [
+  { locale: 'zh-CN', baseUrlLabel: '基础 URL' },
+  { locale: 'en-US', baseUrlLabel: 'Base URL' },
+] as const
+
+test.describe('Provider card base URL label', () => {
+  for (const viewport of PROVIDER_CARD_VIEWPORTS) {
+    for (const { locale, baseUrlLabel } of PROVIDER_CARD_LOCALES) {
+      const suffix = `${viewport.name}-${locale}`
+
+      test(`labels the provider endpoint with the form wording at ${suffix}`, async ({
+        page,
+      }, testInfo) => {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await page.goto(`${PROVIDER_CARD_URL}&locale=${locale}`)
+        const card = page.locator('article.resource-card')
+        await expect(card).toBeVisible()
+
+        const endpoint = card.locator('.resource-card-meta-row').filter({ hasText: 'https://api.openai.com/v1' })
+        await expect(endpoint.locator('.resource-card-meta-label')).toHaveText(baseUrlLabel)
+
+        // 截图必须能证明整张卡片可见：卡片完整落在视口内且无横向溢出。
+        const cardBox = (await card.boundingBox())!
+        expect(cardBox.x).toBeGreaterThanOrEqual(0)
+        expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width + 0.5)
+        expect(cardBox.y).toBeGreaterThanOrEqual(0)
+        expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(viewport.height + 0.5)
+        const overflow = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+
+        await page.evaluate(() => document.fonts.ready.then(() => undefined))
+        await page.screenshot({ path: testInfo.outputPath(`provider-card-${suffix}.png`) })
+      })
+    }
+  }
+})

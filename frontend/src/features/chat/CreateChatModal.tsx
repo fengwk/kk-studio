@@ -10,6 +10,7 @@ import { AgentSelect } from '@/features/thread/AgentSelect'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
+import '@/features/chat/create-chat-modal.css'
 
 export function CreateChatModal({
   open,
@@ -133,10 +134,10 @@ export function CreateChatModal({
             {agentError ? <span className="field-error">{agentError}</span> : null}
           </div>
           <div className="form-group">
-            <div className="settings-row">
-              <div className="settings-row-text">
+            <div className="create-chat-yolo-row">
+              <div className="create-chat-yolo-text">
                 <FieldLabel>{t('projects.yolo')}</FieldLabel>
-                <span className="settings-row-description">
+                <span className="create-chat-yolo-description">
                   {t('ai.chat.yoloDescription')}
                 </span>
               </div>
