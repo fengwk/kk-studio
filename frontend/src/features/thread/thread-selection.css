@@ -153,9 +153,9 @@
   white-space: nowrap;
 }
 
-/* 搜索命中词：与历史树命中同一表面与文字色。 */
+/* 搜索命中词：与历史树命中同样式；底色在普通、活动（--surface-active）和已选（--accent-soft）行上都可辨。 */
 .thread-selection-mark {
-  background: var(--surface-active);
+  background: var(--accent-soft-hover);
   color: var(--fg);
   border-radius: 2px;
 }

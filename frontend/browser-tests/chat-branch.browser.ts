@@ -1407,6 +1407,10 @@ for (const locale of LOCALES) {
       const hitBox = (await deepHit.boundingBox())!
       const subtitleBox = (await sessionSubtitle.boundingBox())!
       expect(hitBox.x + hitBox.width).toBeLessThanOrEqual(subtitleBox.x + subtitleBox.width + 0.5)
+      // 唯一的结果行就是活动行：命中底色必须与活动行底色不同。
+      await expect(sessionRow).toHaveAttribute('aria-selected', 'true')
+      expect(await deepHit.evaluate((element) => getComputedStyle(element).backgroundColor))
+        .not.toBe(await sessionRow.evaluate((element) => getComputedStyle(element).backgroundColor))
       await captureShot(page, testInfo, shotName(locale, viewport, 'session-selection-deep-hit'))
       // 链接地址不是可见的预览文本，不参加匹配。
       await search.fill('example.test/runbook')

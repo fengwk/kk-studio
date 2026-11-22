@@ -53,7 +53,7 @@ const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixtur
       argumentsJson: JSON.stringify({
         questions: [
           {
-            question: '请选择需要归档的产物',
+            question: '请选择本次发布需要归档到长期存储并同步给值班同学的产物',
             multiple: true,
             options: [{ label: '构建日志' }, { label: '测试报告' }, { label: '界面截图' }],
           },
@@ -71,7 +71,7 @@ const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixtur
       argumentsJson: JSON.stringify({
         questions: [
           {
-            question: 'Choose the artifacts to archive',
+            question: 'Choose the build artifacts to archive in long-term storage and share with on-call',
             multiple: true,
             options: [{ label: 'Build log' }, { label: 'Test report' }, { label: 'UI screenshots' }],
           },

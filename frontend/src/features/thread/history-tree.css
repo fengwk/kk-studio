@@ -129,8 +129,9 @@
   color: var(--fg);
 }
 
+/* 命中底色不同于选中行的 --surface-active，选中行里仍可辨。 */
 .history-tree-mark {
-  background: var(--surface-active);
+  background: var(--accent-soft-hover);
   color: var(--fg);
   border-radius: 2px;
 }

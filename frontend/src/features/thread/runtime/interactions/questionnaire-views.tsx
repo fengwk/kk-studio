@@ -43,7 +43,7 @@ export function QuestionnaireCompletedView({
             <div key={idx} className="interaction-question-item">
               <div className="interaction-question-title">
                 <span className="interaction-question-idx">{idx + 1}.</span>
-                <span>{q.question}</span>
+                <span className="interaction-question-text">{q.question}</span>
               </div>
               <div className="interaction-completed-answers">
                 {ans.map((a, aIdx) => (

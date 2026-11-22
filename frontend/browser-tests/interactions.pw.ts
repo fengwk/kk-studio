@@ -820,7 +820,7 @@ test.describe('questionnaire option semantics and read-only answers', () => {
     await openQuestionnaireHarness(page, 'multi')
 
     await expect(page.getByRole('radiogroup')).toHaveCount(0)
-    const group = page.getByRole('group', { name: '请选择需要归档的产物' })
+    const group = page.getByRole('group', { name: '请选择本次发布需要归档到长期存储并同步给值班同学的产物' })
     await expect(group).toBeVisible()
     const boxes = group.getByRole('checkbox')
     await expect(boxes).toHaveCount(3)
@@ -842,6 +842,23 @@ test.describe('questionnaire option semantics and read-only answers', () => {
     await expect(boxes.nth(0)).toHaveAttribute('aria-checked', 'false')
     await expect(boxes.nth(2)).toHaveAttribute('aria-checked', 'true')
   })
+
+  // 窄屏长题目换行时，编号与题型标记保持完整：编号不被挤成「1」「.」两行。
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    test(`a long question wraps while its number stays on one line at 390px (${locale})`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await openQuestionnaireHarness(page, 'multi', locale)
+
+      const title = page.locator('.interaction-question-title')
+      const number = title.locator('.interaction-question-idx')
+      const lineHeight = await number.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight))
+      const numberBox = (await number.boundingBox())!
+      const textBox = (await title.locator('.interaction-question-text').boundingBox())!
+      expect(textBox.height).toBeGreaterThan(lineHeight * 1.5)
+      expect(numberBox.height).toBeLessThanOrEqual(lineHeight + 1)
+      await expect(number).toHaveText('1.')
+    })
+  }
 
   test('answered questionnaire is read-only and shows the chosen answers', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
