@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.infra.platform.PlatformCanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.time.Instant;
@@ -176,28 +177,27 @@ class CanvasFunctionRunCollaboratorsTest {
     assertEquals(0, outputs.get(0).index());
   }
 
-  /** 名称未声明时由节点名派生，两个同 kind 槽位会撞名：启动期必须先拒绝，而不是等物化时才冲突。 */
+  /** 显式名与派生名在具体节点名上撞名时，启动期必须以 400 校验错误拒绝，而不是落到 500。 */
   @Test
-  void freezeOutputsRejectsDuplicateResolvedNames() {
-    CanvasFunctionDefinition duplicateNames =
+  void freezeOutputsRejectsNodeDependentNameCollisionsAsValidation() {
+    CanvasFunctionDefinition collidesOnNodeName =
         new CanvasFunctionDefinition(
-            "test.duplicate",
-            "Duplicate",
+            "test.collision",
+            "Collision",
             CanvasJson.parseObject(
                 "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{}}"),
             List.of(
-                new CanvasFunctionOutputSpec(CanvasResourceKind.IMAGE, null),
-                new CanvasFunctionOutputSpec(CanvasResourceKind.IMAGE, null)),
+                CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "output.png"),
+                CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)),
             new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 0, Map.of()));
 
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> CanvasFunctionRunPlan.freezeOutputs("output", duplicateNames));
+            DomainException.class,
+            () -> CanvasFunctionRunPlan.freezeOutputs("output", collidesOnNodeName));
 
-    assertTrue(
-        error.getMessage().startsWith("Function output names must be unique within a run"),
-        error.getMessage());
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
+    assertTrue(error.getMessage().contains("output.png"), error.getMessage());
   }
 
   /** 未物化的槽位（无 Resource 行）不能发布。 */

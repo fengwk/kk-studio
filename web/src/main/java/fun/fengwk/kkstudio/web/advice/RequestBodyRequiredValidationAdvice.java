@@ -37,9 +37,20 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-/** 在 JSON 树中以字段或 record 组件的类型注解校验必填属性。 */
+/**
+ * 在 JSON 树中以字段或 record 组件的类型注解校验必填属性。
+ *
+ * <p>请求体先按 {@link #MAX_BODY_BYTES} 有界读取：超限请求在任何解析之前失败为 413，避免把整段请求体读入堆。
+ */
 @ControllerAdvice
 public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapter {
+
+  /**
+   * 公开 JSON 请求体的传输上限（UTF-8 字节）。
+   *
+   * <p>配置导入允许最多 8 × 1024² 个 UTF-16 单元；常规 UTF-8 JSON 编码的 YAML 字段最多约 24 MiB，需为请求其余字段留余量。
+   */
+  static final int MAX_BODY_BYTES = 32 * 1024 * 1024;
 
   private final ObjectMapper mapper;
   private final ConcurrentMap<Class<?>, List<Property>> metadata = new ConcurrentHashMap<>();
@@ -64,7 +75,7 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
       Type targetType,
       Class<? extends HttpMessageConverter<?>> converterType)
       throws IOException {
-    byte[] bytes = input.getBody().readAllBytes();
+    byte[] bytes = readBounded(input.getBody());
     JsonNode tree;
     try {
       tree = mapper.readTree(bytes);
@@ -75,6 +86,15 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
     validatePresence(
         tree, mapper.constructType(targetType), parameter.getParameter().getAnnotatedType(), "");
     return new CapturedInput(input.getHeaders(), bytes);
+  }
+
+  /** 有界读取：最多保留上限加一个字节用于判定越界，超限立即 413。 */
+  private static byte[] readBounded(InputStream body) throws IOException {
+    byte[] bytes = body.readNBytes(MAX_BODY_BYTES + 1);
+    if (bytes.length > MAX_BODY_BYTES) {
+      throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "request body is too large");
+    }
+    return bytes;
   }
 
   private void validatePresence(

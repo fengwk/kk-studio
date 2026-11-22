@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,7 +22,8 @@ import java.util.Optional;
  *
  * <p>cookie 严格绑定 Environment + Daemon 实例 + viewId + bindingEpoch，并只通过 view 作用域 Path 下发。本类只管理一次性
  * bootstrap 之后的 cookie 生命周期；视图是否存在、是否仍属于该 epoch 与 workspace 完全由 {@link
- * fun.fengwk.kkstudio.ide.IdeViewSnapshotStore} 的唯一权威快照裁决。
+ * fun.fengwk.kkstudio.ide.IdeViewSnapshotStore} 的唯一权威快照裁决。签发新 cookie 时回收已过期条目与同一 view 更旧 epoch 的
+ * 条目，条目数不随历史打开次数增长。
  */
 @Component
 public final class IdeBrowserSessionRegistry {
@@ -72,11 +74,10 @@ public final class IdeBrowserSessionRegistry {
     synchronized (lock) {
       SessionKey key = new SessionKey(identity, viewId, bindingEpoch);
       Instant now = clock.instant();
+      reclaim(identity, viewId, bindingEpoch, now);
       String existingToken = tokenBySessionKey.get(key);
       SessionState existing = existingToken == null ? null : sessions.get(existingToken);
-      if (existing != null
-          && existing.expiresAt.isAfter(now)
-          && existing.workspacePath.equals(workspacePath)) {
+      if (existing != null && existing.workspacePath.equals(workspacePath)) {
         existing.expiresAt = now.plus(sessionTtl);
         return existingToken;
       }
@@ -111,6 +112,28 @@ public final class IdeBrowserSessionRegistry {
       }
       return Optional.of(
           new Session(state.identity, state.viewId, state.bindingEpoch, state.workspacePath));
+    }
+  }
+
+  /**
+   * 回收已过期条目与同一 view 更旧 epoch 的条目，避免注册表随历史打开次数单调增长。
+   *
+   * <p>只回收严格更旧的 epoch：迟到的旧 epoch 打开不能撤销新 epoch 已签发的 cookie。
+   */
+  private void reclaim(
+      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, Instant now) {
+    Iterator<Map.Entry<String, SessionState>> iterator = sessions.entrySet().iterator();
+    while (iterator.hasNext()) {
+      SessionState state = iterator.next().getValue();
+      boolean expired = !state.expiresAt.isAfter(now);
+      boolean staleEpoch =
+          state.bindingEpoch < bindingEpoch
+              && state.identity.equals(identity)
+              && state.viewId.equals(viewId);
+      if (expired || staleEpoch) {
+        iterator.remove();
+        tokenBySessionKey.remove(state.key());
+      }
     }
   }
 

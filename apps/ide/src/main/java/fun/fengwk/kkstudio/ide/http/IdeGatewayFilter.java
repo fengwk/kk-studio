@@ -65,7 +65,8 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
 
     String remainder = matcher.group(2);
     if (remainder == null) {
-      redirectToViewRoot(request, response, environmentId);
+      // 缺 viewId 的环境根不是可进入的数据面地址；不再 301 到同样返回 404 的尾斜杠形式。
+      response.sendError(HttpServletResponse.SC_NOT_FOUND);
       return;
     }
     String query = request.getQueryString();
@@ -94,18 +95,6 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
     String viewPath = tail.substring(slash);
     String rawPathAndQuery = (query == null || query.isEmpty()) ? viewPath : viewPath + "?" + query;
     dataPlane.handleBrowserTraffic(environmentId, viewId, rawPathAndQuery, request, response);
-  }
-
-  private static void redirectToViewRoot(
-      HttpServletRequest request, HttpServletResponse response, EnvironmentId environmentId) {
-    String contextPath = request.getContextPath() == null ? "" : request.getContextPath();
-    String location = contextPath + IdeGatewayConstants.ROUTE_PREFIX + environmentId + "/";
-    String query = request.getQueryString();
-    if (query != null && !query.isEmpty()) {
-      location += "?" + query;
-    }
-    response.setStatus(HttpServletResponse.SC_MOVED_PERMANENTLY);
-    response.setHeader("Location", location);
   }
 
   private static String relativePath(HttpServletRequest request) {

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.canvas.function;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -16,6 +17,8 @@ import java.util.Set;
  *
  * <p>{@code outputs} 是有界的输出计划：启动时按槽位预分配 Resource ID 并写入 Run checkpoint，成功发布时按该顺序原子挂接。槽位类型可以是 {@code
  * TEXT}（内联文本）或媒体，因此一个函数可以同时产出文本与媒体。
+ *
+ * <p>输出名在声明期即要求唯一：显式名不得重复，每个 kind 至多保留一个无名槽位（其余槽位必须显式命名），因为无名槽位按节点名与类型后缀推导出同名，不允许留到 Run 启动才暴露。
  */
 public record CanvasFunctionDefinition(
     String name,
@@ -41,10 +44,17 @@ public record CanvasFunctionDefinition(
           "outputs must not exceed " + CanvasFunctionOutputSpec.MAX_OUTPUTS + " slots");
     }
     Set<String> explicitNames = new HashSet<>();
+    Set<CanvasResourceKind> derivedKinds = EnumSet.noneOf(CanvasResourceKind.class);
     for (CanvasFunctionOutputSpec output : outputs) {
       Objects.requireNonNull(output, "outputs contains null");
-      if (output.name() != null && !explicitNames.add(output.name())) {
-        throw new IllegalArgumentException("outputs must not declare duplicate names");
+      if (output.name() != null) {
+        if (!explicitNames.add(output.name())) {
+          throw new IllegalArgumentException("outputs must not declare duplicate names");
+        }
+      } else if (!derivedKinds.add(output.kind())) {
+        // 无名槽位按「节点名 + kind 后缀」推导名称，同 kind 的多个无名槽位必然重名。
+        throw new IllegalArgumentException(
+            "outputs must not declare more than one unnamed slot of kind " + output.kind());
       }
     }
     Objects.requireNonNull(referencePolicy, "referencePolicy");

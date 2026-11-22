@@ -71,6 +71,36 @@ class IdeGatewayFilterTest {
     verifyNoInteractions(dataPlane);
   }
 
+  @Test
+  void environmentRootWithoutViewIsNotFound() throws Exception {
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane);
+    FilterChain chain = mock(FilterChain.class);
+
+    HttpServletRequest req = request("/ide/" + ENV, null);
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    filter.doFilter(req, res, chain);
+
+    verify(res).sendError(HttpServletResponse.SC_NOT_FOUND);
+    verifyNoInteractions(dataPlane);
+  }
+
+  @Test
+  void environmentRootWithTrailingSlashIsNotFound() throws Exception {
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane);
+    FilterChain chain = mock(FilterChain.class);
+
+    HttpServletRequest req = request("/ide/" + ENV + "/", null);
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    filter.doFilter(req, res, chain);
+
+    verify(res).sendError(HttpServletResponse.SC_NOT_FOUND);
+    verifyNoInteractions(dataPlane);
+  }
+
   private static HttpServletRequest request(String uri, String query) {
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getRequestURI()).thenReturn(uri);

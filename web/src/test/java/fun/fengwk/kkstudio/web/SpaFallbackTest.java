@@ -1,15 +1,20 @@
 package fun.fengwk.kkstudio.web;
 
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -26,10 +31,11 @@ import org.springframework.test.web.servlet.MockMvc;
  *   <li>不存在且带文件扩展名的资源返回 404 而不是 {@code index.html}；
  *   <li>不存在且无扩展名的前端 GET（如 {@code /chats/123}、{@code /canvas}）返回 {@code index.html}；
  *   <li>非 GET 请求不会触发 fallback。
+ *   <li>SPA 外壳每次回源验证，带 hash 的构建产物长期缓存且 immutable，其它静态文件与缺失资源不带缓存策略。
  * </ul>
  *
- * <p>本测试不依赖 distribution profile，可在普通 {@code mvn test} 中运行；测试资源 {@code static/index.html} 与 {@code
- * static/assets/index.js} 由 {@code src/test/resources} 提供。
+ * <p>本测试不依赖 distribution profile，可在普通 {@code mvn test} 中运行；测试资源 {@code static/index.html}、{@code
+ * static/assets/index.js} 与 {@code static/plain.txt} 由 {@code src/test/resources} 提供。
  */
 @AutoConfigureMockMvc
 public class SpaFallbackTest extends WebPostgresTestSupport {
@@ -115,5 +121,61 @@ public class SpaFallbackTest extends WebPostgresTestSupport {
   @Test
   public void shouldNotFallbackForNonGetOnSpaRoute() throws Exception {
     mockMvc.perform(post("/chats/123")).andExpect(status().is4xxClientError());
+  }
+
+  /** 带内容 hash 的构建产物可以按文件名永久缓存，重新部署不会改变同名文件的内容。 */
+  @Test
+  public void shouldCacheHashedBuildAssetsImmutably() throws Exception {
+    mockMvc
+        .perform(get("/assets/index.js"))
+        .andExpect(status().isOk())
+        .andExpect(
+            header()
+                .string(
+                    HttpHeaders.CACHE_CONTROL,
+                    allOf(
+                        containsString("max-age=31536000"),
+                        containsString("public"),
+                        containsString("immutable"))));
+  }
+
+  /** 外壳必须每次回源验证：否则升级后浏览器可能继续加载引用已删除 hash 资源的旧 index.html。 */
+  @Test
+  public void shouldRevalidateTheSpaShell() throws Exception {
+    for (String path : new String[] {"/index.html", "/chats/123", "/canvas"}) {
+      mockMvc
+          .perform(get(path))
+          .andExpect(status().isOk())
+          .andExpect(content().string(containsString(INDEX_BODY_FRAGMENT)))
+          .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"));
+    }
+    mockMvc
+        .perform(head("/index.html"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"));
+    // 根路径由 Boot 的 welcome page 转发到 index.html，同样属于外壳。
+    mockMvc
+        .perform(get("/"))
+        .andExpect(status().isOk())
+        .andExpect(forwardedUrl("index.html"))
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"));
+  }
+
+  /** 其它静态文件保持默认协商，缺失的资源也不能被当作可缓存结果下发。 */
+  @Test
+  public void shouldLeaveOtherAndMissingStaticFilesWithoutCachePolicy() throws Exception {
+    mockMvc
+        .perform(get("/plain.txt"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("kkStudioPlainStaticFile")))
+        .andExpect(header().doesNotExist(HttpHeaders.CACHE_CONTROL));
+    mockMvc
+        .perform(get("/assets/index-missing.js"))
+        .andExpect(status().isNotFound())
+        .andExpect(header().doesNotExist(HttpHeaders.CACHE_CONTROL));
+    mockMvc
+        .perform(get("/studio-missing.txt"))
+        .andExpect(status().isNotFound())
+        .andExpect(header().doesNotExist(HttpHeaders.CACHE_CONTROL));
   }
 }

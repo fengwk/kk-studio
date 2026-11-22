@@ -103,6 +103,45 @@ class CanvasFunctionDefinitionTest {
         () -> new CanvasFunctionDefinition("image.crop", "Crop", schema, singleImagePlan(), null));
   }
 
+  /** 缺省名由「节点名 + kind 后缀」推导，因此同一 kind 的第二个无名槽位必然与前者重名：定义期即拒绝，而不是等 Run 启动才失败。 */
+  @Test
+  void rejectsOutputSlotsWhoseDerivedNamesCollide() {
+    JsonObject schema = schema();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasFunctionDefinition(
+                "fake.pair",
+                "Pair",
+                schema,
+                List.of(
+                    CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE),
+                    CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)),
+                policy()));
+
+    // 不同 kind 的派生名后缀不同，可以并存；同 kind 的其余槽位显式命名也能消除冲突。
+    assertDoesNotThrow(
+        () ->
+            new CanvasFunctionDefinition(
+                "fake.mixed",
+                "Mixed",
+                schema,
+                List.of(
+                    CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE),
+                    CanvasFunctionOutputSpec.of(CanvasResourceKind.TEXT)),
+                policy()));
+    assertDoesNotThrow(
+        () ->
+            new CanvasFunctionDefinition(
+                "fake.named",
+                "Named",
+                schema,
+                List.of(
+                    CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE),
+                    CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "preview.png")),
+                policy()));
+  }
+
   /** 输出计划暴露类型与名称推导：显式名优先，缺省名由节点名加类型后缀生成。 */
   @Test
   void exposesDeclaredNameDescriptionSchemaAndOutputPlan() {

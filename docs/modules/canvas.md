@@ -127,7 +127,7 @@ Function 的能力契约（adapter、函数定义、冻结运行计划、执行�
 
 [`CanvasFunctionAdapter`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionAdapter.java) 提供 `functions/enabled/unavailableReason/preflight/submit/execute/cancel`。[`CanvasFunctionDefinition`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionDefinition.java) 声明小写 canonical token 形式的 `name`、`description`、[`CanvasFunctionArgsSchema`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsSchema.java)、输出计划与 [`CanvasFunctionReferencePolicy`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionReferencePolicy.java)：
 
-- 输出计划是 1..8 个 [`CanvasFunctionOutputSpec`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionOutputSpec.java) 槽位，每个槽位声明 `kind`（`TEXT|IMAGE|VIDEO|AUDIO`，见 [`CanvasResourceKind`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasResourceKind.java)）与可选显式资源名：`TEXT` 以内联文本发布，其余以 Blob 发布；显式名在函数内唯一，缺省名由节点名加类型后缀推导。
+- 输出计划是 1..8 个 [`CanvasFunctionOutputSpec`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionOutputSpec.java) 槽位，每个槽位声明 `kind`（`TEXT|IMAGE|VIDEO|AUDIO`，见 [`CanvasResourceKind`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasResourceKind.java)）与可选显式资源名：`TEXT` 以内联文本发布，其余以 Blob 发布；显式名在函数内唯一，缺省名由节点名加类型后缀推导，因此同 kind 至多一个槽位可以省略名称（其余槽位必须显式命名），否则定义构造即拒绝、插件目录构建随之失败。显式名与某个节点上推导出的名称相同时，Run 启动以 400 校验错误拒绝。
 - 参数 schema 是严格 JSON Schema 子集：根必须是 object，每层 object 都显式 `additionalProperties: false`；关键字支持 `type/description/properties/required/additionalProperties/enum/default/minimum/maximum/items/minItems/maxItems`，类型支持 `object|string|integer|number|boolean|array|resourceReference`；嵌套深度上限 8，array 必须声明 `items` 且 `maxItems <= 32`。
 - 参数与 schema 都用 [`CanvasJson`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasJson.java) 表示：严格解析（拒绝重复键、尾随内容与超限嵌套），对象保留插入顺序。`write()` 是持久化与 API 的唯一文本：压缩空白、保留该顺序、数值去尾零。JSON 语义相等的值 `equals` 相等，但键顺序不同时文本不一定相同。命令与目录指纹使用 `writeCanonical()`，递归按对象键字典序写出、保留数组顺序，因此对象键序不改变幂等身份。`MAX_LENGTH` 同时约束输入与写出文本。
 
@@ -162,7 +162,7 @@ Canvas 负责 Run 的状态、调度、资源保护与人工决议；能力契�
 现有 Run 为 READY/RUNNING 或待核实的 UNKNOWN 且 requestId 不同：conflict
 租用目录 -> 按名找函数（已移除即 conflict）-> 比较完整定义指纹与 expectedVersion
 -> 严格解码 args -> 冻结引用 manifest（节点存在、index 在范围内且是 blob）与媒体事实
--> 按输出计划预分配 resource id，构造 submitState=PENDING 的冻结计划 -> adapter.preflight
+-> 按输出计划预分配 resource id（显式名与推导名在节点名上撞名即 400），构造 submitState=PENDING 的冻结计划 -> adapter.preflight
 -> 释放上一个 Run 的 pin -> 写入 READY Run（同事务请求 Work）-> 写 INPUT pin -> revision + 1
 ```
 
