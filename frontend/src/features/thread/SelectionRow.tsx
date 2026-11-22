@@ -9,6 +9,13 @@ export interface SelectionPanelItem {
   searchText?: string
 }
 
+/** 行内重命名动作：可访问名带对象名，悬停提示保持调用方给定的文案。 */
+export interface SelectionRenameAction {
+  tooltip: string
+  ariaLabel: string
+  onRename: () => void
+}
+
 export interface SelectionRowProps {
   item: SelectionPanelItem
   optionId?: string
@@ -17,20 +24,22 @@ export interface SelectionRowProps {
   disabled: boolean
   /** 当前项旁的“已选”文案。 */
   selectedLabel: string
-  /** 行内重命名动作的 aria-label；缺省时不渲染该动作。 */
-  renameLabel?: string
+  /** 行内重命名动作；缺省时不渲染。 */
+  rename?: SelectionRenameAction
   /** 当前搜索的小写 token；为空时不高亮。 */
   searchTokens: string[]
   onHover: () => void
+  /** 行获得焦点：进入 Tab 序列的行就是活动项，Enter 必须提交它。 */
+  onFocus: () => void
   onSelect: () => void
-  onRename?: () => void
 }
 
 /**
  * 选择面板的一行。
  *
  * 行本身是 `role=option` 按钮：鼠标按下不抢焦点（否则会打断搜索框输入），
- * hover/move 只登记活动项。重命名动作是行内独立按钮，Enter/空格不冒泡成整行提交。
+ * hover/move 与焦点都把该行登记为活动项。重命名动作是行内独立按钮，
+ * Enter/空格不冒泡成整行提交。
  * 标题与副标题按可用宽度单行省略，搜索时优先显示命中词。
  */
 export function SelectionRow({
@@ -40,11 +49,11 @@ export function SelectionRow({
   current,
   disabled,
   selectedLabel,
-  renameLabel,
+  rename,
   searchTokens,
   onHover,
+  onFocus,
   onSelect,
-  onRename,
 }: SelectionRowProps) {
   return (
     <li className="thread-selection-row">
@@ -62,6 +71,7 @@ export function SelectionRow({
           current ? 'current' : '',
         ].filter(Boolean).join(' ')}
         disabled={disabled}
+        onFocus={onFocus}
         onMouseMove={onHover}
         onMouseDown={(event) => event.preventDefault()}
         onClick={onSelect}
@@ -77,12 +87,12 @@ export function SelectionRow({
           </span>
         ) : null}
       </button>
-      {onRename && renameLabel ? (
+      {rename ? (
         <button
           type="button"
           className="thread-selection-rename"
-          aria-label={renameLabel}
-          title={renameLabel}
+          aria-label={rename.ariaLabel}
+          title={rename.tooltip}
           disabled={disabled}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -91,7 +101,7 @@ export function SelectionRow({
           }}
           onClick={(event) => {
             event.stopPropagation()
-            onRename()
+            rename.onRename()
           }}
         >
           <Pencil aria-hidden="true" />

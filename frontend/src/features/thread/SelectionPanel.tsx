@@ -8,7 +8,7 @@ import {
 import { Search } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
-import { SelectionLoadMoreRow, SelectionRow, type SelectionPanelItem } from '@/features/thread/SelectionRow'
+import { SelectionLoadMoreRow, SelectionRow, type SelectionPanelItem, type SelectionRenameAction } from '@/features/thread/SelectionRow'
 import { useSelectionKeyboard } from '@/features/thread/useSelectionKeyboard'
 import { useI18n } from '@/shared/i18n'
 import './thread-selection.css'
@@ -28,15 +28,13 @@ export interface SelectionPanelProps {
   controls?: ReactNode
   loading?: boolean
   selectionPending?: boolean
-  /** 行内重命名动作的 aria-label；缺省时不渲染该动作。 */
+  /** 行内重命名动作的悬停提示；缺省时不渲染该动作。 */
   renameLabel?: string
   emptyText?: string
   /** 是否还有未加载的选项页；与 onLoadMore 同时给出才渲染加载更多入口。 */
   hasMore?: boolean
   loadingMore?: boolean
   onLoadMore?: () => void
-  onCycleControl?: () => void
-  cycleControlHint?: string
   onRename?: (id: string) => void
   onSelect: (id: string) => void | Promise<void>
   onClose: () => void
@@ -87,8 +85,6 @@ export function SelectionPanel({
   hasMore = false,
   loadingMore = false,
   onLoadMore,
-  onCycleControl,
-  cycleControlHint,
   onRename,
   onSelect,
   onClose,
@@ -111,7 +107,6 @@ export function SelectionPanel({
     selectionPending,
     onSelect,
     onClose,
-    onCycleControl,
     searchRef,
   })
 
@@ -139,9 +134,19 @@ export function SelectionPanel({
     active?.scrollIntoView({ block: 'nearest' })
   }, [activeId])
 
-  const renameItem = onRename == null ? undefined : (id: string) => {
-    setActiveId(id)
-    onRename(id)
+  const renameOf = (item: SelectionPanelItem): SelectionRenameAction | undefined => {
+    if (onRename == null || renameLabel == null) {
+      return undefined
+    }
+    return {
+      tooltip: renameLabel,
+      // 每行都自报对象名，读屏不会听到一串同样的“重命名”。
+      ariaLabel: t('ai.chat.selection.rename', { name: item.title }),
+      onRename: () => {
+        setActiveId(item.id)
+        onRename(item.id)
+      },
+    }
   }
 
   const listId = inlineId == null ? undefined : `${inlineId}-list`
@@ -211,11 +216,11 @@ export function SelectionPanel({
             current={item.id === selectedId}
             disabled={selectionPending}
             selectedLabel={t('ai.chat.selected')}
-            renameLabel={renameLabel}
+            rename={renameOf(item)}
             searchTokens={searchTokens ?? []}
             onHover={() => setActiveId(item.id)}
+            onFocus={() => setActiveId(item.id)}
             onSelect={() => void onSelect(item.id)}
-            onRename={renameItem == null ? undefined : () => renameItem(item.id)}
           />
         ))}
         {!loading && !catalogError && !loadFailed && hasMore && onLoadMore ? (
@@ -250,7 +255,6 @@ export function SelectionPanel({
       footer={t('ai.chat.selection.meta', {
         visible: filteredItems.length,
         total: items.length,
-        cycle: cycleControlHint ? ` · ${cycleControlHint}` : '',
       })}
     >
       {content}

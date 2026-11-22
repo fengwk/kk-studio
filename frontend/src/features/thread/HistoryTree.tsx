@@ -65,6 +65,20 @@ export function HistoryTree({
     searchRef.current?.focus({ preventScroll: true })
   }, [])
 
+  function changeSearchQuery(query: string) {
+    setSearchQuery(query)
+    const nextTokens = historySearchTokens(query)
+    if (nextTokens.length === 0 || (selectedRow && historyRowMatches(selectedRow, nextTokens))) {
+      return
+    }
+    const firstHit = rows.find((row) => historyRowMatches(row, nextTokens))
+    if (firstHit) {
+      setSelectedId(firstHit.entry.entryId)
+    }
+  }
+
+  const hasNoMatches = tokens.length > 0 && matchedIds.size === 0
+
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {
       return
@@ -77,14 +91,13 @@ export function HistoryTree({
       event.preventDefault()
       event.stopPropagation()
       moveSelection(event.key === 'ArrowDown' ? 1 : -1)
-    } else if (event.key === 'Enter' && selectedRow?.canFork) {
+    } else if (event.key === 'Enter' && !loading && !queryError && !hasNoMatches && selectedRow?.canFork) {
       event.preventDefault()
       event.stopPropagation()
       onFork(selectedRow.entry)
     }
   }
 
-  const matchCount = matchedIds.size
   return (
     <ThreadInteractionPanel
       title={t('ai.chat.branch.historyTree')}
@@ -102,7 +115,7 @@ export function HistoryTree({
             value={searchQuery}
             placeholder={t('ai.chat.history.search')}
             aria-label={t('ai.chat.history.search')}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onChange={(event) => changeSearchQuery(event.target.value)}
           />
         </label>
       )}
@@ -125,7 +138,7 @@ export function HistoryTree({
       ) : null}
       {!loading && !queryError && rows.length > 0 ? (
         <>
-          {tokens.length > 0 && matchCount === 0 ? (
+          {hasNoMatches ? (
             <div className="history-tree-no-match">
               {t('ai.chat.history.noMatch', { query: searchQuery.trim() })}
             </div>

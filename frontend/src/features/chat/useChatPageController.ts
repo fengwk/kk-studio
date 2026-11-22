@@ -61,16 +61,21 @@ export function useChatPageController() {
     },
     [locale, rawMutationError],
   )
+  // 分页失败只影响「加载更多」这一动作：就地提示并允许重试，不并入页面级 error 覆盖已加载的列表。
+  const rawLoadMoreError = chatController.chatsLoadMoreError
+  const loadMoreError = useMemo(
+    () => {
+      void locale
+      return rawLoadMoreError ? toUserFacingErrorMessage(rawLoadMoreError) : null
+    },
+    [locale, rawLoadMoreError],
+  )
 
   return {
     search,
     setSearch,
     busy: agentsQuery.isLoading || chatController.chatsQuery.isLoading,
-    error:
-      agentsQuery.error
-      ?? chatController.chatsQuery.error
-      ?? chatController.chatsLoadMoreError
-      ?? null,
+    error: agentsQuery.error ?? chatController.chatsQuery.error ?? null,
     mutationError,
     chatPanelProps: {
       chats,
@@ -82,6 +87,7 @@ export function useChatPageController() {
       setup,
       hasMore: chatController.hasMoreChats,
       loadingMore: chatController.chatsLoadingMore,
+      loadMoreError,
       onLoadMore: () => void chatController.loadMoreChats(),
     },
     createChatModal: chatController.createChatModal,

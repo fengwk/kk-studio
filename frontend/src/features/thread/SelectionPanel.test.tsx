@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AgentSelectionPanel,
   SelectionPanel,
 } from '@/features/thread/SelectionPanel'
+import { setLocale } from '@/shared/i18n'
 
 describe('SelectionPanel', () => {
   it('focuses search, filters by typing, and confirms the active item with Enter', async () => {
@@ -246,9 +247,8 @@ describe('SelectionPanel', () => {
     expect(screen.queryByText(/没有匹配/)).not.toBeInTheDocument()
   })
 
-  it('cycles the sort control with Tab, refocuses search, and shows the hint in the footer', async () => {
+  it('leaves Tab to native focus movement and shows no sort-cycle hint', async () => {
     const user = userEvent.setup()
-    const onCycleControl = vi.fn()
     render(
       <SelectionPanel
         title="选择 Session"
@@ -256,31 +256,45 @@ describe('SelectionPanel', () => {
           { id: 's1', title: 'Alpha' },
           { id: 's2', title: 'Beta' },
         ]}
-        onCycleControl={onCycleControl}
-        cycleControlHint="Tab 切换排序"
         onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    // Tab 不再被改写成「切换排序」：焦点按原生顺序进入选项行，footer 只说明保留的键位。
+    await user.tab()
+    expect(screen.getByRole('option', { name: /Alpha/ })).toHaveFocus()
+    expect(screen.getByText('2 / 2 · ↑↓ 选择 · Enter 确认 · Esc 返回')).toBeInTheDocument()
+  })
+
+  it('selects the row that keyboard focus lands on instead of the hover cursor', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <SelectionPanel
+        title="选择 Session"
+        items={[
+          { id: 's1', title: 'Alpha' },
+          { id: 's2', title: 'Beta' },
+          { id: 's3', title: 'Gamma' },
+        ]}
+        selectedId="s1"
+        onSelect={onSelect}
         onClose={vi.fn()}
       />,
     )
     await user.tab()
-    expect(onCycleControl).toHaveBeenCalledTimes(1)
-    // Tab 循环排序后焦点回到搜索框，而非继续在面板内顺序移动。
-    await waitFor(() => expect(screen.getByRole('searchbox')).toHaveFocus())
-    expect(screen.getByText('2 / 2 · ↑↓ 选择 · Enter 确认 · Esc 返回 · Tab 切换排序')).toBeInTheDocument()
-    // 未提供 cycleControlHint 时不渲染排序提示。
-    const { unmount } = render(
-      <SelectionPanel
-        title="选择 Session"
-        items={[{ id: 's1', title: 'Alpha' }]}
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-    expect(screen.getByText('1 / 1 · ↑↓ 选择 · Enter 确认 · Esc 返回')).toBeInTheDocument()
-    unmount()
+    await user.tab()
+    const beta = screen.getByRole('option', { name: /Beta/ })
+    expect(beta).toHaveFocus()
+    // 焦点行即活动项：Tab 到第 2 行后 Enter 必须提交第 2 行，而不是键盘游标停留的已选行。
+    expect(beta).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('option', { name: /Alpha/ })).toHaveAttribute('aria-selected', 'false')
+    await user.keyboard('{Enter}')
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith('s2')
   })
 
-  it('navigates with PageUp/PageDown and Home/End within the filtered list', async () => {
+  it('navigates with PageUp/PageDown inside the filtered list', async () => {
     const user = userEvent.setup()
     render(
       <SelectionPanel
@@ -302,14 +316,55 @@ describe('SelectionPanel', () => {
     await user.keyboard('{PageUp}')
     const item1 = screen.getByRole('option', { name: /^Item 1$/ })
     expect(item1).toHaveAttribute('aria-selected', 'true')
-    await user.keyboard('{End}')
-    const item10 = screen.getByRole('option', { name: /Item 10/ })
-    expect(item10).toHaveAttribute('aria-selected', 'true')
-    await user.keyboard('{Home}')
-    expect(item1).toHaveAttribute('aria-selected', 'true')
     // PageDown 在尾部环绕到列表头部。
     await user.keyboard('{PageDown}')
     expect(item9).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('keeps Home/End for list navigation while focus is on an option row', async () => {
+    const user = userEvent.setup()
+    render(
+      <SelectionPanel
+        title="选择 Session"
+        items={Array.from({ length: 10 }, (_, index) => ({
+          id: `s${index + 1}`,
+          title: `Item ${index + 1}`,
+        }))}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    await user.tab()
+    await user.keyboard('{End}')
+    expect(screen.getByRole('option', { name: /Item 10/ })).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('option', { name: /^Item 1$/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('hands Home/End back to the search input for caret movement', async () => {
+    const user = userEvent.setup()
+    render(
+      <SelectionPanel
+        title="选择 Session"
+        items={[
+          { id: 's1', title: 'Alpha' },
+          { id: 's2', title: 'Beta' },
+          { id: 's3', title: 'Gamma' },
+        ]}
+        selectedId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    const search = screen.getByRole('searchbox', { name: '搜索' })
+    await waitFor(() => expect(search).toHaveFocus())
+    await user.type(search, 'a')
+    // 搜索框内的 Home/End 是文本编辑键：面板既不设 preventDefault，也不移动活动项。
+    expect(fireEvent.keyDown(search, { key: 'Home' })).toBe(true)
+    expect(fireEvent.keyDown(search, { key: 'End' })).toBe(true)
+    await user.keyboard('{Home}{End}')
+    expect(search).toHaveValue('a')
+    expect(screen.getByRole('option', { name: /Alpha/ })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('marks the current selection with aria-current and renders badge/subtitle', () => {
@@ -344,13 +399,41 @@ describe('SelectionPanel', () => {
         onClose={vi.fn()}
       />,
     )
-    const rename = screen.getByRole('button', { name: '重命名' })
+    const rename = screen.getByRole('button', { name: '重命名 Alpha' })
     rename.focus()
 
     await user.keyboard('{Enter}')
 
     expect(onRename).toHaveBeenCalledWith('s1')
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('names each row rename button after the row it renames', async () => {
+    // 每行铅笔都必须能自报对象名；悬停提示保持调用方给定的短文案。
+    const user = userEvent.setup()
+    const onRename = vi.fn()
+    render(
+      <SelectionPanel
+        title="选择 Session"
+        items={[
+          { id: 's1', title: 'Alpha' },
+          { id: 's2', title: 'Beta' },
+        ]}
+        renameLabel="重命名"
+        onRename={onRename}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    const alphaRename = screen.getByRole('button', { name: '重命名 Alpha' })
+    expect(screen.getByRole('button', { name: '重命名 Beta' })).toBeInTheDocument()
+    expect(alphaRename).toHaveAttribute('title', '重命名')
+    // 英文界面同样自报对象名。
+    act(() => setLocale('en-US'))
+    expect(screen.getByRole('button', { name: 'Rename Alpha' })).toBeInTheDocument()
+    act(() => setLocale('zh-CN'))
+    await user.click(screen.getByRole('button', { name: '重命名 Alpha' }))
+    expect(onRename).toHaveBeenCalledWith('s1')
   })
 
   it('falls back to the previously selected item when it reappears after filtering', async () => {

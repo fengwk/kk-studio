@@ -5,8 +5,9 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
+import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/features/chat/chat-service'
-import type { AgentDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -19,6 +20,7 @@ vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     listChats: vi.fn(),
     createChat: vi.fn(),
+    updateChat: vi.fn(),
   },
 }))
 describe('useChatPageController', () => {
@@ -149,6 +151,98 @@ describe('useChatPageController', () => {
     act(() => result.current.deleteConfirmModal.onClose())
     expect(result.current.deleteConfirmModal.modal).toBeNull()
   })
+
+  // 编辑后服务端按 updated_at 重排（刚改的排到最前），列表缓存刷新必须透传该顺序而不是按 createdAt 重排。
+  it('keeps the server updated-at order after an edit refreshes the list', async () => {
+    const editedBefore: ChatDTO = chat({
+      id: 'chat-edited',
+      title: 'Edited',
+      version: '1',
+      createdAt: 1781913600000,
+      updatedAt: 1781913600000,
+    })
+    const untouched: ChatDTO = chat({
+      id: 'chat-untouched',
+      title: 'Untouched',
+      version: '1',
+      createdAt: 1782086400000,
+      updatedAt: 1782086400000,
+    })
+    vi.mocked(chatService.listChats)
+      // 首屏：服务端 updated_at 倒序，untouched 最近被改过
+      .mockResolvedValueOnce({ items: [untouched, editedBefore], nextCursor: null })
+      // 编辑后回读：编辑把 chat-edited 顶到最前，尽管它的 createdAt 更早
+      .mockResolvedValue({
+        items: [{ ...editedBefore, title: 'Edited once', version: '2', updatedAt: 1782172800000 }, untouched],
+        nextCursor: null,
+      })
+    vi.mocked(chatService.updateChat).mockResolvedValue({
+      ...editedBefore,
+      title: 'Edited once',
+      version: '2',
+      updatedAt: 1782172800000,
+    })
+
+    const { result } = renderHook(() => useChatPageController(), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.chatPanelProps.chats.map((item) => item.id)).toEqual([
+      'chat-untouched',
+      'chat-edited',
+    ])
+
+    act(() => result.current.chatPanelProps.onEdit(editedBefore))
+    act(() => result.current.createChatModal.onTitleChange('Edited once'))
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+
+    await waitFor(() =>
+      expect(result.current.chatPanelProps.chats.map((item) => item.title)).toEqual([
+        'Edited once',
+        'Untouched',
+      ]),
+    )
+  })
+
+  // 加载更多失败只能就地提示：已加载的列表保留、不并入页面级 error，文案经 toUserFacingErrorMessage 本地化。
+  it('keeps the loaded list when loading more fails and reports a localized inline error', async () => {
+    const loaded: ChatDTO = chat({ id: 'chat-1', title: 'Loaded' })
+    const appended: ChatDTO = chat({ id: 'chat-2', title: 'Appended' })
+    vi.mocked(chatService.listChats)
+      .mockResolvedValueOnce({ items: [loaded], nextCursor: 'cursor-1' })
+      .mockRejectedValueOnce(new ApiError('Request timeout', undefined, 'timeout'))
+      .mockResolvedValueOnce({ items: [appended], nextCursor: null })
+
+    const { result } = renderHook(() => useChatPageController(), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+    await waitFor(() => expect(result.current.chatPanelProps.chats).toHaveLength(1))
+
+    await act(async () => {
+      result.current.chatPanelProps.onLoadMore()
+    })
+
+    await waitFor(() =>
+      expect(result.current.chatPanelProps.loadMoreError).toBe('网络异常，请稍后重试'),
+    )
+    expect(result.current.error).toBeFalsy()
+    expect(result.current.chatPanelProps.chats.map((item) => item.id)).toEqual(['chat-1'])
+    expect(result.current.chatPanelProps.hasMore).toBe(true)
+    expect(result.current.chatPanelProps.loadingMore).toBe(false)
+
+    // 重试成功后就地提示消失并追加新页
+    await act(async () => {
+      result.current.chatPanelProps.onLoadMore()
+    })
+    await waitFor(() => expect(result.current.chatPanelProps.loadMoreError).toBeNull())
+    expect(result.current.chatPanelProps.chats.map((item) => item.id)).toEqual([
+      'chat-1',
+      'chat-2',
+    ])
+    expect(result.current.chatPanelProps.hasMore).toBe(false)
+  })
 })
 
 const queryClientOptions = {
@@ -165,6 +259,20 @@ function queryWrapper(queryClient: QueryClient) {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
+  }
+}
+
+function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {
+  return {
+    id: 'chat-1',
+    title: 'Chat',
+    agentName: 'default-assistant',
+    environmentName: null,
+    yoloEnabled: false,
+    version: '1',
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
   }
 }
 

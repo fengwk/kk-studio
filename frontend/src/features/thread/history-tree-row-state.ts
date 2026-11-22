@@ -16,7 +16,7 @@ export function historyLaneGlyphs(row: HistoryTreeRow): string {
   return glyphs
 }
 
-/** 默认选中 head，其次保留仍然存在的选择，最后回落到最后一行。 */
+/** 优先保留仍然存在的选中行，其次回落到 head，最后回落到最后一行。 */
 export function resolveHistoryRowId(
   rows: HistoryTreeRow[],
   currentId: string | null,

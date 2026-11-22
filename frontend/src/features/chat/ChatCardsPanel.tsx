@@ -18,6 +18,7 @@ export function ChatCardsPanel({
   setup,
   hasMore = false,
   loadingMore = false,
+  loadMoreError = null,
   onLoadMore,
 }: {
   chats: ChatDTO[]
@@ -31,6 +32,8 @@ export function ChatCardsPanel({
   /** 首页之后是否还有未加载的对话页。 */
   hasMore?: boolean
   loadingMore?: boolean
+  /** 上一次「加载更多」失败的本地化文案；失败不影响已加载的卡片。 */
+  loadMoreError?: string | null
   onLoadMore?: () => void
 }) {
   const { t } = useI18n()
@@ -56,8 +59,13 @@ export function ChatCardsPanel({
       </ResourceGrid>
       {hasMore && onLoadMore ? (
         <div className="chat-cards-load-more">
+          {loadMoreError ? (
+            <p className="chat-cards-load-more-error" role="alert">
+              {loadMoreError}
+            </p>
+          ) : null}
           <Button variant="ghost" loading={loadingMore} onClick={onLoadMore}>
-            {t('ai.chat.loadMore')}
+            {loadMoreError ? t('shared.retry') : t('ai.chat.loadMore')}
           </Button>
         </div>
       ) : null}

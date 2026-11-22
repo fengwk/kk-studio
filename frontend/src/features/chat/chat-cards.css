@@ -15,8 +15,18 @@
 
 .chat-cards-load-more {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  margin-top: 12px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* 加载更多失败就地提示：与按钮同行但不占据列表位置。 */
+.chat-cards-load-more-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-size-xs);
 }
 
 .catalog-setup-guide {

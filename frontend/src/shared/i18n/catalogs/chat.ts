@@ -142,6 +142,14 @@ export const chatCatalog = {
     'en-US': 'Layout',
     'zh-CN': '布局',
   },
+  'ai.chat.paneCount.one': {
+    'en-US': '1 pane',
+    'zh-CN': '1 个窗格',
+  },
+  'ai.chat.paneCount.other': {
+    'en-US': '{{count}} panes',
+    'zh-CN': '{{count}} 个窗格',
+  },
   'ai.chat.tabStateNotSaved': {
     'en-US': 'This page’s recovery state is not saved',
     'zh-CN': '本页恢复状态未保存',
@@ -262,9 +270,13 @@ export const chatCatalog = {
     'en-US': 'No matches for “{{query}}”',
     'zh-CN': '没有匹配“{{query}}”的选项',
   },
+  'ai.chat.selection.rename': {
+    'en-US': 'Rename {{name}}',
+    'zh-CN': '重命名 {{name}}',
+  },
   'ai.chat.selection.meta': {
-    'en-US': '{{visible}} / {{total}} · ↑↓ select · Enter confirm · Esc back{{cycle}}',
-    'zh-CN': '{{visible}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回{{cycle}}',
+    'en-US': '{{visible}} / {{total}} · ↑↓ select · Enter confirm · Esc back',
+    'zh-CN': '{{visible}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回',
   },
   'ai.chat.history.search': {
     'en-US': 'Search records',
@@ -327,8 +339,8 @@ export const chatCatalog = {
     'zh-CN': '{{kind}} · {{preview}}{{path}}{{head}}',
   },
   'ai.chat.history.hint': {
-    'en-US': '{{current}} / {{total}} · ↑↓ select · Enter confirm · Esc back',
-    'zh-CN': '{{current}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回',
+    'en-US': '{{current}} / {{total}} · ↑↓ select · Enter branch from here · Esc back',
+    'zh-CN': '{{current}} / {{total}} · ↑↓ 选择 · Enter 从此处分支 · Esc 返回',
   },
   'ai.chat.history.cancel': {
     'en-US': 'Cancel',

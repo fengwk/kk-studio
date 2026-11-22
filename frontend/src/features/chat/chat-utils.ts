@@ -33,14 +33,7 @@ export function appendUniqueChats(current: ChatDTO[], incoming: ChatDTO[]): Chat
   return [...current, ...incoming.filter((chat) => !seen.has(chat.id))]
 }
 
+/** 过滤只筛掉不命中项：列表顺序由服务端 updated_at 倒序决定，前端不重排。 */
 export function filterChats(chats: ChatDTO[], search: string): ChatDTO[] {
-  return chats
-    .filter((chat) => includesSearch(chat.title ?? '', search))
-    .sort((left, right) => {
-      const delta = right.createdAt - left.createdAt
-      if (delta !== 0) {
-        return delta
-      }
-      return String(right.id).localeCompare(String(left.id), undefined, { numeric: true })
-    })
+  return chats.filter((chat) => includesSearch(chat.title ?? '', search))
 }
