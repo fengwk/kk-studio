@@ -368,15 +368,20 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
-  /** 映射一次 Stop 结果及权威的 stop 后快照。 */
+  /**
+   * 映射一次 Stop 结果及权威的 stop 后快照。
+   *
+   * <p>Stop 提交与回读分属两个事务：提交后的退出确认等并发写入可能继续推进同一 Thread 的 version，因此只要求快照属于同一 Thread
+   * 且版本不倒退；回读到的更新快照就是返回给调用方的权威当前状态。
+   */
   public static HarnessThreadStopResultDTO toStopResultDto(
       StopResult result, ThreadSnapshot postStopSnapshot) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(postStopSnapshot, "postStopSnapshot");
     requireSameThread(
         result.thread().id(), postStopSnapshot, "post-stop snapshot does not match Stop result");
-    if (result.thread().version() != postStopSnapshot.thread().version()) {
-      throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
+    if (postStopSnapshot.thread().version() < result.thread().version()) {
+      throw new IllegalArgumentException("post-stop snapshot is older than Stop result");
     }
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
     dto.setStatus(

@@ -2,6 +2,9 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.invalid;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.parseTtl;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireDate;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireMinute;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireZone;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO;
@@ -10,10 +13,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
-import java.time.DateTimeException;
-import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,19 +57,11 @@ final class ModelPricingMapper {
     for (ModelPricingChangeDTO change : changes) {
       result.add(
           new ModelPricing.DateChange(
-              parseDate(change.getFrom(), PATH + ".changes.from"),
+              requireDate(change.getFrom(), PATH + ".changes.from"),
               toRateSet(change.getBase()),
               toRules(change.getRules())));
     }
     return result;
-  }
-
-  private static LocalDate parseDate(String value, String path) {
-    try {
-      return LocalDate.parse(value);
-    } catch (DateTimeException | NullPointerException error) {
-      throw invalid(path + " must be YYYY-MM-DD", error);
-    }
   }
 
   private static List<ModelPricing.Rule> toRules(List<ModelPricingRuleDTO> rules) {
@@ -98,35 +89,15 @@ final class ModelPricingMapper {
           rule.isCacheWriteByTtlSpecified(),
           rule.isReasoningSpecified());
       case "time_multiplier" -> new ModelPricing.TimeMultiplier(
-          parseMinute(rule.getStart(), false),
-          parseMinute(rule.getEnd(), true),
-          parseZone(rule.getTimezone()),
+          requireMinute(rule.getStart(), false, PATH + ".rules.start"),
+          requireMinute(rule.getEnd(), true, PATH + ".rules.end"),
+          requireZone(rule.getTimezone(), PATH + ".rules.timezone"),
           rule.getWeekdays(),
           toFactors(rule));
       case "service_tier_multiplier" -> new ModelPricing.ServiceTierMultiplier(
           rule.getServiceTier(), toFactors(rule));
       default -> throw new IllegalArgumentException("unsupported rule type: " + rule.getType());
     };
-  }
-
-  private static int parseMinute(String value, boolean end) {
-    if (end && "24:00".equals(value)) {
-      return 1440;
-    }
-    try {
-      LocalTime time = LocalTime.parse(value);
-      return time.getHour() * 60 + time.getMinute();
-    } catch (DateTimeException | NullPointerException error) {
-      throw new IllegalArgumentException("time must be HH:mm" + (end ? " or 24:00" : ""), error);
-    }
-  }
-
-  private static ZoneId parseZone(String value) {
-    try {
-      return ZoneId.of(value);
-    } catch (DateTimeException | NullPointerException error) {
-      throw new IllegalArgumentException("timezone must be a valid IANA zone", error);
-    }
   }
 
   private static ModelPricing.Factors toFactors(ModelPricingRuleDTO rule) {

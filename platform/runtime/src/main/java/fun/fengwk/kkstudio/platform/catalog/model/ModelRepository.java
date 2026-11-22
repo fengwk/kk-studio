@@ -202,7 +202,7 @@ public class ModelRepository {
         .update();
     builtinReferences.renameLockedAgents(referencingAgents, model.name());
     if (model.kind() == ModelKind.GROUP) {
-      // 组改名同样是一次配置写：清除原名称下的冷却状态。
+      // 组改名同样是一次配置写：外键 on update cascade 已把旧名冷却改挂到新名，这里按新名清除。
       deleteGroupCooldowns(model.name());
     }
   }

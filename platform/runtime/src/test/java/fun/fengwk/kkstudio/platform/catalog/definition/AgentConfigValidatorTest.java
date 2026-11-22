@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -148,6 +150,24 @@ class AgentConfigValidatorTest {
           assertThrows(DomainException.class, () -> fixture.validator.validate(config))
               .getMessage()
               .contains("subagent name must be <= 64 characters"));
+    }
+  }
+
+  /** 测试意图：subagent 名与 Agent 名共用同一字符集与长度规则，目录校验器必须与配置 codec 给出同一结论（validation， 而非仅长度一条）。 */
+  @Test
+  void rejectsSubagentNamesOutsideTheSharedRule() {
+    try (Fixture fixture = new Fixture(List.of())) {
+      for (String name :
+          List.of(" ", " agent", "agent ", "my:agent", "my/agent", "my@agent", "my\\agent")) {
+        AgentConfigDTO config = new AgentConfigDTO();
+        config.setTools(List.of());
+        config.setSkills(List.of());
+        config.setSubagents(List.of(name));
+        assertEquals(
+            DomainErrorCode.VALIDATION,
+            assertThrows(DomainException.class, () -> fixture.validator.validate(config)).code(),
+            name);
+      }
     }
   }
 

@@ -11,6 +11,7 @@ import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.platform.catalog.definition.SubagentNames;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
@@ -92,7 +93,7 @@ public class AgentConfigCodec {
     }
     validateToolNames(config.getTools());
     validateSkills(config.getSkills());
-    validateNames(config.getSubagents(), "subagents");
+    validateSubagents(config.getSubagents());
   }
 
   /** 校验选中的全局 Skill 引用列表：非空列表、非空元素、canonical 短名、保序且不重复。 */
@@ -145,31 +146,16 @@ public class AgentConfigCodec {
     }
   }
 
-  private static void validateNames(List<String> values, String field) {
+  private static void validateSubagents(List<String> values) {
     if (values == null) {
-      throw new IllegalArgumentException("agent config " + field + " is required");
+      throw new IllegalArgumentException("agent config subagents is required");
     }
     Set<String> seen = new HashSet<>();
     for (String value : values) {
-      if (value == null || value.isBlank()) {
-        throw new IllegalArgumentException(
-            "agent config " + field + " must contain non-blank names");
-      }
-      if (!value.equals(value.trim())) {
-        throw new IllegalArgumentException(
-            "agent config " + field + " must not contain surrounding whitespace");
-      }
-      if (value.length() > 128
-          || value.indexOf(':') >= 0
-          || value.indexOf('/') >= 0
-          || value.indexOf('@') >= 0
-          || value.indexOf('\\') >= 0) {
-        throw new IllegalArgumentException(
-            "agent config " + field + " must contain short names only: " + value);
-      }
+      SubagentNames.require(value);
       if (!seen.add(value)) {
         throw new IllegalArgumentException(
-            "agent config " + field + " must not contain duplicates: " + value);
+            "agent config subagents must not contain duplicates: " + value);
       }
     }
   }

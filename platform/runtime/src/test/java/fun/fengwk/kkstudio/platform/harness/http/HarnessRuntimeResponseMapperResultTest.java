@@ -199,8 +199,25 @@ class HarnessRuntimeResponseMapperResultTest {
   }
 
   @Test
-  void rejectsStopSnapshotIdentityAndVersionMismatch() {
-    // stop 后回读必须同时匹配 Thread id 与 version，不能返回另一时刻的快照。
+  void acceptsStopSnapshotAdvancedAfterCommit() {
+    // 测试意图：Stop 事务提交后，被取消的执行体（退出确认事务）又推进了同一 Thread 的 version；
+    // 回读快照的版本更高只是一次合法的并发推进，不能用 version 等值断言把已生效的 Stop 报成失败响应。
+    StoppedThreadReceipt receipt = new StoppedThreadReceipt(id(1), id(5), null, 0, List.of());
+    StopResult result =
+        new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), List.of(receipt));
+    ThreadSnapshot readBack = withVersion(HarnessRuntimeTestFixtures.idleSnapshot(), 4);
+
+    HarnessThreadStopResultDTO dto = HarnessRuntimeResponseMapper.toStopResultDto(result, readBack);
+
+    assertEquals(HarnessThreadStopResultDTO.Status.STOPPED, dto.getStatus());
+    // DTO 必须反映回读到的权威当前 Thread，而不是 Stop 事务内的历史 version。
+    assertEquals(Long.valueOf(4), dto.getThread().getVersion());
+    assertEquals(1, dto.getStoppedThreads().size());
+  }
+
+  @Test
+  void rejectsStopSnapshotOfAnotherThreadOrOlderVersion() {
+    // 测试意图：Thread 身份始终是硬断言；版本不一致只在「回读更旧」时说明快照不是 Stop 后的权威状态。
     StopResult result = new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), List.of());
     assertThrows(
         IllegalArgumentException.class,
@@ -211,6 +228,6 @@ class HarnessRuntimeResponseMapperResultTest {
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeResponseMapper.toStopResultDto(
-                result, withVersion(HarnessRuntimeTestFixtures.idleSnapshot(), 4)));
+                result, withVersion(HarnessRuntimeTestFixtures.idleSnapshot(), 2)));
   }
 }

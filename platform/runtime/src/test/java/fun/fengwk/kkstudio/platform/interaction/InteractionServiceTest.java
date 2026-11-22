@@ -40,6 +40,9 @@ class InteractionServiceTest {
     return new UUID(0L, value);
   }
 
+  /** 种子执行根的 Session 归属：交互写路径只用它加产品锁，不需要整份加锁快照。 */
+  private static final UUID ROOT_SESSION_ID = id(400);
+
   private SessionOwnership ownership;
   private SessionOwnership otherOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
@@ -58,10 +61,13 @@ class InteractionServiceTest {
     // 默认：任意存在的 Thread 自身即执行根；后代/不存在场景在具体测试中覆盖该 stub。
     when(runtime.findRootThreadId(any()))
         .thenAnswer(invocation -> Optional.of(invocation.<UUID>getArgument(0)));
+    // 执行根的 Session 归属走无锁读；getThreadSnapshot 的替身只用于让旧实现在测试里继续走完流程，
+    // 从而使「交互路径不得读取加锁快照」成为可验证的断言。
+    when(runtime.findThreadSessionId(any())).thenReturn(Optional.of(ROOT_SESSION_ID));
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     ThreadState root = mock(ThreadState.class);
     when(snapshot.thread()).thenReturn(root);
-    when(root.sessionId()).thenReturn(id(400));
+    when(root.sessionId()).thenReturn(ROOT_SESSION_ID);
     when(runtime.getThreadSnapshot(any())).thenReturn(snapshot);
     service = new InteractionService(List.of(ownership, otherOwnership), runtimes);
   }
@@ -80,10 +86,12 @@ class InteractionServiceTest {
 
     InOrder order = inOrder(runtime, ownership, otherOwnership);
     order.verify(runtime).findRootThreadId(threadId);
-    order.verify(runtime).getThreadSnapshot(threadId);
-    order.verify(ownership).lockForInteraction(threadId, id(400));
-    order.verify(otherOwnership).lockForInteraction(threadId, id(400));
+    order.verify(runtime).findThreadSessionId(threadId);
+    order.verify(ownership).lockForInteraction(threadId, ROOT_SESSION_ID);
+    order.verify(otherOwnership).lockForInteraction(threadId, ROOT_SESSION_ID);
     order.verify(runtime).submitToolInput(command);
+    // 交互提交只锁目标 Thread：执行根只能做无锁归属读取，不得先取执行根行锁。
+    verify(runtime, never()).getThreadSnapshot(any());
   }
 
   /** 测试意图：工具审批与人工回答共用同一产品锁序，审批不能绕过 Issue 的层级串行化。 */
@@ -99,9 +107,11 @@ class InteractionServiceTest {
     assertSame(expected, service.decideApproval(command));
 
     InOrder order = inOrder(runtime, ownership, otherOwnership);
-    order.verify(ownership).lockForInteraction(threadId, id(400));
-    order.verify(otherOwnership).lockForInteraction(threadId, id(400));
+    order.verify(runtime).findThreadSessionId(threadId);
+    order.verify(ownership).lockForInteraction(threadId, ROOT_SESSION_ID);
+    order.verify(otherOwnership).lockForInteraction(threadId, ROOT_SESSION_ID);
     order.verify(runtime).decideToolApproval(command);
+    verify(runtime, never()).getThreadSnapshot(any());
   }
 
   /** 测试意图：后代任务按真实执行根加产品锁；写回的目标仍是原始子 Thread，不被根替代。 */
@@ -117,9 +127,11 @@ class InteractionServiceTest {
     service.submitInput(command);
 
     InOrder order = inOrder(ownership, runtime);
-    order.verify(runtime).getThreadSnapshot(rootThreadId);
-    order.verify(ownership).lockForInteraction(rootThreadId, id(400));
+    order.verify(runtime).findThreadSessionId(rootThreadId);
+    order.verify(ownership).lockForInteraction(rootThreadId, ROOT_SESSION_ID);
     order.verify(runtime).submitToolInput(command);
+    // 后代任务同样只无锁读取执行根的 Session，不先取执行根行锁，锁序只剩目标 Thread。
+    verify(runtime, never()).getThreadSnapshot(any());
   }
 
   /** 测试意图：产品层级事实损坏时 fail closed，回答与审批都不进入 Runtime。 */
@@ -128,7 +140,7 @@ class InteractionServiceTest {
     UUID threadId = id(100);
     doThrow(new IllegalStateException("Issue owner does not exist"))
         .when(ownership)
-        .lockForInteraction(threadId, id(400));
+        .lockForInteraction(threadId, ROOT_SESSION_ID);
 
     IllegalStateException submitFailure =
         assertThrows(

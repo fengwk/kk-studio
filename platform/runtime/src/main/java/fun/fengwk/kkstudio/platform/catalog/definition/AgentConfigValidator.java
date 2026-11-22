@@ -17,7 +17,7 @@ import java.util.Set;
 
 /**
  * 依据 {@link RuntimeToolCatalogSource} 的 current 租用校验 Agent 选择：工具必须存在且可被 Agent 选择，Skill 名必须
- * canonical，subagent 名遵守长度规则。
+ * canonical，subagent 名复用 {@link SubagentNames} 的共享规则。
  *
  * <p>Agent 与 Environment 解耦：环境工具的可用性由每个 branch 的 Environment 选择在执行期决定，配置阶段不对环境工具做环境绑定的过滤；Skill 名指向
  * Platform 的全局目录，因此配置阶段只校验形状，存在性与锁定由引用解析器负责。
@@ -97,9 +97,11 @@ public final class AgentConfigValidator {
 
   private static void validateSubagents(List<String> names) {
     for (String name : names) {
-      if (name.length() > 64) {
-        throw DomainException.validation(
-            "agent", "subagent name must be <= 64 characters: " + name);
+      try {
+        SubagentNames.require(name);
+      } catch (IllegalArgumentException error) {
+        // 长度与字符集规则由 SubagentNames 单点定义；这里只把失败分类成 domain validation。
+        throw DomainException.validation("agent", error.getMessage(), error);
       }
     }
   }

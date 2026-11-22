@@ -594,6 +594,14 @@ HOME、临时目录），断线保留最后已接受的 metadata；`daemonVersio
 同实例重连依赖 Gateway 在途记录和 Daemon 进程内 journal；新实例接管使旧调用进入
 结果不确定，恢复保证止于这两个进程内记录的生命周期。
 
+## 跨节点内部认证
+
+内部请求使用共享秘密做 HMAC-SHA256 认证，以确认发送方持有集群共享秘密，并校验请求方法、路径（含查询字符串）与目标节点。
+接收方只接受时间戳在允许偏差内（默认 30 秒）的请求，并拒绝已使用的 nonce，防止窗口内重放。
+
+HMAC 不保护请求正文的完整性或机密性：正文不参与签名，HMAC 也不提供加密。
+跨节点部署的 `kk-studio.cluster.internal-url` 必须位于可信网络内，或使用 `https`。
+
 ## 构建期 Plugin
 
 选中的 Plugin JAR 由 [`web/pom.xml`](../../web/pom.xml) 的 runtime dependency 进入发行物，

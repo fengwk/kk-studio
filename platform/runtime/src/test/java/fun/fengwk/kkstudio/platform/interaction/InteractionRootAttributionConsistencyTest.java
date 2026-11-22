@@ -120,7 +120,8 @@ class InteractionRootAttributionConsistencyTest {
     assertEquals("ISSUE_AGENT", dto.owner().getKind());
     assertEquals("issue", dto.owner().getTitle());
 
-    // 提交：同一点代来源的产品锁同样按根解析。
+    // 提交：同一点代来源的产品锁同样按根解析；产品锁前只做无锁的 Session 归属读。
+    when(runtime.findThreadSessionId(rootThreadId)).thenReturn(Optional.of(rootSessionId));
     ToolInputSubmissionCommand command =
         new ToolInputSubmissionCommand(
             childThreadId, id(102), id(103), "alice", false, List.of(List.of("ans")));

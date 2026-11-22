@@ -261,13 +261,24 @@ final class PostgresqlJoinStore implements JoinStore {
             old.terminalEntryId(),
             old.deliveryCommandSequence(),
             old.supersededByInvocationId());
-    tx.requireSingleUpdate(updated, "join", join.invocationId());
+    if (updated != 1) {
+      throw joinUpdateFailure(join);
+    }
     if (!old.equals(join)) {
       tx.notifyThreadSnapshotChanged(join.childThreadId());
       if (join.parentThreadId() != null) {
         tx.notifyThreadSnapshotChanged(join.parentThreadId());
       }
     }
+  }
+
+  /** 0 行更新有两种来源：行已被删除，或前像已被并发改写。后者是并发冲突，必须与「不存在」区分，否则排障会把并发写竞争误读成数据缺失。 */
+  private RuntimeException joinUpdateFailure(ThreadJoin join) {
+    if (tx.joins().find(join.invocationId()).isPresent()) {
+      return new IllegalStateException(
+          "join " + join.invocationId() + " changed concurrently; reload it and retry");
+    }
+    return new IllegalArgumentException("join " + join.invocationId() + " does not exist");
   }
 
   @Override
