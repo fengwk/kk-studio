@@ -495,14 +495,14 @@ public class SkillCatalogService {
           "branch is only valid for Git packages and token must be KEEP");
     }
     if (!Objects.equals(description, current.description())) {
-      if (!skillPackageRepository.updateDescription(packageName, description, expected)) {
+      if (!skillPackageRepository.updateEditable(packageName, description, null, expected)) {
         throw conflictOrMissing(packageName, expected);
       }
     }
     return getPackage(packageName);
   }
 
-  /** Git 渠道可改描述、branch 与 token；三项都未变化时不写行。 */
+  /** Git 渠道可改描述、branch 与 token；三项都未变化时不写行，任一变化只推进一次 version。 */
   private SkillPackageDetailDTO editGitPackage(
       String packageName,
       SkillPackage current,
@@ -511,14 +511,14 @@ public class SkillCatalogService {
       long expected) {
     String branch = SkillPackageInputs.requireBranch(editDTO.getBranch());
     TokenUpdate tokenUpdate = resolveToken(current.gitSource().token(), editDTO.getToken());
-    if (!Objects.equals(description, current.description())) {
-      if (!skillPackageRepository.updateDescription(packageName, description, expected)) {
+    boolean descriptionChanged = !Objects.equals(description, current.description());
+    boolean gitChanged =
+        !Objects.equals(branch, current.gitSource().branch()) || tokenUpdate.changed();
+    if (descriptionChanged || gitChanged) {
+      SkillPackageGitEdit gitEdit =
+          gitChanged ? new SkillPackageGitEdit(branch, tokenUpdate.token()) : null;
+      if (!skillPackageRepository.updateEditable(packageName, description, gitEdit, expected)) {
         throw conflictOrMissing(packageName, expected);
-      }
-    }
-    if (!Objects.equals(branch, current.gitSource().branch()) || tokenUpdate.changed()) {
-      if (!skillPackageRepository.updateGitSettings(packageName, branch, tokenUpdate.token())) {
-        throw DomainException.notFound(SkillPackageInputs.RESOURCE);
       }
     }
     return getPackage(packageName);
@@ -641,12 +641,14 @@ public class SkillCatalogService {
             current.createdAt(),
             current.updatedAt(),
             current.gitSource());
-    if (!skillPackageRepository.updatePublication(published, current.version())) {
+    if (!skillPackageRepository.updatePublication(
+        published,
+        new SkillPackageGitEdit(prepared.branch(), prepared.token()),
+        current.version())) {
       throw conflictOrMissing(name, current.version());
     }
-    if (!skillPackageRepository.updateGitSettings(name, prepared.branch(), prepared.token())
-        || !skillPackageRepository.updateGitObservation(
-            name, prepared.commit(), Instant.now(), null)) {
+    if (!skillPackageRepository.updateGitObservation(
+        name, prepared.commit(), Instant.now(), null)) {
       throw DomainException.notFound(SkillPackageInputs.RESOURCE);
     }
     staging.release(current);

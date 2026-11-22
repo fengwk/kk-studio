@@ -369,7 +369,9 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 1–1024 个字符，允许换行；
 路径和符号链接保持在仓库树内。正文和附属文件由 Git 保存。
 
-创建发布当时 branch 的 exact HEAD；Check 只更新观察事实。发布要求
+创建发布当时 branch 的 exact HEAD；Check 只更新观察事实，不推进 CAS 版本。
+描述与 branch/令牌都是可编辑事实：编辑命中 `expectedVersion` 后把 CAS 版本推进一次，同一请求同时改多项也只加一，
+陈旧卡片统一得到 version conflict。发布要求
 `targetCommit + expectedVersion`，target 必须等于最近检查的 `headCommit`，
 校验全部 Skill 与 Agent 引用后原子替换当前版本和 Skill 列表。
 检查失败保留已发布内容；详情返回检查时间、错误与 `updateAvailable`。

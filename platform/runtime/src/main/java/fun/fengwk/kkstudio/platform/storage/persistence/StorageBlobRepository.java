@@ -205,11 +205,16 @@ public class StorageBlobRepository {
         == 1;
   }
 
-  /** 启动恢复用：列出待回收的 DELETING 行 id（上限 {@code limit}）。 */
+  /** 列出可清扫的 DELETING 行；仍被上传行引用的 Blob 等待 finalize，不占用清扫批次。 */
   public List<UUID> listDeletingIds(int limit) {
     return jdbcClient
         .sql(
-            "select id from storage_blob where state = 'DELETING' order by updated_at limit :limit")
+            """
+            select b.id from storage_blob b
+            where b.state = 'DELETING'
+              and not exists (select 1 from storage_upload u where u.blob_id = b.id)
+            order by b.updated_at limit :limit
+            """)
         .param("limit", limit)
         .query(UUID.class)
         .list();
