@@ -11,6 +11,7 @@ import { ModelForm } from '@/features/catalog/AiModelResourceForm'
 import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import { emptyAgentDraft, emptyModelDraft, emptyProviderDraft } from '@/features/catalog/ai-resource-draft-codecs'
 import { ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
+import { ProviderResourceCard } from '@/features/catalog/AiProviderResourceCard'
 import { setLocale } from '@/shared/i18n'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
@@ -141,6 +142,8 @@ if (rootEl) {
       <ResourceFormsHarness />
     ) : params.has('panels') ? (
       <PanelsHarness />
+    ) : params.has('provider') ? (
+      <ProviderCardHarness />
     ) : (
       <ResourceCardHarnessApp />
     ),
@@ -262,6 +265,25 @@ function PanelsHarness() {
           onDelete={() => {}}
         />
       </section>
+    </main>
+  )
+}
+
+/**
+ * 供应商卡片夹具：只渲染真实 ProviderResourceCard，让卡片整体落在
+ * 1440×900 与 390×844 视口内，用于双语卡片文案与布局截图核对。
+ */
+function ProviderCardHarness() {
+  return (
+    <main style={{ padding: 24 }}>
+      <ResourceGrid>
+        <ProviderResourceCard
+          provider={SAMPLE_PROVIDER}
+          onEdit={() => undefined}
+          onDelete={() => undefined}
+          deletePending={false}
+        />
+      </ResourceGrid>
     </main>
   )
 }

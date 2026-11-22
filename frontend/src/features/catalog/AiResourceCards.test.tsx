@@ -289,6 +289,9 @@ describe('AI resource cards', () => {
     expect(screen.getByText('180 秒')).toBeInTheDocument()
     expect(screen.getByText('1500 毫秒')).toBeInTheDocument()
     expect(screen.getByText('已配置')).toBeInTheDocument()
+    // 端点标签复用表单字段文案，不再单独定义裸“URL”。
+    expect(screen.getByText('基础 URL')).toBeInTheDocument()
+    expect(screen.queryByText('URL')).toBeNull()
 
     rerender(
       <ProviderResourceCard

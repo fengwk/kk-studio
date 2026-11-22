@@ -24,6 +24,18 @@ const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
 const ATTACHMENT_NAME = 'layout-draft.txt'
 const DRAFT_TEXT = 'pane two draft survives'
 const UPLOAD_ID = 'c3000000-0000-4000-8000-0000000000c1'
+/**
+ * Session 首条消息与 Thread 头部消息的 Markdown 源：标题井号、强调星号、行内代码反引号、
+ * 链接语法、列表与引用前缀都在其中，用于验收选择列表的预览只显示纯文本。
+ */
+const MARKDOWN_PREVIEW = [
+  '## 发布前必读',
+  '**必须**先跑 `verify`，细节见 [运行手册](https://example.test/runbook)',
+  '- 列表项不要跳过',
+  '> 引用结论照旧',
+].join('\n')
+/** 折成单行后用于展示和搜索的预览文字。 */
+const PREVIEW_TEXT = '发布前必读 必须先跑 verify，细节见 运行手册 列表项不要跳过 引用结论照旧'
 
 /** 可选截图输出目录：给出 `KK_BROWSER_SHOTS_DIR` 时把验收截图同时复制出去。 */
 const SHOTS_DIR = process.env.KK_BROWSER_SHOTS_DIR
@@ -40,6 +52,7 @@ const COPY = {
     selectThread: messageCatalog['ai.chat.selectThread']['zh-CN'],
     emptyThread: messageCatalog['ai.runtime.thread.empty']['zh-CN'],
     singleThread: messageCatalog['ai.chat.threadCount.one']['zh-CN'],
+    search: messageCatalog['ai.chat.selection.search']['zh-CN'],
   },
   'en-US': {
     layout: messageCatalog['ai.chat.layout']['en-US'],
@@ -49,6 +62,7 @@ const COPY = {
     selectThread: messageCatalog['ai.chat.selectThread']['en-US'],
     emptyThread: messageCatalog['ai.runtime.thread.empty']['en-US'],
     singleThread: messageCatalog['ai.chat.threadCount.one']['en-US'],
+    search: messageCatalog['ai.chat.selection.search']['en-US'],
   },
 } as const
 
@@ -211,8 +225,11 @@ async function installChatApi(
     uploads?: boolean
     /** `empty` 表示该 Chat 没有任何 Session，用于空白 pane 入口的隐藏条件。 */
     sessions?: 'one' | 'empty'
+    /** 预览用 Markdown 源：Session 首条消息与 Thread 头部消息都带标记，用于验收只显示纯文本。 */
+    markdownPreviews?: boolean
   } = {},
 ): Promise<Recorded> {
+  const messagePreview = options.markdownPreviews ? MARKDOWN_PREVIEW : 'hello'
   const entryList = entries({ usage: options.usageEntries })
   if (options.longHistory) {
     entryList.push(...Array.from({ length: 24 }, (_, index) => ({
@@ -356,7 +373,7 @@ async function installChatApi(
               name: 'Session One',
               createdAt: 1790812800000,
               lastActivityAt: 1790812860000,
-              firstMessagePreview: 'hello',
+              firstMessagePreview: messagePreview,
               threadCount: 1,
             }],
             nextCursor: null,
@@ -460,7 +477,7 @@ async function installChatApi(
       await route.fulfill({ json: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
         createdAt: boundThread.createdAt * 1000, updatedAt: boundThread.updatedAt * 1000, status: 'IDLE',
-        executionControl: 'RUNNABLE', model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: 'hello',
+        executionControl: 'RUNNABLE', model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: messagePreview,
       }] })
       return
     }
@@ -1357,7 +1374,7 @@ for (const locale of LOCALES) {
       page,
     }, testInfo) => {
       const copy = COPY[locale]
-      const recorded = await installChatApi(page)
+      const recorded = await installChatApi(page, { markdownPreviews: true })
       await seedBlankPane(page)
       await openHarness(page, locale, viewport)
 
@@ -1378,6 +1395,17 @@ for (const locale of LOCALES) {
       const sessionSubtitle = sessionRow.locator('.thread-selection-item-subtitle')
       await expect(sessionSubtitle).toContainText(copy.singleThread)
       await expect(sessionSubtitle).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+      // 预览只显示去除 Markdown 标记后的文字；搜索仍能用预览里的词找到这一行。
+      await expect(sessionSubtitle).toContainText(` · ${PREVIEW_TEXT}`)
+      const search = panel.getByRole('searchbox', { name: copy.search })
+      await search.fill('verify，细节见 运行手册')
+      await expect(sessionRow).toBeVisible()
+      // 链接地址不是可见的预览文本，不参加匹配。
+      await search.fill('example.test/runbook')
+      await expect(panel.getByRole('option')).toHaveCount(0)
+      await expect(panel.getByRole('status')).toBeVisible()
+      await search.fill('')
+      await expect(sessionRow).toBeVisible()
       const badge = sessionRow.locator('.thread-selection-item-title code')
       await expect(badge).toHaveText(SESSION_ID)
       await expect(badge).toHaveAttribute('title', SESSION_ID)
@@ -1390,8 +1418,13 @@ for (const locale of LOCALES) {
       await expect(panel.getByRole('heading', { name: copy.selectThread })).toBeVisible()
       const threadRow = panel.getByRole('option', { name: /thread-name/ })
       await expect(threadRow).toBeVisible()
-      await expect(threadRow.locator('.thread-selection-item-subtitle'))
-        .toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+      const threadSubtitle = threadRow.locator('.thread-selection-item-subtitle')
+      await expect(threadSubtitle).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+      await expect(threadSubtitle).toContainText(` · ${PREVIEW_TEXT}`)
+      await search.fill('verify，细节见 运行手册')
+      await expect(threadRow).toBeVisible()
+      await search.fill('')
+      await expect(threadRow).toBeVisible()
       await captureShot(page, testInfo, shotName(locale, viewport, 'thread-selection'))
 
       // 选中 Thread 就是继续已有会话：绑定真实目标并渲染历史，不提交任何命令。

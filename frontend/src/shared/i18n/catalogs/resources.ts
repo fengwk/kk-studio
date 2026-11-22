@@ -103,10 +103,6 @@ export const resourcesCatalog = {
     'en-US': 'Type',
     'zh-CN': '类型',
   },
-  'ai.catalog.card.url': {
-    'en-US': 'URL',
-    'zh-CN': 'URL',
-  },
   'ai.catalog.card.apiKey': {
     'en-US': 'API Key',
     'zh-CN': 'API Key',

@@ -1,0 +1,23 @@
+/* 对话创建/编辑弹窗自有样式。共享控件只提供控件本体，弹窗内的排版职责留在这里。 */
+
+/* YOLO 行：标签与说明各占一行独立成列，开关垂直居中留在右侧，不随说明换行而偏移。 */
+.create-chat-yolo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.create-chat-yolo-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.create-chat-yolo-description {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  line-height: 1.5;
+}
