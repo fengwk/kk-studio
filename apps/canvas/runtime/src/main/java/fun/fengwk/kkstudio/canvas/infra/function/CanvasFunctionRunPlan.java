@@ -117,6 +117,9 @@ final class CanvasFunctionRunPlan {
    * 冻结输出计划：按定义顺序为每个槽位预分配 Resource ID 与资源名。
    *
    * <p>计划先落库（stateJson），因此任何 Materialize 都只能写入计划内的槽位；名称为空的槽位由节点名与类型推导，解析后必须互不重名。
+   *
+   * <p>同 kind 的多个无名槽位已由 {@link CanvasFunctionDefinition}
+   * 的构造拒绝；本处兜底的是依节点名才成立的撞名（显式名与推导名相同），按请求校验错误返回 400。
    */
   static List<CanvasFunctionFrozenOutput> freezeOutputs(
       String nodeName, CanvasFunctionDefinition definition) {
@@ -126,8 +129,8 @@ final class CanvasFunctionRunPlan {
     for (int index = 0; index < specs.size(); index++) {
       String name = specs.get(index).resolveName(nodeName);
       if (!names.add(name)) {
-        throw new IllegalArgumentException(
-            "Function output names must be unique within a run: " + name);
+        throw DomainException.validation(
+            "function.outputs", "function output names must be unique within a run: " + name);
       }
       outputs.add(
           new CanvasFunctionFrozenOutput(UUID.randomUUID(), index, specs.get(index).kind(), name));

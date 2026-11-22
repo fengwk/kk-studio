@@ -51,7 +51,7 @@ Daemon 只维护一个 IDE revision 序列。create/resume 在原生注册前从
 
 OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, views}`；错误若已改变 CLOSING 或其它可见状态，也携带完整的提交后快照。快照同步冻结当前已提交视图，不等待其它 view 的在途绑定，不把执行前旧列表包装成新 revision。`views` 按 `viewId` 排序，最多 64 项，不包含票据、用户文件内容或心跳时间；相同 revision 必须对应相同内容，否则是协议错误。reservation 不在快照中，一个 view 的绑定 CAS 也不阻塞对其它 view 的同步读取。
 
-[`IdeViewSnapshotStore`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewSnapshotStore.java) 是 Backend 唯一接受的权威快照缓存：同一 Daemon 进程只接受单调递增 revision，更大 revision 原子替换，更小 revision 不生效，相同 revision 内容漂移为 `IDE_PROTOCOL_ERROR`。新 Daemon 进程使用新的缓存代际，不跨 `daemonInstanceId` 比较 revision；迟到旧快照中的 absent view 不能删除新绑定。网关授权、绑定查询、容量与 bootstrap 校验都读取同一个已接受快照；[`IdeBrowserSessionRegistry`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/IdeBrowserSessionRegistry.java) 只管理 cookie，[`IdeBootstrapTicketService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBootstrapTicketService.java) 只管理一次性票据。票据与 cookie 按完整 `(Daemon 身份, viewId, bindingEpoch)` 处理，旧 epoch 的回滚、清理或迟到回执不能撤销新 cookie/票据。
+[`IdeViewSnapshotStore`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewSnapshotStore.java) 是 Backend 唯一接受的权威快照缓存：同一 Daemon 进程只接受单调递增 revision，更大 revision 原子替换，更小 revision 不生效，相同 revision 内容漂移为 `IDE_PROTOCOL_ERROR`。新 Daemon 进程使用新的缓存代际，不跨 `daemonInstanceId` 比较 revision；迟到旧快照中的 absent view 不能删除新绑定。网关授权、绑定查询、容量与 bootstrap 校验都读取同一个已接受快照；[`IdeBrowserSessionRegistry`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/IdeBrowserSessionRegistry.java) 只管理 cookie，[`IdeBootstrapTicketService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBootstrapTicketService.java) 只管理一次性票据。票据与 cookie 按完整 `(Daemon 身份, viewId, bindingEpoch)` 处理，旧 epoch 的回滚、清理或迟到回执不能撤销新 cookie/票据。cookie 登记在签发新 cookie 时回收已过期条目与同一 `(Daemon 身份, viewId)` 下更旧 `bindingEpoch` 的条目，条目数不随历史打开次数增长。
 
 ## 管理 API
 
@@ -117,7 +117,7 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 
 ## 浏览器会话与数据面
 
-iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。路径段与 query 值统一经 `common.uri.UrlEncoding` 做 RFC 3986 百分号编码，空格是 `%20`，不使用表单语义的 `+`。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。查询中的 `folder`、`ew`、重复的 `workspace` 或与登记路径不同的 `workspace` 不通过网关。
+iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。环境根 `/ide/{environmentId}` 与 `/ide/{environmentId}/` 都不携带 viewId，统一返回 404；只有缺尾斜杠的 view 基址才 301 到 `/ide/{environmentId}/{viewId}/`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。路径段与 query 值统一经 `common.uri.UrlEncoding` 做 RFC 3986 百分号编码，空格是 `%20`，不使用表单语义的 `+`。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。查询中的 `folder`、`ew`、重复的 `workspace` 或与登记路径不同的 `workspace` 不通过网关。
 
 - `openView` 先向事件节点核验 exact intent：只有该物理连接、browserSession 与 view/claim 意图仍存活且匹配时才发命令（[`IdeBrowserUseGateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBrowserUseGateway.java)）；事件节点不可达或当前 usage 未 ACK 时不建立新绑定。`claimId` 在单次请求未确认期间保持不变，同 claim 的同形请求返回同一绑定，参数漂移被拒绝。
 - `openView` 成功后才用权威快照铸造一次性 bootstrap 票据；票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管工作区路径，短时、消费即删除。`GET` 不生成 entryUrl，也不发票据。

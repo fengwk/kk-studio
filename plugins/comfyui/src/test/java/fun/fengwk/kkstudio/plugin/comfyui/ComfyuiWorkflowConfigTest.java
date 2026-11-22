@@ -305,14 +305,18 @@ class ComfyuiWorkflowConfigTest {
                 outputWorkflow(
                     "[{\"name\":\"a\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0},"
                         + "{\"name\":\"b\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0}]")));
-    // 多槽必须全部具名。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            settingsJson(
-                outputWorkflow(
-                    "[{\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0},"
-                        + "{\"name\":\"b\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":1}]")));
+    // 多槽必须全部具名：DIRECT 配置在保存时就给出可读的配置错误，而不是等到 Run 启动。
+    IllegalArgumentException unnamedSlot =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                settingsJson(
+                    outputWorkflow(
+                        "[{\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0},"
+                            + "{\"name\":\"b\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":1}]")));
+    assertEquals(
+        "workflow direct must name every output slot when it declares multiple outputs",
+        unnamedSlot.getMessage());
     // selector 节点必须存在于冻结图中。
     assertThrows(
         IllegalArgumentException.class,

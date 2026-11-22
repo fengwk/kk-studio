@@ -204,6 +204,13 @@ required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguratio
 不改变持久化、集群客户端和插件使用的 mapper。Long 在请求与响应中均为规范非负十进制字符串，
 DTO 使用 `Long` / `long`，HTTP 边界统一解析并拒绝非法值。请求体按字段或 record 组件的 `@Nullable`
 统一检查必填性并递归检查 DTO、集合与 Map；未标注的属性缺失或为 null 时报告属性路径。
+[`RequestBodyRequiredValidationAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/RequestBodyRequiredValidationAdvice.java)
+在必填校验之前有界读取 JSON 请求体：上限为 32 MiB，最多读取上限加一个字节。超限在 JSON 解码前返回
+413 `validation`，固定提示 `request body is too large`，不回显输入。上限覆盖配置导入的常规 JSON 编码：
+YAML 最多 8 × 1024² 个 UTF-16 单元，常规 UTF-8 JSON 编码后该字段约占至多 24 MiB，余量留给其它字段。
+插件配置值、凭据和模型变体协议选项各有 64 KiB 的逐项上限；命令批消息正文没有单独的字节上限。
+配置导出没有总大小上限，若超出导入的传输或 YAML 解析上限，可按选择项分批导出与导入。
+集群内部 IDE 元数据与 browser-use 端点各自按既有 16 KiB 上限读取请求体，不经过该 Advice。
 创建请求中的 Provider credential、MCP headers 与 Git 技能包 token 是可空 `SecretUpdate`，非空时只接受
 `SET`；更新请求中的对应密钥字段必填，`KEEP` / `CLEAR` 必须显式提交，读取投影只返回 `configured`。
 UUID 路径和查询参数统一按 canonical 小写文本解析，非规范形式拒绝。领域 codec 另有严格语法校验。
@@ -315,13 +322,22 @@ Web 的 distribution profile 在 prepare-package 执行 npm ci/Vite build，将�
 再复制到 classes/static，由 Boot repackage 嵌入 Fat JAR。
 SPA fallback 仅适用于 GET、非 API/actuator/ws/ide/internal 且末段无扩展名的路径；真实 asset/Controller 优先，未映射的 `/internal/**` 保持 problem+json 404。
 
+静态资源的缓存策略按命名空间区分：Vite 只把带内容 hash 的构建产物写入 `/assets/`，`public/` 下的固定文件（如
+`favicon.svg`）复制到站点根目录，因此 [`SpaFallbackConfig`](../../web/src/main/java/fun/fengwk/kkstudio/web/SpaFallbackConfig.java)
+把 `/assets/**` 单独注册为资源处理器并下发 `Cache-Control: max-age=31536000, public, immutable`，
+缺失的 `/assets/**` 直接 404，不会回退为外壳，也不会被当作可缓存结果。
+SPA 外壳（`/index.html`、`/` 与 fallback 响应）由 [`SpaShellNoCacheFilter`](../../web/src/main/java/fun/fengwk/kkstudio/web/SpaShellNoCacheFilter.java)
+统一下发 `Cache-Control: no-cache`，每次回源验证，避免升级后浏览器继续加载引用已删除 hash 资源的旧外壳；
+其它静态文件与缺失资源不添加缓存策略。外壳路径归类与 fallback 判定共用 `SpaFallbackResourceResolver` 的同一组规则。
+
 部署参数、secret 与启动操作见 [部署与运行](../operations/deployment.md)，
 跨模块配置归属见 [Platform 配置](platform.md#配置)。
 
 ## 测试入口
 
-[`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖 Flyway、HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、
-通知重连与静态 SPA。Harness 端点测试按端点族拆分，领域夹具集中在 `HarnessRuntimeTestFixtures`；
+[`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖 Flyway、HTTP mapper/advice（含请求体 32 MiB 上限与 413 映射）、
+owner 事务、Snapshot、ack-before-event、通知重连与静态 SPA（含 `/assets/**` 长缓存、外壳 no-cache 与其它静态文件不设缓存）。
+Harness 端点测试按端点族拆分，领域夹具集中在 `HarnessRuntimeTestFixtures`；
 架构与依赖边界由 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 统一检查，模块内不重复写架构测试。
 Spring 集成基座使用真实 PostgreSQL。
 [`IdeProductionChainAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java) 以真实 Daemon 与 code-server 验证受管视图；

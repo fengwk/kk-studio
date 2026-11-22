@@ -1,0 +1,2 @@
+// SPA fallback test fixture: an ordinary static file without a content hash.
+kkStudioPlainStaticFile

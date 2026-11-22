@@ -6,7 +6,8 @@ import java.util.Objects;
  * 函数声明的输出计划槽位：资源类型与可选显式名称。
  *
  * <p>输出计划在 Run 启动时冻结：每个槽位分配一个 Resource ID 并写进 Run checkpoint，真正物化时才插入 Resource 与 {@code OUTPUT}
- * pin。{@code name} 为空表示由节点名与类型推导（单输出函数的常规情形）；显式名称用于多输出，避免同节点资源重名。
+ * pin。{@code name} 为空表示由节点名与类型推导（单输出函数的常规情形）；显式名称用于多输出，避免同节点资源重名。同 kind
+ * 至多一个槽位可以省略名称，其余槽位必须显式命名，否则推导出的名称相同，定义自身的构造就会拒绝。显式名与推导名在具体节点名上撞名时，Run 启动以校验错误拒绝。
  */
 public record CanvasFunctionOutputSpec(CanvasResourceKind kind, String name) {
 
