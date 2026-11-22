@@ -1,0 +1,24 @@
+/* 插件卡头部：宽卡片沿用共享卡的“图标 + 标题 + 右对齐徽标”一行布局；
+   窄卡片（手机单列，英文 v1.0.0 / Applied / Not Connected 三枚徽标）把徽标整组移到标题下方，
+   否则徽标与卡片图标同排时会把名称与 id 挤成单个字符。
+   条件取卡片自身宽度而不是视口，设置页桌面宽卡片与双列栅格保持不变。 */
+.plugin-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 440px) {
+  .plugin-card .resource-card-head {
+    display: grid;
+    /* 图标列沿用卡片图标自身的尺寸，这里不自带新的固定宽度。 */
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    column-gap: var(--space-3);
+    row-gap: var(--space-2);
+  }
+
+  .plugin-card .resource-card-badge {
+    grid-column: 2;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+}

@@ -5,6 +5,7 @@ import { formatBackendDate } from '@/shared/lib/date-format'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { pluginConnectionCheckExpected } from '@/features/extensions/plugin-connection-check'
+import './plugin-card.css'
 import type {
   PluginCredentialStatus,
   PluginDTO,
