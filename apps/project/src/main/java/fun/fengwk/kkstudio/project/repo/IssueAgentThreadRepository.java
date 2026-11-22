@@ -64,6 +64,20 @@ public class IssueAgentThreadRepository {
         .list();
   }
 
+  /** 看板读取面：一个语句取整个项目的稳定绑定，按 Issue、Agent 名称排序。 */
+  public List<IssueAgentThread> listByProjectId(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
+    return jdbc.sql(
+            "select "
+                + COLUMNS
+                + " from project_issue_agent_thread"
+                + " where issue_id in (select id from project_issue where project_id = :projectId)"
+                + " order by issue_id, agent_name asc")
+        .param("projectId", projectId)
+        .query(ROW_MAPPER)
+        .list();
+  }
+
   /**
    * 按 Harness Thread 反向读取稳定绑定；该 Thread 未绑定时返回 {@code null}。
    *

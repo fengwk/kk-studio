@@ -222,13 +222,17 @@ final class ControlProtocolTransferChecks {
           "presignedPut.headers must not exceed " + DaemonPresignedPut.MAX_HEADERS + " entries");
     }
     for (Map.Entry<String, String> header : put.getHeadersMap().entrySet()) {
-      requireText(
-          true, header.getKey(), "presignedPut.header", DaemonPresignedPut.MAX_HEADER_CHARS, true);
-      requireText(
+      requireUtf8Text(
+          true,
+          header.getKey(),
+          "presignedPut.header",
+          DaemonPresignedPut.MAX_HEADER_UTF8_BYTES,
+          true);
+      requireUtf8Text(
           true,
           header.getValue(),
           "presignedPut.header",
-          DaemonPresignedPut.MAX_HEADER_CHARS,
+          DaemonPresignedPut.MAX_HEADER_UTF8_BYTES,
           true);
     }
     requirePositive(

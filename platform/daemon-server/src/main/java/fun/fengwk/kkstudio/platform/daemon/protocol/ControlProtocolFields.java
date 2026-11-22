@@ -222,9 +222,24 @@ final class ControlProtocolFields {
     return value;
   }
 
+  /**
+   * IDE 路径：非空白、合法 Unicode、不超过 {@link #MAX_IDE_PATH_CHARS} 个码点且不含任何 Unicode 控制字符。
+   *
+   * <p>与 Daemon(Go) 的 {@code unicode.IsControl} 和 {@code RuneCountInString} 同口径，避免 Studio 放行而
+   * Daemon 拒绝。
+   */
   static void requireIdePath(String value, String name) {
-    requireText(true, value, name, MAX_IDE_PATH_CHARS, true);
-    if (value.codePoints().anyMatch(code -> code <= 0x1f || code == 0x7f)) {
+    if (value == null) {
+      throw new ControlProtocolException(name + " is required");
+    }
+    if (value.isBlank()) {
+      throw new ControlProtocolException(name + " must not be blank");
+    }
+    requireValidUnicode(value, name);
+    if (value.codePointCount(0, value.length()) > MAX_IDE_PATH_CHARS) {
+      throw new ControlProtocolException(name + " exceeds " + MAX_IDE_PATH_CHARS + " characters");
+    }
+    if (value.codePoints().anyMatch(Character::isISOControl)) {
       throw new ControlProtocolException(name + " must not contain control characters");
     }
   }

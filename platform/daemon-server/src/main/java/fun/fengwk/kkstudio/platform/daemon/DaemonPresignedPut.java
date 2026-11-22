@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.daemon;
 
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -21,8 +23,8 @@ public record DaemonPresignedPut(
   /** headers 的条目上限。 */
   public static final int MAX_HEADERS = 16;
 
-  /** 单个 header 名与值的字符上限。 */
-  public static final int MAX_HEADER_CHARS = 1024;
+  /** 单个 header 名与值的 UTF-8 字节上限；与 Daemon(Go) 的 {@code len(...) < 1024} 同口径。 */
+  public static final int MAX_HEADER_UTF8_BYTES = 1024;
 
   public DaemonPresignedPut {
     method = requireNonBlank(method, "method");
@@ -41,9 +43,10 @@ public record DaemonPresignedPut(
         (name, value) -> {
           requireNonBlank(name, "header name");
           requireNonBlank(value, "header value");
-          if (name.length() > MAX_HEADER_CHARS || value.length() > MAX_HEADER_CHARS) {
+          if (utf8Length(name, "header name") > MAX_HEADER_UTF8_BYTES
+              || utf8Length(value, "header value") > MAX_HEADER_UTF8_BYTES) {
             throw new IllegalArgumentException(
-                "header name and value must not exceed " + MAX_HEADER_CHARS + " characters");
+                "header name and value must not exceed " + MAX_HEADER_UTF8_BYTES + " UTF-8 bytes");
           }
         });
     requireEpochMillis(expiresAtEpochMs, "expiresAtEpochMs");
@@ -61,6 +64,14 @@ public record DaemonPresignedPut(
       throw new IllegalArgumentException(name + " must not be negative");
     }
     return value;
+  }
+
+  private static int utf8Length(String value, String name) {
+    try {
+      return ResourceRef.utf8Length(value, name);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(name + " must be valid Unicode", error);
+    }
   }
 
   /** 签名过期时刻；仅供读取方换算展示。 */

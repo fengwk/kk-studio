@@ -8,6 +8,15 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlFraming;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolValidator;
+import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
+import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentConfig;
+import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
+import fun.fengwk.kkstudio.platform.daemon.transport.DaemonControlStream;
+import fun.fengwk.kkstudio.platform.environment.server.DaemonConfigProtocolMapper;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -21,6 +30,9 @@ import java.util.Set;
  * 卡片 Daemon 配置的唯一结构与取值校验边界。
  *
  * <p>错误只包含字段路径与规则，不包含输入值或解析器异常。parse 严格校验 JSON 的实际类型且拒绝未知字段；validate 同样校验程序构造的模型，返回独立、 规范化的完整配置。
+ *
+ * <p>上限直接引用协议侧定义：字段上限来自 {@link ControlProtocolValidator} 的 {@code MAX_*}
+ * 常量，整条消息上限来自发送方的消息与帧预算。卡片能保存的配置一定能下发，不会出现保存成功而连接在下发时被关闭。
  */
 public final class DaemonConfigCodec {
   private static final ObjectMapper MAPPER =
@@ -100,17 +112,67 @@ public final class DaemonConfigCodec {
     }
     DaemonConfigDTO result = new DaemonConfigDTO();
     result.setStudioUrl(origin(config.getStudioUrl()).toString());
-    result.setBashExecutable(optionalNonblank(config.getBashExecutable()));
+    result.setBashExecutable(bashExecutable(config.getBashExecutable()));
     result.setLsp(config.getLsp() == null ? null : validateLsp(config.getLsp()));
     result.setProxyUrl(proxy(config.getProxyUrl()));
+    requireDeliverable(result);
     return result;
   }
 
-  private static String optionalNonblank(String value) {
+  /**
+   * 最坏情况下一条 {@code ENVIRONMENT_CONFIG} 的序列化字节上限。
+   *
+   * <p>发送方（{@code DaemonConnectionSession}）固定使用 {@code ENVIRONMENT_CONFIG} 信封；它必须同时满足消息上限 {@link
+   * ControlFraming#MAX_MESSAGE_BYTES} 与出站队列的成帧长度预算 {@link
+   * DaemonControlStream#MAX_PENDING_BYTES}，超出后发送方只会得到 BUSY 并关闭连接。
+   */
+  private static final int MAX_DELIVERABLE_MESSAGE_BYTES =
+      Math.min(
+          ControlFraming.MAX_MESSAGE_BYTES,
+          DaemonControlStream.MAX_PENDING_BYTES - ControlFraming.PREFIX_BYTES);
+
+  /** 信封里与配置无关的部分取最坏情况：canonical UUID 环境 id 与最大合法版本。 */
+  private static final String SERIALIZED_ENVIRONMENT_ID = "00000000-0000-4000-8000-000000000000";
+
+  /**
+   * 单条字段都合法不等于能下发：LSP 列表没有条数上限，累加后可能超过一条控制帧的字节预算。
+   *
+   * <p>这里按发送方的真实结构（{@link DaemonConfigProtocolMapper} 映射后的 {@code ENVIRONMENT_CONFIG}）计算序列化大小，环境 id
+   * 与版本取最坏情况， 因此通过校验的卡片在任何合法版本下都能进入一帧。
+   */
+  private static void requireDeliverable(DaemonConfigDTO config) {
+    Envelope update =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.ENVIRONMENT_CONFIG)
+            .setEnvironmentId(SERIALIZED_ENVIRONMENT_ID)
+            .setEnvironmentConfig(
+                EnvironmentConfig.newBuilder()
+                    .setVersion(Long.MAX_VALUE)
+                    .setConfig(DaemonConfigProtocolMapper.toProtocol(config))
+                    .build())
+            .build();
+    if (update.getSerializedSize() > MAX_DELIVERABLE_MESSAGE_BYTES) {
+      throw invalid(
+          "daemonConfig",
+          "must fit in a " + MAX_DELIVERABLE_MESSAGE_BYTES + " byte ENVIRONMENT_CONFIG message");
+    }
+  }
+
+  /**
+   * bashExecutable 与控制协议 {@code requireSingleLine} 同口径：非空白、无控制字符、无首尾空白、限长。
+   *
+   * <p>首尾空白或超长值会让 {@code ENVIRONMENT_CONFIG} 在出站时被拒，导致环境永远无法进入 READY。
+   */
+  private static String bashExecutable(String value) {
     if (value == null) {
       return null;
     }
-    nonblank(value, "daemonConfig.bashExecutable");
+    String path = "daemonConfig.bashExecutable";
+    nonblank(value, path);
+    if (!value.equals(value.strip())) {
+      throw invalid(path, "must not have surrounding whitespace");
+    }
+    bounded(value, path, ControlProtocolValidator.MAX_BASH_EXECUTABLE_CHARS);
     return value;
   }
 
@@ -140,7 +202,9 @@ public final class DaemonConfigCodec {
       throw invalid(
           path, "must be an unauthenticated http://host:port proxy without path or query");
     }
-    return "http://" + uri.getRawAuthority();
+    String proxy = "http://" + uri.getRawAuthority();
+    bounded(proxy, path, ControlProtocolValidator.MAX_CONFIG_URL_CHARS);
+    return proxy;
   }
 
   private static URI origin(String value) {
@@ -172,7 +236,9 @@ public final class DaemonConfigCodec {
         && (!port.matches(":[0-9]+") || uri.getPort() < 1 || uri.getPort() > 65535)) {
       throw invalid(path, "must have a valid authority and port");
     }
-    return URI.create(scheme.toLowerCase(Locale.ROOT) + "://" + authority);
+    String normalized = scheme.toLowerCase(Locale.ROOT) + "://" + authority;
+    bounded(normalized, path, ControlProtocolValidator.MAX_CONFIG_URL_CHARS);
+    return URI.create(normalized);
   }
 
   private static DaemonLspConfiguration validateLsp(DaemonLspConfiguration config) {
@@ -235,6 +301,7 @@ public final class DaemonConfigCodec {
           throw invalid(field, "must be project-relative without traversal");
         }
       }
+      bounded(value, field, ControlProtocolValidator.MAX_LSP_ITEM_CHARS);
       result.add(value);
     }
     return List.copyOf(result);
@@ -243,6 +310,13 @@ public final class DaemonConfigCodec {
   private static void serverId(String id) {
     if (id == null || !id.matches("[A-Za-z0-9_.-]+")) {
       throw invalid("daemonConfig.lsp.servers", "server IDs must match [A-Za-z0-9_.-]+");
+    }
+    if (id.length() > ControlProtocolValidator.MAX_LSP_SERVER_ID_CHARS) {
+      throw invalid(
+          "daemonConfig.lsp.servers",
+          "server IDs must not exceed "
+              + ControlProtocolValidator.MAX_LSP_SERVER_ID_CHARS
+              + " characters");
     }
   }
 
@@ -307,6 +381,22 @@ public final class DaemonConfigCodec {
       throw invalid(path, "must be a nonblank string");
     }
     noControls(value, path);
+    requireValidUnicode(value, path);
+  }
+
+  /** 与控制协议一致：不成对的代理项无法进入 UTF-8 wire，必须在保存阶段就拒绝。 */
+  private static void requireValidUnicode(String value, String path) {
+    try {
+      ResourceRef.utf8Length(value, path);
+    } catch (IllegalArgumentException error) {
+      throw invalid(path, "must be valid Unicode");
+    }
+  }
+
+  private static void bounded(String value, String path, int maxChars) {
+    if (value.length() > maxChars) {
+      throw invalid(path, "must not exceed " + maxChars + " characters");
+    }
   }
 
   private static void noControls(String value, String path) {

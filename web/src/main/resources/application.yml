@@ -107,6 +107,8 @@ kk-studio:
         heartbeat-interval-millis: ${KK_STUDIO_CANVAS_FUNCTION_HEARTBEAT_INTERVAL_MILLIS:10000}
         poll-interval-millis: ${KK_STUDIO_CANVAS_FUNCTION_POLL_INTERVAL_MILLIS:1000}
         rejection-delay-millis: ${KK_STUDIO_CANVAS_FUNCTION_REJECTION_DELAY_MILLIS:1000}
+        # 读取冻结原件的总预算（S3 握手 + 响应体消费），打开时冻结。
+        blob-read-budget-millis: ${KK_STUDIO_CANVAS_FUNCTION_BLOB_READ_BUDGET_MILLIS:300000}
   plugins:
     refresh:
       poll-delay: ${KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY:1h}

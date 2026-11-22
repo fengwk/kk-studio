@@ -11,7 +11,8 @@ public final class ControlFraming {
   /** 单条控制消息的最大字节数：16 MiB。 */
   public static final int MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 
-  private static final int PREFIX_BYTES = Integer.BYTES;
+  /** 长度前缀的字节数；成帧后的总长是消息长度加该前缀。 */
+  public static final int PREFIX_BYTES = Integer.BYTES;
 
   private ControlFraming() {}
 

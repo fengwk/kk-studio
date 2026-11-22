@@ -263,7 +263,8 @@ class StandardComfyuiClientTest {
     assertEquals(
         "\r\n--", text.substring(payloadAt + payload.length, payloadAt + payload.length + 4));
     assertTrue(text.trim().endsWith("--"));
-    assertTrue(closed.get());
+    // 关闭权归调用方：上传只消费流，绝不替调用方关闭。
+    assertFalse(closed.get());
   }
 
   /** 碎片化输入流（每次最多 100 字节）必须被完整组装成单个 multipart 请求体，不能截断或重复内容。 */
@@ -286,12 +287,12 @@ class StandardComfyuiClientTest {
     String text = new String(body, StandardCharsets.ISO_8859_1);
     assertTrue(text.contains("filename=\"wide.bin\""));
     assertTrue(text.contains("Content-Type: application/octet-stream"));
-    assertTrue(closed.get());
+    assertFalse(closed.get());
   }
 
-  /** HttpClient.send 拒绝上传请求时调用方流仍必须被关闭，且不得读取内容。 */
+  /** HttpClient.send 拒绝上传请求时不得读取内容，也不得关闭调用方的流（由调用方释放）。 */
   @Test
-  void closesCallerStreamWhenSendRejectsUploadRequest() throws Exception {
+  void leavesCallerStreamOpenWhenSendRejectsUploadRequest() throws Exception {
     AtomicBoolean closed = new AtomicBoolean();
     AtomicInteger reads = new AtomicInteger();
     InputStream content =
@@ -323,8 +324,9 @@ class StandardComfyuiClientTest {
                     "cancel.bin", "application/octet-stream", 1024L, content, CANVAS));
     assertSame(rejected, thrown);
     assertEquals(0, reads.get());
-    assertTrue(closed.get());
-    assertThrows(IOException.class, () -> content.read(new byte[1]));
+    assertFalse(closed.get());
+    // 流仍由调用方持有且可继续读取，未被上传路径提前破坏。
+    assertEquals(7, content.read());
   }
 
   @Test
@@ -369,7 +371,8 @@ class StandardComfyuiClientTest {
                     tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
                     CANVAS));
     assertTrue(tooShort.getCause().getMessage().contains("ended after"));
-    assertTrue(shortClosed.get());
+    // 长度不符也只报错，流的释放仍由调用方负责。
+    assertFalse(shortClosed.get());
     assertEquals(null, uploadBody.get());
 
     AtomicBoolean longClosed = new AtomicBoolean();
@@ -384,8 +387,21 @@ class StandardComfyuiClientTest {
                     tracking(new ByteArrayInputStream(new byte[] {1, 2, 3, 4}), longClosed),
                     CANVAS));
     assertTrue(tooLong.getCause().getMessage().contains("longer than declared"));
-    assertTrue(longClosed.get());
+    assertFalse(longClosed.get());
     assertEquals(null, uploadBody.get());
+  }
+
+  /** JAP-5：上传路径不关闭调用方的流；调用方 try-with-resources 关闭后，同一条流只被关闭一次。 */
+  @Test
+  void closesUploadedCallerStreamOnlyOnceByCaller() throws Exception {
+    AtomicInteger closes = new AtomicInteger();
+    uploadResponse.set(
+        "{\"name\":\"clip.mp4\",\"subfolder\":\"kk-studio/" + CANVAS + "\",\"type\":\"input\"}");
+    try (InputStream content = counting(new ByteArrayInputStream(new byte[] {1, 2, 3}), closes)) {
+      client.upload("clip.mp4", "video/mp4", 3L, content, CANVAS);
+      assertEquals(0, closes.get());
+    }
+    assertEquals(1, closes.get());
   }
 
   @Test
@@ -419,8 +435,9 @@ class StandardComfyuiClientTest {
                 CANVAS));
   }
 
+  /** 读取失败或内容短于声明只报错，不替调用方关闭流。 */
   @Test
-  void closesUploadStreamWhenReadFailsOrContentIsShorterThanDeclared() {
+  void leavesCallerStreamOpenWhenReadFailsOrContentIsShorterThanDeclared() {
     AtomicBoolean failedClosed = new AtomicBoolean();
     assertThrows(
         UncheckedIOException.class,
@@ -431,7 +448,7 @@ class StandardComfyuiClientTest {
                 8L,
                 tracking(new FailingInputStream(), failedClosed),
                 CANVAS));
-    assertTrue(failedClosed.get());
+    assertFalse(failedClosed.get());
 
     AtomicBoolean shortClosed = new AtomicBoolean();
     assertThrows(
@@ -443,7 +460,7 @@ class StandardComfyuiClientTest {
                 8L,
                 tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
                 CANVAS));
-    assertTrue(shortClosed.get());
+    assertFalse(shortClosed.get());
   }
 
   @Test
@@ -795,6 +812,17 @@ class StandardComfyuiClientTest {
       return;
     }
     json(exchange, uploadStatus.get(), uploadResponse.get());
+  }
+
+  /** 只统计 close 次数的调用方流：用于断言上传后同一条流只被调用方关闭一次。 */
+  private static InputStream counting(InputStream content, AtomicInteger closes) {
+    return new FilterInputStream(content) {
+      @Override
+      public void close() throws IOException {
+        closes.incrementAndGet();
+        super.close();
+      }
+    };
   }
 
   private static InputStream tracking(InputStream content, AtomicBoolean closed) {

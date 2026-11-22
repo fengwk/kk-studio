@@ -264,7 +264,15 @@ final class DaemonConnectionSession implements DaemonSession {
       DaemonOfferResult result;
       try {
         result = control.offer(update);
+      } catch (ControlProtocolException rejection) {
+        // 此处抛出的 ControlProtocolException 只可能来自 control.offer → ControlProtocolCodec.encodeFrame →
+        // ControlProtocolValidator：
+        // ENVIRONMENT_CONFIG 的每条拒绝都由协议校验器构造，正文只是字段路径与规则，不含配置值或存储细节。
+        DaemonFailures.logRejection(
+            DaemonConnectionSession.class, configStage(snapshot), rejection);
+        result = DaemonOfferResult.CLOSED;
       } catch (RuntimeException error) {
+        DaemonFailures.log(DaemonConnectionSession.class, configStage(snapshot), error);
         result = DaemonOfferResult.CLOSED;
       }
       if (result == DaemonOfferResult.ACCEPTED) {
@@ -274,6 +282,11 @@ final class DaemonConnectionSession implements DaemonSession {
     }
     close();
     return false;
+  }
+
+  /** 配置下发阶段的固定短语；只含实体标识与协议版本号，不放异常正文或配置值。 */
+  private String configStage(EnvironmentConfigSnapshot snapshot) {
+    return "environment config version " + snapshot.version() + " delivery";
   }
 
   private void failMissingEnvironmentConfig() {

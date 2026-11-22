@@ -32,8 +32,23 @@ import java.util.regex.Pattern;
  * <p>编解码与领域映射见 {@link ControlProtocolCodec}；本类只补 proto3 无法表达的契约：消息类型与 payload
  * 一致性、scope、必填、枚举未指定值、安全整数、UUID/SHA/媒体类型、UTF-8 字节上限、既有 granular limits 以及递归未知字段。嵌入 JSON
  * 只做严格文本校验，绝不重新序列化。
+ *
+ * <p>环境配置（{@code ENVIRONMENT_CONFIG}）里卡片可编辑字段的上限以本类的 {@code MAX_*} 常量为唯一真源；卡片侧校验（platform/runtime 的
+ * codec）直接复用这些常量，保证“能保存的卡片一定能下发”，不会出现保存成功但连接在下发时被关闭的情况。
  */
 public final class ControlProtocolValidator {
+
+  /** 卡片 Daemon 配置中 URL 字段（{@code studioUrl} / {@code proxyUrl}）的字符上限。 */
+  public static final int MAX_CONFIG_URL_CHARS = 2048;
+
+  /** 卡片 Daemon 配置中 {@code bashExecutable} 的字符上限。 */
+  public static final int MAX_BASH_EXECUTABLE_CHARS = 4096;
+
+  /** 卡片 Daemon 配置中 LSP server id 的字符上限。 */
+  public static final int MAX_LSP_SERVER_ID_CHARS = 256;
+
+  /** 卡片 Daemon 配置中 LSP 单个列表项的字符上限。 */
+  public static final int MAX_LSP_ITEM_CHARS = 4096;
 
   private static final Pattern LSP_SERVER_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+$");
   private static final Pattern CONFIG_ERROR_CODE_PATTERN =
@@ -292,18 +307,19 @@ public final class ControlProtocolValidator {
 
   private static void validateDaemonConfiguration(DaemonConfiguration config, String path) {
     requireHttpOrigin(
-        requireText(true, config.getStudioUrl(), path + ".studioUrl", 2048, true),
+        requireText(true, config.getStudioUrl(), path + ".studioUrl", MAX_CONFIG_URL_CHARS, true),
         path + ".studioUrl",
         false);
     if (config.hasBashExecutable()) {
-      requireSingleLine(true, config.getBashExecutable(), path + ".bashExecutable", 4096);
+      requireSingleLine(
+          true, config.getBashExecutable(), path + ".bashExecutable", MAX_BASH_EXECUTABLE_CHARS);
     }
     if (config.hasLsp()) {
       validateLspConfiguration(config.getLsp(), path + ".lsp");
     }
     if (config.hasProxyUrl()) {
       requireHttpOrigin(
-          requireText(true, config.getProxyUrl(), path + ".proxyUrl", 2048, true),
+          requireText(true, config.getProxyUrl(), path + ".proxyUrl", MAX_CONFIG_URL_CHARS, true),
           path + ".proxyUrl",
           true);
     }
@@ -317,7 +333,8 @@ public final class ControlProtocolValidator {
     for (int index = 0; index < lsp.getServersCount(); index++) {
       LspServer server = lsp.getServers(index);
       String serverPath = path + ".servers[" + index + "]";
-      String id = requireText(true, server.getId(), serverPath + ".id", 256, true);
+      String id =
+          requireText(true, server.getId(), serverPath + ".id", MAX_LSP_SERVER_ID_CHARS, true);
       if (!LSP_SERVER_ID_PATTERN.matcher(id).matches()) {
         throw new ControlProtocolException(serverPath + ".id must match [A-Za-z0-9_.-]+");
       }
@@ -341,7 +358,8 @@ public final class ControlProtocolValidator {
       return;
     }
     for (int index = 0; index < values.size(); index++) {
-      String value = requireText(true, values.get(index), path + "[" + index + "]", 4096, true);
+      String value =
+          requireText(true, values.get(index), path + "[" + index + "]", MAX_LSP_ITEM_CHARS, true);
       if (extension
           && (value.length() < 2
               || !value.startsWith(".")

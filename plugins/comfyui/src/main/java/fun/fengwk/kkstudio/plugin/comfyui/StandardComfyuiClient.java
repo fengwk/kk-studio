@@ -87,6 +87,12 @@ public final class StandardComfyuiClient implements Closeable {
     this.mapper = transport.mapper();
   }
 
+  /**
+   * 上传一份已冻结原件，返回远端登记的坐标。
+   *
+   * <p>资源所有权边界：{@code content} 由调用方持有并关闭（见 {@code ComfyuiManifestUploader} 的 try-with-resources），与
+   * OpenCLI 上传一致；本方法只消费该流一次，不关闭、不缓存、不重放。
+   */
   public H3UploadedFile upload(
       String filename, String mediaType, long contentLength, InputStream content, UUID canvasId) {
     requireFilename(filename);
@@ -98,31 +104,27 @@ public final class StandardComfyuiClient implements Closeable {
     Objects.requireNonNull(canvasId, "canvasId");
     String boundary = "kkstudio-" + UUID.randomUUID();
     String subfolder = "kk-studio/" + canvasId;
-    try {
-      HttpRequest.BodyPublisher body =
-          transport.multipart(
-              multipartHeader(boundary, filename, mediaType, subfolder),
-              contentLength,
-              content,
-              multipartFooter(boundary));
-      ObjectNode response =
-          object(
-              transport.sendJson(
-                  transport
-                      .request("upload/image")
-                      .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                      .POST(body)),
-              "upload response");
-      H3UploadedFile uploaded =
-          new H3UploadedFile(
-              text(response, "name"), text(response, "subfolder"), text(response, "type"));
-      if (!subfolder.equals(uploaded.subfolder())) {
-        throw new IllegalArgumentException("ComfyUI upload returned an unexpected subfolder");
-      }
-      return uploaded;
-    } finally {
-      ComfyuiHttpTransport.closeQuietly(content);
+    HttpRequest.BodyPublisher body =
+        transport.multipart(
+            multipartHeader(boundary, filename, mediaType, subfolder),
+            contentLength,
+            content,
+            multipartFooter(boundary));
+    ObjectNode response =
+        object(
+            transport.sendJson(
+                transport
+                    .request("upload/image")
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(body)),
+            "upload response");
+    H3UploadedFile uploaded =
+        new H3UploadedFile(
+            text(response, "name"), text(response, "subfolder"), text(response, "type"));
+    if (!subfolder.equals(uploaded.subfolder())) {
+      throw new IllegalArgumentException("ComfyUI upload returned an unexpected subfolder");
     }
+    return uploaded;
   }
 
   public String submit(ObjectNode workflow, String clientId) {

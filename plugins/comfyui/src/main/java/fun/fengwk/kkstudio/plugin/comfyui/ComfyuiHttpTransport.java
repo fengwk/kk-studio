@@ -215,14 +215,33 @@ final class ComfyuiHttpTransport implements Closeable {
     }
   }
 
+  /**
+   * 上传正文的流供应商：正文只允许开启一次，长度必须与声明一致。
+   *
+   * <p>关闭权归调用方：{@link HttpRequest.BodyPublishers#ofInputStream} 在正文发布结束后会关闭它拿到的流，因此这里再包一层 {@link
+   * CallerOwnedContent}，把那次关闭降为空操作，调用方的 try-with-resources 仍能正常释放。
+   */
   static Supplier<InputStream> contentSupplier(InputStream content, long contentLength) {
     AtomicBoolean opened = new AtomicBoolean();
     return () -> {
       if (!opened.compareAndSet(false, true)) {
         throw new IllegalStateException("upload content stream is already open");
       }
-      return new ExactUploadContent(content, contentLength);
+      return new ExactUploadContent(new CallerOwnedContent(content), contentLength);
     };
+  }
+
+  /** 关闭权归调用方的正文流：吞掉传输层在正文发布结束后发的 close，从不关闭上游流。 */
+  private static final class CallerOwnedContent extends FilterInputStream {
+
+    private CallerOwnedContent(InputStream content) {
+      super(content);
+    }
+
+    @Override
+    public void close() {
+      // 关闭权归调用方（ComfyuiManifestUploader 的 try-with-resources），这里不释放上游流。
+    }
   }
 
   /**
@@ -368,7 +387,7 @@ final class ComfyuiHttpTransport implements Closeable {
 
   record Response(int statusCode, HttpHeaders headers, DeadlineResponseBody body) {}
 
-  /** 只读声明长度。提前结束或声明长度之后仍有字节都失败，不截断。流由 upload 关闭。 */
+  /** 只读声明长度。提前结束或声明长度之后仍有字节都失败，不截断。流由调用方持有并关闭。 */
   private static final class ExactUploadContent extends FilterInputStream {
 
     private final long declared;

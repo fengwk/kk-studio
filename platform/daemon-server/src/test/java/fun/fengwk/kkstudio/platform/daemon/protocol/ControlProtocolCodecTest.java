@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.daemon.protocol;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
@@ -1418,5 +1420,43 @@ class ControlProtocolCodecTest {
                                     .setDetailsJson("{}")
                                     .addContents(ControlProtocolFixtures.json("{"))))
                     .build()));
+  }
+
+  /** 预签名 PUT 头部的上限按 UTF-8 字节计：Java 不再放行 Daemon(Go) 会拒绝的非 ASCII 头部。 */
+  @Test
+  void boundsPresignedPutHeadersByUtf8Bytes() {
+    assertDoesNotThrow(
+        () ->
+            ControlProtocolCodec.encodeFrame(uploadTicket(Map.of("x-amz-meta", "a".repeat(1024)))));
+    assertDoesNotThrow(
+        () ->
+            ControlProtocolCodec.encodeFrame(uploadTicket(Map.of("x-amz-meta", "签".repeat(341)))));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeFrame(uploadTicket(Map.of("x-amz-meta", "签".repeat(342)))));
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.encodeFrame(uploadTicket(Map.of("签".repeat(342), "v"))));
+  }
+
+  private static Envelope uploadTicket(Map<String, String> headers) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.RESOURCE_UPLOAD_TICKET)
+        .setEnvironmentId("11111111-1111-4111-8111-111111111111")
+        .setInvocationId("22222222-2222-4222-8222-222222222222")
+        .setResourceUploadTicket(
+            ResourceUploadTicket.newBuilder()
+                .setTransferId("33333333-3333-4333-8333-333333333333")
+                .setUploadId("44444444-4444-4444-8444-444444444444")
+                .setState(TicketState.TICKET_PENDING)
+                .setPresignedPut(
+                    PresignedPut.newBuilder()
+                        .setMethod("PUT")
+                        .setUrl("https://bucket.example.com/key?signature=abc")
+                        .putAllHeaders(headers)
+                        .setExpiresAtEpochMs(1L))
+                .build())
+        .build();
   }
 }

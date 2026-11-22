@@ -19,4 +19,7 @@ public class CanvasFunctionRuntimeProperties {
   private long pollIntervalMillis = 1_000;
 
   private long rejectionDelayMillis = 1_000;
+
+  /** 读取冻结原件的预算：打开时冻结，覆盖 S3 握手与响应体消费。 */
+  private long blobReadBudgetMillis = 300_000;
 }

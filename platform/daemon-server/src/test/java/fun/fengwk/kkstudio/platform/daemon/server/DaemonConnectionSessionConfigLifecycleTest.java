@@ -5,6 +5,8 @@ import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.heartbeatEnvelope;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.runtimeStatusEnvelope;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -13,11 +15,17 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationError;
 import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationStatus;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
+import fun.fengwk.kkstudio.platform.daemon.protocol.DaemonConfiguration;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.FakeControlChannel;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.Fixture;
 
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 /** 配置 v2 生命周期回归：初始/READY/通知查询失败、入队失败、CONNECTING 租约围栏与快照 revision。 */
 class DaemonConnectionSessionConfigLifecycleTest {
@@ -66,6 +74,39 @@ class DaemonConnectionSessionConfigLifecycleTest {
 
     fixture.server.environmentChanged(ENVIRONMENT_ID);
     assertTrue(channel.closed());
+  }
+
+  /** 出站协议拒绝必须记录字段路径与规则，且不回显配置值，而不是无声关闭连接。 */
+  @Test
+  void protocolRejectedEnvironmentConfigIsLoggedWithoutEchoingTheValue() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.openSession("config-protocol-rejection");
+    fixture.configs.put(
+        ENVIRONMENT_ID,
+        new EnvironmentConfigSnapshot(
+            3L,
+            DaemonConfiguration.newBuilder()
+                .setStudioUrl("https://studio.example.org")
+                .setBashExecutable(" /opt/secret-token ")
+                .build()));
+
+    try (ConfigLog log = new ConfigLog()) {
+      fixture.server.environmentChanged(ENVIRONMENT_ID);
+
+      assertTrue(channel.closed(), "a rejected frame must force a reconnect");
+      assertEquals(
+          1,
+          channel.countOf(MessageType.ENVIRONMENT_CONFIG),
+          "the rejected frame is not delivered");
+      assertEquals(0L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
+      assertEquals(
+          List.of(
+              "environment daemon environment config version 3 delivery rejected:"
+                  + " environmentConfig.config.bashExecutable must not have surrounding"
+                  + " whitespace"),
+          log.messages());
+      log.assertSafe();
+    }
   }
 
   @Test
@@ -170,5 +211,62 @@ class DaemonConnectionSessionConfigLifecycleTest {
         new DaemonRuntimeSnapshot(3L, new DaemonRuntimeStatus(DAEMON_VERSION, null, noError));
     fixture.receive(channel, heartbeatEnvelope(3L, third.status()));
     assertEquals(third, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow());
+  }
+
+  /**
+   * 接管环境会话诊断日志的 JUL 端口：安全失败日志是普通 {@code System.Logger} 记录，只有挂接处理器才能断言其内容。
+   *
+   * <p>{@link #close()} 恢复接管前的级别与父处理器设置，避免影响其它测试。
+   */
+  private static final class ConfigLog implements AutoCloseable {
+
+    private static final String SECRET = "secret-token";
+
+    private final Logger logger = Logger.getLogger(DaemonConnectionSession.class.getName());
+    private final Level previousLevel = logger.getLevel();
+    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final List<LogRecord> records = new CopyOnWriteArrayList<>();
+    private final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+
+    private ConfigLog() {
+      handler.setLevel(Level.ALL);
+      logger.addHandler(handler);
+      logger.setLevel(Level.ALL);
+      logger.setUseParentHandlers(false);
+    }
+
+    List<String> messages() {
+      return records.stream().map(LogRecord::getMessage).toList();
+    }
+
+    /** 每条拒绝恰好一条 WARNING，只携带固定阶段、字段路径与规则：没有原始 throwable，也不回显配置值。 */
+    void assertSafe() {
+      assertEquals(1, records.size(), "the rejection must be logged exactly once");
+      for (LogRecord record : records) {
+        assertEquals(Level.WARNING, record.getLevel());
+        assertNull(record.getThrown(), "a raw throwable must never be logged");
+        assertFalse(
+            record.getMessage().contains(SECRET), "the diagnostic must not echo the config value");
+      }
+    }
+
+    @Override
+    public void close() {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+      logger.setUseParentHandlers(previousUseParentHandlers);
+    }
   }
 }

@@ -219,7 +219,7 @@ runtimeStatus: {
 - **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
 - **非 owner 转发**：浏览器不要求粘性路由；非 owner 节点 B 收到 IDE 流量时，从 `environment_connection` 和 `cluster_node` 找到 owner 节点 A，通过内部单跳代理转发给 A，只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
-`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；预签名票据的 `expiresAtEpochMs` 是正整数 epoch 毫秒，由 `ControlProtocolValidator` 校验，协议中不存在 `Instant` 文本。协议验证未知字段、必填字段、canonical UUID、摘要与 ticket 状态；嵌入的 JSON 文本严格校验重复键和尾随内容。
+`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 个 UTF-8 字节（与 Daemon 的字节口径一致，非 ASCII 头部不会单方面被拒）；预签名票据的 `expiresAtEpochMs` 是正整数 epoch 毫秒，由 `ControlProtocolValidator` 校验，协议中不存在 `Instant` 文本。协议验证未知字段、必填字段、canonical UUID、摘要与 ticket 状态；嵌入的 JSON 文本严格校验重复键和尾随内容。
 
 上传资源的字节不进入控制通道：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。控制流和 IDE 数据流通过承载在 WebSocket 上的 HTTP/2 会话多路复用；所有能力统一通过通用 INVOKE 与结果协议交互。
 

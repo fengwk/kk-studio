@@ -86,7 +86,7 @@ class DeadlineBoundedBlobStreamTest {
     assertFalse(source.drainAttempted(), "提前退出不能排空未读完的响应体");
   }
 
-  /** 测试意图：正常读到 EOF 后走 close（不 abort），连接可留在池中复用。 */
+  /** 测试意图：正常读到 EOF 后走 close（不 abort），连接可留在池中复用；公开入口同时给出 S3 权威长度。 */
   @Test
   void closesWithoutAbortingAfterFullEof() throws IOException {
     StallingAbortableInputStream source = StallingAbortableInputStream.withBody(3);
@@ -94,6 +94,7 @@ class DeadlineBoundedBlobStreamTest {
     int total = 0;
     try (DeadlineBoundedBlobStream stream =
         DeadlineBoundedBlobStream.open(s3StorageService, KEY, freshDeadline(5_000L))) {
+      assertEquals(3L, stream.contentLength());
       int read;
       while ((read = stream.read()) != -1) {
         total++;
