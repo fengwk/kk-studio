@@ -5,18 +5,24 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 const invalidProxyConfig = "Invalid HTTP proxy configuration"
 
-// ProxyPolicy applies only the explicitly configured proxy URL; it never consults environment proxies.
+// ProxyPolicy owns the HTTP connection pool for an explicit proxy or direct policy.
+// It never consults environment proxies.
 type ProxyPolicy struct {
-	proxy *url.URL
+	transport *http.Transport
 }
 
 // NewProxyPolicy validates the optional explicit HTTP proxy URL.
 func NewProxyPolicy(proxyURL string) (*ProxyPolicy, error) {
-	p := &ProxyPolicy{}
+	p := &ProxyPolicy{transport: &http.Transport{
+		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 4,
+	}}
 	if proxyURL == "" {
 		return p, nil
 	}
@@ -28,15 +34,21 @@ func NewProxyPolicy(proxyURL string) (*ProxyPolicy, error) {
 	if err != nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("%s", invalidProxyConfig)
 	}
-	p.proxy = u
+	p.transport.Proxy = func(r *http.Request) (*url.URL, error) {
+		// IDE requests are pinned to the resolver's validated local address. Unlike
+		// ordinary requests to a loopback URL, they must never reach an external proxy.
+		if addr, ok := r.Context().Value(ideUpstreamAddressKey{}).(string); ok && r.URL.Host == addr {
+			return nil, nil
+		}
+		return u, nil
+	}
 	return p, nil
 }
 
-// HTTPClient creates an isolated client whose transport uses the configured proxy without bypass rules.
+// HTTPClient creates a client using the policy's shared transport. Redirects are not followed.
 func (p *ProxyPolicy) HTTPClient() *http.Client {
-	tr := &http.Transport{Proxy: nil}
-	if p != nil && p.proxy != nil {
-		tr.Proxy = http.ProxyURL(p.proxy)
+	if p == nil {
+		p, _ = NewProxyPolicy("")
 	}
-	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &http.Client{Transport: p.transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }

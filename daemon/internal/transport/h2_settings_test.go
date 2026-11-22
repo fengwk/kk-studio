@@ -37,7 +37,7 @@ func TestServerSettingsEnableConnectProtocol(t *testing.T) {
 func assertConnectProtocolSetting(t *testing.T) {
 	t.Helper()
 	serverConn, clientConn := net.Pipe()
-	connection := newControlConnection(serverConn, nil, nil)
+	connection := newControlConnection(serverConn, nil, nil, nil)
 	defer connection.Close()
 	defer clientConn.Close()
 	if err := clientConn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {

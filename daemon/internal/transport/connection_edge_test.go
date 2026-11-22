@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
@@ -30,6 +31,18 @@ func (s *testStream) Close() error                { return s.closeErr }
 type deadlineErrorConn struct{ net.Conn }
 
 func (deadlineErrorConn) SetReadDeadline(time.Time) error { return errors.New("deadline failed") }
+
+type closeErrorConn struct {
+	net.Conn
+	err error
+}
+
+func (c closeErrorConn) Close() error {
+	if err := c.Conn.Close(); err != nil {
+		return err
+	}
+	return c.err
+}
 
 type failingWriter struct{}
 
@@ -99,6 +112,78 @@ func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
 	}
 }
 
+// A transport handshake error does not prevent the first Close from succeeding.
+func TestControlConnection_CloseIgnoresTransportHandshakeFailure(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	closeErr := errors.New("transport close failed")
+	cc := &ControlConnection{
+		conn:        closeErrorConn{Conn: left, err: closeErr},
+		server:      &http.Server{},
+		closed:      make(chan struct{}),
+		stopControl: make(chan struct{}),
+	}
+	if err := cc.Close(); err != nil {
+		t.Fatalf("first Close error = %v, want nil", err)
+	}
+	if err := cc.Close(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("second Close error = %v, want net.ErrClosed", err)
+	}
+}
+
+// Simulate shutdown owning Close after Studio abruptly disconnects, without a competing reader.
+func TestControlConnection_FirstCloseAfterPeerDisconnect(t *testing.T) {
+	peerClosed := make(chan error, 1)
+	studio := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err == nil {
+			err = ws.CloseNow()
+		}
+		peerClosed <- err
+	}))
+	defer studio.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, studio.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.CloseNow()
+	if err := <-peerClosed; err != nil {
+		t.Fatalf("disconnect Studio: %v", err)
+	}
+	cc := &ControlConnection{
+		conn:        websocket.NetConn(ctx, ws, websocket.MessageBinary),
+		server:      &http.Server{},
+		closed:      make(chan struct{}),
+		stopControl: make(chan struct{}),
+	}
+	if err := cc.Close(); err != nil {
+		t.Fatalf("shutdown Close after peer disconnect: %v", err)
+	}
+}
+
+// A read failure closes the transport without passing its close error to a later caller.
+func TestControlConnection_ReceiveDoesNotReplayCloseFailure(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	cc := &ControlConnection{
+		conn:          closeErrorConn{Conn: left, err: errors.New("transport close failed")},
+		server:        &http.Server{},
+		closed:        make(chan struct{}),
+		stopControl:   make(chan struct{}),
+		controlReady:  make(chan struct{}),
+		controlStream: &testStream{reader: bytes.NewReader(nil), writer: io.Discard},
+	}
+	close(cc.controlReady)
+	if _, err := cc.Receive(context.Background()); !errors.Is(err, io.EOF) {
+		t.Fatalf("Receive error = %v, want io.EOF", err)
+	}
+	if err := cc.Close(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Close after Receive error = %v, want net.ErrClosed", err)
+	}
+}
+
 func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 	for _, data := range [][]byte{{0, 0, 0, 1}, {0, 0, 0, 1, 0xff}} {
 		left, right := net.Pipe()
@@ -109,8 +194,8 @@ func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 			t.Fatal("invalid control stream accepted")
 		}
 		_ = right.Close()
-		if err := cc.Close(); err != nil {
-			t.Fatal(err)
+		if err := cc.Close(); !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("Close after Receive error = %v, want net.ErrClosed", err)
 		}
 	}
 	left, right := net.Pipe()
@@ -164,7 +249,8 @@ func TestControlConnection_HandlerWaitsForActiveSendBeforeClose(t *testing.T) {
 	}
 
 	cancel()
-	if err := cc.Close(); err != nil {
+	// Cancellation can cause the handler to close the connection first.
+	if err := cc.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("phase=close: %v", err)
 	}
 	sendClosureObserved := make(chan struct{})

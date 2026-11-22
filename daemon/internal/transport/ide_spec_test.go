@@ -104,7 +104,7 @@ func TestHandleIDE_HTTPUpstreamFailureReleasesLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	var releases atomic.Int32
-	connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+	connection := &ControlConnection{httpClient: newTestIDEClient(t, ""), resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 		return ViewUpstream{Host: host, Port: port, Path: "/", Release: func() { releases.Add(1) }}, nil
 	})}
 	response := httptest.NewRecorder()
@@ -131,7 +131,7 @@ func TestHandleIDE_HTTPRequestCancellationReleasesLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	var releases atomic.Int32
-	connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+	connection := &ControlConnection{httpClient: newTestIDEClient(t, ""), resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 		return ViewUpstream{Host: "127.0.0.1", Port: port, Path: "/", Release: func() { releases.Add(1) }}, nil
 	})}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -175,7 +175,7 @@ func TestHandleIDE_ForwardsRepeatedUpstreamHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+	connection := &ControlConnection{httpClient: newTestIDEClient(t, ""), resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 		return ViewUpstream{Host: "127.0.0.1", Port: port, Path: "/", Headers: http.Header{"X-Multi": {"one", "two"}}}, nil
 	})}
 	response := httptest.NewRecorder()

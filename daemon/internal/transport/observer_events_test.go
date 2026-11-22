@@ -20,7 +20,7 @@ func TestControlConnection_ReportsPeerGoawayFrameToObserver(t *testing.T) {
 	for _, code := range []uint32{0, 11} {
 		serverConn, clientConn := net.Pipe()
 		observed := make(chan uint32, 1)
-		connection := newControlConnection(serverConn, nil, recordingObserver{goaway: func(code uint32) { observed <- code }})
+		connection := newControlConnection(serverConn, nil, recordingObserver{goaway: func(code uint32) { observed <- code }}, nil)
 		frame := append([]byte(http2ClientPreface), make([]byte, 9)...)
 		frame[len(http2ClientPreface)+3] = 4 // Empty client SETTINGS frame.
 		goaway := make([]byte, 9+8)

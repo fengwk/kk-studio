@@ -169,11 +169,13 @@ func validHeaderName(s string) bool {
 	return true
 }
 
+type ideUpstreamAddressKey struct{}
+
 func (c *ControlConnection) proxyIDEHTTP(w http.ResponseWriter, r *http.Request, up ViewUpstream) {
-	path := up.Path
-	urlText := "http://" + net.JoinHostPort(strings.Trim(up.Host, "[]"), strconv.Itoa(up.Port)) + path
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, urlText, r.Body)
-	if err != nil {
+	addr := net.JoinHostPort(strings.Trim(up.Host, "[]"), strconv.Itoa(up.Port))
+	ctx := context.WithValue(r.Context(), ideUpstreamAddressKey{}, addr)
+	req, err := http.NewRequestWithContext(ctx, r.Method, "http://"+addr+up.Path, r.Body)
+	if err != nil || req.URL.Host != addr {
 		http.Error(w, "invalid IDE request", http.StatusBadRequest)
 		return
 	}
@@ -186,9 +188,7 @@ func (c *ControlConnection) proxyIDEHTTP(w http.ResponseWriter, r *http.Request,
 	if up.Cookie != "" {
 		req.Header.Set("Cookie", up.Cookie)
 	}
-	resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(strings.Trim(up.Host, "[]"), strconv.Itoa(up.Port)))
-	}}}).Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
 		return
