@@ -97,24 +97,33 @@ describe('appendUniqueChats', () => {
 })
 
 describe('filterChats', () => {
-  it('filters by title and keeps the server order for equal timestamps', () => {
+  // 服务端契约是 updated_at 倒序：刚编辑过的对话即使创建更早也必须留在最前，前端不得按 createdAt 重排。
+  it('keeps the server order instead of re-sorting by createdAt', () => {
     const chats = [
-      chat({ id: '2', title: 'beta', createdAt: 1782000000000 }),
-      chat({ id: '10', title: 'alpha', createdAt: 1782000000000 }),
+      chat({ id: '2', title: 'just edited', createdAt: 1781913600000, updatedAt: 1782086400000 }),
+      chat({ id: '10', title: 'untouched', createdAt: 1782086400000, updatedAt: 1781913600000 }),
     ]
-    // numeric-aware id tie-break: '10' is newer than '2'
-    expect(filterChats(chats, '')).toMatchObject([{ id: '10' }, { id: '2' }])
-    expect(filterChats(chats, 'alp')).toMatchObject([{ id: '10' }])
-    expect(filterChats(chats, 'missing')).toEqual([])
-    expect(filterChats(chats, '  ')).toHaveLength(2)
+    expect(filterChats(chats, '').map((item) => item.id)).toEqual(['2', '10'])
   })
 
-  it('sorts by the extracted timestamp before falling back to the id tie-break', () => {
+  // 同刻同值时服务端按 title asc, id asc 兜底，前端透传即可，不再用 id 降序覆盖。
+  it('keeps the server order for equal timestamps', () => {
     const chats = [
-      chat({ id: '1', title: 'old', createdAt: 1781913600000 }),
-      chat({ id: '2', title: 'new', createdAt: 1782086400000 }),
+      chat({ id: '2', title: 'same title', createdAt: 1782000000000, updatedAt: 1782000000000 }),
+      chat({ id: '10', title: 'same title', createdAt: 1782000000000, updatedAt: 1782000000000 }),
     ]
-    expect(filterChats(chats, '').map((item) => item.title)).toEqual(['new', 'old'])
+    expect(filterChats(chats, '').map((item) => item.id)).toEqual(['2', '10'])
+  })
+
+  it('filters by title without reordering matching chats', () => {
+    const chats = [
+      chat({ id: '2', title: 'alpha', updatedAt: 3 }),
+      chat({ id: '5', title: 'beta', updatedAt: 2 }),
+      chat({ id: '10', title: 'alphabet', updatedAt: 1 }),
+    ]
+    expect(filterChats(chats, 'alp').map((item) => item.id)).toEqual(['2', '10'])
+    expect(filterChats(chats, 'missing')).toEqual([])
+    expect(filterChats(chats, '  ')).toEqual(chats)
   })
 
   it('treats the empty title as a searchable value', () => {

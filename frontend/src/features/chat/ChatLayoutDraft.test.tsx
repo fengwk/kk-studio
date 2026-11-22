@@ -101,12 +101,12 @@ it.each([
   const draft = 'unsent pane two draft'
   renderWorkspace()
   const layout = await screen.findByRole('button', { name: '布局' })
-  const chooseLayout = async (count: string) => {
+  const chooseLayout = async (panes: number) => {
     await user.click(layout)
-    await user.click(screen.getByRole('option', { name: count }))
+    await user.click(screen.getByRole('option', { name: `${panes} 个窗格` }))
   }
 
-  await chooseLayout('2')
+  await chooseLayout(2)
   await user.type(editor(), draft)
   if (attach) {
     const fileInput = pane2().querySelector<HTMLInputElement>('input[type="file"]')!
@@ -119,9 +119,9 @@ it.each([
   }
   expect(editor()).toHaveTextContent(draft)
 
-  await chooseLayout('1')
+  await chooseLayout(1)
   expect(screen.getAllByRole('textbox', { name: '给 AI 发送消息' })).toHaveLength(1)
-  await chooseLayout('2')
+  await chooseLayout(2)
   expect(screen.getAllByRole('textbox', { name: '给 AI 发送消息' })).toHaveLength(2)
 
   expect.soft(editor().textContent, 'Pane 2 still contains the unsent text').toContain(draft)
@@ -139,20 +139,20 @@ it('keeps an in-flight upload in a hidden slot and allows retry on return', asyn
   const user = userEvent.setup()
   renderWorkspace()
   const layout = await screen.findByRole('button', { name: '布局' })
-  const chooseLayout = async (count: string) => {
+  const chooseLayout = async (panes: number) => {
     await user.click(layout)
-    await user.click(screen.getByRole('option', { name: count }))
+    await user.click(screen.getByRole('option', { name: `${panes} 个窗格` }))
   }
-  await chooseLayout('8')
+  await chooseLayout(8)
   const pane = document.querySelector<HTMLElement>('[data-pane-id="pane-8"]')!
   await user.upload(pane.querySelector<HTMLInputElement>('input[type="file"]')!,
     new File(['review attachment'], fileName, { type: 'text/plain' }))
   await waitFor(() => expect(storageService.uploadFile).toHaveBeenCalledTimes(1))
-  await chooseLayout('1')
+  await chooseLayout(1)
   expect(pane).toHaveAttribute('inert')
   expect(pane).not.toBeVisible()
   await act(async () => reject(new Error('PUT failed')))
-  await chooseLayout('8')
+  await chooseLayout(8)
   expect(within(pane).getByText('上传失败')).toBeVisible()
   expect(within(pane).getByRole('button', { name: '发送消息' })).toBeDisabled()
   await user.click(within(pane).getByRole('button', { name: `重试上传 ${fileName}` }))

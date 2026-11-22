@@ -187,6 +187,45 @@ describe('ChatCardsPanel', () => {
     await user.click(screen.getByRole('button', { name: '删除 Draft' }))
     expect(onDelete).toHaveBeenCalledWith(testChat)
   })
+
+  // 加载更多失败只在按钮旁就地提示并可重试：已加载卡片保留，不升级成整页错误。
+  it('shows the load-more failure inline with a retry action and keeps the loaded cards', async () => {
+    const user = userEvent.setup()
+    const onLoadMore = vi.fn()
+    const { rerender } = render(
+      <MemoryRouter>
+        <ChatCardsPanel
+          chats={[chat()]}
+          agents={[]}
+          onCreate={() => undefined}
+          hasMore
+          onLoadMore={onLoadMore}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter>
+        <ChatCardsPanel
+          chats={[chat()]}
+          agents={[]}
+          onCreate={() => undefined}
+          hasMore
+          onLoadMore={onLoadMore}
+          loadMoreError="网络异常，请稍后重试"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('网络异常，请稍后重试')
+    // 已加载的卡片不因分页失败消失
+    expect(screen.getByRole('heading', { level: 3, name: 'Draft' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(onLoadMore).toHaveBeenCalledOnce()
+  })
 })
 
 function Location() {

@@ -1,6 +1,16 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import type { TestInfo } from '@playwright/test'
 import { expect, test, type Page } from './fixture'
+import type { AgentDTO, ChatPageDTO } from '@/shared/api/generated/contracts'
 
 const HARNESS_URL = '/browser-tests/chat-defaults-harness.html'
+
+/** 视觉用例共用的视口矩阵：桌面 1440x900 与移动 390x844。 */
+const VISUAL_VIEWPORTS = [
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'mobile', width: 390, height: 844 },
+] as const
 
 async function setupEnvironmentRoute(page: Page) {
   await page.route('**/api/platform/environments**', async (route) => {
@@ -305,13 +315,8 @@ test.describe('Chat defaults & metadata contracts', () => {
     },
   } as const
 
-  const yoloRowViewports = [
-    { name: 'desktop', width: 1440, height: 900 },
-    { name: 'mobile', width: 390, height: 844 },
-  ] as const
-
   for (const locale of ['zh-CN', 'en-US'] as const) {
-    for (const viewport of yoloRowViewports) {
+    for (const viewport of VISUAL_VIEWPORTS) {
       test(`create Chat YOLO row: separate label/description with the switch centered beside (${locale} ${viewport.width}x${viewport.height})`, async ({ page }, testInfo) => {
         const copy = yoloRowCopy[locale]
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
@@ -362,6 +367,163 @@ test.describe('Chat defaults & metadata contracts', () => {
           path: testInfo.outputPath(`chat-yolo-row-${locale}-${viewport.name}-${viewport.width}x${viewport.height}.png`),
           animations: 'disabled',
         })
+      })
+    }
+  }
+})
+
+/**
+ * FTC-4：「加载更多」失败只影响这一次追加请求。
+ * 已加载卡片保留，失败在分页处以 role=alert 的本地化文案 + 重试呈现，
+ * 不得并入页面级 error（否则整个列表会被一个错误块替掉）。
+ */
+const loadMoreFailureCopy = {
+  'zh-CN': {
+    loadMore: '加载更多',
+    retry: '重试',
+    failure: '服务暂时异常，请稍后重试',
+    pageFailure: '资源加载失败',
+  },
+  'en-US': {
+    loadMore: 'Load more',
+    retry: 'Retry',
+    failure: 'The service is temporarily unavailable. Please try again later.',
+    pageFailure: 'Failed to load resources',
+  },
+} as const
+
+/** 失败回执的原始技术文案：任何语言下都不得直接展示给用户。 */
+const RAW_FAILURE_TITLE = 'list chats failed'
+
+const LIST_AGENTS: AgentDTO[] = [
+  {
+    name: 'assistant',
+    execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
+    config: { tools: [], skills: [], subagents: [] },
+    version: '1',
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
+  },
+]
+
+const FIRST_CHAT_PAGE: ChatPageDTO = {
+  items: [
+    {
+      id: 'chat-release-review',
+      title: 'Release review',
+      agentName: 'assistant',
+      environmentName: 'docker-node',
+      yoloEnabled: false,
+      version: '3',
+      createdAt: 1790812800000,
+      updatedAt: 1790816400000,
+    },
+    {
+      id: 'chat-runtime-triage',
+      title: 'Runtime triage',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: true,
+      version: '2',
+      createdAt: 1790809200000,
+      updatedAt: 1790812800000,
+    },
+  ],
+  nextCursor: 'cursor-page-2',
+}
+
+const SECOND_CHAT_PAGE: ChatPageDTO = {
+  items: [
+    {
+      id: 'chat-docs-polish',
+      title: 'Docs polish',
+      agentName: 'assistant',
+      environmentName: 'docker-node',
+      yoloEnabled: false,
+      version: '1',
+      createdAt: 1790805600000,
+      updatedAt: 1790809200000,
+    },
+  ],
+  nextCursor: null,
+}
+
+/** 首页成功；首次「加载更多」返回 problem+json 500，重试返回末页。 */
+async function setupChatListRoutes(page: Page) {
+  await page.route('**/api/platform/agents', (route) => route.fulfill({ json: LIST_AGENTS }))
+  let nextPageAttempts = 0
+  await page.route('**/api/chat/chats**', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('cursor') == null) {
+      await route.fulfill({ json: FIRST_CHAT_PAGE })
+      return
+    }
+    nextPageAttempts += 1
+    if (nextPageAttempts === 1) {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: RAW_FAILURE_TITLE, status: 500 }),
+      })
+      return
+    }
+    await route.fulfill({ json: SECOND_CHAT_PAGE })
+  })
+}
+
+/** 截图默认落到 Playwright 报告目录；设 KK_CHAT_PAGINATION_SHOTS_DIR 时写入该目录（可指向 worktree 外的 shots/）。 */
+async function captureListShot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  const shotsDir = process.env.KK_CHAT_PAGINATION_SHOTS_DIR
+  const target = shotsDir ? path.join(shotsDir, name) : testInfo.outputPath(name)
+  if (shotsDir) {
+    fs.mkdirSync(shotsDir, { recursive: true })
+  }
+  await page.screenshot({ path: target, animations: 'disabled' })
+}
+
+/** 卡片标题是 `h3`：用 heading 角色定位，避免文本匹配落到包裹节点上。 */
+function chatCard(page: Page, title: string) {
+  return page.getByRole('heading', { name: title, exact: true })
+}
+
+test.describe('Chat list load-more failure', () => {
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    for (const viewport of VISUAL_VIEWPORTS) {
+      test(`keeps loaded chats and offers a localized retry (${locale} ${viewport.width}x${viewport.height})`, async ({ page }, testInfo) => {
+        const copy = loadMoreFailureCopy[locale]
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await setupChatListRoutes(page)
+        await page.goto(`${HARNESS_URL}?scenario=list&locale=${locale}`)
+
+        await expect(chatCard(page, FIRST_CHAT_PAGE.items[0].title)).toBeVisible()
+        await expect(chatCard(page, FIRST_CHAT_PAGE.items[1].title)).toBeVisible()
+
+        await page.getByRole('button', { name: copy.loadMore, exact: true }).click()
+
+        // 失败就地呈现：分页区内的本地化文案 + 重试，已加载卡片不动。
+        const loadMoreBox = page.locator('.chat-cards-load-more')
+        await expect(loadMoreBox.getByRole('alert')).toHaveText(copy.failure)
+        await expect(page.getByRole('button', { name: copy.retry, exact: true })).toBeVisible()
+        await expect(chatCard(page, FIRST_CHAT_PAGE.items[0].title)).toBeVisible()
+        await expect(chatCard(page, FIRST_CHAT_PAGE.items[1].title)).toBeVisible()
+        // 未被误当成整页失败：没有页面级错误块，也没有原始技术文案。
+        await expect(page.locator('.screen-body .state-block')).toHaveCount(0)
+        await expect(page.getByText(copy.pageFailure, { exact: true })).toHaveCount(0)
+        await expect(page.getByText(RAW_FAILURE_TITLE)).toHaveCount(0)
+        // 提示与按钮同行且可换行，窄屏不横向溢出。
+        await loadMoreBox.scrollIntoViewIfNeeded()
+        expect(await loadMoreBox.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+
+        await captureListShot(
+          page,
+          testInfo,
+          `chat-load-more-error-${locale}-${viewport.name}-${viewport.width}x${viewport.height}.png`,
+        )
+
+        // 重试成功：提示消失，追加页进入列表，分页区随之收起。
+        await page.getByRole('button', { name: copy.retry, exact: true }).click()
+        await expect(chatCard(page, SECOND_CHAT_PAGE.items[0].title)).toBeVisible()
+        await expect(loadMoreBox.getByRole('alert')).toHaveCount(0)
+        await expect(loadMoreBox).toHaveCount(0)
       })
     }
   }

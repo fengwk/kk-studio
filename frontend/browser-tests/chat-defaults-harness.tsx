@@ -8,6 +8,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { ChatCard } from '@/features/chat/ChatCard'
+import ChatsRoute from '@/features/chat/ChatsRoute'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import type {
   AgentDTO,
@@ -247,10 +248,21 @@ const queryClient = new QueryClient({
 })
 queryClient.setQueryData(queryKeys.environments.list, initialEnvironments)
 
+/** 列表场景：真实 Chat 列表运行时；其它查询串沿用默认的弹窗与卡片夹具。 */
+const listScenario = params.get('scenario') === 'list'
+
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={queryClient}>
-    <MemoryRouter>
-      <ChatDefaultsHarnessApp />
+    <MemoryRouter initialEntries={listScenario ? ['/chats'] : ['/']}>
+      {listScenario ? (
+        // `scenario=list` 挂载真实 `/chats` 列表运行时（含分页控制器），
+        // 外层 `.stage` 复刻工作台内容区：视口固定高度，列表在 screen-body 内滚动。
+        <div className="stage" style={{ height: '100vh' }}>
+          <ChatsRoute />
+        </div>
+      ) : (
+        <ChatDefaultsHarnessApp />
+      )}
     </MemoryRouter>
   </QueryClientProvider>,
 )

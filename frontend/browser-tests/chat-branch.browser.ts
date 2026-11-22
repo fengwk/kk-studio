@@ -7,6 +7,7 @@ import {
   readSearchHitText,
   recordSearchHitMetrics,
 } from './search-hit-geometry'
+import { isInside } from './visual-shots'
 import type { Locator, Route, TestInfo, WebSocketRoute } from '@playwright/test'
 import { createDefaultChatPaneState, type ChatLayout, type ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
@@ -59,6 +60,7 @@ const COPY = {
     emptyThread: messageCatalog['ai.runtime.thread.empty']['zh-CN'],
     singleThread: messageCatalog['ai.chat.threadCount.one']['zh-CN'],
     search: messageCatalog['ai.chat.selection.search']['zh-CN'],
+    composer: messageCatalog['ai.runtime.composer.ariaLabel']['zh-CN'],
   },
   'en-US': {
     layout: messageCatalog['ai.chat.layout']['en-US'],
@@ -69,6 +71,7 @@ const COPY = {
     emptyThread: messageCatalog['ai.runtime.thread.empty']['en-US'],
     singleThread: messageCatalog['ai.chat.threadCount.one']['en-US'],
     search: messageCatalog['ai.chat.selection.search']['en-US'],
+    composer: messageCatalog['ai.runtime.composer.ariaLabel']['en-US'],
   },
 } as const
 
@@ -689,14 +692,25 @@ async function openHarness(
   await expect(page.locator('html')).toHaveAttribute('lang', locale)
 }
 
-/** 通过真实的布局选择器切换可见 pane 数（选项标签就是 pane 数量）。 */
-async function chooseLayout(page: Page, locale: HarnessLocale, panes: '1' | '2') {
+/**
+ * 布局选项的无障碍名带量词：中文「2 个窗格」，英文按数量区分单复数（1 pane / 2 panes）。
+ * 可见文本与可访问名同源，因此按可访问名定位选项只依赖 catalog 文案。
+ */
+function paneCountLabel(locale: HarnessLocale, panes: number): string {
+  const messages = panes === 1
+    ? messageCatalog['ai.chat.paneCount.one']
+    : messageCatalog['ai.chat.paneCount.other']
+  return messages[locale].replace('{{count}}', String(panes))
+}
+
+/** 通过真实的布局选择器切换可见 pane 数：选项按带量词的无障碍名定位。 */
+async function chooseLayout(page: Page, locale: HarnessLocale, panes: 1 | 2) {
   await page.locator('.chat-layout-selector .ui-select-trigger').click()
   const listbox = page.getByRole('listbox', { name: COPY[locale].layout })
   await expect(listbox).toBeVisible()
-  await listbox.getByRole('option', { name: panes, exact: true }).click()
+  await listbox.getByRole('option', { name: paneCountLabel(locale, panes), exact: true }).click()
   await expect(page.locator('.chat-pane-grid'))
-    .toHaveClass(new RegExp(`layout-${panes === '1' ? 'single' : 'split-2'}`))
+    .toHaveClass(new RegExp(`layout-${panes === 1 ? 'single' : 'split-2'}`))
 }
 
 /** 上传一个已就绪附件：reserve → 直传 → complete 走完，返回可继续断言的句柄定位器。 */
@@ -993,6 +1007,103 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     await expect(page.locator('.thread-debug-back')).toHaveCount(0)
   })
 })
+
+/** 历史树 footer 的提示、原因与三个动作文案同样取自 catalog，不复制字符串。 */
+function historyFooterCopy(locale: HarnessLocale) {
+  const hintTemplate = messageCatalog['ai.chat.history.hint'][locale]
+  return {
+    /** 提示里的当前位置由选中行在列表中的序号决定，总数是真实行数。 */
+    hint: (current: number, total: number) => hintTemplate
+      .replace('{{current}}', String(current))
+      .replace('{{total}}', String(total)),
+    cancel: messageCatalog['ai.chat.history.cancel'][locale],
+    forkSession: messageCatalog['ai.chat.branch.forkSession'][locale],
+    fromHere: messageCatalog['ai.chat.branch.fromHere'][locale],
+    notBoundary: messageCatalog['ai.chat.branch.notBoundary'][locale],
+  }
+}
+
+/** 判定底栏内容未被压成零宽、截断或推出面板。 */
+async function expectFooterFits(panel: Locator, parts: Locator[]) {
+  for (const part of [panel.locator('.history-tree-footer'), ...parts]) {
+    await expect(part).toBeVisible()
+    expect(await isInside(part, panel), `${part} fits inside the panel`).toBe(true)
+    expect(await part.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+      `${part} keeps all its content visible`).toBe(true)
+  }
+}
+
+/**
+ * FTC-5：历史树底部操作区在 390 宽英文长文案下不得溢出。
+ *
+ * 中英 × 1440/390 覆盖两种真实状态：普通消息行给出禁用原因，三个动作仍全部可见；
+ * 选中可分支点（已关闭 TURN_END）时三个动作可点，并真的把切点前历史复制进本 pane 的
+ * 会话草稿。截图记录可分支点状态，即用户真正操作的那一帧。
+ */
+for (const locale of LOCALES) {
+  for (const viewport of VIEWPORTS) {
+    test(`history tree footer keeps hint, reason and three actions whole (${locale}, ${viewportKey(viewport)})`, async ({
+      page,
+    }, testInfo) => {
+      const copy = historyFooterCopy(locale)
+      await installChatApi(page)
+      await bindFirstPaneToThread(page)
+      await openHarness(page, locale, viewport)
+
+      const composer = page.getByLabel(COPY[locale].composer).first()
+      await composer.click()
+      await composer.pressSequentially('/history')
+      await page.keyboard.press('Enter')
+
+      const panel = page.locator('.history-tree-panel')
+      await expect(panel).toBeVisible()
+      const rows = panel.locator('.history-tree-entry')
+      await expect(rows).toHaveCount(5)
+
+      const hint = panel.locator('.history-tree-hint')
+      const reason = panel.locator('.history-tree-disabled-reason')
+      const actions = panel.locator('.history-tree-actions')
+      const cancel = actions.getByRole('button', { name: copy.cancel, exact: true })
+      const forkSession = actions.getByRole('button', { name: copy.forkSession, exact: true })
+      const fromHere = actions.getByRole('button', { name: copy.fromHere, exact: true })
+      await expect(actions.getByRole('button')).toHaveCount(3)
+
+      // 非分支点（普通消息行）：三个动作仍全部可见，禁用原因占据整行完整可读。
+      await rows.nth(1).click()
+      await expect(rows.nth(1)).toHaveAttribute('data-can-fork', 'false')
+      await expect(reason).toBeVisible()
+      await expect(reason).toHaveText(copy.notBoundary)
+      await expect(cancel).toBeEnabled()
+      await expect(forkSession).toBeDisabled()
+      await expect(forkSession).toHaveAttribute('title', copy.notBoundary)
+      await expect(fromHere).toBeDisabled()
+      await expect(fromHere).toHaveAttribute('title', copy.notBoundary)
+      await expect(hint).toHaveText(copy.hint(2, 5))
+      await expectFooterFits(panel, [hint, reason, cancel, forkSession, fromHere])
+
+      // 可分支点：三个动作全部可见可点，提示完整可读。
+      await rows.nth(2).click()
+      await expect(rows.nth(2)).toHaveAttribute('data-can-fork', 'true')
+      await expect(reason).toHaveCount(0)
+      await expect(hint).toHaveText(copy.hint(3, 5))
+      await expectFooterFits(panel, [hint, cancel, forkSession, fromHere])
+      for (const action of [cancel, forkSession, fromHere]) {
+        await action.click({ trial: true })
+      }
+      await captureShot(page, testInfo, `history-footer-${locale}-${viewport.width}`)
+
+      // 窄屏下动作真实生效：把切点前的历史复制进本 pane 的会话 fork 草稿并收面板。
+      await forkSession.click()
+      await expect(panel).toHaveCount(0)
+      await expect.poll(() => readPaneTarget(page, 'pane-1')).toEqual({
+        kind: 'FORK_SESSION_DRAFT',
+        sessionId: SESSION_ID,
+        sourceThreadId: THREAD_ID,
+        startEntryId: 'entry-2',
+      })
+    })
+  }
+}
 
 test('409 competition keeps history, text and settings; local rename recovers the first atomic send', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 800 })
@@ -1510,7 +1621,7 @@ for (const locale of LOCALES) {
       expect(uploadId, 'composer pill 携带浏览器本地 localId').not.toBeNull()
 
       // 2 → 1：pane 2 隐藏；隐藏期间不能提交任何命令（既无点击也无快捷键入口）。
-      await chooseLayout(page, locale, '1')
+      await chooseLayout(page, locale, 1)
       await expect(grid).toHaveClass(/layout-single/)
       await expect(editor).toBeHidden()
       await expect(paneTwo).toHaveAttribute('inert', '')
@@ -1523,7 +1634,7 @@ for (const locale of LOCALES) {
       expect(recorded.commandBatches).toEqual([])
 
       // 1 → 2：文字与附件恢复到同一个已就绪句柄，上传注册表没有被重建或释放。
-      await chooseLayout(page, locale, '2')
+      await chooseLayout(page, locale, 2)
       await expect(grid).toHaveClass(/layout-split-2/)
       await expect(editor, '隐藏后恢复的 pane 2 仍保留未发送文字').toContainText(DRAFT_TEXT)
       const restoredPill = paneTwo.locator(`.composer-pill[data-filename="${ATTACHMENT_NAME}"]`)

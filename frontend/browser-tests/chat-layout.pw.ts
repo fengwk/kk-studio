@@ -2,17 +2,29 @@ import { expect, test, type Page } from './fixture'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { messageCatalog } from '@/shared/i18n/catalogs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const REPORTS_DIR = process.env.KK_LAYOUT_REPORTS_DIR ?? path.resolve(__dirname, '../../reports/layout')
 
-async function selectLayoutOption(page: Page, value: string, label: string) {
+/**
+ * 布局选项的无障碍名带量词（中文「3 个窗格」、英文按数量区分单复数）。chat-layout 基座
+ * 固定 zh-CN，因此按 pane 数量从 catalog 取名称定位选项，不使用裸数字。
+ */
+function paneCountLabel(panes: number): string {
+  const messages = panes === 1
+    ? messageCatalog['ai.chat.paneCount.one']
+    : messageCatalog['ai.chat.paneCount.other']
+  return messages['zh-CN'].replace('{{count}}', String(panes))
+}
+
+async function selectLayoutOption(page: Page, value: string, panes: number) {
   const trigger = page.locator('#chat-layout-select')
   await trigger.click()
   const listbox = page.getByRole('listbox')
   await expect(listbox).toBeVisible()
-  const option = listbox.getByRole('option', { name: label, exact: true })
+  const option = listbox.getByRole('option', { name: paneCountLabel(panes), exact: true })
   await option.click()
   await expect(listbox).toHaveCount(0)
   await expect(trigger).toHaveAttribute('data-value', value)
@@ -42,7 +54,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     expect(box2_split2.x).toBeGreaterThan(box1_split2.x + box1_split2.width - 2)
 
     // 2. 通过组件下拉切换到 5 布局：左侧一整高跨 2 行 + 右侧 2x2（共 3 列等宽）
-    await selectLayoutOption(page, 'grid-5', '5')
+    await selectLayoutOption(page, 'grid-5', 5)
 
     const pane3 = page.locator('[data-testid="pane-item-3"]')
     const pane4 = page.locator('[data-testid="pane-item-4"]')
@@ -67,7 +79,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     expect(Math.abs(box1_g5.height - rightColCombinedHeight)).toBeLessThanOrEqual(4)
 
     // 3. 通过组件下拉切换到 7 布局：左侧一整高跨 2 行 + 右侧 3x2（共 4 列等宽）
-    await selectLayoutOption(page, 'grid-7', '7')
+    await selectLayoutOption(page, 'grid-7', 7)
 
     const pane6 = page.locator('[data-testid="pane-item-6"]')
     const pane7 = page.locator('[data-testid="pane-item-7"]')
@@ -90,7 +102,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     expect(Math.abs(box1_g7.height - rightCol7CombinedHeight)).toBeLessThanOrEqual(4)
 
     // 4. 通过组件下拉切换到 8 布局：4x2 均匀网格（第 5 个 pane 落在第二行首列）
-    await selectLayoutOption(page, 'grid-8', '8')
+    await selectLayoutOption(page, 'grid-8', 8)
 
     const pane8 = page.locator('[data-testid="pane-item-8"]')
     await expect(pane8).toBeVisible()
@@ -135,8 +147,8 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
   test('layouts 5 and 7 stack by conversation width even in a wide viewport', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 900 })
     await page.goto('/browser-tests/chat-layout-harness.html')
-    for (const layout of ['5', '7']) {
-      await selectLayoutOption(page, `grid-${layout}`, layout)
+    for (const panes of [5, 7]) {
+      await selectLayoutOption(page, `grid-${panes}`, panes)
       const first = page.getByTestId('pane-item-1')
       const second = page.getByTestId('pane-item-2')
       expect((await second.boundingBox())!.x).toBeGreaterThan((await first.boundingBox())!.x)
@@ -252,13 +264,13 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     const listbox = page.getByRole('listbox')
     await expect(listbox).toBeVisible()
 
-    // 初始选项为 split-2，ArrowDown 移动到 3
+    // 初始选项为 split-2，ArrowDown 移动到 3 个窗格
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
 
     await expect(listbox).toHaveCount(0)
     await expect(trigger).toHaveAttribute('data-value', 'split-3')
-    await expect(trigger.locator('.ui-select-value')).toHaveText('3')
+    await expect(trigger.locator('.ui-select-value')).toHaveText(paneCountLabel(3))
     await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()
     await expect(trigger).toBeFocused()
   })
@@ -365,7 +377,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     expect(pane1Title).not.toContain('非待发请求精确值')
 
     // 切换到 3 分屏，使每列宽度约束至 ~400px，验证桌面分屏场景下的真实截断
-    await selectLayoutOption(page, 'split-3', '3')
+    await selectLayoutOption(page, 'split-3', 3)
     const pane2Footer = page.locator('[data-testid="pane-2-footer"]')
     await expect(pane2Footer).toBeVisible()
     const pane2Lines = pane2Footer.locator('.thread-status-line')
@@ -409,7 +421,7 @@ test.describe('Chat Workspace 1-8 Panes Layout, Footer & User Attachments', () =
     })
 
     // 切回 split-2 并截图
-    await selectLayoutOption(page, 'split-2', '2')
+    await selectLayoutOption(page, 'split-2', 2)
     await page.screenshot({
       path: path.join(REPORTS_DIR, 'chat-usage-layout-desktop-1280.png'),
       fullPage: false,

@@ -305,12 +305,12 @@ describe('ChatWorkspacePage', () => {
 
     const trigger = screen.getByRole('button', { name: '布局' })
     await user.click(trigger)
-    await user.click(screen.getByRole('option', { name: '2' }))
+    await user.click(screen.getByRole('option', { name: '2 个窗格' }))
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
     expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2)
 
     await user.click(trigger)
-    await user.click(screen.getByRole('option', { name: '5' }))
+    await user.click(screen.getByRole('option', { name: '5 个窗格' }))
     expect(document.querySelector('.chat-pane-grid.layout-grid-5')).not.toBeNull()
     expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(5)
   })
@@ -439,7 +439,7 @@ describe('ChatWorkspacePage', () => {
     await screen.findByRole('heading', { name: 'Workspace' })
     const trigger = screen.getByRole('button', { name: '布局' })
     await user.click(trigger)
-    await user.click(screen.getByRole('option', { name: '2' }))
+    await user.click(screen.getByRole('option', { name: '2 个窗格' }))
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
     const snapshot = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))
     expect(snapshot?.presentation.panes[0].target).toEqual(bindThread(THREAD_ID))
@@ -588,7 +588,7 @@ describe('ChatWorkspacePage', () => {
     // chat A 默认是 single 布局，将其切换为 split-2
     const trigger = screen.getByRole('button', { name: '布局' })
     await user.click(trigger)
-    await user.click(screen.getByRole('option', { name: '2' }))
+    await user.click(screen.getByRole('option', { name: '2 个窗格' }))
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
 
     // 检查 chat A 的持久化确实更新为 split-2
@@ -649,7 +649,7 @@ describe('ChatWorkspacePage', () => {
     const view = renderWorkspace()
     await screen.findByRole('heading', { name: 'Workspace' })
     await user.click(screen.getByRole('button', { name: '布局' }))
-    await user.click(screen.getByRole('option', { name: '2' }))
+    await user.click(screen.getByRole('option', { name: '2 个窗格' }))
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
     expect(readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))?.presentation.layout)
       .toBe('split-2')
@@ -997,7 +997,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       await waitFor(() => expect(harnessService.renameThread).toHaveBeenCalled())
     }
     await user.click(screen.getByRole('button', { name: '布局' }))
-    await user.click(screen.getByRole('option', { name: '1' }))
+    await user.click(screen.getByRole('option', { name: '1 个窗格' }))
     expect(document.querySelector('[data-pane-id="pane-3"]')).toHaveAttribute('hidden')
     const dialog = await openBranchDialogFromTree(user)
     await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'not-overwritten')
@@ -1182,7 +1182,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
 
     const layoutTrigger = screen.getByRole('button', { name: '布局' })
     await user.click(layoutTrigger)
-    await user.click(screen.getByRole('option', { name: '1' }))
+    await user.click(screen.getByRole('option', { name: '1 个窗格' }))
 
     // Chat IDE 宿主脱离 pane 生命周期；隐藏 pane 不因 IDE 曾打开而继续挂载。
     expect(document.querySelectorAll('.chat-pane')).toHaveLength(1)

@@ -8,14 +8,13 @@ export interface SelectionKeyboardOptions {
   selectionPending: boolean
   onSelect: (id: string) => void | Promise<void>
   onClose: () => void
-  onCycleControl?: () => void
   searchRef: RefObject<HTMLInputElement | null>
 }
 
 /**
- * 选择面板的键盘语义：Esc 关闭、上下与翻页移动、Home/End 边界、Enter 提交，
- * 以及把 Tab 用于循环排序控件（移动后焦点回到搜索框）。
+ * 选择面板的键盘语义：Esc 关闭、上下与翻页移动、Home/End 边界、Enter 提交。
  *
+ * 焦点在搜索框时 Home/End 是文本编辑键，面板不接管它们；其余键位保持列表导航。
  * 组合输入（IME 组合中或 keyCode 229）一律放行，否则组字过程会被当成命令。
  */
 export function useSelectionKeyboard({
@@ -25,7 +24,6 @@ export function useSelectionKeyboard({
   selectionPending,
   onSelect,
   onClose,
-  onCycleControl,
   searchRef,
 }: SelectionKeyboardOptions) {
   const moveActive = useCallback((delta: number) => {
@@ -66,11 +64,8 @@ export function useSelectionKeyboard({
       onClose()
       return
     }
-    if (event.key === 'Tab' && onCycleControl) {
-      event.preventDefault()
-      event.stopPropagation()
-      onCycleControl()
-      searchRef.current?.focus({ preventScroll: true })
+    const fromSearch = searchRef.current != null && event.target === searchRef.current
+    if (fromSearch && (event.key === 'Home' || event.key === 'End')) {
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -96,5 +91,5 @@ export function useSelectionKeyboard({
       event.stopPropagation()
       selectActive()
     }
-  }, [moveActive, moveToBoundary, onClose, onCycleControl, searchRef, selectActive])
+  }, [moveActive, moveToBoundary, onClose, searchRef, selectActive])
 }
