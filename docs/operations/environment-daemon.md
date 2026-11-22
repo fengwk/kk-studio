@@ -235,18 +235,20 @@ Studio 保存的完整卡片配置：
 服务端、安装脚本、本地 JSON 与控制协议使用同一份严格配置契约，未知字段、错误类型与越界值都会被
 拒绝，错误只报告字段路径与规则、不回显输入值：
 
-- `studioUrl` 必填，只能是 HTTP(S) origin：拒绝 userinfo、path、query、fragment 与非法端口。
+- `studioUrl` 必填，只能是 HTTP(S) origin，至多 2048 字符：拒绝 userinfo、path、query、fragment 与非法端口。
   Daemon 由它派生统一连接入口 `ws(s)://<authority>/ws/daemon`。单条物理连接通过 HTTP/2 复用
   Protobuf 控制流，IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。
-- `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值不能是空白或含
-  控制字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
+- `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值必须单行：不能是空白、
+  含控制字符、带首尾空白或超过 4096 字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
   `daemon.json` 与运行快照保存的仍是配置里写下的字符串，真正的路径解析发生在执行时。
 - `lsp` 可选；整个字段省略或 `null` 表示禁用 LSP。一旦声明就必须至少有一个 server，空表非法。server id 匹配
-  `[A-Za-z0-9_.-]+`。每个 server 的 `command` 与 `extensions` 都必须是非空字符串数组；每个后缀须带前导点且不含路径分隔符。
-  Studio 卡片、控制协议与 Daemon 在输入边界统一校验。`rootMarkers` / `firstMatchMarkers` 可选，
+  `[A-Za-z0-9_.-]+` 且至多 256 字符。每个 server 的 `command` 与 `extensions` 都必须是非空字符串数组；每个后缀须带前导点且不含路径分隔符；
+  每个列表项至多 4096 字符。Studio 卡片、控制协议与 Daemon 在输入边界统一校验。`rootMarkers` / `firstMatchMarkers` 可选，
   若给出则是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段一律拒绝**。
 - `proxyUrl` 可选；`null` 表示该 Daemon 的自身请求明确直连。非空只接受无认证的
-  `http://host:port`，拒绝 userinfo、query、fragment 和非根 path。
+  `http://host:port`，拒绝 userinfo、query、fragment 和非根 path，规范化后至多 2048 字符。
+- 卡片能保存的配置一定能下发：卡片校验与控制协议出站校验使用同一组长度上限，且都拒绝不成对的代理项；
+  万一下发仍被协议拒绝，控制连接只记录字段路径与规则后重连，日志不回显配置值。
 - `note` 是卡片备注，最多 512 字符，trim 后单行、不含控制字符；空值保存为 `null`。
 - 目标 OS 是生成安装命令的参数，不是卡片运行配置；实际 OS 与架构来自 READY。
 

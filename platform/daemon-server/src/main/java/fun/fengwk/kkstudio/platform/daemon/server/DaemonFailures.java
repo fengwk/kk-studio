@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.daemon.server;
 
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
+
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 
@@ -20,5 +22,17 @@ final class DaemonFailures {
     logger.log(
         Level.WARNING,
         "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
+  }
+
+  /**
+   * 记录一次控制协议自定义拒绝的字段路径与规则。
+   *
+   * <p>{@link ControlProtocolException} 的文案由校验器用固定字段路径与固定规则短语构造，不含输入值、远端内容或凭据，因此可以安全地作为失败原因写出；
+   * 这正是“无声关闭连接”与“可诊断拒绝”的区别。其它 throwable 仍走 {@link #log}，只记异常类名。
+   */
+  static void logRejection(Class<?> owner, String stage, ControlProtocolException rejection) {
+    Logger logger = System.getLogger(owner.getName());
+    logger.log(
+        Level.WARNING, "environment daemon " + stage + " rejected: " + rejection.getMessage());
   }
 }

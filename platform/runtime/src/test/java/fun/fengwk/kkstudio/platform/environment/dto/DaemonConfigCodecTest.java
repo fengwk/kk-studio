@@ -14,8 +14,17 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
+import fun.fengwk.kkstudio.platform.daemon.protocol.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
+import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentConfig;
+import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
+import fun.fengwk.kkstudio.platform.environment.server.DaemonConfigProtocolMapper;
+
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Consumer;
 
 class DaemonConfigCodecTest {
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
@@ -296,6 +305,143 @@ class DaemonConfigCodecTest {
     assertTrue(node.get("lsp").isNull());
     assertEquals("https://host", DaemonConfigCodec.read(json).getStudioUrl());
     assertFalse(json.contains("note"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {" /bin/bash", "/bin/bash ", " /bin/bash ", "\t/bin/bash"})
+  void rejectsBashExecutableWithSurroundingWhitespace(String text) {
+    DaemonConfigDTO config = basic();
+    config.setBashExecutable(text);
+    assertSafe(() -> DaemonConfigCodec.validate(config), "daemonConfig.bashExecutable");
+  }
+
+  /** 不成对的代理项能通过 JSON 读入但无法进入 UTF-8 wire：必须在保存阶段就拒绝，而不是下发时失败。 */
+  @Test
+  void rejectsUnpairedSurrogatesThatCannotBeDelivered() {
+    DaemonConfigDTO bash = basic();
+    bash.setBashExecutable("/bin/\ud800bash");
+    assertSafe(() -> DaemonConfigCodec.validate(bash), "daemonConfig.bashExecutable");
+
+    DaemonConfigDTO command = basic();
+    command.setLsp(lsp());
+    command.getLsp().getServers().get("java").setCommand(List.of("jdtls\udc00"));
+    assertSafe(() -> DaemonConfigCodec.validate(command), "command[0]");
+  }
+
+  @Test
+  void boundsBashExecutableByTheProtocolLimit() {
+    DaemonConfigDTO longest = basic();
+    longest.setBashExecutable("/" + "a".repeat(4095));
+    assertEquals(4096, DaemonConfigCodec.validate(longest).getBashExecutable().length());
+
+    DaemonConfigDTO tooLong = basic();
+    tooLong.setBashExecutable("/" + "a".repeat(4096));
+    assertSafe(() -> DaemonConfigCodec.validate(tooLong), "daemonConfig.bashExecutable");
+  }
+
+  @Test
+  void boundsLspEntriesByTheProtocolLimits() {
+    DaemonConfigDTO command = basic();
+    command.setLsp(lsp());
+    command.getLsp().getServers().get("java").setCommand(List.of("j".repeat(4097)));
+    assertSafe(() -> DaemonConfigCodec.validate(command), "command[0]");
+
+    DaemonConfigDTO marker = basic();
+    marker.setLsp(lsp());
+    marker.getLsp().getServers().get("java").setRootMarkers(List.of("m".repeat(4097)));
+    assertSafe(() -> DaemonConfigCodec.validate(marker), "rootMarkers[0]");
+
+    DaemonConfigDTO firstMatch = basic();
+    firstMatch.setLsp(lsp());
+    firstMatch.getLsp().getServers().get("java").setFirstMatchMarkers(List.of("m".repeat(4097)));
+    assertSafe(() -> DaemonConfigCodec.validate(firstMatch), "firstMatchMarkers[0]");
+
+    DaemonConfigDTO longest = basic();
+    longest.setLsp(lsp());
+    longest.getLsp().getServers().get("java").setRootMarkers(List.of("m".repeat(4096)));
+    assertEquals(
+        List.of("m".repeat(4096)),
+        DaemonConfigCodec.validate(longest).getLsp().getServers().get("java").getRootMarkers());
+
+    DaemonConfigDTO longId = basic();
+    longId.setLsp(lsp());
+    longId.getLsp().getServers().put("a".repeat(257), lsp().getServers().get("java"));
+    assertSafe(() -> DaemonConfigCodec.validate(longId), "daemonConfig.lsp.servers");
+  }
+
+  /**
+   * 卡片校验与出站协议校验必须同样严格：保存成功的配置一定能下发，否则环境会停留在 CONNECTING。
+   *
+   * <p>每个样本同时跑两处校验，只允许“两侧都接受”或“两侧都拒绝”。
+   */
+  @Test
+  void cardValidationIsAsStrictAsOutboundProtocolValidation() {
+    assertSameAcceptance(config -> config.setBashExecutable("/bin/bash"));
+    assertSameAcceptance(config -> config.setBashExecutable(" /bin/bash "));
+    assertSameAcceptance(config -> config.setBashExecutable("/" + "a".repeat(4095)));
+    assertSameAcceptance(config -> config.setBashExecutable("/" + "a".repeat(4096)));
+    assertSameAcceptance(
+        config -> config.getLsp().getServers().get("java").setCommand(List.of("j".repeat(4096))));
+    assertSameAcceptance(
+        config -> config.getLsp().getServers().get("java").setCommand(List.of("j".repeat(4097))));
+    assertSameAcceptance(
+        config ->
+            config
+                .getLsp()
+                .getServers()
+                .get("java")
+                .setFirstMatchMarkers(List.of("m".repeat(4096))));
+    assertSameAcceptance(
+        config ->
+            config
+                .getLsp()
+                .getServers()
+                .get("java")
+                .setFirstMatchMarkers(List.of("m".repeat(4097))));
+    assertSameAcceptance(
+        config ->
+            config
+                .getLsp()
+                .getServers()
+                .put("a".repeat(256), config.getLsp().getServers().get("java")));
+    assertSameAcceptance(
+        config ->
+            config
+                .getLsp()
+                .getServers()
+                .put("a".repeat(257), config.getLsp().getServers().get("java")));
+    assertSameAcceptance(config -> config.setBashExecutable("/bin/\ud800bash"));
+    assertSameAcceptance(config -> config.setProxyUrl("http://host:" + "1".repeat(4) + "0"));
+    assertSameAcceptance(config -> config.setStudioUrl("https://" + "a".repeat(2040)));
+    assertSameAcceptance(config -> config.setStudioUrl("https://" + "a".repeat(2041)));
+    assertSameAcceptance(config -> config.setProxyUrl("http://" + "a".repeat(2040) + ":8080"));
+    assertSameAcceptance(config -> config.setProxyUrl("http://" + "a".repeat(2041) + ":8080"));
+  }
+
+  private static void assertSameAcceptance(Consumer<DaemonConfigDTO> mutation) {
+    DaemonConfigDTO config = basic();
+    config.setLsp(lsp());
+    mutation.accept(config);
+    DaemonConfigDTO validated;
+    try {
+      validated = DaemonConfigCodec.validate(config);
+    } catch (IllegalArgumentException error) {
+      return;
+    }
+    DaemonConfiguration protocol = DaemonConfigProtocolMapper.toProtocol(validated);
+    Envelope update =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.ENVIRONMENT_CONFIG)
+            .setEnvironmentId("11111111-1111-4111-8111-111111111111")
+            .setEnvironmentConfig(
+                EnvironmentConfig.newBuilder().setVersion(1L).setConfig(protocol).build())
+            .build();
+    try {
+      ControlProtocolCodec.encodeFrame(update);
+    } catch (ControlProtocolException error) {
+      throw new AssertionError(
+          "a card that passes validation must be deliverable: " + error.getMessage(), error);
+    }
   }
 
   private static DaemonConfigDTO basic() {

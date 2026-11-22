@@ -264,7 +264,13 @@ final class DaemonConnectionSession implements DaemonSession {
       DaemonOfferResult result;
       try {
         result = control.offer(update);
+      } catch (ControlProtocolException rejection) {
+        // 卡片配置不满足出站协议约束：记录字段路径与规则，保留原因后按连接不可用处理。
+        DaemonFailures.logRejection(
+            DaemonConnectionSession.class, configStage(snapshot), rejection);
+        result = DaemonOfferResult.CLOSED;
       } catch (RuntimeException error) {
+        DaemonFailures.log(DaemonConnectionSession.class, configStage(snapshot), error);
         result = DaemonOfferResult.CLOSED;
       }
       if (result == DaemonOfferResult.ACCEPTED) {
@@ -274,6 +280,11 @@ final class DaemonConnectionSession implements DaemonSession {
     }
     close();
     return false;
+  }
+
+  /** 配置下发阶段的固定短语；只含实体标识与协议版本号，不放异常正文或配置值。 */
+  private String configStage(EnvironmentConfigSnapshot snapshot) {
+    return "environment config version " + snapshot.version() + " delivery";
   }
 
   private void failMissingEnvironmentConfig() {
