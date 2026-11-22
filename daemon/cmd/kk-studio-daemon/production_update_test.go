@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func TestProductionFailedUpdateResumesProcesses(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- (productionRuntime{}).Run(ctx, initial) }()
-	defer func() {
+	stopDaemon := sync.OnceFunc(func() {
 		cancel()
 		select {
 		case err := <-done:
@@ -73,7 +74,8 @@ func TestProductionFailedUpdateResumesProcesses(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Error("daemon did not shut down")
 		}
-	}()
+	})
+	defer stopDaemon()
 	var peer net.Conn
 	select {
 	case peer = <-accepted:
@@ -85,6 +87,9 @@ func TestProductionFailedUpdateResumesProcesses(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	defer writer.Close()
 	defer response.Body.Close()
+	// Stop the daemon while the Studio side of the stream is still open, as the other production
+	// tests do, so the daemon closes the connection itself instead of racing a Studio disconnect.
+	defer stopDaemon()
 	writeControlEnvelope(t, writer, &protocol.Envelope{
 		MessageType: protocol.MessageType_SETTINGS, EnvironmentId: proto.String(e2eEnvironmentID),
 		Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{

@@ -92,7 +92,7 @@ func TestProductionRuntimeProcessLifecycle(t *testing.T) {
 	}
 	defer stopFirst()
 
-	waitForDaemonLock(t, dataDir, firstDone, &firstStderr)
+	waitForDaemonLock(t, dataDir, firstDone, &firstStderr, &exited)
 	if info, err := os.Stat(dataDir); err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("private data directory mode = %v, err=%v", info, err)
 	}
@@ -174,27 +174,40 @@ func buildDaemonForTest(t *testing.T) string {
 	return binary
 }
 
-func waitForDaemonLock(t *testing.T, dataDir string, done <-chan error, stderr *bytes.Buffer) {
+// waitForDaemonLock waits until the daemon holds its directory lock, then checks the lock is busy.
+// The daemon creates its temporary-output root only after it acquires the lock, so the wait watches
+// that directory: probing the lock itself could take it first and make the daemon's startup fail.
+// An early exit consumes done, so it marks the process as exited for the caller's cleanup.
+func waitForDaemonLock(t *testing.T, dataDir string, done <-chan error, stderr *bytes.Buffer, exited *bool) {
 	t.Helper()
 	deadline := time.NewTimer(productionLifecycleTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	outputRoot := filepath.Join(dataDir, "tmp", "workspaces")
 	for {
-		lock, err := native.AcquireDirectoryLock(dataDir, native.DaemonLockFileName)
+		_, err := os.Stat(outputRoot)
 		if err == nil {
-			_ = lock.Close()
-		} else if errors.Is(err, native.ErrDirectoryLockBusy) {
-			return
-		} else {
-			t.Fatalf("inspect daemon lock: %v", err)
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("inspect daemon output root: %v", err)
 		}
 		select {
 		case err := <-done:
+			*exited = true
 			t.Fatalf("daemon exited before acquiring its lock: %v, stderr=%q", err, stderr.String())
 		case <-deadline.C:
 			t.Fatalf("daemon did not acquire its lock, stderr=%q", stderr.String())
 		case <-ticker.C:
 		}
+	}
+	lock, err := native.AcquireDirectoryLock(dataDir, native.DaemonLockFileName)
+	if err == nil {
+		_ = lock.Close()
+		t.Fatal("the running daemon does not hold its directory lock")
+	}
+	if !errors.Is(err, native.ErrDirectoryLockBusy) {
+		t.Fatalf("inspect daemon lock: %v", err)
 	}
 }
