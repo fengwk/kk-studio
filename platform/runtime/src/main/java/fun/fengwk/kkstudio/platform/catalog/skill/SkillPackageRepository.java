@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.skill;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -148,12 +149,19 @@ public class SkillPackageRepository {
     return true;
   }
 
-  /**
-   * 以 {@code expectedVersion} 为条件切换当前发布版本（描述、版本号、归档、清单与发布时间）并推进 version。
-   *
-   * <p>影响行数为 0 表示不存在或并发冲突；归档引用切换与旧引用释放由调用方在同一事务内完成。
-   */
+  /** 以 {@code expectedVersion} 为条件切换当前发布版本并推进 version。 */
   public boolean updatePublication(SkillPackage published, long expectedVersion) {
+    return updatePublication(published, null, expectedVersion);
+  }
+
+  /**
+   * 以 {@code expectedVersion} 为条件切换当前发布版本（描述、版本号、归档、清单与发布时间），可选改写 Git 设置，并只推进一次 version。
+   *
+   * <p>{@code gitEdit} 非 null 时 branch 与令牌和发布事实属于同一次 CAS：配置同步导入同时改写仓库设置时必须走这一条。影响行数为 0
+   * 表示不存在或并发冲突；归档引用切换与旧引用释放由调用方在同一事务内完成。
+   */
+  public boolean updatePublication(
+      SkillPackage published, @Nullable SkillPackageGitEdit gitEdit, long expectedVersion) {
     requireTransaction();
     int updated =
         jdbcClient
@@ -180,11 +188,21 @@ public class SkillPackageRepository {
     if (updated != 1) {
       return false;
     }
+    writeGitEdit(published.packageName(), gitEdit);
     return true;
   }
 
-  /** 以 {@code expectedVersion} 为条件更新描述并推进 version；影响行数为 0 表示并发冲突。 */
-  public boolean updateDescription(String packageName, String description, long expectedVersion) {
+  /**
+   * 以 {@code expectedVersion} 为条件更新可编辑事实（描述与可选 Git 设置）并只推进一次 version；影响行数为 0 表示并发冲突。
+   *
+   * <p>描述与 branch/令牌都是可编辑事实：任一变化都让版本前进一次，陈旧卡片因此统一得到 version conflict。{@code gitEdit} 为 null 表示不改写
+   * Git 设置（上传渠道，或只改描述）。
+   */
+  public boolean updateEditable(
+      String packageName,
+      String description,
+      @Nullable SkillPackageGitEdit gitEdit,
+      long expectedVersion) {
     requireTransaction();
     int updated =
         jdbcClient
@@ -203,6 +221,7 @@ public class SkillPackageRepository {
     if (updated != 1) {
       return false;
     }
+    writeGitEdit(packageName, gitEdit);
     return true;
   }
 
@@ -231,9 +250,16 @@ public class SkillPackageRepository {
     return true;
   }
 
-  /** 更新 Git 渠道的可编辑设置（branch 与访问令牌）；repository URL 是不可变身份。 */
-  public boolean updateGitSettings(String packageName, String branch, String token) {
-    requireTransaction();
+  /**
+   * 改写 Git 渠道的可编辑设置（branch 与访问令牌）；repository URL 是不可变身份。
+   *
+   * <p>只由 {@link #updateEditable} 与 {@link #updatePublication} 在版本推进成功后调用：设置写入与 CAS
+   * 版本属于同一次事实变更。Package 行已由 CAS 保证存在，因此缺少 Git 渠道行是数据损坏。
+   */
+  private void writeGitEdit(String packageName, @Nullable SkillPackageGitEdit gitEdit) {
+    if (gitEdit == null) {
+      return;
+    }
     int updated =
         jdbcClient
             .sql(
@@ -242,14 +268,13 @@ public class SkillPackageRepository {
                 set branch = :branch, token = :token
                 where package_name = :packageName
                 """)
-            .param("branch", branch)
-            .param("token", token)
+            .param("branch", gitEdit.branch())
+            .param("token", gitEdit.token())
             .param("packageName", packageName)
             .update();
     if (updated != 1) {
-      return false;
+      throw new IllegalStateException("skill package git source is missing: " + packageName);
     }
-    return true;
   }
 
   /** 以 {@code expectedVersion} 为条件删除 Package；影响行数为 0 表示不存在或并发冲突。 */

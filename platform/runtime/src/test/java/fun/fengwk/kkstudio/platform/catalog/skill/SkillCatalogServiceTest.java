@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
@@ -153,7 +154,7 @@ class SkillCatalogServiceTest {
   void editUploadPackageUpdatesDescriptionWithCas() {
     // 意图：上传渠道允许改描述，且必须命中客户端展示的 version。
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(uploadPackage(3));
-    when(packageRepository.updateDescription(PACKAGE, "updated", 3)).thenReturn(true);
+    when(packageRepository.updateEditable(PACKAGE, "updated", null, 3)).thenReturn(true);
     SkillPackage updated = uploadPackage(4);
     when(packageRepository.getPackage(PACKAGE)).thenReturn(updated);
     when(blobManager.getBlob(updated.artifactBlobId()))
@@ -162,8 +163,8 @@ class SkillCatalogServiceTest {
     SkillPackageDetailDTO detail = service.editPackage(PACKAGE, editDTO(3L, "updated"));
 
     assertEquals(SkillPackageSource.UPLOAD, detail.getSource());
-    verify(packageRepository).updateDescription(PACKAGE, "updated", 3);
-    verify(packageRepository, never()).updateGitSettings(any(), any(), any());
+    assertEquals(4L, detail.getVersion());
+    verify(packageRepository).updateEditable(PACKAGE, "updated", null, 3);
   }
 
   @Test
@@ -176,7 +177,7 @@ class SkillCatalogServiceTest {
     SkillPackageEditDTO tokenEdit = editDTO(3L, "updated");
     tokenEdit.setToken(SecretUpdate.clear());
     assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, tokenEdit));
-    verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
+    verify(packageRepository, never()).updateEditable(any(), any(), any(), anyLong());
   }
 
   @Test
@@ -186,8 +187,39 @@ class SkillCatalogServiceTest {
 
     assertThrows(
         DomainException.class, () -> service.editPackage(PACKAGE, gitEditDTO(1L, "stale")));
-    verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
-    verify(packageRepository, never()).updateGitSettings(any(), any(), any());
+    verify(packageRepository, never()).updateEditable(any(), any(), any(), anyLong());
+  }
+
+  @Test
+  void editGitPackageWithoutChangesWritesNothing() {
+    // 意图：三项都未变化时不写行，也不占用客户端版本。
+    when(packageRepository.lockPackage(PACKAGE)).thenReturn(gitPackage(3, HEAD, HEAD));
+    SkillPackage current = gitPackage(3, HEAD, HEAD);
+    when(packageRepository.getPackage(PACKAGE)).thenReturn(current);
+    when(blobManager.getBlob(current.artifactBlobId()))
+        .thenReturn(blob(current.artifactBlobId(), ARTIFACT_SHA, 10));
+
+    service.editPackage(PACKAGE, gitEditDTO(3L, "dev tools"));
+
+    verify(packageRepository, never()).updateEditable(any(), any(), any(), anyLong());
+  }
+
+  @Test
+  void editGitPackageCasMissReportsVersionConflict() {
+    // 意图：行锁下仍写不进 CAS 时报并发冲突，而不是“资源不存在”。
+    when(packageRepository.lockPackage(PACKAGE)).thenReturn(gitPackage(3, HEAD, HEAD));
+    when(packageRepository.updateEditable(any(), any(), any(), anyLong())).thenReturn(false);
+    SkillPackage current = gitPackage(4, HEAD, HEAD);
+    when(packageRepository.getPackage(PACKAGE)).thenReturn(current);
+    when(blobManager.getBlob(current.artifactBlobId()))
+        .thenReturn(blob(current.artifactBlobId(), ARTIFACT_SHA, 10));
+    SkillPackageEditDTO dto = gitEditDTO(3L, "dev tools");
+    dto.setBranch("dev");
+
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, dto));
+
+    assertEquals(DomainErrorCode.VERSION_CONFLICT, error.code());
   }
 
   @Test

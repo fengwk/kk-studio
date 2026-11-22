@@ -20,9 +20,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -1110,40 +1114,72 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         "preview object must be deleted after commit");
   }
 
+  /** 测试意图：DELETE 已立即释放引用，但 upload 行仍引用着 DELETING blob，清扫必须整轮跳过且不产生 warn、对象删除或清理登记。 */
   @Test
-  void sweepDeletingRetriesAfterOwnerUploadIsGone() {
+  void sweepDeletingSkipsBlobStillReferencedByUploadRow() {
     byte[] content = "sweep".getBytes(StandardCharsets.UTF_8);
     StorageUploadDTO pending =
         reserve("sweep.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    UUID uploadId = UUID.fromString(ready.getId());
     UUID blobUuid = UUID.fromString(readyOf(ready).getBlobId());
+    String originalKey = StorageObjectKeys.blobOriginal(blobUuid);
+    String previewKey = StorageObjectKeys.blobPreview(blobUuid);
 
-    // 模拟中断残留：blob 已 DELETING，但 owner upload 行仍引用它。
-    jdbc.update("update storage_blob set state = 'DELETING', ref_count = 0 where id = ?", blobUuid);
+    // 生产 DELETE 顺序：同一短事务先标记清理再立即释放引用；上传行留到 finalize（FK RESTRICT 禁止先删 blob 行）。
+    storageUploadService.delete(uploadId);
+    assertEquals(0L, blobRefCount(blobUuid.toString()));
+    assertEquals(StorageBlobState.DELETING, blobRow(blobUuid.toString()).state());
+    assertEquals(blobUuid, uploadBlobId(ready.getId()), "upload row must still reference the blob");
 
+    s3Storage.clearNetworkCalls();
+    Logger logger = (Logger) LoggerFactory.getLogger(StorageBlobManager.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    int swept;
+    try {
+      swept = storageBlobManager.sweepDeleting();
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
+
+    assertEquals(0, swept, "a blob still referenced by an upload row must not be swept");
+    assertTrue(
+        logs.list.isEmpty(),
+        "skipping must not report a failed sweep: "
+            + logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList());
+    assertEquals(
+        StorageBlobState.DELETING,
+        blobRow(blobUuid.toString()).state(),
+        "the skipped DELETING row must stay for a later sweep");
+    assertTrue(s3Storage.hasObject(originalKey), "a skipped blob must keep its object");
+    assertFalse(
+        s3Storage.networkCalls().stream().anyMatch(call -> call.operation().equals("deleteObject")),
+        "a skipped blob must not attempt object deletion: " + s3Storage.networkCalls());
+    assertFalse(
+        hasObjectCleanupRecord(originalKey), "a skipped blob must not register object cleanup");
+    assertFalse(hasObjectCleanupRecord(previewKey));
+
+    // upload 行 finalize（claim 已冻结后续绑定）之后，后续清扫才删对象并删行。
+    assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     assertEquals(
         0,
-        storageBlobManager.sweepDeleting(),
-        "FK RESTRICT must block blob deletion while an upload row references it");
-    assertEquals(
-        1,
         jdbc.queryForObject(
-            "select count(*) from storage_blob where id = ? and state = 'DELETING'",
-            Integer.class,
-            blobUuid),
-        "blocked sweep must leave the DELETING row for retry");
-
-    // owner 删除后重试成功：对象与行一并清理。
-    storageUploadService.delete(UUID.fromString(ready.getId()));
-    assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
+            "select count(*) from storage_upload where id = ?", Integer.class, uploadId),
+        "the owner row must be finalized before the blob can be swept");
     assertEquals(
         1, storageBlobManager.sweepDeleting(), "sweep must clean up once the owner is gone");
     assertEquals(
         0,
         jdbc.queryForObject(
             "select count(*) from storage_blob where id = ?", Integer.class, blobUuid));
-    assertFalse(s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobUuid)));
+    assertFalse(s3Storage.hasObject(originalKey));
+    assertTrue(
+        hasObjectCleanupRecord(originalKey),
+        "the durable tombstone must be registered before the blob row is removed");
   }
 
   @Test
@@ -1602,6 +1638,12 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   private UUID uploadBlobId(String uploadId) {
     return jdbc.queryForObject(
         "select blob_id from storage_upload where id = ?", UUID.class, UUID.fromString(uploadId));
+  }
+
+  private boolean hasObjectCleanupRecord(String objectKey) {
+    return jdbc.queryForObject(
+            "select count(*) from storage_object_cleanup where key = ?", Integer.class, objectKey)
+        > 0;
   }
 
   private long blobRefCount(String blobId) {
