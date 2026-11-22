@@ -172,8 +172,8 @@ describe('SelectionPanel', () => {
     expect(screen.queryByRole('option', { name: /Beta/ })).not.toBeInTheDocument()
   })
 
-  // 测试意图：副标题是单行省略，深处命中要从命中处附近开始显示并高亮，用户才看得到为什么命中。
-  it('highlights hits and starts a long subtitle near a deep hit while searching', async () => {
+  // 副标题的视觉省略不能改变正文或可访问名称。
+  it('highlights deep hits without changing the subtitle or accessible name', async () => {
     const user = userEvent.setup()
     const subtitle = '2026-11-22 10:08 · 空闲 · 结论 服务停机时先停止接收新请求，再把 terminationGracePeriodSeconds 调大'
     render(
@@ -188,11 +188,11 @@ describe('SelectionPanel', () => {
     expect(option.querySelector('mark')).toBeNull()
 
     await user.type(screen.getByRole('searchbox'), 'GracePeriod')
-    const row = screen.getByRole('option', { name: /main/ })
-    // 命中在长词内部、上下文里没有空格可对齐：保留命中前 6 个字符。
-    expect(row.querySelector('.thread-selection-item-subtitle')).toHaveTextContent(
-      '…nationGracePeriodSeconds 调大',
-    )
+    // 即使命中拆在单词内部，可访问名称也保留完整单词与前文。
+    const row = screen.getByRole('option', { name: `main ${subtitle}` })
+    const subtitleBox = row.querySelector('.thread-selection-item-subtitle')!
+    expect(subtitleBox.textContent).toBe(subtitle)
+    expect(subtitleBox.querySelector('.search-hit-prefix')?.textContent).toBe(subtitle.split('GracePeriod')[0])
     expect([...row.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['GracePeriod'])
 
     // 标题命中同样高亮，副标题未命中时保持原样。

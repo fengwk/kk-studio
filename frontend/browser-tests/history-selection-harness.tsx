@@ -7,12 +7,21 @@ import {
   type PaneInteractionContext,
 } from '@/features/thread/runtime/panes/root-agent-pane-interactions'
 import { setLocale, translate } from '@/shared/i18n'
+import type { ReactNode } from 'react'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type {
   HarnessSessionEntryDTO,
   HarnessSessionSummaryDTO,
   HarnessThreadSummaryDTO,
 } from '@/shared/api/generated/contracts'
+import {
+  DEEP_PREVIEW,
+  DEEP_TITLE,
+  HISTORY_TEXT,
+  LONG_HISTORY_TEXT,
+  SHORT_PREVIEW,
+  SHORT_TITLE,
+} from './search-hit-fixtures'
 
 setLocale(
   new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN',
@@ -42,23 +51,11 @@ function entry(
 const HISTORY_ENTRIES: HarnessSessionEntryDTO[] = [
   entry('entry-root', 'ROOT', null, null),
   entry('entry-user', 'MESSAGE', 'entry-root', '服务停机流程要怎么落地？'),
-  entry(
-    'entry-assistant',
-    'MESSAGE',
-    'entry-user',
-    '## 结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录停机耗时',
-    'ASSISTANT',
-  ),
+  entry('entry-assistant', 'MESSAGE', 'entry-user', HISTORY_TEXT, 'ASSISTANT'),
   entry('entry-turn-end', 'TURN_END', 'entry-assistant', null),
   entry('entry-user-2', 'MESSAGE', 'entry-turn-end', '还有别的注意事项吗？'),
   // 长拉丁命中词位于 220 字预览上限之外：搜索预览必须从全文截取。
-  entry(
-    'entry-assistant-2',
-    'MESSAGE',
-    'entry-user-2',
-    `${'背景说明'.repeat(60)} 最后把 terminationGracePeriodSeconds 调大到 60 秒`,
-    'ASSISTANT',
-  ),
+  entry('entry-assistant-2', 'MESSAGE', 'entry-user-2', LONG_HISTORY_TEXT, 'ASSISTANT'),
   entry('entry-turn-end-2', 'TURN_END', 'entry-assistant-2', null),
 ]
 
@@ -72,9 +69,15 @@ const SESSIONS: HarnessSessionSummaryDTO[] = [
     firstMessagePreview: null,
     threadCount: 1,
   },
+  // 标题深处的命中：长标题在窄行里放不下，命中词原本会被单行省略裁掉。
+  { sessionId: 'session-title-hit', name: DEEP_TITLE, createdAt: 0, lastActivityAt: 0, firstMessagePreview: null, threadCount: 12 },
+  // 副标题深处的命中：命中词在预览的 40 多个字符之后。
+  { sessionId: 'session-subtitle-hit', name: '回滚演练会话', createdAt: 0, lastActivityAt: 0, firstMessagePreview: DEEP_PREVIEW, threadCount: 3 },
+  // 短命中：命中词就在标题开头，没有前文可以省略。
+  { sessionId: 'session-short-hit', name: SHORT_TITLE, createdAt: 0, lastActivityAt: 0, firstMessagePreview: SHORT_PREVIEW, threadCount: 1 },
 ]
 
-function thread(threadId: string, name: string): HarnessThreadSummaryDTO {
+function thread(threadId: string, name: string, headMessagePreview: string | null = null): HarnessThreadSummaryDTO {
   return {
     threadId,
     name,
@@ -85,11 +88,16 @@ function thread(threadId: string, name: string): HarnessThreadSummaryDTO {
     status: 'IDLE',
     executionControl: 'RUNNABLE',
     execution: { driver: 'builtin', settings: { modelName: 'offline', variant: 'default' } },
-    headMessagePreview: null,
+    headMessagePreview,
   }
 }
 
-const THREADS = [thread('thread-main', 'main'), thread('thread-second', '第二个 Thread')]
+const THREADS = [
+  thread('thread-main', 'main'),
+  thread('thread-second', '第二个 Thread'),
+  thread('thread-title-hit', DEEP_TITLE),
+  thread('thread-subtitle-hit', '回滚演练 Thread', DEEP_PREVIEW),
+]
 
 /**
  * 只提供选择面板渲染读取到的字段；条目投影仍由生产构建器完成。
@@ -145,8 +153,10 @@ export function Harness() {
   ]
   return (
     <MemoryRouter>
-      <main style={{ display: 'grid', gap: 16, padding: 12 }}>
-        <section data-testid="history">
+      {/* 长文本不能撑宽测试视口。 */}
+      <main style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16 }}>
+        {/* Reproduce the R7 preview width budget (225px zh / 194px en at 390px). */}
+        <section data-testid="history" style={{ paddingInline: 6 }}>
           <HistoryTree
             entries={HISTORY_ENTRIES}
             headEntryId="entry-turn-end"
@@ -159,22 +169,33 @@ export function Harness() {
         </section>
         {/* 绑定 Thread 的 pane：两个列表都要标出当前项。 */}
         {sections.map(({ id, interaction }) => (
-          <section key={id} data-testid={`bound-${id}`}>
+          <PaneSection key={id} testId={`bound-${id}`}>
             {selectionPanel(
               { kind: 'BOUND_THREAD', threadId: 'thread-second' },
               interaction,
               'session-second',
             )}
-          </section>
+          </PaneSection>
         ))}
         {/* 未绑定 Thread 的草稿 pane：两个列表都不能有当前项。 */}
         {sections.map(({ id, interaction }) => (
-          <section key={id} data-testid={`unbound-${id}`}>
+          <PaneSection key={id} testId={`unbound-${id}`}>
             {selectionPanel({ kind: 'NEW_SESSION_DRAFT' }, interaction, null)}
-          </section>
+          </PaneSection>
         ))}
       </main>
     </MemoryRouter>
+  )
+}
+
+/**
+ * 为选择列表模拟 composer 与 dock 的内边距。历史树不在 composer 内。
+ */
+function PaneSection({ testId, children }: { testId: string; children: ReactNode }) {
+  return (
+    <section data-testid={testId} style={{ minWidth: 0, padding: '8px 16px 10px' }}>
+      <div style={{ minWidth: 0, padding: 8 }}>{children}</div>
+    </section>
   )
 }
 

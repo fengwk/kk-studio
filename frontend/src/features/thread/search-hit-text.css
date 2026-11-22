@@ -1,0 +1,29 @@
+.search-hit-text {
+  display: flex;
+  min-width: 0;
+}
+
+.search-hit-prefix,
+.search-hit-match {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space-collapse: preserve-spaces;
+  text-wrap: nowrap;
+}
+
+/* Only clipping runs right-to-left; the original text keeps its reading order. */
+.search-hit-prefix {
+  direction: rtl;
+  text-align: left;
+}
+
+.search-hit-prefix > span {
+  unicode-bidi: isolate;
+}
+
+/* Reserve the hit and its tail first, up to the available width. */
+.search-hit-match {
+  flex: 0 0 auto;
+  max-width: 100%;
+}

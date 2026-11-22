@@ -5,7 +5,7 @@ import {
   type HistoryTreeRow,
 } from '@/features/thread/history-tree'
 import { historyLaneGlyphs } from '@/features/thread/history-tree-row-state'
-import { highlightSegments } from '@/features/thread/search-highlight'
+import { SearchHitText } from '@/features/thread/SearchHitText'
 import type { RefObject } from 'react'
 
 const KIND_LABEL_KEYS: Record<HistoryEntryKind, TranslationKey> = {
@@ -31,7 +31,7 @@ export interface HistoryTreeRowViewProps {
 /**
  * 历史树的一行：kind + 可见文本预览，命中搜索时只高亮命中的片段。
  *
- * 预览是单行省略，命中词在深处时按搜索摘录从命中处附近开始显示，窄行也能看到命中；
+ * 预览按可用宽度单行省略，搜索时优先显示命中词；
  * 无障碍标签把结构事实（kind、是否在当前路径、是否 head）拼进名字里，并保留完整预览，
  * 因为视觉上这些事实与全文只由 lane 字形、颜色和省略呈现。
  */
@@ -45,9 +45,6 @@ export function HistoryTreeRowView({
 }: HistoryTreeRowViewProps) {
   const { t } = useI18n()
   const kindLabel = t(KIND_LABEL_KEYS[row.kind])
-  const segments = tokens.length > 0
-    ? highlightSegments(historyRowSearchPreview(row, tokens), tokens)
-    : [{ text: row.preview, match: false }]
   return (
     <div role="listitem">
       <button
@@ -79,9 +76,7 @@ export function HistoryTreeRowView({
         <span className="history-tree-entry-kind">{kindLabel}</span>
         <span className="history-tree-entry-sep" aria-hidden="true">·</span>
         <span className="history-tree-entry-preview">
-          {segments.map((segment, index) => segment.match
-            ? <mark key={index} className="history-tree-mark">{segment.text}</mark>
-            : <span key={index}>{segment.text}</span>)}
+          <SearchHitText text={historyRowSearchPreview(row, tokens)} tokens={tokens} markClassName="history-tree-mark" />
         </span>
         {row.isHead ? (
           <span className="history-tree-entry-head">{t('ai.chat.history.currentPosition')}</span>

@@ -7,9 +7,7 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /** 预览中命中词位于深处（第 40 个 UTF-16 单元），单行省略会把它挤出可见区。 */
 const DEEP_HIT_PREVIEW = '## 结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录停机耗时'
-/** 摘录保留命中词前 6 个字符。 */
-const DEEP_HIT_EXCERPT = '…连接池并记录停机耗时'
-/** 命中已在开头附近时摘录不改变原预览。 */
+/** 命中就在预览开头。 */
 const EARLY_HIT_PREVIEW = '停机耗时统计：服务停机时先停止接收新请求'
 
 function row(preview: string): HistoryTreeRow {
@@ -57,12 +55,12 @@ function renderRow(preview: string, tokens: string[]) {
 }
 
 describe('HistoryTreeRowView', () => {
-  // 测试意图：命中词在预览深处时，窄行也要从命中处附近开始显示并高亮命中；
-  // 无障碍标签始终保留完整预览，不能因视觉摘录而丢失读屏文本。
-  it('starts the preview near a deep search hit and keeps the full accessible label', () => {
+  // 视觉裁切不能丢失预览正文或读屏文本。
+  it('keeps the full preview and accessible label for a deep hit', () => {
     const { entry, preview } = renderRow(DEEP_HIT_PREVIEW, ['停机耗时'])
 
-    expect(preview.textContent).toBe(DEEP_HIT_EXCERPT)
+    expect(preview.textContent).toBe(DEEP_HIT_PREVIEW)
+    expect(preview.querySelector('.search-hit-prefix')?.textContent).toBe(DEEP_HIT_PREVIEW.slice(0, -4))
     expect(preview.querySelector('mark')?.textContent).toBe('停机耗时')
     expect(entry.getAttribute('aria-label')).toContain(DEEP_HIT_PREVIEW)
     expect(entry.getAttribute('aria-label')).toContain('助手')
