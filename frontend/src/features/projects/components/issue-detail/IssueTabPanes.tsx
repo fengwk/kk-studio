@@ -188,23 +188,23 @@ export function IssueAgentThreadsPane({
     <div className="thread-list">
       {agentThreads.map((thread) => (
         <div key={thread.threadId} className="thread-item">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Bot size={16} aria-hidden="true" />
-            <strong>{thread.agentName}</strong>
+          <div className="thread-item-identity">
+            <strong className="thread-item-agent" title={thread.agentName}>
+              <Bot size={16} aria-hidden="true" />
+              <span>{thread.agentName}</span>
+            </strong>
+            <code className="thread-item-id">{thread.threadId}</code>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <code>{thread.threadId}</code>
-            {onOpenThread && (
-              <Button
-                variant="ghost"
-                onClick={() => onOpenThread(thread.threadId)}
-                title={t('projects.issue.openAgentThreadTitle')}
-              >
-                <Eye size={14} aria-hidden="true" />
-                <span>{t('projects.issue.openAction')}</span>
-              </Button>
-            )}
-          </div>
+          {onOpenThread && (
+            <Button
+              variant="ghost"
+              onClick={() => onOpenThread(thread.threadId)}
+              title={t('projects.issue.openAgentThreadTitle')}
+            >
+              <Eye size={14} aria-hidden="true" />
+              <span>{t('projects.issue.openAction')}</span>
+            </Button>
+          )}
         </div>
       ))}
     </div>

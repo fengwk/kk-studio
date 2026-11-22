@@ -828,8 +828,8 @@ describe('ProjectDetailPage', () => {
     // 等待弹窗打开
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
 
-    // 切换到 Agent 线程页签。
-    fireEvent.click(screen.getByRole('tab', { name: /Agent 线程/ }))
+    // 切换到 Agent Thread 页签。
+    fireEvent.click(screen.getByRole('tab', { name: /Agent Thread/ }))
     const openThreadBtn = await screen.findByTitle('打开此 Agent Thread 视图')
     fireEvent.click(openThreadBtn)
 

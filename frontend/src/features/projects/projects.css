@@ -485,14 +485,6 @@
   flex: 1;
 }
 
-/* 窄屏换行保留完整页签，不在边缘裁掉部分标签。 */
-@media (max-width: 600px) {
-  .issue-detail-tabs > .ui-tabs {
-    flex: none;
-    flex-wrap: wrap;
-  }
-}
-
 .issue-detail-tabs .ui-tab-panel {
   display: flex;
   flex-direction: column;
@@ -825,7 +817,43 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   font-size: var(--font-size-sm);
+}
+
+/* Agent 名称单行、过长省略；Thread ID 是弱化诊断文本，窄屏先换到下一行再按需折断。 */
+.thread-item-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.thread-item-agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.thread-item-agent > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-item-id {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.thread-item > button {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* Evidence */

@@ -204,7 +204,7 @@ describe('IssueDetailModal', () => {
     expect(screen.getByText(/活动时间线/)).toBeInTheDocument()
     expect(screen.getByText(/Run 报告/)).toBeInTheDocument()
     expect(screen.getByText(/阶段预算/)).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /Agent 线程/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Agent Thread/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
   })
 
@@ -954,7 +954,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    const threadsTab = screen.getByRole('tab', { name: /Agent 线程/ })
+    const threadsTab = screen.getByRole('tab', { name: /Agent Thread/ })
     fireEvent.click(threadsTab)
 
     expect(await screen.findByText('architect')).toBeInTheDocument()

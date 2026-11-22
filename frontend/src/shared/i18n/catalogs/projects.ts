@@ -1051,7 +1051,7 @@ export const projectsCatalog = {
     'en-US': 'Stage budgets ({{count}})',
   },
   'projects.issue.tabAgentThreads': {
-    'zh-CN': 'Agent 线程 ({{count}})',
+    'zh-CN': 'Agent Thread ({{count}})',
     'en-US': 'Agent Threads ({{count}})',
   },
   'projects.issue.tabEvidence': {
