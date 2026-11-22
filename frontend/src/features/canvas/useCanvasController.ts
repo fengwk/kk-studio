@@ -28,6 +28,7 @@ import { useCanvasReferenceLinks } from '@/features/canvas/useCanvasReferenceLin
 import { useCanvasStageSurface } from '@/features/canvas/useCanvasStageSurface'
 import { useCanvasTextEditor } from '@/features/canvas/useCanvasTextEditor'
 import { useCanvasToast } from '@/features/canvas/useCanvasToast'
+import { useCanvasViewportPersistence } from '@/features/canvas/useCanvasViewportPersistence'
 import {
   getCanvas,
   listCanvasFunctions,
@@ -71,6 +72,9 @@ export function useCanvasController(initialCanvasId?: string) {
       enterCanvasScope(scope, state.canvasId)
     }
   }, [activeCanvasIdRef, scope, state.canvasId])
+
+  // 视口落盘挂在提交之后：拖拽期间的逐帧视口变化会被合并成有限的存储写入。
+  useCanvasViewportPersistence(state.canvasId, state.viewport)
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],

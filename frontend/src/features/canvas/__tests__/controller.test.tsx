@@ -7,6 +7,7 @@ import { loadPendingFunctionRun } from '@/features/canvas/function-run-pending'
 import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
 import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
 import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage'
+import { loadCanvasViewport } from '@/features/canvas/viewport-storage'
 import { createMockIDBFactory } from '@/test-support/mock-idb'
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import { readJsonObject } from '@/features/canvas/domain'
@@ -160,6 +161,23 @@ function emitCanvasSubscribed(cursor: string) {
       subscription.onSubscribed?.(cursor)
     }
   })
+}
+
+/** 记录视口键的存储写入，用于断言画布视口落盘的频率与位置。 */
+function recordViewportWrites(): string[] {
+  const writes: string[] = []
+  const setItem = Storage.prototype.setItem
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function record(
+    this: Storage,
+    key: string,
+    value: string,
+  ) {
+    if (key.startsWith('kk-studio.canvas.viewport:')) {
+      writes.push(key)
+    }
+    setItem.call(this, key, value)
+  })
+  return writes
 }
 
 /** 在权威快照上投影指定 FunctionRun（测试夹具便捷方法）。 */
@@ -522,6 +540,40 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(getCanvas).toHaveBeenCalledWith(CANVAS_ID, expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))
+  })
+
+  it('restores the stored viewport without rewriting it when the canvas opens', async () => {
+    localStorage.setItem(
+      `kk-studio.canvas.viewport:${CANVAS_ID}`,
+      JSON.stringify({ x: 30, y: -20, zoom: 0.7 }),
+    )
+    const viewportWrites = recordViewportWrites()
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    expect(result.current.state.viewport).toEqual({ x: 30, y: -20, zoom: 0.7 })
+    // 有存档的视口直接恢复，既不需要首帧 fit，也不回写同一份存档。
+    expect(result.current.initialFitPending).toBe(false)
+    expect(viewportWrites).toHaveLength(0)
+  })
+
+  it('coalesces viewport persistence instead of writing storage per move', async () => {
+    const viewportWrites = recordViewportWrites()
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    viewportWrites.length = 0
+
+    // 拖拽期间每帧都会回调 setViewport：状态逐次更新，存储写入按间隔合并。
+    act(() => {
+      for (let frame = 1; frame <= 60; frame += 1) {
+        result.current.setViewport({ x: frame, y: -frame, zoom: 1 })
+      }
+    })
+    expect(result.current.state.viewport).toEqual({ x: 60, y: -60, zoom: 1 })
+    expect(viewportWrites.length).toBeLessThanOrEqual(1)
+    await waitFor(() => expect(loadCanvasViewport(CANVAS_ID)).toEqual({ x: 60, y: -60, zoom: 1 }))
   })
 
   it('drives commands, local UI state, uploads, and keyboard actions from one server snapshot', async () => {
