@@ -682,6 +682,13 @@ describe('CanvasStage conditional rendering and viewport', () => {
     expect(actions.toggleAddMenu).toHaveBeenCalledTimes(1)
   })
 
+  it('hides the minimap on a canvas without nodes', () => {
+    renderStage({ snapshot: snapshotDTO({ nodes: [] }) })
+
+    expect(screen.getByRole('note')).toBeInTheDocument()
+    expect(screen.queryByTestId('minimap')).not.toBeInTheDocument()
+  })
+
   it('drops the empty-canvas guidance once the canvas has a node', () => {
     renderStage({})
     expect(screen.queryByRole('note')).not.toBeInTheDocument()

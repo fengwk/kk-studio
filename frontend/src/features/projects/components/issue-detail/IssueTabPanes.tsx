@@ -4,7 +4,13 @@ import { formatBackendDate } from '@/shared/lib/date-format'
 import { Button } from '@/shared/ui/controls/Button'
 import { Badge } from '@/shared/ui/data/Badge'
 import { EmptyState } from '@/shared/ui/feedback/EmptyState'
-import { RUN_STATUS_LABEL_KEY, stateNameOf, type IssueStateNames } from '../../issue-labels'
+import { runDurationText } from '../../issue-duration'
+import {
+  ACTIVITY_KIND_LABEL_KEY,
+  RUN_STATUS_LABEL_KEY,
+  stateNameOf,
+  type IssueStateNames,
+} from '../../issue-labels'
 import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 /** 活动事实流：区分 Agent、人与系统三类行为者。 */
@@ -18,7 +24,9 @@ export function IssueActivityTimeline({ activities }: { activities: IssueDetailD
         activities.map((act) => (
           <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
             <div className="activity-item-header">
-              <span className="activity-badge-kind">{act.kind}</span>
+              <span className="activity-badge-kind" title={act.kind}>
+                {t(ACTIVITY_KIND_LABEL_KEY[act.kind])}
+              </span>
               <span className="activity-actor">
                 {act.actorType === 'AGENT' ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -76,25 +84,34 @@ export function IssueRunsPane({
               )}
               <Badge title={r.status}>{t(RUN_STATUS_LABEL_KEY[r.status])}</Badge>
             </div>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
-              {t('projects.issue.durationRemaining', { ms: r.remainingExecutionMs })}
-            </span>
+            <span className="run-card-duration">{runDurationText(r, t)}</span>
           </div>
 
           <div className="run-card-details">
             <div className="run-detail-row">
-              <span>{t('projects.issue.entryRangeLabel')}</span>
-              <code>{r.startEntryId} → {r.endEntryId || t('projects.issue.running')}</code>
+              <span className="run-detail-label">{t('projects.issue.entryRangeLabel')}</span>
+              <span className="run-detail-ids">
+                <code>{r.startEntryId}</code>
+                {/* 活动 Run 的终点尚未冻结：卡头状态已说明执行中，这里不重复占用宽度。 */}
+                {r.endEntryId && (
+                  <>
+                    <span aria-hidden="true">→</span>
+                    <code>{r.endEntryId}</code>
+                  </>
+                )}
+              </span>
             </div>
             {r.finalAnswerEntryId && (
               <div className="run-detail-row">
-                <span>{t('projects.issue.finalAnswerEntryLabel')}</span>
-                <code>{r.finalAnswerEntryId}</code>
+                <span className="run-detail-label">{t('projects.issue.finalAnswerEntryLabel')}</span>
+                <span className="run-detail-ids">
+                  <code>{r.finalAnswerEntryId}</code>
+                </span>
               </div>
             )}
             {r.nextState && (
               <div className="run-detail-row">
-                <span>{t('projects.issue.handoverTargetLabel')}</span>
+                <span className="run-detail-label">{t('projects.issue.handoverTargetLabel')}</span>
                 <strong style={{ color: 'var(--accent)' }} title={r.nextState}>
                   {stateNameOf(stateNames, r.nextState)}
                 </strong>
@@ -102,7 +119,7 @@ export function IssueRunsPane({
             )}
             {r.error && (
               <div className="run-detail-row" style={{ color: 'var(--danger)' }}>
-                <span>{t('projects.issue.errorMessageLabel')}</span>
+                <span className="run-detail-label">{t('projects.issue.errorMessageLabel')}</span>
                 <span>{r.error}</span>
               </div>
             )}

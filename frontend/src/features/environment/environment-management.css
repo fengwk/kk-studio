@@ -104,6 +104,20 @@
   word-break: break-all;
 }
 
+/* 能力键是完整标识符：不在词中断开，超出宽度时在键与键之间换行。 */
+.env-host-meta-card .val.env-host-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.env-host-capability {
+  white-space: nowrap;
+}
+
 /* --- Environment Events --- */
 /* 读取中、失败与空态各自占位：失败时错误块与重试入口纵向排列，窄屏不并排挤压。 */
 .env-events-failure {
@@ -150,6 +164,7 @@
   font-size: var(--font-size-xs);
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg-muted);
@@ -171,6 +186,7 @@
   font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--fg);
+  white-space: nowrap;
 }
 
 .env-event-time {

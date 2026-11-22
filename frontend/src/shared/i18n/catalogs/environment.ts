@@ -610,4 +610,28 @@ export const environmentCatalog = {
     'en-US': 'Failed to load events',
     'zh-CN': '事件记录读取失败',
   },
+  'ai.environment.events.level.info': {
+    'en-US': 'Info',
+    'zh-CN': '信息',
+  },
+  'ai.environment.events.level.warn': {
+    'en-US': 'Warning',
+    'zh-CN': '警告',
+  },
+  'ai.environment.events.type.connecting': {
+    'en-US': 'Connecting',
+    'zh-CN': '连接中',
+  },
+  'ai.environment.events.type.ready': {
+    'en-US': 'Ready',
+    'zh-CN': '已就绪',
+  },
+  'ai.environment.events.type.disconnected': {
+    'en-US': 'Disconnected',
+    'zh-CN': '已断开',
+  },
+  'ai.environment.events.type.updateFailed': {
+    'en-US': 'Update failed',
+    'zh-CN': '更新失败',
+  },
 } satisfies LocaleCatalog

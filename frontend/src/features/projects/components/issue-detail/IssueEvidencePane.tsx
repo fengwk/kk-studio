@@ -62,7 +62,7 @@ export function IssueEvidencePane({
         <StateBlock title={t('projects.issue.loadingEvidence')} />
       ) : (
         <>
-          {/* 失败保留已知道的证据，只在上方说明读取失败并可重试。 */}
+          {/* 失败保留已知道的证据，只在上方说明读取失败并可重试；反馈行与环境列表刷新失败一致。 */}
           {loadFailed && (
             <div className="evidence-feedback" role="alert">
               <CircleAlert size={16} aria-hidden="true" />

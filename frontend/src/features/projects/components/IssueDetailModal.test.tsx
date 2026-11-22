@@ -198,14 +198,35 @@ describe('IssueDetailModal', () => {
     expect(screen.queryByText('IN_PROGRESS')).toBeNull()
     // 阶段名称旁的提示保留内部编码，便于对照工作流配置。
     expect(screen.getAllByTitle('IN_PROGRESS').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('期望版本号:')).toBeInTheDocument()
-    expect(screen.getByText('3')).toBeInTheDocument()
+    // 并发控制用的版本号不是可见事实，详情里不再呈现。
+    expect(screen.queryByText(/期望版本号/)).toBeNull()
     expect(screen.getByText('需求事实')).toBeInTheDocument()
     expect(screen.getByText(/活动时间线/)).toBeInTheDocument()
     expect(screen.getByText(/Run 报告/)).toBeInTheDocument()
     expect(screen.getByText(/阶段预算/)).toBeInTheDocument()
-    expect(screen.getByText(/Agent Thread/)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Agent 线程/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
+  })
+
+  it('focuses the footer close action when the detail opens', async () => {
+    // 测试意图：头部第一个可聚焦控件是删除，初始焦点必须落在安全的关闭动作上。
+    const api = createMockApi()
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    const dialog = await screen.findByLabelText('Issue #12 详情')
+    const footer = dialog.querySelector<HTMLElement>('.modal-footer')!
+    expect(within(footer).getByRole('button', { name: '关闭' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: '删除 Issue' })).not.toHaveFocus()
   })
 
   it('renders run and stage budget facts with stage names and readable run status', async () => {
@@ -665,7 +686,8 @@ describe('IssueDetailModal', () => {
         issue: { ...pausedDetail.issue, version: '4', pauseDetail: '新的暂停详情' },
       })
     })
-    await waitFor(() => expect(screen.getByText('4')).toBeInTheDocument())
+    // 版本号不是可见字段；用刷新的暂停详情作为详情已更新的可见信号。
+    await waitFor(() => expect(screen.getByText('新的暂停详情')).toBeInTheDocument())
     expect(screen.getByRole('dialog', { name: '继续执行' })).toHaveTextContent('原暂停详情')
 
     fireEvent.click(screen.getByRole('button', { name: '确认继续' }))
@@ -932,7 +954,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    const threadsTab = screen.getByText(/Agent Thread/)
+    const threadsTab = screen.getByRole('tab', { name: /Agent 线程/ })
     fireEvent.click(threadsTab)
 
     expect(await screen.findByText('architect')).toBeInTheDocument()

@@ -85,7 +85,7 @@ test('single header, back and explicit failed-load retry', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Workflow Project', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '刷新', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '返回项目列表' }).click()
-  await expect(page).toHaveURL(/\/list$/)
+  await expect(page).toHaveURL(/\?list$/)
 })
 
 test('structured multi-edge editing, real Tabs styling and hidden reference protection', async ({ page }) => {

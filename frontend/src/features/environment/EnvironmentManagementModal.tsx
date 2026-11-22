@@ -6,7 +6,11 @@ import { useI18n } from '@/shared/i18n'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { formatBackendDateSeconds } from '@/shared/lib/date-format'
-import { environmentEventLevelClass } from '@/features/environment/environment-utils'
+import {
+  ENVIRONMENT_EVENT_LEVEL_LABEL_KEY,
+  ENVIRONMENT_EVENT_TYPE_LABEL_KEY,
+  environmentEventLevelClass,
+} from '@/features/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
 import { EnvironmentConfigurationSection } from '@/features/environment/EnvironmentConfigurationSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
@@ -98,11 +102,18 @@ export function EnvironmentManagementModal({
                       return (
                         <div key={`${evt.type}-${idx}`} className={`env-event-item ${levelClass}`}>
                           <div className="env-event-header">
-                            <span className={`env-event-level ${levelClass}`}>{evt.level}</span>
-                            <span className="env-event-type">{evt.type}</span>
+                            <span
+                              className={`env-event-level ${levelClass}`}
+                              title={evt.level}
+                            >
+                              {t(ENVIRONMENT_EVENT_LEVEL_LABEL_KEY[evt.level])}
+                            </span>
+                            <span className="env-event-type" title={evt.type}>
+                              {t(ENVIRONMENT_EVENT_TYPE_LABEL_KEY[evt.type])}
+                            </span>
                             {timeStr ? <span className="env-event-time">{timeStr}</span> : null}
                           </div>
-                          <div className="env-event-message">{evt.message}</div>
+                          {evt.message ? <div className="env-event-message">{evt.message}</div> : null}
                         </div>
                       )
                     })}

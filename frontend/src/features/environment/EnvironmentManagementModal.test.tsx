@@ -169,7 +169,14 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()
     expect(screen.getByText('Production host')).toBeInTheDocument()
-    expect(screen.getByText('process.exec · shell.exec')).toBeInTheDocument()
+    // 能力键逐个渲染为完整标识符，便于整体不折断、只在键之间换行。
+    const capabilitiesCell = screen.getByText('process.exec').closest('.env-host-meta-card')
+    expect(capabilitiesCell).not.toBeNull()
+    const capabilityNodes = capabilitiesCell!.querySelectorAll('.env-host-capability')
+    expect([...capabilityNodes].map((node) => node.textContent)).toEqual([
+      'process.exec',
+      'shell.exec',
+    ])
     // lastSeen 使用共享固定格式（分钟精度），不直接铺 UTC 原文。
     expect(screen.getByText(/2026-07-20 \d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()
@@ -253,7 +260,7 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.getByText('VALIDATION_FAILED · daemonConfig.proxyUrl')).toBeInTheDocument()
   })
 
-  /** 测试意图：展开后按时间倒序呈现事件，级别可区分且 WARN 有视觉区分样式。 */
+  /** 测试意图：展开后按时间倒序呈现事件，级别与类型用本地化名称，原码只留在 title。 */
   it('renders events with distinguishable levels once diagnostics is expanded', async () => {
     const user = userEvent.setup()
     const mockEvents: EnvironmentEventDTO[] = [
@@ -277,9 +284,14 @@ describe('EnvironmentManagementModal', () => {
 
     expect(await screen.findByText('Daemon update failed')).toBeInTheDocument()
     expect(screen.getByText('Host connected successfully')).toBeInTheDocument()
-    expect(screen.getByText('UPDATE_FAILED')).toBeInTheDocument()
-    expect(screen.getByText('READY')).toBeInTheDocument()
-    expect(screen.getByText('WARN')).toHaveClass('is-warn')
+    // 类型按事件语义命名，不显示 READY / UPDATE_FAILED 这类内部码。
+    expect(screen.getByText('更新失败')).toHaveAttribute('title', 'UPDATE_FAILED')
+    expect(screen.getByText('已就绪')).toHaveAttribute('title', 'READY')
+    // 级别同样本地化，协议码保留在 title 提示里。
+    expect(screen.getByText('警告')).toHaveAttribute('title', 'WARN')
+    expect(screen.getByText('警告')).toHaveClass('is-warn')
+    expect(screen.getByText('信息')).toHaveAttribute('title', 'INFO')
+    expect(screen.getByText('信息')).toHaveClass('is-info')
     // 倒序：最新事件在前。
     const messages = screen.getAllByText(/Host connected successfully|Daemon update failed/)
     expect(messages.map((node) => node.textContent)).toEqual([

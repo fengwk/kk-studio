@@ -87,7 +87,7 @@ export function IssueSpecPane({
   )
 }
 
-/** Spec 只读视图：标题、描述与阶段/版本元数据。 */
+/** Spec 只读视图：标题、描述与阶段元数据；并发控制用的版本号不作为可见字段。 */
 function IssueSpecView({
   issue,
   stateNames,
@@ -102,7 +102,7 @@ function IssueSpecView({
   const { t } = useI18n()
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="spec-head">
         <h2 className="spec-title">{issue.title}</h2>
         <Button
           variant="ghost"
@@ -129,10 +129,6 @@ function IssueSpecView({
           <span className="meta-value" title={issue.state}>
             {stateNameOf(stateNames, issue.state)}
           </span>
-        </div>
-        <div className="meta-item">
-          <span className="meta-label">{t('projects.issue.expectedVersionLabel')}</span>
-          <span className="meta-value"><code>{issue.version}</code></span>
         </div>
         {issue.blockedFromState && (
           <div className="meta-item">

@@ -8,11 +8,14 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type { IssueDTO } from '@/shared/api/generated/contracts'
+import { readableStateNameOf, toStateNames } from '../issue-labels'
+import type { IssueDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface CreateIssueModalProps {
   isOpen: boolean
   projectId: string
+  /** 项目工作流：提示里只引用其声明的初始阶段名称。 */
+  workflow?: ProjectWorkflowDTO
   onClose: () => void
   onSuccess: (created: IssueDTO) => void
   api?: ProjectsApi
@@ -21,11 +24,14 @@ export interface CreateIssueModalProps {
 export function CreateIssueModal({
   isOpen,
   projectId,
+  workflow,
   onClose,
   onSuccess,
   api = projectsApi,
 }: CreateIssueModalProps) {
   const { t } = useI18n()
+  // 初始阶段只写工作流给出的名称；没有名称时用通用说法，不露 INIT 编码。
+  const initStageName = readableStateNameOf(toStateNames(workflow?.states), 'INIT')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -108,7 +114,11 @@ export function CreateIssueModal({
             </label>
 
             <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
-              <span>{t('projects.issue.createHint')}</span>
+              <span>
+                {initStageName
+                  ? t('projects.issue.createHintStage', { stage: initStageName })
+                  : t('projects.issue.createHint')}
+              </span>
             </div>
           </div>
 

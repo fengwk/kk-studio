@@ -1,5 +1,6 @@
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { tokenColor } from './fixture'
 import { url } from '@/shared/api/client'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
@@ -61,6 +62,38 @@ const savedConfig = testDaemonConfig({
 /** 卡片与管理弹窗共用的英文/中文文案在窄屏也不能产生横向溢出。 */
 async function expectNoHorizontalOverflow(page: Page, width: number): Promise<void> {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+}
+
+/**
+ * 搜索占位文案必须完整可读：用输入框自身的字体真实排版后，宽度要放进可用内容区，
+ * 否则提示会被截断成省略号。
+ */
+async function expectPlaceholderFits(search: Locator): Promise<void> {
+  const metrics = await search.evaluate((element: HTMLInputElement) => {
+    const style = getComputedStyle(element)
+    const probe = document.createElement('span')
+    probe.textContent = element.placeholder
+    probe.style.position = 'absolute'
+    probe.style.left = '-10000px'
+    probe.style.whiteSpace = 'pre'
+    probe.style.fontFamily = style.fontFamily
+    probe.style.fontSize = style.fontSize
+    probe.style.fontWeight = style.fontWeight
+    probe.style.fontStyle = style.fontStyle
+    probe.style.letterSpacing = style.letterSpacing
+    document.body.appendChild(probe)
+    const text = probe.getBoundingClientRect().width
+    probe.remove()
+    const padding =
+      Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
+    return {
+      placeholder: element.placeholder,
+      text,
+      available: element.clientWidth - padding,
+    }
+  })
+  const { placeholder, text, available } = metrics
+  expect(text, `placeholder "${placeholder}" must not be truncated`).toBeLessThanOrEqual(available)
 }
 
 /** 卡片上唯一的入口是「管理 <name>」：读取会话、配置与全部动作都在弹窗里。 */
@@ -378,6 +411,11 @@ test('keeps event history and config details inside the collapsible diagnostics'
     status: 'READY',
     ready: true,
     lastSeenAt: 1784505660000,
+    capabilities: [
+      { id: 'fs.edit.preview' },
+      { id: 'lsp.goto-definition' },
+      { id: 'process.exec' },
+    ],
   })
   const runtime = testRuntimeStatus({
     revision: '3',
@@ -417,7 +455,22 @@ test('keeps event history and config details inside the collapsible diagnostics'
   await page.screenshot({ path: testInfo.outputPath('management-collapsed.png'), fullPage: true })
 
   await diagnostics.locator('summary').click()
-  await expect(modal.locator('.env-mgmt-section[aria-label="宿主信息"]')).toBeVisible()
+  const hostSection = modal.locator('.env-mgmt-section[aria-label="宿主信息"]')
+  await expect(hostSection).toBeVisible()
+  // 能力键逐个完整呈现：每个键不折断，超宽时只在键与键之间换行。
+  const capabilityKeys = hostSection.locator('.env-host-capability')
+  await expect(capabilityKeys).toHaveText(['fs.edit.preview', 'lsp.goto-definition', 'process.exec'])
+  const capabilityLayout = await hostSection.locator('.env-host-capabilities').evaluate(element => ({
+    display: getComputedStyle(element).display,
+    flexWrap: getComputedStyle(element).flexWrap,
+    keyWhiteSpace: [...element.querySelectorAll('.env-host-capability')]
+      .map(key => getComputedStyle(key).whiteSpace),
+  }))
+  expect(capabilityLayout).toEqual({
+    display: 'flex',
+    flexWrap: 'wrap',
+    keyWhiteSpace: ['nowrap', 'nowrap', 'nowrap'],
+  })
   const configSection = modal.locator('.env-mgmt-section[aria-label="配置"]')
   await expect(configSection.getByText('已应用', { exact: true })).toBeVisible()
   const configCells = configSection.locator('.env-host-meta-card')
@@ -426,11 +479,23 @@ test('keeps event history and config details inside the collapsible diagnostics'
   const events = modal.locator('.env-mgmt-section[aria-label="事件记录"]')
   await expect(events.getByText('daemon connection lost')).toBeVisible()
   await expect(events.getByText('environment ready')).toBeVisible()
-  // 事件按发生时间倒序呈现，最新一条在前。
-  await expect(events.locator('.env-event-item')).toHaveText([
-    /READY/,
-    /DISCONNECTED/,
-  ])
+  // 事件按发生时间倒序呈现，最新一条在前；级别与类型用本地化名称承载，协议码只在 title。
+  const eventItems = events.locator('.env-event-item')
+  await expect(eventItems.locator('.env-event-type')).toHaveText(['已就绪', '已断开'])
+  await expect(eventItems.locator('.env-event-level')).toHaveText(['信息', '警告'])
+  expect(
+    await eventItems.locator('.env-event-type').evaluateAll(nodes =>
+      nodes.map(node => node.getAttribute('title')),
+    ),
+  ).toEqual(['READY', 'DISCONNECTED'])
+  expect(
+    await eventItems.locator('.env-event-level').evaluateAll(nodes =>
+      nodes.map(node => node.getAttribute('title')),
+    ),
+  ).toEqual(['INFO', 'WARN'])
+  // 事件正文不残留协议码：服务端消息只作为本地化名称下的次要说明。
+  await expect(events).not.toContainText('READY')
+  await expect(events).not.toContainText('DISCONNECTED')
   expect(calls.filter(call => call.endsWith('/events'))).toHaveLength(1)
   await page.screenshot({ path: testInfo.outputPath('management-diagnostics.png'), fullPage: true })
   await expectNoHorizontalOverflow(page, 1280)
@@ -799,6 +864,12 @@ test('native Tab skips closed details inputs and disabled controls around both S
  */
 const sliceShotsDir = process.env.KK_SLICE_SHOTS?.trim()
 
+test.beforeAll(() => {
+  if (sliceShotsDir) {
+    mkdirSync(sliceShotsDir, { recursive: true })
+  }
+})
+
 async function sliceShot(page: Page, name: string): Promise<void> {
   if (!sliceShotsDir) {
     return
@@ -817,6 +888,13 @@ const diagnosticsCopy = {
     failed: '事件记录读取失败',
     empty: '暂无事件记录',
     retry: '重试',
+    levels: { INFO: '信息', WARN: '警告' },
+    types: {
+      CONNECTING: '连接中',
+      READY: '已就绪',
+      DISCONNECTED: '已断开',
+      UPDATE_FAILED: '更新失败',
+    },
   },
   'en-US': {
     manage: (name: string) => `Manage ${name}`,
@@ -827,6 +905,13 @@ const diagnosticsCopy = {
     failed: 'Failed to load events',
     empty: 'No events recorded',
     retry: 'Retry',
+    levels: { INFO: 'Info', WARN: 'Warning' },
+    types: {
+      CONNECTING: 'Connecting',
+      READY: 'Ready',
+      DISCONNECTED: 'Disconnected',
+      UPDATE_FAILED: 'Update failed',
+    },
   },
 } as const
 
@@ -913,6 +998,150 @@ for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
   }
 }
 
+/**
+ * 有数据的事件记录：级别与类型是本地化名称，服务端消息是名称下的次要说明，原样保留。
+ * 服务端按发生时间正序返回，管理面反转后最新一条在前；覆盖警告与信息两种级别、三种事件类型。
+ */
+const populatedEvents = [
+  {
+    occurredAt: Date.parse('2026-07-20T00:00:00.000Z'),
+    level: 'INFO',
+    type: 'READY',
+    message: 'environment ready',
+  },
+  {
+    occurredAt: Date.parse('2026-07-20T00:01:00.000Z'),
+    level: 'INFO',
+    type: 'DISCONNECTED',
+    message: 'daemon connection closed by peer',
+  },
+  {
+    occurredAt: Date.parse('2026-07-20T00:02:00.000Z'),
+    level: 'WARN',
+    type: 'UPDATE_FAILED',
+    message: 'daemon update failed: exit status 1',
+  },
+]
+
+/** 呈现顺序：管理面把服务端时间正序反转，最新一条在最前。 */
+const renderedEvents = [...populatedEvents].reverse()
+
+/** 能力键混排短键与接近卡片宽度的长键，用来验证整键渲染。 */
+const populatedCapabilityIds = [
+  'fs.read',
+  'fs.write',
+  'process.exec',
+  'lsp.goto-definition',
+  'lsp.workspace-symbols',
+  'lsp.java-decompile',
+  'skill.install',
+]
+
+/** 读取每条事件的级别与类型协议码：两者只应出现在 title 提示里。 */
+async function eventTitles(items: Locator): Promise<(string | null)[][]> {
+  return items.evaluateAll(nodes =>
+    nodes.map(node => [
+      node.querySelector('.env-event-level')?.getAttribute('title') ?? null,
+      node.querySelector('.env-event-type')?.getAttribute('title') ?? null,
+    ]),
+  )
+}
+
+/** 每个能力键必须整键渲染：只有一个行盒，且不越出所在卡片。 */
+async function brokenCapabilityKeys(capabilities: Locator): Promise<string[]> {
+  return capabilities.evaluate(element => {
+    const available = element.getBoundingClientRect().width
+    return [...element.querySelectorAll('.env-host-capability')]
+      .filter(key =>
+        key.getClientRects().length !== 1
+        || key.getBoundingClientRect().width > available,
+      )
+      .map(key => key.textContent ?? '')
+  })
+}
+
+for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    test(`shows populated events and whole capability keys in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      const card = testEnvironment({
+        id: 'env-1',
+        name: 'diag-box',
+        version: '3',
+        status: 'READY',
+        ready: true,
+        capabilities: populatedCapabilityIds.map(id => ({ id })),
+      })
+      const runtime = testRuntimeStatus({ revision: '3' })
+      await page.route('**/api/platform/environments**', async route => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/events')) return route.fulfill({ json: populatedEvents })
+        if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+        if (path.endsWith('/env-1')) return route.fulfill({ json: card })
+        return route.fulfill({ json: [card] })
+      })
+
+      await page.goto(`${HARNESS_URL}?locale=${locale}`)
+      const manage = page.getByRole('button', { name: copy.manage('diag-box'), exact: true })
+      await expect(manage).toBeVisible({ timeout: 15000 })
+      await manage.click()
+      const modal = page.getByRole('dialog', { name: copy.dialog('diag-box') })
+      await expect(modal).toBeVisible()
+      await modal.locator('.environment-diagnostics > summary').click()
+
+      // 能力键是完整标识符：整键换行，不在词中断开，也不越出卡片。
+      const capabilities = modal.locator('.env-host-capabilities')
+      await expect(capabilities.locator('.env-host-capability')).toHaveText(populatedCapabilityIds)
+      await expect(capabilities).toHaveCSS('word-break', 'normal')
+      await expect(capabilities).toHaveCSS('flex-wrap', 'wrap')
+      expect(await brokenCapabilityKeys(capabilities)).toEqual([])
+
+      const events = modal.locator(`.env-mgmt-section[aria-label="${copy.eventsTitle}"]`)
+      await expect(events).toBeVisible()
+      await expect(events.locator('.env-mgmt-badge-count')).toHaveText('3')
+      const items = events.locator('.env-event-item')
+      await expect(items).toHaveCount(3)
+      // 级别与类型读作产品文案，同一份名称覆盖两种级别与三种类型。
+      await expect(items.locator('.env-event-level')).toHaveText([
+        copy.levels.WARN,
+        copy.levels.INFO,
+        copy.levels.INFO,
+      ])
+      await expect(items.locator('.env-event-type')).toHaveText([
+        copy.types.UPDATE_FAILED,
+        copy.types.DISCONNECTED,
+        copy.types.READY,
+      ])
+      expect(await eventTitles(items)).toEqual([
+        ['WARN', 'UPDATE_FAILED'],
+        ['INFO', 'DISCONNECTED'],
+        ['INFO', 'READY'],
+      ])
+      // 协议码只留在 title：事件正文不出现 READY / WARN 这类内部码。
+      for (const code of ['INFO', 'WARN', 'READY', 'CONNECTING', 'DISCONNECTED', 'UPDATE_FAILED']) {
+        await expect(events.getByText(code, { exact: true })).toHaveCount(0)
+      }
+      // 服务端消息是本地化名称下的次要说明，不被名称替代也不改写。
+      await expect(items.locator('.env-event-message')).toHaveText(
+        renderedEvents.map(event => event.message),
+      )
+
+      if (sliceShotsDir) {
+        await capabilities.scrollIntoViewIfNeeded()
+        await sliceShot(page, `environment-capabilities-${locale}-${viewport.width}`)
+        await items.last().scrollIntoViewIfNeeded()
+      }
+      await expectNoHorizontalOverflow(page, viewport.width)
+      const box = await modal.boundingBox()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
+      await sliceShot(page, `environment-events-${locale}-${viewport.width}`)
+    })
+  }
+}
+
 /** 卡片状态徽标：共享卡的状态槽，卡内只有这一个 Badge。 */
 function statusBadge(page: Page, name: string) {
   return page.locator('.environment-card').filter({ hasText: name })
@@ -994,6 +1223,8 @@ for (const [locale, labels] of Object.entries(environmentPageCopy)) {
       await expect(search).toBeVisible()
       await expect(search).toHaveAttribute('aria-label', labels.searchLabel)
       await expect(search).toHaveAttribute('placeholder', labels.searchPlaceholder)
+      // 占位文案完整放进搜索框：宽屏是固定宽度的页级搜索框，英文提示最容易在这里溢出。
+      await expectPlaceholderFits(search)
       const searchBox = (await search.boundingBox())!
       expect(
         searchBox.x >= navBox.x + navBox.width - 1
