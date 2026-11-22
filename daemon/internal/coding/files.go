@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
+	"github.com/fengwk/kk-studio/daemon/internal/coding/keylock"
 	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
@@ -35,7 +35,7 @@ type WriteReview struct {
 	NewFile     bool         `json:"-"`
 }
 
-var pathLocks sync.Map
+var pathLocks keylock.Locks
 
 // sha256Hex returns the lower-case hex SHA-256 of data.
 func sha256Hex(data []byte) string {
@@ -44,10 +44,7 @@ func sha256Hex(data []byte) string {
 }
 
 func lockPath(path string) func() {
-	lock, _ := pathLocks.LoadOrStore(path, &sync.Mutex{})
-	mutex := lock.(*sync.Mutex)
-	mutex.Lock()
-	return mutex.Unlock
+	return pathLocks.Lock(path)
 }
 
 // PreviewWrite computes an approval preview without modifying the target.

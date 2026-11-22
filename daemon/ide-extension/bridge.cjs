@@ -19,7 +19,7 @@ const { createHostActions } = require('./host-actions.cjs')
 const DEFAULT_RECONNECT_MILLIS = 500
 /**
  * A command line is a bounded JSON object. Snapshot/restore carry ordinary dirty text,
- * so the line budget matches the daemon's fixed recovery quota.
+ * so the UTF-8 line budget matches the daemon bridge's 8 MiB body limit.
  */
 const MAX_LINE_BYTES = 8 * 1024 * 1024
 /** Bounds how long a bridge POST may occupy the extension host. */
@@ -74,6 +74,22 @@ function createBridgeHost(vscode, options) {
   const closeSubscription = vscode.workspace.onDidCloseTextDocument(unwatchDocument)
   for (const document of vscode.workspace.textDocuments) {
     watchDocument(document)
+  }
+
+  // Document tracking outlives the control channel unless it is released: a retired host can no
+  // longer report a file, so retirement and disposal both stop watching.
+  let documentsReleased = false
+  const releaseDocuments = () => {
+    if (documentsReleased) {
+      return
+    }
+    documentsReleased = true
+    openSubscription.dispose()
+    closeSubscription.dispose()
+    for (const watcher of fileWatchers.values()) {
+      watcher.dispose()
+    }
+    fileWatchers.clear()
   }
 
   const folderPaths = () => {
@@ -186,6 +202,7 @@ function createBridgeHost(vscode, options) {
     }
     retired = true
     folderSubscription.dispose()
+    releaseDocuments()
     framer.reset()
     clearReconnectTimer()
     destroyStreamRequest()
@@ -330,13 +347,8 @@ function createBridgeHost(vscode, options) {
       if (!retired) {
         folderSubscription.dispose()
       }
-      openSubscription.dispose()
-      closeSubscription.dispose()
+      releaseDocuments()
       actions.disposeAttachments()
-      for (const watcher of fileWatchers.values()) {
-        watcher.dispose()
-      }
-      fileWatchers.clear()
       clearReconnectTimer()
       destroyStreamRequest()
       destroyPendingPosts()

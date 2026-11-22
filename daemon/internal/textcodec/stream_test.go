@@ -139,6 +139,24 @@ func TestReaderReplacesExactlyLikeDecode(t *testing.T) {
 	}
 }
 
+// Both entry points ignore a coding comment beyond the shared probe window.
+func TestDecodeAndReaderShareDeclarationWindow(t *testing.T) {
+	const path = "/repo/script.py"
+	prefix := "#" + strings.Repeat("x", binaryProbeBytes) + "\n# coding: latin-1\n"
+	data := []byte(prefix + "print('caf\xe9')\n")
+	reader := mustReader(t, path, data)
+	text, encoding, replacements, err := Decode(path, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := reader.Encoding(); encoding != want || encoding.Name != "UTF-8" {
+		t.Fatalf("Decode encoding=%+v, NewReader encoding=%+v; want both UTF-8", encoding, want)
+	}
+	if streamed := readAllRunes(t, reader); string(text) != streamed || streamed != prefix+"print('caf\uFFFD')\n" || replacements != 1 {
+		t.Fatal("both decoders should replace the single invalid UTF-8 byte")
+	}
+}
+
 func mustReader(t *testing.T, path string, data []byte) *Reader {
 	t.Helper()
 	reader, err := NewReader(path, bytes.NewReader(data))

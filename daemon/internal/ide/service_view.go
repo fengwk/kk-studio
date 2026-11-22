@@ -72,15 +72,11 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 		return nil, err
 	}
 	shape := openShape(parsed)
-	claimLock := s.keyedLock(s.claimLocks, parsed.claimID)
-	claimLock.Lock()
-	defer claimLock.Unlock()
+	defer s.claimLocks.Lock(parsed.claimID)()
 	if reply, err := s.replayClaim(parsed.claimID, shape); err != nil || reply != nil {
 		return reply, err
 	}
-	viewLock := s.keyedLock(s.viewLocks, parsed.viewID)
-	viewLock.Lock()
-	defer viewLock.Unlock()
+	defer s.viewLocks.Lock(parsed.viewID)()
 	if reply, err := s.replayClaim(parsed.claimID, shape); err != nil || reply != nil {
 		return reply, err
 	}
@@ -422,9 +418,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 	if err != nil {
 		return nil, err
 	}
-	lock := s.keyedLock(s.viewLocks, viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(viewID)()
 	view, err := s.requireBound(command, true)
 	if err != nil {
 		return nil, err
@@ -460,9 +454,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 
 // reconcileDirectoryChange converges service metadata and the managed workspace after a late host confirmation.
 func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, operationID, directory string) {
-	lock := s.keyedLock(s.viewLocks, viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(viewID)()
 	s.mu.Lock()
 	view := s.views[viewID]
 	current := view != nil && view.state == viewOpen && view.bindingEpoch == epoch
@@ -516,9 +508,7 @@ func (s *Service) openAttachment(ctx context.Context, command *protocol.IdeComma
 	if err != nil {
 		return nil, err
 	}
-	lock := s.keyedLock(s.viewLocks, viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(viewID)()
 	view, err := s.requireBound(command, true)
 	if err != nil {
 		return nil, err
@@ -554,9 +544,7 @@ func (s *Service) focusTerminal(ctx context.Context, command *protocol.IdeComman
 	if err != nil {
 		return nil, err
 	}
-	lock := s.keyedLock(s.viewLocks, viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(viewID)()
 	view, err := s.requireBound(command, true)
 	if err != nil {
 		return nil, err
@@ -587,9 +575,7 @@ func (s *Service) collapseMobile(ctx context.Context, command *protocol.IdeComma
 	if err != nil {
 		return nil, err
 	}
-	lock := s.keyedLock(s.viewLocks, viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(viewID)()
 	view, err := s.requireBound(command, true)
 	if err != nil {
 		return nil, err
@@ -620,9 +606,7 @@ func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (
 	if command.Discard == nil {
 		return nil, NewError("discard is required", "UNAVAILABLE")
 	}
-	lock := s.keyedLock(s.viewLocks, viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(viewID)()
 	view, err := s.requireBound(command, false)
 	if err != nil {
 		return nil, err
@@ -912,9 +896,7 @@ func (s *Service) expireView(view *viewRecord, epoch int64, generation uint64) {
 	}
 	s.mu.Unlock()
 
-	lock := s.keyedLock(s.viewLocks, view.viewID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer s.viewLocks.Lock(view.viewID)()
 	s.mu.Lock()
 	if !s.expiryDueLocked(view, epoch, generation) {
 		s.mu.Unlock()

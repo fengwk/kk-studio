@@ -7,10 +7,14 @@ const { test } = require('node:test')
 const { readFileSync } = require('node:fs')
 const path = require('node:path')
 const { createBridgeHost } = require('./bridge.cjs')
+const { INVALID, LineFramer } = require('./framing.cjs')
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const BINDING_EPOCH = '7'
 const WORKSPACE = '/managed/one.code-workspace'
+/** The framing outcomes the bridge relies on, as documented for `LineFramer.push`. */
+const CONSUMED = 'consumed'
+const STOPPED = 'stopped'
 
 class FakeTabInputText {
   constructor(uri) { this.uri = uri }
@@ -974,6 +978,53 @@ test('reconnects after an ordinary network disconnect with the same host identit
   } finally { context.host.dispose() }
 })
 
+// A chunk that carries several frames must be walked in place: each line is delivered once and only
+// the trailing partial line survives into the next push.
+test('frames every line of a multi-line chunk and carries only the trailing partial line', () => {
+  const framer = new LineFramer(1024)
+  const seen = []
+  const record = (message) => { seen.push(message.id) }
+  assert.equal(framer.push(`${JSON.stringify({ id: 1 })}\n\n${JSON.stringify({ id: 2 })}\n{"id":3`, record), CONSUMED)
+  assert.deepEqual(seen, [1, 2])
+  assert.equal(framer.push('}\n', record), CONSUMED)
+  assert.deepEqual(seen, [1, 2, 3])
+  assert.equal(framer.push(`${JSON.stringify({ id: 4 })}\n`, record), CONSUMED)
+  assert.deepEqual(seen, [1, 2, 3, 4])
+})
+
+test('stops consuming a multi-line chunk when the consumer stops it', () => {
+  const framer = new LineFramer(1024)
+  const seen = []
+  const chunk = [1, 2, 3].map((id) => `${JSON.stringify({ id })}\n`).join('')
+  assert.equal(framer.push(chunk, (message) => { seen.push(message.id); return message.id !== 2 }), STOPPED)
+  assert.deepEqual(seen, [1, 2])
+})
+
+// The bridge budgets a line against the daemon's 8 MiB byte quota, so the framer must count UTF-8
+// bytes: six two-byte characters plus two quotes are 14 bytes but only 8 UTF-16 code units.
+test('budgets a terminated line by UTF-8 bytes rather than code units', () => {
+  const line = JSON.stringify('é'.repeat(6))
+  assert.equal(line.length, 8)
+  assert.equal(Buffer.byteLength(line), 14)
+  assert.equal(new LineFramer(10).push(`${line}\n`, () => {}), INVALID)
+  // The same line is accepted once the byte budget covers it.
+  const accepted = []
+  assert.equal(new LineFramer(14).push(`${line}\n`, (message) => { accepted.push(message) }), CONSUMED)
+  assert.deepEqual(accepted, ['é'.repeat(6)])
+})
+
+test('budgets an unterminated partial line by UTF-8 bytes rather than code units', () => {
+  const partial = `"${'é'.repeat(5)}`
+  assert.equal(partial.length, 6)
+  assert.equal(Buffer.byteLength(partial), 11)
+  // The partial line already exceeds the byte budget, so it must not be carried forward.
+  assert.equal(new LineFramer(10).push(partial, () => {}), INVALID)
+  // The completed line is over budget even though each chunk fits by itself.
+  const framer = new LineFramer(11)
+  assert.equal(framer.push(partial, assert.fail), CONSUMED)
+  assert.equal(framer.push('"\n', assert.fail), INVALID)
+})
+
 test('cancels a pending control POST on retirement without disposing the terminal', async () => {
   const network = fakeHttp()
   const context = setup(undefined, { network })
@@ -1002,6 +1053,30 @@ test('a retired control host does not reconnect or dispose its terminal', async 
     await waitFor(() => context.network.streams[0].request.destroyed)
     assert.equal(terminal.disposed, false)
     assert.equal(context.network.streams.length, 1)
+  } finally { context.host.dispose() }
+})
+
+test('retirement releases document tracking and keeps terminal ownership', async () => {
+  const fake = fakeVscode()
+  const initial = { uri: fake.fileUri('/workspace/open.txt'), isClosed: false }
+  fake.vscode.workspace.textDocuments.push(initial)
+  const context = setup(fake, { reconnectMillis: 1 })
+  try {
+    await focus(context)
+    const terminal = context.fake.terminals[0]
+    assert.equal(fake.watchers.length, 1)
+    context.network.streams[0].response.write(`${JSON.stringify({ type: 'retired' })}\n`)
+    await waitFor(() => context.network.streams[0].request.destroyed)
+    // A retired host can no longer report files, so it must not keep watching them.
+    assert.equal(fake.watchers[0].disposed, true)
+    assert.equal(fake.openListeners.size, 0)
+    assert.equal(fake.closeListeners.size, 0)
+    fake.fireOpen({ uri: fake.fileUri('/workspace/later.txt'), isClosed: false })
+    assert.equal(fake.watchers.length, 1)
+    // Retirement owns only the control channel; the managed scope keeps its terminal.
+    assert.equal(terminal.disposed, false)
+    context.host.dispose()
+    assert.equal(terminal.disposed, false)
   } finally { context.host.dispose() }
 })
 
