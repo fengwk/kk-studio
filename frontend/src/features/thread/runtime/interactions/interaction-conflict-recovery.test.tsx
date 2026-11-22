@@ -63,6 +63,15 @@ function inputInteraction(invocationId: string): InteractionDTO {
   }
 }
 
+/**
+ * 问卷卡在列表异步读到后才出现，它对草稿 store 的订阅在提交后的 effect 里建立；订阅建立前的选择已写入
+ * store，但要等订阅建立后才重新渲染。先等「提交回答」变为可用，再像用户一样点击提交。
+ */
+async function chooseOptionAndWaitForSubmit(label: RegExp) {
+  fireEvent.click(await screen.findByRole('radio', { name: label }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '提交回答' })).toBeEnabled())
+}
+
 function page(items: InteractionDTO[]): InteractionPageDTO {
   return { items, nextCursor: null, total: items.length, freshnessAt: null }
 }
@@ -168,7 +177,7 @@ describe('409 冲突后的待处理事实回读', () => {
       .mockResolvedValue(submitted('int-live', 'sub-second'))
     render(<InteractionsPage />, { wrapper })
 
-    fireEvent.click(await screen.findByRole('radio', { name: /本周六凌晨/ }))
+    await chooseOptionAndWaitForSubmit(/本周六凌晨/)
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
     expect(await screen.findByText('此事项的最新状态已重新载入，请重新确认后提交。'))
       .toBeInTheDocument()
@@ -198,7 +207,7 @@ describe('409 冲突后的待处理事实回读', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
     render(rootSurface(), { wrapper })
 
-    fireEvent.click(await screen.findByRole('radio', { name: /本周六凌晨/ }))
+    await chooseOptionAndWaitForSubmit(/本周六凌晨/)
     const callsBefore = listSpy.mock.calls.length
     pending = []
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
