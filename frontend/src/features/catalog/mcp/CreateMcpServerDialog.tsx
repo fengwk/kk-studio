@@ -48,7 +48,7 @@ export function CreateMcpServerDialog({
             <TextInput
               value={form.name}
               onChange={(event) => edit({ name: event.target.value })}
-              placeholder="e.g. filesystem"
+              placeholder={t('ai.mcp.namePlaceholder')}
               maxLength={32}
               disabled={pending}
               required

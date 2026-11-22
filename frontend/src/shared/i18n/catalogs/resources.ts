@@ -352,7 +352,11 @@ export const resourcesCatalog = {
     'en-US': 'Fetching models…',
     'zh-CN': '正在拉取模型…',
   },
-  'ai.catalog.form.remoteModelsLoaded': {
+  'ai.catalog.form.remoteModelsLoaded.one': {
+    'en-US': '{{count}} model found; pick it in Model ID.',
+    'zh-CN': '找到 {{count}} 个模型，可在模型 ID 中选择。',
+  },
+  'ai.catalog.form.remoteModelsLoaded.other': {
     'en-US': '{{count}} models found; pick one in Model ID.',
     'zh-CN': '找到 {{count}} 个模型，可在模型 ID 中选择。',
   },
@@ -1181,11 +1185,11 @@ export const resourcesCatalog = {
     'en-US': 'Files',
     'zh-CN': '文件数',
   },
-  'ai.skillPackages.fileCountOne': {
+  'ai.skillPackages.fileCountValue.one': {
     'en-US': '{{count}} file',
     'zh-CN': '共 {{count}} 个文件',
   },
-  'ai.skillPackages.fileCountMany': {
+  'ai.skillPackages.fileCountValue.other': {
     'en-US': '{{count}} files',
     'zh-CN': '共 {{count}} 个文件',
   },
@@ -1265,11 +1269,11 @@ export const resourcesCatalog = {
     'en-US': 'Download Archive',
     'zh-CN': '下载归档',
   },
-  'ai.skillPackages.skillCountOne': {
+  'ai.skillPackages.skillCountValue.one': {
     'en-US': '{{count}} skill',
     'zh-CN': '共 {{count}} 个技能',
   },
-  'ai.skillPackages.skillCountMany': {
+  'ai.skillPackages.skillCountValue.other': {
     'en-US': '{{count}} skills',
     'zh-CN': '共 {{count}} 个技能',
   },
@@ -1388,6 +1392,10 @@ export const resourcesCatalog = {
   'ai.mcp.nameHint': {
     'en-US': 'Lowercase letters, numbers, and underscores; must start with a letter. Pattern:',
     'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：',
+  },
+  'ai.mcp.namePlaceholder': {
+    'en-US': 'e.g. filesystem',
+    'zh-CN': '例如 filesystem',
   },
   'ai.mcp.timeout': {
     'en-US': 'Timeout (ms)',

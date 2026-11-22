@@ -121,8 +121,8 @@ export function SkillPackageSkillsSection({ detail }: { detail: SkillPackageDeta
         <span className="inline-hint">
           {t(
             detail.skills.length === 1
-              ? 'ai.skillPackages.skillCountOne'
-              : 'ai.skillPackages.skillCountMany',
+              ? 'ai.skillPackages.skillCountValue.one'
+              : 'ai.skillPackages.skillCountValue.other',
             { count: detail.skills.length },
           )}
         </span>
@@ -158,8 +158,8 @@ export function SkillPackageFilesSection({
         <span className="inline-hint">
           {t(
             (files?.length ?? 0) === 1
-              ? 'ai.skillPackages.fileCountOne'
-              : 'ai.skillPackages.fileCountMany',
+              ? 'ai.skillPackages.fileCountValue.one'
+              : 'ai.skillPackages.fileCountValue.other',
             { count: files?.length ?? 0 },
           )}
         </span>

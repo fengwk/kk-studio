@@ -120,7 +120,12 @@ export function ThreadCommandPalette({
       </ul>
       <div className="thread-command-meta">
         {t('ai.runtime.command.meta', { enabled: enabledCount, total: totalCount })}
-        {query.trim() ? t('ai.runtime.command.matches', { count: commands.length }) : ''}
+        {query.trim()
+          ? t(
+            commands.length === 1 ? 'ai.runtime.command.matches.one' : 'ai.runtime.command.matches.other',
+            { count: commands.length },
+          )
+          : ''}
         {t('ai.runtime.command.hint')}
       </div>
     </div>

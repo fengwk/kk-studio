@@ -1496,7 +1496,9 @@ describe('IssueDetailModal', () => {
     const failure = document.querySelector('.evidence-failure') as HTMLElement
     // 整载失败用与其它读取失败一致的 danger 失败块，而不是中性灰说明行。
     expect(failure.querySelector('.state-block')).toHaveClass('danger')
-    expect(within(failure).getByText('公开证据读取失败')).toBeInTheDocument()
+    // 失败只播报一次：危险态失败块自带 alert，外层包装不重复。
+    expect(within(failure).getByRole('alert')).toHaveTextContent('公开证据读取失败')
+    expect(failure).not.toHaveAttribute('role')
     fireEvent.click(within(failure).getByRole('button', { name: '重试' }))
 
     expect(await screen.findByText(/暂无公开证据/)).toBeInTheDocument()

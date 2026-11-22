@@ -22,6 +22,16 @@ describe('RemoteModelIdPicker', () => {
     expect(Array.from(options).map((option) => option.getAttribute('value'))).toEqual(['m-a', 'm-b'])
   })
 
+  it('uses the singular wording when the provider lists one model', async () => {
+    // 英文计数文案按数量区分单复数，不出现「1 models」。
+    const load = vi.fn().mockResolvedValue(['m-a'])
+    render(<RemoteModelIdPicker listId="ids" providerName="openai" load={load} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Fetch models from Provider' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('1 model found; pick it in Model ID.')
+  })
+
   it('cannot fetch before a provider is chosen', () => {
     render(<RemoteModelIdPicker listId="ids" providerName="" load={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Fetch models from Provider' })).toBeDisabled()

@@ -598,7 +598,11 @@ export const chatCatalog = {
     'en-US': '{{enabled}} available / {{total}} total',
     'zh-CN': '可用 {{enabled}} / 共 {{total}}',
   },
-  'ai.runtime.command.matches': {
+  'ai.runtime.command.matches.one': {
+    'en-US': ' · {{count}} match',
+    'zh-CN': ' · 匹配 {{count}}',
+  },
+  'ai.runtime.command.matches.other': {
     'en-US': ' · {{count}} matches',
     'zh-CN': ' · 匹配 {{count}}',
   },

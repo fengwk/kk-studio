@@ -680,8 +680,11 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await failedTab.click()
       // 整载失败用统一的危险态失败块（与诊断事件读取失败一致），不是中性灰说明行。
       const failure = dialog.locator('.evidence-failure')
-      await expect(failure).toHaveAttribute('role', 'alert')
+      // 危险态失败块自带 alert，外层不重复播报。
+      await expect(failure.getByRole('alert')).toHaveCount(1)
+      await expect(failure).not.toHaveAttribute('role', 'alert')
       const failureBlock = failure.locator('.state-block.danger')
+      await expect(failureBlock).toHaveAttribute('role', 'alert')
       await expect(failureBlock).toHaveText(copy[locale].evidenceFailed)
       await expect(failureBlock).toHaveCSS('color', await tokenColor(page, '--danger'))
       await expect(failureBlock).toHaveCSS('border-top-color', await tokenColor(page, '--danger-border'))

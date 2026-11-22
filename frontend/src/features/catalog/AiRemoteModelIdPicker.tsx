@@ -61,9 +61,14 @@ export function RemoteModelIdPicker({
       </Button>
       {current?.status === 'loaded' ? (
         <span className="inline-hint" role="status">
-          {current.ids.length > 0
-            ? t('ai.catalog.form.remoteModelsLoaded', { count: current.ids.length })
-            : t('ai.catalog.form.remoteModelsEmpty')}
+          {current.ids.length === 0
+            ? t('ai.catalog.form.remoteModelsEmpty')
+            : t(
+              current.ids.length === 1
+                ? 'ai.catalog.form.remoteModelsLoaded.one'
+                : 'ai.catalog.form.remoteModelsLoaded.other',
+              { count: current.ids.length },
+            )}
         </span>
       ) : null}
       {current?.status === 'failed' ? (

@@ -109,8 +109,8 @@ export function SkillPackagePreview({
           <span className="inline-hint">
             {t(
               preview.skills.length === 1
-                ? 'ai.skillPackages.skillCountOne'
-                : 'ai.skillPackages.skillCountMany',
+                ? 'ai.skillPackages.skillCountValue.one'
+                : 'ai.skillPackages.skillCountValue.other',
               { count: preview.skills.length },
             )}
           </span>

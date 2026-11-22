@@ -116,7 +116,10 @@ export function CanvasTextEditor() {
           />
         </label>
         <span className="canvas-text-editor-count" aria-live="polite">
-          {t('canvas.textEditor.characters', { count: editor.markdown.length })}
+          {t(
+            editor.markdown.length === 1 ? 'canvas.textEditor.characters.one' : 'canvas.textEditor.characters.other',
+            { count: editor.markdown.length },
+          )}
         </span>
       </div>
       <footer className="canvas-text-editor-footer">

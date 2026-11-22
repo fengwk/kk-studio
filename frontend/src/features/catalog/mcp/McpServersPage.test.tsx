@@ -171,7 +171,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
 
-    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'new_srv')
+    await user.type(screen.getByPlaceholderText('例如 filesystem'), 'new_srv')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
     fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
       target: { value: '{"Authorization": "Bearer secret"}' },
@@ -198,7 +198,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
 
-    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'no_headers')
+    await user.type(screen.getByPlaceholderText('例如 filesystem'), 'no_headers')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 
@@ -219,7 +219,7 @@ describe('McpServersPage', () => {
 
     await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
-    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'Bad_Name')
+    await user.type(screen.getByPlaceholderText('例如 filesystem'), 'Bad_Name')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 
@@ -262,7 +262,7 @@ describe('McpServersPage', () => {
 
     await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
-    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'conflict_srv')
+    await user.type(screen.getByPlaceholderText('例如 filesystem'), 'conflict_srv')
     await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 

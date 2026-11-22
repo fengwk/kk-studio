@@ -733,7 +733,11 @@ export const canvasCatalog = {
     'en-US': 'Markdown',
     'zh-CN': 'Markdown 内容',
   },
-  'canvas.textEditor.characters': {
+  'canvas.textEditor.characters.one': {
+    'en-US': '{{count}} character',
+    'zh-CN': '{{count}} 字',
+  },
+  'canvas.textEditor.characters.other': {
     'en-US': '{{count}} characters',
     'zh-CN': '{{count}} 字',
   },

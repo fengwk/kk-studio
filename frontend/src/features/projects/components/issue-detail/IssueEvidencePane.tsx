@@ -62,9 +62,9 @@ export function IssueEvidencePane({
         <StateBlock title={t('projects.issue.loadingEvidence')} />
       ) : (
         <>
-          {/* 整载失败保留已知证据，用统一的危险态失败块（与诊断事件读取失败一致）就地重试。 */}
+          {/* 整载失败保留已知证据，用统一的危险态失败块（与诊断事件读取失败一致）就地重试；失败块自带 alert，外层不再重复播报。 */}
           {loadFailed && (
-            <div className="evidence-failure" role="alert">
+            <div className="evidence-failure">
               <StateBlock tone="danger" title={t('projects.issue.evidenceLoadFailed')} />
               <Button size="compact" variant="ghost" disabled={isRetrying} onClick={onRetry}>
                 {t('shared.retry')}
