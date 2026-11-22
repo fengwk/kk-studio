@@ -127,7 +127,7 @@ export function SkillPackageDetailModal({
       {deleteOpen && detail ? (
         <ConfirmActionModal
           modal={{
-            title: t('ai.skillPackages.delete'),
+            title: t('ai.skillPackages.deleteTitle', { name: packageName }),
             description: t('ai.skillPackages.deleteConfirm', { name: packageName }),
             confirmLabel: t('ai.skillPackages.delete'),
             tone: 'danger',

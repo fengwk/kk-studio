@@ -109,7 +109,7 @@ export function useResourceDeleteConfirm() {
     onConfirm: () => void
   }) {
     setDeleteConfirm({
-      title: t(options.titleKey),
+      title: t(options.titleKey, { name: options.name }),
       description: t(options.descriptionKey, { name: options.name }),
       confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',

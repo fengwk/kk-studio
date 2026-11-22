@@ -179,7 +179,7 @@ describe('useCatalogPageController', () => {
     })
     act(() => result.current.providerPanelProps.onDelete(provider()))
     expect(result.current.resourceDeleteConfirmModal.modal?.title).toBe(
-      '删除提供商',
+      '删除提供商：stub',
     )
 
     act(() => result.current.modelPanelProps.onCreate())
@@ -203,7 +203,7 @@ describe('useCatalogPageController', () => {
       ),
     )
     expect(result.current.resourceDeleteConfirmModal.modal?.title).toBe(
-      '删除模型',
+      '删除模型：model',
     )
 
     act(() => result.current.agentPanelProps.onCreate())
@@ -227,7 +227,7 @@ describe('useCatalogPageController', () => {
       ),
     )
     expect(result.current.resourceDeleteConfirmModal.modal?.title).toBe(
-      '删除 Agent',
+      '删除 Agent：default-assistant',
     )
   })
 })

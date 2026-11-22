@@ -119,7 +119,12 @@ export function SkillPackageSkillsSection({ detail }: { detail: SkillPackageDeta
       <div className="skill-section-heading">
         <h3>{t('ai.skillPackages.skills')}</h3>
         <span className="inline-hint">
-          {t('ai.skillPackages.skillCountValue', { count: detail.skills.length })}
+          {t(
+            detail.skills.length === 1
+              ? 'ai.skillPackages.skillCountOne'
+              : 'ai.skillPackages.skillCountMany',
+            { count: detail.skills.length },
+          )}
         </span>
       </div>
       <ul className="skill-list">
@@ -151,7 +156,12 @@ export function SkillPackageFilesSection({
       <div className="skill-section-heading">
         <h3>{t('ai.skillPackages.fileTree')}</h3>
         <span className="inline-hint">
-          {t('ai.skillPackages.fileCountValue', { count: files?.length ?? 0 })}
+          {t(
+            (files?.length ?? 0) === 1
+              ? 'ai.skillPackages.fileCountOne'
+              : 'ai.skillPackages.fileCountMany',
+            { count: files?.length ?? 0 },
+          )}
         </span>
       </div>
       {loading ? (

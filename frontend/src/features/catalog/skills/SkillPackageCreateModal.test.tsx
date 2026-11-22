@@ -213,6 +213,8 @@ describe('SkillPackageCreateModal', () => {
     expect(within(previewDialog).getByText('没有移除技能')).toBeInTheDocument()
     // 预览只有服务端清单，归档真实文件树在发布后的详情中展示。
     expect(within(previewDialog).getAllByText('SKILL.md')).toHaveLength(2)
+    // 预览的技能计数与详情共用同一组文案（中文单位不随数量变化）。
+    expect(within(previewDialog).getByText('共 2 个技能')).toBeInTheDocument()
     // 预览页只有一个 footer，发布操作只有一处。
     expect(within(previewDialog).getAllByRole('button', { name: '发布' })).toHaveLength(1)
 
