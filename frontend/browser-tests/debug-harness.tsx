@@ -9,7 +9,8 @@ import type { DebugInspectorSelection } from '@/features/thread/runtime/thread-p
 import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
-setLocale('zh-CN')
+// 默认中文；视觉矩阵按 ?locale=en-US 覆盖，事件列几何断言与语言无关。
+setLocale(new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
 const LONG_SYSTEM_PROMPT = `You are **JIJI**, a coding agent. You are expected to be precise, safe, and helpful.
 **KK** is your owner and an expert programmer. You assist him with coding and a wide variety of software engineering tasks.

@@ -308,7 +308,8 @@ pre.thread-system-prompt-body {
   overflow-y: auto;
   padding: 8px 12px;
   display: grid;
-  grid-template-columns: 58px minmax(0, max-content) minmax(0, 1fr) 8px;
+  /* 时间列按完整时间戳取宽，徽标与摘要各自在列内省略，时间不被压到徽标下面。 */
+  grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) 8px;
   align-content: start;
   column-gap: 8px;
   row-gap: 2px;

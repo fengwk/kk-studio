@@ -1,4 +1,5 @@
 import { test, expect, type Page } from './fixture'
+import './composer-controls-cases'
 
 /**
  * ComposerEditor / ThreadComposer 真实 contenteditable 回归。

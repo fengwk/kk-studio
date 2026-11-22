@@ -18,8 +18,12 @@
 }
 
 .thread-composer-controls-right {
-  flex: 1;
+  /* 两组都以内容宽度为基准收缩，模型不再只取左侧剩余空间。 */
   justify-content: flex-end;
+}
+
+.thread-composer-permission-control {
+  flex: none;
 }
 
 .thread-composer-control {

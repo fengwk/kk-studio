@@ -242,6 +242,7 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('environment-install-harness')
     expect(keys).toContain('pane-control-harness')
     expect(keys).toContain('composer-editor-harness')
+    expect(keys).toContain('composer-controls-harness')
     expect(keys).toContain('model-browser-harness')
     expect(keys).toContain('settings-catalog-harness')
     expect(inputs['custom-message-queue-harness']).toBe(
@@ -251,7 +252,7 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('workbench-not-found-harness')
     expect(keys).toContain('questionnaire-card-harness')
     expect(keys).toContain('canvas-editor-harness')
-    expect(keys.length).toBe(42)
+    expect(keys.length).toBe(43)
   })
 
   // 验证静态构建目标与 MPA 模式

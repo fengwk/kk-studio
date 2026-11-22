@@ -9,6 +9,8 @@ const HARNESS_URL = '/browser-tests/interactions-harness.html'
 const QUESTIONNAIRE_HARNESS_URL = '/browser-tests/questionnaire-card-harness.html'
 /** 问卷卡自查截图目录：未设置时不输出截图、不跳过语义断言。 */
 const QUESTIONNAIRE_SHOTS_DIR = process.env.KK_QUESTIONNAIRE_SHOTS_DIR
+/** 问卷标题行窄屏修复的对照截图目录：未设置时不落盘、不跳过语义断言。 */
+const QUESTIONNAIRE_TITLE_SHOTS_DIR = process.env.KK_QUESTIONNAIRE_TITLE_SHOTS_DIR
 
 const APPROVAL_INTERACTION_ID = 'int-approval'
 const QUESTIONNAIRE_INTERACTION_ID = 'int-questionnaire'
@@ -758,7 +760,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
  */
 async function openQuestionnaireHarness(
   page: Page,
-  state: 'single' | 'multi' | 'answered',
+  state: 'single' | 'multi' | 'brief' | 'answered',
   locale: 'zh-CN' | 'en-US' = 'zh-CN',
 ): Promise<void> {
   await page.routeWebSocket(/\/ws\/events$/, () => {})
@@ -766,31 +768,60 @@ async function openQuestionnaireHarness(
   await expect(page.locator('.interaction-questionnaire-card')).toBeVisible()
 }
 
-async function expectFirstQuestionLine(page: Page, view: string) {
+/**
+ * 问卷标题行的几何：编号/图标、题干与题型标记的相对位置。
+ *
+ * 三处布局都靠这份测量判定：编号/图标贴首行、宽屏标记在首行右侧、窄屏题干占满整行。
+ */
+async function measureQuestionTitle(page: Page) {
   const title = page.locator('.interaction-question-title')
   await expect(title).toBeVisible()
-  const layout = await title.evaluate((element) => {
-    const box = (selector: string) => element.querySelector(selector)?.getBoundingClientRect()
+  return title.evaluate((element) => {
+    const box = (selector: string) => element.querySelector(selector)?.getBoundingClientRect() ?? null
     const text = box('.interaction-question-text')!
     const tag = box('.interaction-question-type-tag')
     const icon = box('.ask-user-q-icon')
     return {
+      titleRight: element.getBoundingClientRect().right,
+      textRight: text.right,
+      textTop: text.top,
+      textBottom: text.bottom,
       numberOffset: box('.interaction-question-idx')!.top - text.top,
-      tagOffset: tag ? tag.top - text.top : null,
-      lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+      tagTop: tag ? tag.top : null,
       iconCenter: icon ? icon.top + icon.height / 2 - text.top : null,
+      lineHeight: parseFloat(getComputedStyle(element).lineHeight),
     }
   })
+}
+
+type QuestionTitleMeasurement = Awaited<ReturnType<typeof measureQuestionTitle>>
+
+/** 编号与题干首行对齐；已提交记录的图标同样贴首行居中。 */
+function expectTitleMarkersOnFirstLine(layout: QuestionTitleMeasurement, view: string) {
   expect(Math.abs(layout.numberOffset)).toBeLessThan(1)
-  if (view !== 'completed') {
-    expect(layout.tagOffset).not.toBeNull()
-    expect(layout.tagOffset!).toBeGreaterThanOrEqual(-1)
-    expect(layout.tagOffset!).toBeLessThan(layout.lineHeight / 2)
-  }
   if (view === 'submitted') {
     expect(layout.iconCenter).not.toBeNull()
     expect(Math.abs(layout.iconCenter! - layout.lineHeight / 2)).toBeLessThan(1)
   }
+}
+
+/** 宽屏既有视觉：题型标记在题干首行右侧，题干保持自然宽度。 */
+function expectTypeTagOnFirstLine(layout: QuestionTitleMeasurement) {
+  expect(layout.tagTop).not.toBeNull()
+  const tagOffset = layout.tagTop! - layout.textTop
+  expect(tagOffset).toBeGreaterThanOrEqual(-1)
+  expect(tagOffset).toBeLessThan(layout.lineHeight / 2)
+}
+
+/**
+ * 窄屏要求：题干用整行宽度，题型标记不再占一列，而是跟在题干最后一行之后。
+ *
+ * 旧布局把标记固定在同一行右侧，390 宽下题干被压成 200 多像素的窄栏。
+ */
+function expectQuestionTitleUsesFullRow(layout: QuestionTitleMeasurement) {
+  expect(layout.textRight).toBeGreaterThanOrEqual(layout.titleRight - 2)
+  expect(layout.tagTop).not.toBeNull()
+  expect(layout.tagTop!).toBeGreaterThanOrEqual(layout.textBottom - 1)
 }
 
 test.describe('questionnaire option semantics and read-only answers', () => {
@@ -870,7 +901,7 @@ test.describe('questionnaire option semantics and read-only answers', () => {
     await expect(boxes.nth(2)).toHaveAttribute('aria-checked', 'true')
   })
 
-  // 窄屏长题目换行时，编号与题型标记保持完整：编号不被挤成「1」「.」两行。
+  // 窄屏长题目换行时，编号保持完整：不被挤成「1」「.」两行。
   for (const locale of ['zh-CN', 'en-US'] as const) {
     test(`a long question wraps while its number stays on one line at 390px (${locale})`, async ({ page }, info) => {
       await page.setViewportSize({ width: 390, height: 844 })
@@ -884,8 +915,9 @@ test.describe('questionnaire option semantics and read-only answers', () => {
       expect(textBox.height).toBeGreaterThan(lineHeight * 1.5)
       expect(numberBox.height).toBeLessThanOrEqual(lineHeight + 1)
       await expect(number).toHaveText('1.')
-      // 编号及题型应与首行对齐，而不是与整个题干居中。
-      await expectFirstQuestionLine(page, 'pending')
+      // 编号与题干首行对齐，而不是与整个题干居中。
+      const layout = await measureQuestionTitle(page)
+      expectTitleMarkersOnFirstLine(layout, 'pending')
       await title.screenshot({ path: info.outputPath(`question-pending-${locale}-390.png`) })
     })
 
@@ -896,7 +928,16 @@ test.describe('questionnaire option semantics and read-only answers', () => {
         await page.routeWebSocket(/\/ws\/events$/, () => {})
         for (const view of width === 390 ? ['submitted', 'completed'] : ['pending', 'submitted', 'completed']) {
           await page.goto(`${QUESTIONNAIRE_HARNESS_URL}?locale=${locale}&state=multi&titleView=${view}`)
-          await expectFirstQuestionLine(page, view)
+          const layout = await measureQuestionTitle(page)
+          expectTitleMarkersOnFirstLine(layout, view)
+          if (view !== 'completed') {
+            // 1440 保持标记并在首行的既有视觉；390 改为题干占满整行、标记跟在题干之后。
+            if (width === 1440) {
+              expectTypeTagOnFirstLine(layout)
+            } else {
+              expectQuestionTitleUsesFullRow(layout)
+            }
+          }
           await page.locator('.interaction-question-title').screenshot({
             path: info.outputPath(`question-${view}-${locale}-${width}.png`),
           })
@@ -904,6 +945,53 @@ test.describe('questionnaire option semantics and read-only answers', () => {
       })
     }
   }
+
+  // 审查 R2-3：390 宽下题干被右侧题型徽标挤成窄栏（en-US 还出现孤词「release?」）。
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    test(`the question takes the whole title row and the type tag follows it at 390px (${locale})`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await openQuestionnaireHarness(page, 'multi', locale)
+
+      const layout = await measureQuestionTitle(page)
+      expectQuestionTitleUsesFullRow(layout)
+      // 题干仍真实换行：证明占满整行靠的是布局而不是把文字缩短。
+      expect(layout.textBottom - layout.textTop).toBeGreaterThan(layout.lineHeight * 1.5)
+      await expectNoHorizontalOverflow(page)
+      await page.locator('.interaction-questionnaire-card').screenshot({
+        path: info.outputPath(`questionnaire-title-full-width-${locale}-390.png`),
+      })
+    })
+  }
+
+  test('a short question fits one line at 390px instead of leaving an orphan word (en-US)', async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openQuestionnaireHarness(page, 'brief', 'en-US')
+
+    const layout = await measureQuestionTitle(page)
+    expectQuestionTitleUsesFullRow(layout)
+    expect(layout.textBottom - layout.textTop).toBeLessThanOrEqual(layout.lineHeight + 1)
+    await expectNoHorizontalOverflow(page)
+    await page.locator('.interaction-questionnaire-card').screenshot({
+      path: info.outputPath('questionnaire-title-brief-en-US-390.png'),
+    })
+  })
+
+  test('wide layout keeps the type tag beside the first line (zh-CN and en-US at 1440px)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      await openQuestionnaireHarness(page, 'multi', locale)
+      const layout = await measureQuestionTitle(page)
+      expectTypeTagOnFirstLine(layout)
+      // 窄屏修复不得带回宽屏：题干在 1440 仍是单行自然宽度。
+      expect(layout.textBottom - layout.textTop).toBeLessThanOrEqual(layout.lineHeight + 1)
+    }
+  })
 
   test('answered questionnaire is read-only and shows the chosen answers', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -959,6 +1047,36 @@ test.describe('questionnaire self-check screenshots', () => {
             fullPage: true,
           })
         }
+      }
+    }
+  })
+})
+
+test.describe('questionnaire title row screenshots', () => {
+  test.skip(
+    QUESTIONNAIRE_TITLE_SHOTS_DIR == null,
+    '设置 KK_QUESTIONNAIRE_TITLE_SHOTS_DIR 才输出题干/徽标行对照图',
+  )
+
+  // 审查 R2-3 的四张对照图：题干/题型徽标行，中英 × 1440/390，看同一行怎么排。
+  test('captures the pending question title row at 1440x900 and 390x844 in both locales', async ({
+    page,
+  }) => {
+    const shotsDir = QUESTIONNAIRE_TITLE_SHOTS_DIR!
+    fs.mkdirSync(shotsDir, { recursive: true })
+    await page.routeWebSocket(/\/ws\/events$/, () => {})
+
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      for (const viewport of [
+        { width: 1440, height: 900, name: '1440x900' },
+        { width: 390, height: 844, name: '390x844' },
+      ]) {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await page.goto(`${QUESTIONNAIRE_HARNESS_URL}?locale=${locale}&state=multi`)
+        await expect(page.locator('.interaction-questionnaire-card')).toBeVisible()
+        await page.screenshot({
+          path: path.join(shotsDir, `questionnaire-title-${locale}-${viewport.name}.png`),
+        })
       }
     }
   })
