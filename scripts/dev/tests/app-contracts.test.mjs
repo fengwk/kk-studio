@@ -12,28 +12,88 @@ const APP_SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/app.sh')
 const ROOT_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/repo-root.sh')
 const LIB_DIR = path.join(REPOSITORY_ROOT, 'scripts/dev/lib')
 const E2E_CREDENTIALS_LIB = path.join(LIB_DIR, 'e2e-credentials.sh')
+const E2E_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/lib.sh')
 const MATRIX_RUNNER = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs')
+// 最小的根 POM 骨架：入口只读取 kk-studio-parent 的 <version>。
+const ROOT_POM = '<project>\n  <artifactId>kk-studio-parent</artifactId>\n  <version>9.9.9</version>\n</project>\n'
+// 两份入口都 source 同一组 dev 库；夹具 checkout 必须与真实入口保持同一清单。
+const LAUNCHER_LIBS = ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh', 'backend-jar.sh']
 
-// Deleted classes must not survive a dev-requested backend rebuild.
+/** Launcher environment without any inherited root, preview input or JAR override. */
+function launcherEnvironment() {
+  return cleanEnvironment([
+    'KK_STUDIO_REPO_ROOT',
+    'BACKEND_JAR',
+    'SHARED_PREVIEW_ENV_FILE',
+    'SPRING_PROFILES_ACTIVE',
+    'SPRING_FLYWAY_ENABLED',
+    'KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED',
+    'BACKEND_PORT',
+    'FRONTEND_PORT',
+    'DAEMON_ENV_ROOT',
+  ])
+}
 
-test('test intent: launchers and documentation follow the reactor version', () => {
-  // A release bump must not leave launchers or runnable examples pointing at an old JAR.
-  const version = /<version>([^<]+)<\/version>/.exec(readText(path.join(REPOSITORY_ROOT, 'pom.xml')))?.[1]
+/** A checkout whose root POM version is 9.9.9, plus every library the launchers source. */
+function withLauncherCheckout(body) {
+  const temporary = realpathSync(mkdtempSync(path.join(tmpdir(), 'kk-launcher-jar-')))
+  try {
+    const checkout = path.join(temporary, 'checkout')
+    mkdirSync(path.join(checkout, 'scripts/dev/lib'), { recursive: true })
+    mkdirSync(path.join(checkout, 'scripts/dev/verify/e2e'), { recursive: true })
+    writeFileSync(path.join(checkout, '.git'), 'gitdir: /tmp/example\n')
+    writeFileSync(path.join(checkout, 'pom.xml'), ROOT_POM)
+    for (const name of [...LAUNCHER_LIBS, 'e2e-credentials.sh']) {
+      copyFileSync(path.join(LIB_DIR, name), path.join(checkout, 'scripts/dev/lib', name))
+    }
+    copyFileSync(APP_SCRIPT, path.join(checkout, 'scripts/dev/app.sh'))
+    copyFileSync(E2E_LIB, path.join(checkout, 'scripts/dev/verify/e2e/lib.sh'))
+    return body(checkout, path.join(temporary, 'runtime'))
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+}
+
+test('test intent: launchers derive the distribution JAR name from the root POM version', () => {
+  // 夹具 POM 的版本与真实工作树不同，写死的 JAR 名不可能靠“碰巧等于当前版本”通过。
+  withLauncherCheckout((checkout, runtime) => {
+    const expected = path.join(checkout, 'web/target/kk-studio-web-9.9.9.jar')
+    const cases = [
+      ['scripts/dev/app.sh', { DEV_WORK_DIR: runtime }],
+      ['scripts/dev/verify/e2e/lib.sh', { E2E_WORK_DIR: runtime }],
+    ]
+    const paths = cases.map(([relative, overrides]) => {
+      const result = runBash(`source ${shellQuote(path.join(checkout, relative))}\nprintf '%s\\n' "$BACKEND_JAR"`, {
+        cwd: checkout,
+        env: { ...launcherEnvironment(), ...overrides },
+      })
+      assert.equal(result.status, 0, `${relative}: ${result.stderr}`)
+      return result.stdout.trim()
+    })
+    assert.deepEqual(paths, [expected, expected])
+  })
+
+  // 本工作树的根 POM（多行布局）也必须能被同一个解析器读出，否则两个入口只在夹具格式下成立。
+  const version = /<artifactId>kk-studio-parent<\/artifactId>\s*<version>([^<]+)<\/version>/.exec(
+    readText(path.join(REPOSITORY_ROOT, 'pom.xml')),
+  )?.[1]
   assert.ok(version)
-  const expected = `kk-studio-web-${version}.jar`
-  for (const relative of [
-    'scripts/dev/app.sh',
-    'scripts/dev/verify/e2e/lib.sh',
-    'docs/operations/deployment.md',
-    'docs/operations/development-and-testing.md',
-  ]) {
-    const names = readText(path.join(REPOSITORY_ROOT, relative)).match(/kk-studio-web-[\w.+-]+\.jar/g)
+  const real = runBash('source scripts/dev/app.sh\nprintf \'%s\\n\' "$BACKEND_JAR"', { env: launcherEnvironment() })
+  assert.equal(real.status, 0, real.stderr)
+  assert.equal(real.stdout.trim(), path.join(REPOSITORY_ROOT, `web/target/kk-studio-web-${version}.jar`))
+})
+
+test('test intent: runnable examples carry the reactor version as a placeholder', () => {
+  // 文档示例写死版本时，升级后命令指向不存在的产物；示例统一使用 <version> 占位符。
+  for (const relative of ['docs/operations/deployment.md', 'docs/operations/development-and-testing.md']) {
+    const names = readText(path.join(REPOSITORY_ROOT, relative)).match(/kk-studio-web-[^\s'"`]+\.jar/g)
     assert.ok(names, relative)
-    assert.deepEqual(new Set(names), new Set([expected]), relative)
+    assert.deepEqual(new Set(names), new Set(['kk-studio-web-<version>.jar']), relative)
   }
 })
 
 test('test intent: a dev backend start uses a clean package', () => {
+  // Deleted classes must not survive a dev-requested backend rebuild.
   assert.match(functionBody(APP_SCRIPT, 'package_backend'), /(?:\bmvn\b|\brun_maven\b).*clean\b\s+\bpackage\b/)
 })
 
@@ -68,17 +128,20 @@ test('test intent: root discovery is depth independent and overridable', () => {
     mkdirSync(path.dirname(nested), { recursive: true })
     writeFileSync(nested, source)
     mkdirSync(path.join(path.dirname(nested), 'lib'))
-    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh']) {
+    for (const name of LAUNCHER_LIBS) {
       copyFileSync(path.join(LIB_DIR, name), path.join(path.dirname(nested), 'lib', name))
     }
     mkdirSync(path.join(checkout, 'scripts/dev/lib'), { recursive: true })
     copyFileSync(E2E_CREDENTIALS_LIB, path.join(checkout, 'scripts/dev/lib/e2e-credentials.sh'))
+    // 入口在 source 期就从根 POM 版本推导 JAR 路径，夹具必须是完整 checkout。
+    writeFileSync(path.join(checkout, 'pom.xml'), ROOT_POM)
 
     assert.equal(resolvedRoot(nested, cleanEnvironment()), checkout)
 
     const override = path.join(temporary, 'elsewhere')
     mkdirSync(path.join(override, 'scripts/dev/lib'), { recursive: true })
     copyFileSync(E2E_CREDENTIALS_LIB, path.join(override, 'scripts/dev/lib/e2e-credentials.sh'))
+    writeFileSync(path.join(override, 'pom.xml'), ROOT_POM)
     assert.equal(resolvedRoot(nested, { ...cleanEnvironment(), KK_STUDIO_REPO_ROOT: override }), override)
   } finally {
     rmSync(temporary, { recursive: true, force: true })
@@ -92,7 +155,7 @@ test('test intent: an unresolvable root fails closed before any lifecycle comman
     mkdirSync(path.dirname(orphan), { recursive: true })
     writeFileSync(orphan, readText(APP_SCRIPT))
     mkdirSync(path.join(path.dirname(orphan), 'lib'))
-    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh']) {
+    for (const name of LAUNCHER_LIBS) {
       copyFileSync(path.join(LIB_DIR, name), path.join(path.dirname(orphan), 'lib', name))
     }
 

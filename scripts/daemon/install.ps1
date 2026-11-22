@@ -71,6 +71,8 @@ $script:Published = $false
 $script:StopAttempted = $false
 $script:CleanupFailed = $false
 $script:WorkOwned = $false
+# 成功文案由命令填入、由 Invoke-Main 在清理与诊断记录都成功后输出。
+$script:SuccessOutput = $null
 # The core preflight prints one trusted, value-free line for an invalid configuration;
 # only that bounded marker is surfaced, never raw diagnostics that could echo secrets.
 $script:ConfigFailureMarker = "Invalid daemon configuration: "
@@ -1322,18 +1324,22 @@ function Invoke-InstallCommon {
 function Invoke-Install {
     Assert-OptionSet -ForCommand "install" -Allowed $script:InstallParameterNames
     Invoke-InstallCommon -Operation "install"
-    Write-Host "KK Studio 环境安装完成，服务已启动。"
-    Write-Host ""
-    Write-Host "请返回 Studio，确认环境状态为 READY。"
+    $script:SuccessOutput = @(
+        "KK Studio 环境安装完成，服务已启动。"
+        ""
+        "请返回 Studio，确认环境状态为 READY。"
+    )
     return 0
 }
 
 function Invoke-Update {
     Assert-OptionSet -ForCommand "update" -Allowed $script:UpdateParameterNames
     Invoke-InstallCommon -Operation "update"
-    Write-Host "KK Studio 环境更新完成：程序/任务定义已替换；配置与凭据未改动。"
-    Write-Host ""
-    Write-Host "请返回 Studio，确认环境状态为 READY。"
+    $script:SuccessOutput = @(
+        "KK Studio 环境更新完成：程序/任务定义已替换；配置与凭据未改动。"
+        ""
+        "请返回 Studio，确认环境状态为 READY。"
+    )
     return 0
 }
 
@@ -1460,6 +1466,10 @@ function Invoke-Main {
             }
             elseif (-not (Write-LastOperation -Result "succeeded" -ErrorCode $null)) {
                 $code = 1
+            }
+            elseif ($null -ne $script:SuccessOutput) {
+                # 清理与固定记录都成功后，才输出成功文案（与 Unix 版同一顺序契约）。
+                foreach ($line in $script:SuccessOutput) { Write-Host $line }
             }
         }
     }

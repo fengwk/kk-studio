@@ -15,6 +15,7 @@ source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/http-wait.sh"
 source "$SCRIPT_DIR/../../lib/toolchain.sh"
+source "$SCRIPT_DIR/../../lib/backend-jar.sh"
 source "$SCRIPT_DIR/../../lib/port-cleanup.sh"
 WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
 
@@ -38,7 +39,8 @@ DAEMON_ENVIRONMENT_ID=${DAEMON_ENVIRONMENT_ID:-}
 
 export DAEMON_ENV_ROOT
 
-BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.2.5.jar"}
+# 产物名由根 POM 版本决定；调用方已构建好产物时可用 BACKEND_JAR 覆盖。
+BACKEND_JAR=${BACKEND_JAR:-$(backend_jar_path "$REPO_ROOT")}
 STORAGE_S3_ENDPOINT=${KK_STUDIO_STORAGE_S3_ENDPOINT:-http://127.0.0.1:9000}
 STORAGE_S3_PUBLIC_ENDPOINT=${KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
 STORAGE_S3_REGION=${KK_STUDIO_STORAGE_S3_REGION:-us-east-1}

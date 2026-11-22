@@ -397,6 +397,24 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
     assertIncludesAll(functionBody('Remove-WorkDirectory'), ['$script:CleanupFailed = $true'])
   })
 
+  it('reports success only after cleanup and the diagnostic record succeed', () => {
+    // 与 Unix 版同序：命令本身不打印成功文案，由 Invoke-Main 在清理与固定记录都成功后输出。
+    for (const name of ['Invoke-Install', 'Invoke-Update']) {
+      const body = functionBody(name)
+      assert.doesNotMatch(body, /Write-(?:Host|Output)[^\n]*(?:完成|READY)/u, `${name} must not print success itself`)
+      assert.ok(body.includes('$script:SuccessOutput'), `${name} must hand the success text to Invoke-Main`)
+    }
+    const main = functionBody('Invoke-Main')
+    assertInOrder(
+      main,
+      'if ($script:CleanupFailed) {',
+      'elseif (-not (Write-LastOperation -Result "succeeded" -ErrorCode $null)) {',
+      'foreach ($line in $script:SuccessOutput) { Write-Host $line }',
+    )
+    // 成功文案只挂在清理成功与记录成功之后的分支上。
+    assert.match(main, /elseif \(\$null -ne \$script:SuccessOutput\) \{/u)
+  })
+
   it('records one bounded last-operation entry with fixed fields', () => {
     const body = functionBody('Write-LastOperation')
     assertIncludesAll(body, [

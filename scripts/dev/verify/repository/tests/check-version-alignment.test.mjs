@@ -1,8 +1,9 @@
 /** The release gate keeps every active repository version source aligned. */
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 import path from 'node:path'
 
@@ -104,6 +105,45 @@ test('test intent: CLI strictly rejects a tag that differs from the aligned repo
     assert.match(result.stderr, /invalid RELEASE_TAG/)
   }
 })
+
+test('test intent: a launcher that pins a release JAR version fails the alignment gate', () => {
+  // 夹具仓库只需可对齐的版本源；脚本递归扫描必须覆盖 e2e 子目录。
+  withVersionFixture((root) => {
+    const launcher = path.join(root, 'scripts/dev/verify/e2e/lib.sh')
+    mkdirSync(path.dirname(launcher), { recursive: true })
+    writeFileSync(launcher, 'BACKEND_JAR="$REPO_ROOT/web/target/kk-studio-web-1.2.3.jar"\n')
+    let result = runAlignmentGate(root)
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, /scripts\/dev\/verify\/e2e\/lib\.sh:1 hard-codes the distribution JAR version/)
+
+    writeFileSync(launcher, 'BACKEND_JAR="$REPO_ROOT/web/target/kk-studio-web-$version.jar"\n')
+    result = runAlignmentGate(root)
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
+function runAlignmentGate(root) {
+  const env = { ...process.env, KK_STUDIO_REPO_ROOT: root }
+  delete env.RELEASE_TAG
+  return spawnSync(process.execPath, [path.join(repositoryRoot(), 'scripts/dev/verify/repository/check-version-alignment.mjs')], {
+    cwd: repositoryRoot(),
+    env,
+    encoding: 'utf8',
+  })
+}
+
+/** 临时仓库根：只有对齐的版本源，脚本目录由用例自己填充。 */
+function withVersionFixture(body) {
+  const root = mkdtempSync(path.join(tmpdir(), 'kk-version-gate-'))
+  try {
+    writeFileSync(path.join(root, 'pom.xml'), POM('1.2.3'))
+    mkdirSync(path.join(root, 'daemon/internal/config'), { recursive: true })
+    writeFileSync(path.join(root, 'daemon/internal/config/version.go'), GO_CONFIG('1.2.3'))
+    return body(root)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
 
 function requireExists(root, relativePath) {
   try {

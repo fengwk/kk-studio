@@ -6,6 +6,7 @@ source "$SCRIPT_HOME/lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_HOME"
 source "$SCRIPT_HOME/lib/http-wait.sh"
 source "$SCRIPT_HOME/lib/toolchain.sh"
+source "$SCRIPT_HOME/lib/backend-jar.sh"
 source "$SCRIPT_HOME/lib/port-cleanup.sh"
 WORK_DIR=${DEV_WORK_DIR:-"$REPO_ROOT/runtime/dev"}
 
@@ -157,7 +158,7 @@ BACKEND_LOG="$WORK_DIR/backend.log"
 FRONTEND_LOG="$WORK_DIR/frontend.log"
 BACKEND_PID_FILE="$WORK_DIR/backend.pid"
 FRONTEND_PID_FILE="$WORK_DIR/frontend.pid"
-BACKEND_JAR="$REPO_ROOT/web/target/kk-studio-web-1.2.5.jar"
+BACKEND_JAR=$(backend_jar_path "$REPO_ROOT") || die "cannot derive the backend Fat JAR path from the root POM version"
 # 产物与修订绑定：stamp 与 JAR 同目录，`mvn clean` 会同时移除二者。
 BACKEND_JAR_REVISION_STAMP="$REPO_ROOT/web/target/.kk-studio-revision"
 FRONTEND_PACKAGE_LOCK="$REPO_ROOT/frontend/package-lock.json"
