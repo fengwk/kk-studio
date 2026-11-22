@@ -155,7 +155,7 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(52)
+    expect(allTestFiles.length).toBe(53)
     expect(allTestFiles).toContain('shared-ui-visual.pw.ts')
     expect(allTestFiles).toContain('workbench-not-found.pw.ts')
     expect(allTestFiles).toContain('project-board-evidence.pw.ts')

@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { QuestionnaireCard } from '@/features/thread/runtime/interactions/QuestionnaireCard'
+import { AskUserRecord } from '@/features/thread/runtime/thread-panel/messages/AskUserRecord'
+import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 import { setLocale, type AppLocale } from '@/shared/i18n'
 
 /** 问卷卡真实浏览器基座：`?locale=zh-CN|en-US&state=single|multi|answered` 直接渲染三种状态。 */
@@ -90,6 +92,8 @@ const queryClient = new QueryClient({
 })
 
 const fixture = fixtures[locale][state]
+const longResult = { declined: false, answers: [[locale === 'zh-CN' ? '测试报告' : 'Test report']] }
+const titleView = params.get('titleView')
 const rootEl = document.getElementById('root')
 if (rootEl) {
   createRoot(rootEl).render(
@@ -97,12 +101,16 @@ if (rootEl) {
       <ApplicationEventProvider>
         <div className="questionnaire-harness">
           <div className="interaction-feed-item">
-            <QuestionnaireCard
-              interactionId={`int-questionnaire-${state}`}
-              threadId="thread-questionnaire-harness"
-              argumentsJson={fixture.argumentsJson}
-              result={fixture.result}
-            />
+            {titleView === 'submitted' ? (
+              <AskUserRecord arguments={fixture.argumentsJson} contents={[{ type: 'json', value: longResult }]} />
+            ) : (
+              <QuestionnaireCard
+                interactionId={`int-questionnaire-${state}`}
+                threadId="thread-questionnaire-harness"
+                argumentsJson={fixture.argumentsJson}
+                result={titleView === 'completed' ? longResult : fixture.result}
+              />
+            )}
           </div>
         </div>
       </ApplicationEventProvider>

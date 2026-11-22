@@ -66,7 +66,7 @@
 .interaction-questionnaire-card { gap: 16px; }
 .interaction-questions-list { display: flex; flex-direction: column; gap: 18px; }
 .interaction-question-item { display: flex; flex-direction: column; gap: 10px; }
-.interaction-question-title { display: flex; align-items: center; gap: 8px; color: var(--fg); font-size: var(--font-size-sm); font-weight: 600; }
+.interaction-question-title { display: flex; align-items: baseline; gap: var(--space-2); color: var(--fg); font-size: var(--font-size-sm); font-weight: 600; }
 /* 窄屏长题目由题干换行；编号与题型标记不收缩、不折行。 */
 .interaction-question-idx { flex: none; white-space: nowrap; }
 .interaction-question-text { min-width: 0; overflow-wrap: anywhere; }

@@ -362,6 +362,8 @@
 
 .ask-user-q-icon {
   flex: 0 0 auto;
+  align-self: flex-start;
+  margin-block-start: calc((1lh - 14px) / 2);
   color: var(--fg-muted);
 }
 

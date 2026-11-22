@@ -766,6 +766,33 @@ async function openQuestionnaireHarness(
   await expect(page.locator('.interaction-questionnaire-card')).toBeVisible()
 }
 
+async function expectFirstQuestionLine(page: Page, view: string) {
+  const title = page.locator('.interaction-question-title')
+  await expect(title).toBeVisible()
+  const layout = await title.evaluate((element) => {
+    const box = (selector: string) => element.querySelector(selector)?.getBoundingClientRect()
+    const text = box('.interaction-question-text')!
+    const tag = box('.interaction-question-type-tag')
+    const icon = box('.ask-user-q-icon')
+    return {
+      numberOffset: box('.interaction-question-idx')!.top - text.top,
+      tagOffset: tag ? tag.top - text.top : null,
+      lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+      iconCenter: icon ? icon.top + icon.height / 2 - text.top : null,
+    }
+  })
+  expect(Math.abs(layout.numberOffset)).toBeLessThan(1)
+  if (view !== 'completed') {
+    expect(layout.tagOffset).not.toBeNull()
+    expect(layout.tagOffset!).toBeGreaterThanOrEqual(-1)
+    expect(layout.tagOffset!).toBeLessThan(layout.lineHeight / 2)
+  }
+  if (view === 'submitted') {
+    expect(layout.iconCenter).not.toBeNull()
+    expect(Math.abs(layout.iconCenter! - layout.lineHeight / 2)).toBeLessThan(1)
+  }
+}
+
 test.describe('questionnaire option semantics and read-only answers', () => {
   test('single choice is one radiogroup with roving focus, arrows moving focus and space/enter selecting', async ({
     page,
@@ -845,7 +872,7 @@ test.describe('questionnaire option semantics and read-only answers', () => {
 
   // 窄屏长题目换行时，编号与题型标记保持完整：编号不被挤成「1」「.」两行。
   for (const locale of ['zh-CN', 'en-US'] as const) {
-    test(`a long question wraps while its number stays on one line at 390px (${locale})`, async ({ page }) => {
+    test(`a long question wraps while its number stays on one line at 390px (${locale})`, async ({ page }, info) => {
       await page.setViewportSize({ width: 390, height: 844 })
       await openQuestionnaireHarness(page, 'multi', locale)
 
@@ -857,7 +884,25 @@ test.describe('questionnaire option semantics and read-only answers', () => {
       expect(textBox.height).toBeGreaterThan(lineHeight * 1.5)
       expect(numberBox.height).toBeLessThanOrEqual(lineHeight + 1)
       await expect(number).toHaveText('1.')
+      // 编号及题型应与首行对齐，而不是与整个题干居中。
+      await expectFirstQuestionLine(page, 'pending')
+      await title.screenshot({ path: info.outputPath(`question-pending-${locale}-390.png`) })
     })
+
+    for (const width of [390, 1440]) {
+      test(`question title keeps its markers on the first line (${locale}, ${width}px)`, async ({ page }, info) => {
+        // 已提交记录的图标和已完成卡片的编号遵守与待答卡片相同的首行对齐规则。
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.routeWebSocket(/\/ws\/events$/, () => {})
+        for (const view of width === 390 ? ['submitted', 'completed'] : ['pending', 'submitted', 'completed']) {
+          await page.goto(`${QUESTIONNAIRE_HARNESS_URL}?locale=${locale}&state=multi&titleView=${view}`)
+          await expectFirstQuestionLine(page, view)
+          await page.locator('.interaction-question-title').screenshot({
+            path: info.outputPath(`question-${view}-${locale}-${width}.png`),
+          })
+        }
+      })
+    }
   }
 
   test('answered questionnaire is read-only and shows the chosen answers', async ({ page }) => {
