@@ -114,27 +114,28 @@ for (const copy of LOCALES) {
       await expect(preview).toHaveText(/^…/)
       const row = region.getByRole('button').filter({ has: mark })
       await expect(row).toHaveCount(1)
-      await expect(row).toHaveAttribute('aria-pressed', 'false')
-
-      // R7 场景之一：行未被选中时，长命中词同样完整可见。
-      const unselected = await readSearchHitText(preview)
-      expectFirstMarkVisible(unselected, `${copy.locale} ${size} R7 未选中行`)
-      if (viewport.width >= WIDE) {
-        expectNoLeadingClipping(unselected, `${copy.locale} ${size} R7 未选中行`)
-      }
-      recordSearchHitMetrics(testInfo, `tree-r7-unselected-${copy.locale}-${size}`, unselected)
-
-      // R7 场景之二：选中同一行（选中只改变底色与光标字形），可用宽度与命中可见性不变。
-      await row.click()
+      // 原选中行不匹配新查询时，搜索把选中移到首个命中：这里唯一的命中行先处于选中态。
       await expect(row).toHaveAttribute('aria-pressed', 'true')
+
+      // R7 场景之一：选中行（选中只改变底色与光标字形）里，长命中词完整可见。
       const selected = await readSearchHitText(preview)
       expectFirstMarkVisible(selected, `${copy.locale} ${size} R7 选中行`)
       if (viewport.width >= WIDE) {
         expectNoLeadingClipping(selected, `${copy.locale} ${size} R7 选中行`)
       }
-      expect(selected.availableWidth, '选中前后文字框可用宽度').toBeCloseTo(unselected.availableWidth, 0)
       recordSearchHitMetrics(testInfo, `tree-r7-selected-${copy.locale}-${size}`, selected)
       await captureSearchHitShot(region, testInfo, `tree-r7-selected-${copy.locale}-${size}`)
+
+      // R7 场景之二：选中另一行后命中行回到未选中态，可用宽度与命中可见性不变。
+      await region.locator('.history-tree-entry').filter({ hasNot: mark }).first().click()
+      await expect(row).toHaveAttribute('aria-pressed', 'false')
+      const unselected = await readSearchHitText(preview)
+      expectFirstMarkVisible(unselected, `${copy.locale} ${size} R7 未选中行`)
+      if (viewport.width >= WIDE) {
+        expectNoLeadingClipping(unselected, `${copy.locale} ${size} R7 未选中行`)
+      }
+      expect(unselected.availableWidth, '选中前后文字框可用宽度').toBeCloseTo(selected.availableWidth, 0)
+      recordSearchHitMetrics(testInfo, `tree-r7-unselected-${copy.locale}-${size}`, unselected)
     })
 
     test(`${copy.locale} ${size}: bound Thread and its Session are the current selection`, async ({ page }, testInfo) => {
