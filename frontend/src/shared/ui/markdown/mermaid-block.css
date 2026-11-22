@@ -1,3 +1,10 @@
+/* 复制操作占独立一行，不覆盖图内标题或参与者。 */
+.md-mermaid-shell > .md-code-copy {
+  position: static;
+  margin-inline-start: auto;
+  margin-block-end: var(--space-1);
+}
+
 /* 紧凑 Mermaid 图与正文左对齐，放不下时只在框内横向滚动。 */
 .md-mermaid {
   margin: 0.45em 0;

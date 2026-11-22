@@ -3,8 +3,8 @@ import type { Page } from './fixture'
 
 const HARNESS = '/browser-tests/markdown-table-harness.html'
 
-async function renderDiagram(page: Page, source: string) {
-  await page.goto(`${HARNESS}?mermaid=${encodeURIComponent(source)}`)
+async function renderDiagram(page: Page, source: string, options = '') {
+  await page.goto(`${HARNESS}?mermaid=${encodeURIComponent(source)}${options}`)
   const svg = page.locator('.md-mermaid svg')
   await expect(svg).toBeVisible()
   return svg
@@ -31,6 +31,31 @@ test.describe('Mermaid rendering and sanitization', () => {
     await expect(svg).toContainText('Bob')
     await expect(svg).toContainText('hello')
   })
+
+  for (const locale of ['zh-CN', 'en-US']) {
+    for (const width of [390, 1440]) {
+      test(`places Mermaid copy above the diagram in ${locale} at ${width}px`, async ({ page }, info) => {
+        // 即使图在窄屏横向滚动，复制按钮也不会遮住参与者或图内文字。
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        const svg = await renderDiagram(page, [
+          'sequenceDiagram',
+          'participant A as Kubelet',
+          'participant B as Service',
+          'participant C as Database',
+          'A->>B: SIGTERM',
+          'B->>C: pool.end()',
+        ].join('\n'), `&code&locale=${locale}`)
+        const shell = page.locator('.md-mermaid-shell')
+        const copy = shell.locator('.md-code-copy')
+        await copy.focus()
+        await expect(copy).toHaveCSS('opacity', '1')
+        const buttonBox = (await copy.boundingBox())!
+        const svgBox = (await svg.boundingBox())!
+        expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(svgBox.y)
+        await shell.screenshot({ path: info.outputPath(`mermaid-copy-${locale}-${width}.png`) })
+      })
+    }
+  }
 
   test('removes executable label content before inserting the rendered SVG', async ({ page }) => {
     // 检查实际写入页面的 DOM，而非 mock 返回值；这不是特定公告利用条件的完整 PoC。
