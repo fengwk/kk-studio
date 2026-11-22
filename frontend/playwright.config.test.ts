@@ -155,7 +155,7 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(51)
+    expect(allTestFiles.length).toBe(52)
     expect(allTestFiles).toContain('shared-ui-visual.pw.ts')
     expect(allTestFiles).toContain('workbench-not-found.pw.ts')
     expect(allTestFiles).toContain('project-board-evidence.pw.ts')
@@ -251,7 +251,7 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('workbench-not-found-harness')
     expect(keys).toContain('questionnaire-card-harness')
     expect(keys).toContain('canvas-editor-harness')
-    expect(keys.length).toBe(41)
+    expect(keys.length).toBe(42)
   })
 
   // 验证静态构建目标与 MPA 模式

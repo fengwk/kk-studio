@@ -141,10 +141,13 @@ function renderSessionSelection(
   pane: PaneInteractionContext['pane'],
   t: PaneInteractionContext['t'],
 ): ReactNode {
+  // 已选项只来自绑定事实：绑定 Thread 时是它所属的 Session，草稿目标没有已选 Session。
+  const selectedSessionId = pane.target.kind === 'BOUND_THREAD' ? pane.currentSessionId : null
   return (
     <SelectionPanel
       title={t('ai.chat.selectSession')}
       items={pane.sessions.map(sessionSelectionItem)}
+      selectedId={selectedSessionId}
       loading={pane.sessionsLoading}
       loadError={pane.selectionQueries.sessionsError != null ? t('ai.chat.sessionsLoadFailed') : null}
       onRetryLoad={pane.selectionQueries.retrySessions}
@@ -174,10 +177,13 @@ function renderThreadSelection(
   pane: PaneInteractionContext['pane'],
   t: PaneInteractionContext['t'],
 ): ReactNode {
+  // 已选项只来自绑定事实：绑定 Thread 时就是该 Thread，草稿目标没有已选 Thread。
+  const selectedThreadId = pane.target.kind === 'BOUND_THREAD' ? pane.target.threadId : null
   return (
     <SelectionPanel
       title={t('ai.chat.selectThread')}
       items={pane.threads.map(threadSelectionItem)}
+      selectedId={selectedThreadId}
       loading={pane.threadsLoading}
       loadError={pane.selectionQueries.threadsError != null ? t('ai.chat.threadsLoadFailed') : null}
       onRetryLoad={pane.selectionQueries.retryThreads}
