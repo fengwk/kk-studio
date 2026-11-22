@@ -225,8 +225,22 @@ for (const viewport of VIEWPORTS) {
         }
         // 共享 .ui-tab 提供统一间距：各页签之间不得出现肉眼可见差异。
         expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1)
-
         await shoot(page, testInfo, `issue-detail-tabs-${suffix}`)
+
+        // 页签栏放不下时横向滚动：用键盘逐个切换，选中页签每次都完整位于页签栏可视区内。
+        await tabs.first().focus()
+        for (let index = 0; index < 6; index += 1) {
+          if (index > 0) {
+            await page.keyboard.press('ArrowRight')
+          }
+          const selected = tabs.nth(index)
+          await expect(selected).toHaveAttribute('aria-selected', 'true')
+          await expect.poll(() => selected.evaluate((tab) => {
+            const list = tab.parentElement!.getBoundingClientRect()
+            const rect = tab.getBoundingClientRect()
+            return rect.left >= list.left - 0.5 && rect.right <= list.right + 0.5
+          })).toBe(true)
+        }
       })
 
       test('resource card meta labels keep words intact and columns aligned', async ({ page }, testInfo) => {

@@ -158,4 +158,20 @@ describe('Tabs', () => {
 
     expect(screen.getByRole('tab', { name: '已归档' })).toBeDisabled()
   })
+
+  // 测试意图：窄屏 tablist 横向滚动时，切到只露出一部分的 tab 后要把它完整滚入可见区，
+  // 且只移动 tablist 自身的 scrollLeft。
+  it('scrolls the tablist horizontally so the newly selected tab is fully visible', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    const tablist = screen.getByRole('tablist', { name: '项目配置' })
+    const rect = (left: number, right: number) => ({ left, right }) as DOMRect
+    // 可视宽度 0–200；「历史」位于 150–260，右侧被裁掉 60px。
+    vi.spyOn(tablist, 'getBoundingClientRect').mockReturnValue(rect(0, 200))
+    vi.spyOn(screen.getByRole('tab', { name: '历史' }), 'getBoundingClientRect')
+      .mockReturnValue(rect(150, 260))
+
+    await user.click(screen.getByRole('tab', { name: '历史' }))
+    expect(tablist.scrollLeft).toBe(60)
+  })
 })
