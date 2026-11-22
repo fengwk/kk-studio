@@ -961,7 +961,8 @@ describe('IssueDetailModal', () => {
     fireEvent.click(threadsTab)
 
     expect(await screen.findByText('architect')).toBeInTheDocument()
-    expect(screen.getByText('th-arch-001')).toBeInTheDocument()
+    // 完整 Thread ID 放在提示里，窄屏省略时不丢失可核对的值。
+    expect(screen.getByText('th-arch-001')).toHaveAttribute('title', 'th-arch-001')
 
     const openBtn = screen.getByTitle('打开此 Agent Thread 视图')
     fireEvent.click(openBtn)
@@ -1492,8 +1493,11 @@ describe('IssueDetailModal', () => {
     expect(await screen.findByText('公开证据读取失败')).toBeInTheDocument()
     expect(screen.queryByText(/暂无公开证据/)).not.toBeInTheDocument()
 
-    const feedback = document.querySelector('.evidence-feedback') as HTMLElement
-    fireEvent.click(within(feedback).getByRole('button', { name: '重试' }))
+    const failure = document.querySelector('.evidence-failure') as HTMLElement
+    // 整载失败用与其它读取失败一致的 danger 失败块，而不是中性灰说明行。
+    expect(failure.querySelector('.state-block')).toHaveClass('danger')
+    expect(within(failure).getByText('公开证据读取失败')).toBeInTheDocument()
+    fireEvent.click(within(failure).getByRole('button', { name: '重试' }))
 
     expect(await screen.findByText(/暂无公开证据/)).toBeInTheDocument()
     expect(screen.queryByText('公开证据读取失败')).not.toBeInTheDocument()
@@ -1536,8 +1540,9 @@ describe('IssueDetailModal', () => {
       target: { files: [new File(['mock content'], 'delivered-spec.pdf', { type: 'application/pdf' })] },
     })
 
-    // 刚上传的证据仍然可见，但列表回读失败：计数退回未知，只留名称标签。
+    // 刚上传的证据仍然可见，但列表回读失败：整载失败块保留危险态呈现，计数退回未知。
     expect(await screen.findByText('公开证据读取失败')).toBeInTheDocument()
+    expect(document.querySelector('.evidence-failure .state-block.danger')).not.toBeNull()
     expect(screen.getByText('delivered-spec.pdf')).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: '公开证据' })).toBeInTheDocument()

@@ -28,6 +28,8 @@ const environmentPageCopy = {
     unavailable: '不可用',
     searchLabel: '搜索环境',
     searchPlaceholder: '搜索环境名称或 ID',
+    // 卡片版本行在所有兄弟卡片上共用同一标签，不按版本来源改名。
+    daemonVersionRow: 'Daemon 版本',
     noMatch: '暂无匹配环境',
     refreshFailed: '刷新失败',
     refreshStale: '刷新失败 · 显示上次数据',
@@ -43,6 +45,7 @@ const environmentPageCopy = {
     unavailable: 'Unavailable',
     searchLabel: 'Search environments',
     searchPlaceholder: 'Search environment name or ID',
+    daemonVersionRow: 'Daemon Version',
     noMatch: 'No matching environments',
     refreshFailed: 'Refresh failed',
     refreshStale: 'Refresh failed · Showing last data',
@@ -215,7 +218,7 @@ for (const width of [1280, 390, 320]) {
     const card = page.locator('.environment-card')
     await expect(card.locator('.resource-card-actions button')).toHaveCount(1)
     await expect(page.getByRole('button', { name: '安装 / 覆盖 host-one', exact: true })).toHaveCount(0)
-    await expect(card.getByText('上次 Daemon 版本', { exact: true })).toBeVisible()
+    await expect(card.getByText('Daemon 版本', { exact: true })).toBeVisible()
     await expect(card).not.toContainText('已应用')
     await page.screenshot({ path: testInfo.outputPath(`cards-${width}.png`), fullPage: true })
     await expectNoHorizontalOverflow(page, width)
@@ -437,7 +440,7 @@ test('keeps event history and config details inside the collapsible diagnostics'
   // 卡片状态按名称为主：徽标写「就绪」，不写 READY。
   await expect(cardLocator.locator('.resource-card-badge .ui-badge'))
     .toHaveText(environmentPageCopy['zh-CN'].ready)
-  await expect(cardLocator.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(cardLocator.getByText('Daemon 版本', { exact: true })).toBeVisible()
   await expect(cardLocator.getByText('1.2.3', { exact: true })).toBeVisible()
   await expect(cardLocator.getByText('无进行中的更新', { exact: true })).toBeVisible()
   // 配置态与事件历史都离开卡片：卡片不冒充已应用，也不展示历史。
@@ -667,7 +670,7 @@ for (const width of [1280, 390]) {
       await expect(narrow).toBeHidden()
       // 失败提示只是工具栏状态，不遮挡也不替换缓存卡片。
       await expect(cards).toHaveCount(1)
-      await expect(cards.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+      await expect(cards.getByText('Daemon 版本', { exact: true })).toBeVisible()
       await page.screenshot({ path: testInfo.outputPath(`refresh-failed-${width}.png`), fullPage: true })
       await expectNoHorizontalOverflow(page, width)
       await wide.getByRole('button', { name: '重试', exact: true }).click()
@@ -753,10 +756,10 @@ test('one failed runtime read masks only that card and stops presenting its cach
   const alphaCard = cards.filter({ hasText: 'alpha-box' })
   const betaCard = cards.filter({ hasText: 'beta-box' })
   // 卡片只给版本与更新状态；已应用的配置结论属于诊断详情。
-  await expect(alphaCard.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(alphaCard.getByText('Daemon 版本', { exact: true })).toBeVisible()
   await expect(alphaCard.getByText('9.9.9', { exact: true })).toBeVisible()
   await expect(alphaCard.getByText('无进行中的更新', { exact: true })).toBeVisible()
-  await expect(betaCard.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(betaCard.getByText('Daemon 版本', { exact: true })).toBeVisible()
   await expect(betaCard.getByText('3.3.3', { exact: true })).toBeVisible()
   await expect(betaCard.getByText('无进行中的更新', { exact: true })).toBeVisible()
   await expect(cards.getByText('已应用', { exact: true })).toHaveCount(0)
@@ -787,13 +790,13 @@ test('one failed runtime read masks only that card and stops presenting its cach
   await page.screenshot({ path: testInfo.outputPath('runtime-isolated-after.png'), fullPage: true })
   await reopened.getByRole('button', { name: '关闭', exact: true }).last().click()
 
-  // 缓存里的旧快照不再冒充当前状态，只作为「上次版本」保留。
+  // 缓存里的旧快照不再冒充当前状态：行名与其它卡片一致，值只剩上次上报的版本。
   await expect(betaCard.getByText('运行状态读取失败', { exact: true })).toBeVisible()
-  await expect(betaCard.getByText('上次 Daemon 版本', { exact: true })).toBeVisible()
-  await expect(betaCard.getByText('当前 Daemon 版本', { exact: true })).toHaveCount(0)
+  await expect(betaCard.getByText('Daemon 版本', { exact: true })).toBeVisible()
+  await expect(betaCard.locator('.resource-card-meta-value').first()).toHaveText('3.3.3')
   await expect(betaCard.getByText('已应用', { exact: true })).toHaveCount(0)
   // 另一个环境的运行快照不受影响。
-  await expect(alphaCard.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(alphaCard.getByText('Daemon 版本', { exact: true })).toBeVisible()
   await expect(alphaCard.getByText('9.9.9', { exact: true })).toBeVisible()
   await expect(alphaCard.getByText('无进行中的更新', { exact: true })).toBeVisible()
   expect(runtimeCalls.filter(call => call.includes('env-beta')).length).toBeGreaterThan(0)
@@ -1177,6 +1180,18 @@ for (const [locale, labels] of Object.entries(environmentPageCopy)) {
       for (const code of ['READY', 'CONNECTING', 'OFFLINE', 'UNAVAILABLE']) {
         await expect(page.getByText(code, { exact: true })).toHaveCount(0)
       }
+
+      // 版本行在兄弟卡片上共用同一标签：就绪卡（实时快照）与离线卡（未上报）不改写行名。
+      const versionRows = page.locator('.environment-card .resource-card-meta-row')
+        .filter({ has: page.getByText(labels.daemonVersionRow, { exact: true }) })
+      await expect(versionRows).toHaveCount(4)
+      // 标签只按词边界换行，宽窄屏都不把单词拆开；390 下每个标签都单行。
+      expect(await versionRows.locator('.resource-card-meta-label').evaluateAll((nodes) => (
+        nodes.map((node) => {
+          const style = getComputedStyle(node)
+          return Math.round(node.getBoundingClientRect().height / Number.parseFloat(style.lineHeight))
+        })
+      ))).toEqual([1, 1, 1, 1])
       await expectNoHorizontalOverflow(page, viewport.width)
       await sliceShot(page, `environment-cards-${locale}-${viewport.width}`)
     })

@@ -224,7 +224,7 @@ export function IssueAgentThreadsPane({
               <Bot size={16} aria-hidden="true" />
               <span>{thread.agentName}</span>
             </strong>
-            <code className="thread-item-id">{thread.threadId}</code>
+            <code className="thread-item-id" title={thread.threadId}>{thread.threadId}</code>
           </div>
           {onOpenThread && (
             <Button

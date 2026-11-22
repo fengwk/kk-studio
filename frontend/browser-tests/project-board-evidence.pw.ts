@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Locator, type Page } from './fixture'
+import { expect, test, tokenColor, type Locator, type Page } from './fixture'
 import type {
   IssueActivityDTO, IssueDTO, IssueDetailDTO, IssueEvidenceDTO, IssueRunSummaryDTO, PauseReason,
   ProjectDTO, ProjectSnapshotDTO,
@@ -111,6 +111,8 @@ const copy = {
     activityLatest: 'Latest note',
     evidenceOpenFailed: '证据打开失败，请重试',
     downloadOrView: '下载/查看',
+    threadsTab: 'Agent Thread',
+    openThread: '打开',
     blockDialogTitle: '标记业务阻塞',
     blockReasonField: '阻塞原因',
     // 工作流给 BLOCKED 声明了自定义显示名：详情头部必须跟随声明名，而不是固定通用名。
@@ -167,6 +169,8 @@ const copy = {
     activityLatest: 'Latest note',
     evidenceOpenFailed: 'Failed to open the evidence. Try again.',
     downloadOrView: 'Download / view',
+    threadsTab: 'Agent Threads',
+    openThread: 'Open',
     blockDialogTitle: 'Mark as blocked',
     blockReasonField: 'Blocked reason',
     customBlockedStage: 'Waiting on external',
@@ -372,6 +376,29 @@ function evidenceFixture(): IssueEvidenceDTO {
   }
 }
 
+/** Agent Thread 行：完整 UUID 在 390 下保持单行省略，完整值只放在 title 提示里。 */
+const THREAD_ID = 'd8c9f9a4-37b7-4b0e-9f2e-6f3a6d7c1b42'
+const THREAD_AGENT = 'backend-settlement-reconciler'
+const REVIEW_THREAD_ID = 'e1a2b3c4-0000-4000-8000-000000000009'
+
+function threadsDetail(): IssueDetailDTO {
+  return {
+    ...issueDetail(),
+    agentThreads: [
+      { issueId: ISSUE_DETAIL, agentName: THREAD_AGENT, threadId: THREAD_ID },
+      { issueId: ISSUE_DETAIL, agentName: 'reviewer', threadId: REVIEW_THREAD_ID },
+    ],
+  }
+}
+
+/** 只放目标 Issue 的看板快照：点卡打开的是带「打开」动作的真实详情，线程行才拿到真实宽度。 */
+function threadsSnapshot(locale: Locale): ProjectSnapshotDTO {
+  return {
+    ...snapshotFor(locale),
+    issues: [{ issue: threadsDetail().issue, currentOrLatestRun: null }],
+  }
+}
+
 /** 看板卡片直接打开详情时，服务端返回同一 Issue 的快照；活动与证据另行请求。 */
 function boardIssueDetail(locale: Locale, issueId: string): IssueDetailDTO {
   const entry = snapshotFor(locale).issues.find((item) => item.issue.id === issueId)
@@ -409,6 +436,8 @@ async function placeholderFit(input: Locator): Promise<{ placeholder: string
 interface TransportOptions {
   /** 详情快照；默认是活动/证据垂直所用的 ISSUE_DETAIL。 */
   detail?: IssueDetailDTO
+  /** 看板快照；默认是八张卡的看板夹具，Agent Thread 用例只放目标 Issue。 */
+  snapshot?: ProjectSnapshotDTO
   /** 后续活动窗口：按 afterSequence 返回一页，'error' 表示该窗口读取失败。 */
   activityPage?: (afterSequence: string) => { activities: IssueActivityDTO[]
     nextActivityCursor: string | null } | 'error'
@@ -442,6 +471,7 @@ async function transport(
     failSignedUrl: options.failSignedUrl ?? false,
   }
   const detail = options.detail ?? issueDetail()
+  const snapshot = options.snapshot ?? snapshotFor(locale)
   const evidences = options.evidences ?? []
   await page.routeWebSocket('**/ws/events', (socket) => {
     let connected = false
@@ -469,7 +499,7 @@ async function transport(
     const url = new URL(request.url())
     const path = url.pathname
     if (path === `/api/project/projects/${PROJECT}/snapshot`) {
-      await route.fulfill({ json: snapshotFor(locale) })
+      await route.fulfill({ json: snapshot })
       return
     }
     if (path === '/api/project/projects') {
@@ -648,9 +678,13 @@ for (const locale of Object.keys(copy) as Locale[]) {
       const failedTab = dialog.getByRole('tab', { name: copy[locale].evidenceTab, exact: true })
       await expect(failedTab).toBeVisible()
       await failedTab.click()
-      // 失败说明与重试同处一块（与环境诊断一致），重试就在失败块里。
-      const failure = dialog.locator('.evidence-feedback')
-      await expect(failure.getByText(copy[locale].evidenceFailed)).toBeVisible()
+      // 整载失败用统一的危险态失败块（与诊断事件读取失败一致），不是中性灰说明行。
+      const failure = dialog.locator('.evidence-failure')
+      await expect(failure).toHaveAttribute('role', 'alert')
+      const failureBlock = failure.locator('.state-block.danger')
+      await expect(failureBlock).toHaveText(copy[locale].evidenceFailed)
+      await expect(failureBlock).toHaveCSS('color', await tokenColor(page, '--danger'))
+      await expect(failureBlock).toHaveCSS('border-top-color', await tokenColor(page, '--danger-border'))
       await expect(failure.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
       await expect(dialog.getByText(copy[locale].evidenceEmpty)).toHaveCount(0)
       await expect(failedTab).not.toContainText('(')
@@ -906,6 +940,45 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await failure.getByRole('button', { name: copy[locale].retry }).click()
       await expect(row.getByRole('alert')).toBeVisible()
       await expect(failure.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
+    })
+
+    test(`issue agent threads keep the full id on one ellipsized line in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      // 从看板卡片打开真实接线：详情带「打开」动作，线程行在 390 下才拿到真实剩余宽度。
+      await transport(page, locale, { detail: threadsDetail(), snapshot: threadsSnapshot(locale) })
+      await page.goto(`/browser-tests/project-workflow-harness.html?board&locale=${locale}`)
+      await page.getByTestId(`issue-card-${ISSUE_DETAIL}`)
+        .getByRole('button', { name: new RegExp(`#12\\s+${DETAIL_TITLE}`) }).click()
+
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole('tab', { name: new RegExp(`${copy[locale].threadsTab} \\(2\\)`) }).click()
+      const rows = dialog.locator('.thread-item')
+      await expect(rows).toHaveCount(2)
+      await expect(rows.first()).toContainText(THREAD_AGENT)
+
+      // Agent 名称与完整 UUID 是两个事实：UUID 单行省略，不从中间折断，也不与标题抢主视觉。
+      const threadId = rows.first().locator('.thread-item-id')
+      await expect(threadId).toHaveText(THREAD_ID)
+      await expect(threadId).toHaveAttribute('title', THREAD_ID)
+      await expect(threadId).toHaveCSS('white-space', 'nowrap')
+      await expect(threadId).toHaveCSS('text-overflow', 'ellipsis')
+      const geometry = await threadId.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return {
+          lines: Math.round(element.getBoundingClientRect().height / Number.parseFloat(style.lineHeight)),
+          clipped: element.scrollWidth > element.clientWidth + 1,
+        }
+      })
+      expect(geometry.lines).toBe(1)
+      // 宽屏放得下完整 UUID；窄屏只省略尾部，完整值仍在 title 里。
+      expect(geometry.clipped).toBe(viewport.width < 900)
+      // 「打开」动作仍在行内，没有被长 ID 挤出卡片。
+      await expect(rows.first().getByRole('button', { name: copy[locale].openThread, exact: true })).toBeVisible()
+      expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+      await sliceShot(page, `project-issue-threads-${locale}-${viewport.width}`)
     })
 
     test(`card block action opens the detail with the reason form ready in ${locale} at ${viewport.width}px`, async ({

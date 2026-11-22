@@ -1,4 +1,4 @@
-import { CircleAlert, Upload } from 'lucide-react'
+import { Upload } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 import type { StorageService } from '@/shared/api/storage-service'
 import { Button } from '@/shared/ui/controls/Button'
@@ -62,11 +62,10 @@ export function IssueEvidencePane({
         <StateBlock title={t('projects.issue.loadingEvidence')} />
       ) : (
         <>
-          {/* 失败保留已知道的证据，只在上方说明读取失败并可重试；反馈行与环境列表刷新失败一致。 */}
+          {/* 整载失败保留已知证据，用统一的危险态失败块（与诊断事件读取失败一致）就地重试。 */}
           {loadFailed && (
-            <div className="evidence-feedback" role="alert">
-              <CircleAlert size={16} aria-hidden="true" />
-              <span>{t('projects.issue.evidenceLoadFailed')}</span>
+            <div className="evidence-failure" role="alert">
+              <StateBlock tone="danger" title={t('projects.issue.evidenceLoadFailed')} />
               <Button size="compact" variant="ghost" disabled={isRetrying} onClick={onRetry}>
                 {t('shared.retry')}
               </Button>

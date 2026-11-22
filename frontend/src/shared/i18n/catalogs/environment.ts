@@ -234,10 +234,6 @@ export const environmentCatalog = {
     'en-US': 'Diagnostics',
     'zh-CN': '诊断详情',
   },
-  'ai.environment.currentDaemonVersion': {
-    'en-US': 'Current Daemon version',
-    'zh-CN': '当前 Daemon 版本',
-  },
   'ai.environment.lastDaemonVersion': {
     'en-US': 'Last Daemon version',
     'zh-CN': '上次 Daemon 版本',

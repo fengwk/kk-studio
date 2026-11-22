@@ -846,7 +846,7 @@
   font-size: var(--font-size-sm);
 }
 
-/* Agent 名称单行、过长省略；Thread ID 是弱化诊断文本，窄屏先换到下一行再按需折断。 */
+/* Agent 名称单行、过长省略；Thread ID 是弱化诊断文本，窄屏也保持单行省略（完整 ID 在 title 里）。 */
 .thread-item-identity {
   display: flex;
   flex-wrap: wrap;
@@ -873,7 +873,9 @@
   min-width: 0;
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .thread-item > button {
@@ -886,6 +888,15 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 整载失败：危险的失败块与重试上下排列，与诊断事件的读取失败同一形态。 */
+.evidence-failure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 /* 与环境列表的刷新失败反馈一致：重试位于普通背景上。 */

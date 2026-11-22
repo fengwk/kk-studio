@@ -5,7 +5,6 @@ import type { CanvasLocalState } from '@/features/canvas/types'
 import {
   hasStoredCanvasViewport,
   loadCanvasViewport,
-  saveCanvasViewport,
   type StoredCanvasViewport,
 } from '@/features/canvas/viewport-storage'
 
@@ -30,7 +29,7 @@ export interface CanvasNavigationActions {
 }
 
 /**
- * 画布之间的导航与渲染状态入口：进入编辑器、返回列表、视口持久化、选区更新。
+ * 画布之间的导航与渲染状态入口：进入编辑器、返回列表、视口更新、选区更新。
  *
  * 离开画布时先清空所有进行中的本地编辑流水线再进入新作用域，任何旧画布的异步结果都不会写进新画布。
  */
@@ -97,13 +96,9 @@ export function useCanvasNavigation({
     }))
   }, [leaveCanvas, setState])
 
+  /** 视口写入由画布视口落盘（useCanvasViewportPersistence）在提交后合并执行，这里只更新渲染状态。 */
   const setViewport = useCallback((viewport: StoredCanvasViewport) => {
-    setState((current) => {
-      if (current.canvasId) {
-        saveCanvasViewport(current.canvasId, viewport)
-      }
-      return { ...current, viewport }
-    })
+    setState((current) => ({ ...current, viewport }))
   }, [setState])
 
   const completeInitialFit = useCallback(() => {
