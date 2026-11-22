@@ -1,5 +1,8 @@
-/** 搜索摘录在首个命中处之前保留的上下文字数：留一点上下文，窄行仍给长命中词留出位置。 */
-const EXCERPT_CONTEXT = 6
+/** 首个命中从这么多字符内开始时，窄行开头也看得到它，原样显示。 */
+const EXCERPT_THRESHOLD = 12
+
+/** 摘录在首个命中前保留的上下文字数：留一点上下文，窄行仍给长命中词留出位置。 */
+const EXCERPT_LEAD = 6
 
 /** 以空格分词的拉丁词字符；中文等不以空格分词的文字按字截取即可。 */
 const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u
@@ -68,10 +71,10 @@ export function searchExcerpt(text: string, tokens: string[]): string {
   const first = Math.min(...tokens
     .map((token) => (token.length > 0 ? haystack.indexOf(token) : -1))
     .filter((index) => index >= 0))
-  if (!Number.isFinite(first) || first <= EXCERPT_CONTEXT) {
+  if (!Number.isFinite(first) || first <= EXCERPT_THRESHOLD) {
     return text
   }
-  let start = first - EXCERPT_CONTEXT
+  let start = first - EXCERPT_LEAD
   if (/[\uDC00-\uDFFF]/.test(text[start] ?? '')) {
     start -= 1
   } else if (LATIN_WORD_CHAR.test(text[start - 1] ?? '') && LATIN_WORD_CHAR.test(text[start] ?? '')) {

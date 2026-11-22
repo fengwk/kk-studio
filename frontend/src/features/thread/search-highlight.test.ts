@@ -24,8 +24,9 @@ describe('search highlight', () => {
       .toBe('…and terminationGracePeriodSeconds')
     expect(searchExcerpt('A long preamble goes here, abcd terminationGracePeriodSeconds', ['termination']))
       .toBe('…abcd terminationGracePeriodSeconds')
-    // 命中已在开头附近或没有命中：原样返回。
+    // 命中从前 12 个字符内开始或没有命中：原样返回，短副标题不会被无故截掉开头。
     expect(searchExcerpt('main 分支', ['main'])).toBe('main 分支')
+    expect(searchExcerpt('Checks pull requests', ['pull', 'requests'])).toBe('Checks pull requests')
     expect(searchExcerpt('没有命中的副标题', ['parser'])).toBe('没有命中的副标题')
   })
 
