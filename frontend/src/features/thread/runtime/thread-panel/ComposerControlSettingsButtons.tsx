@@ -31,7 +31,7 @@ export function ComposerControlSettingsButtons({
       <div className="thread-composer-controls-left">
         <button
           type="button"
-          className="thread-composer-control"
+          className="thread-composer-control thread-composer-permission-control"
           aria-label={t('ai.runtime.composer.permission')}
           aria-haspopup="listbox"
           aria-expanded={menu === 'permission'}

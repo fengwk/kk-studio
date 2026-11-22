@@ -7,8 +7,13 @@ import { AskUserRecord } from '@/features/thread/runtime/thread-panel/messages/A
 import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 import { setLocale, type AppLocale } from '@/shared/i18n'
 
-/** 问卷卡真实浏览器基座：`?locale=zh-CN|en-US&state=single|multi|answered|invalid` 直接渲染各状态。 */
-type QuestionnaireState = 'single' | 'multi' | 'answered' | 'invalid'
+/**
+ * 问卷卡真实浏览器基座：`?locale=zh-CN|en-US&state=single|multi|brief|answered|invalid` 直接渲染各状态。
+ *
+ * `brief` 复现窄屏审查证据里的短题干（`Which checks should run before release?`），
+ * 用于锁定「题干占满整行」而不只是长题干换行。
+ */
+type QuestionnaireState = 'single' | 'multi' | 'brief' | 'answered' | 'invalid'
 
 interface QuestionnaireFixture {
   argumentsJson: string
@@ -19,7 +24,9 @@ const params = new URLSearchParams(window.location.search)
 const locale: AppLocale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
 const stateParam = params.get('state')
 const state: QuestionnaireState =
-  stateParam === 'multi' || stateParam === 'answered' || stateParam === 'invalid' ? stateParam : 'single'
+  stateParam === 'multi' || stateParam === 'brief' || stateParam === 'answered' || stateParam === 'invalid'
+    ? stateParam
+    : 'single'
 setLocale(locale)
 
 const SINGLE_ZH = JSON.stringify({
@@ -68,6 +75,17 @@ const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixtur
         ],
       }),
     },
+    brief: {
+      argumentsJson: JSON.stringify({
+        questions: [
+          {
+            question: '发布前应运行哪些检查？',
+            multiple: true,
+            options: [{ label: '单元测试' }, { label: '浏览器测试' }, { label: '打包检查' }],
+          },
+        ],
+      }),
+    },
     answered: {
       argumentsJson: SINGLE_ZH,
       result: { declined: false, answers: [['本周日 01:00']] },
@@ -83,6 +101,17 @@ const fixtures: Record<AppLocale, Record<QuestionnaireState, QuestionnaireFixtur
             question: 'Choose the build artifacts to archive in long-term storage and share with on-call',
             multiple: true,
             options: [{ label: 'Build log' }, { label: 'Test report' }, { label: 'UI screenshots' }],
+          },
+        ],
+      }),
+    },
+    brief: {
+      argumentsJson: JSON.stringify({
+        questions: [
+          {
+            question: 'Which checks should run before release?',
+            multiple: true,
+            options: [{ label: 'Unit tests' }, { label: 'Browser tests' }, { label: 'Package checks' }],
           },
         ],
       }),

@@ -1,9 +1,13 @@
+import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import { test, expect } from './fixture'
 
 const reportsDir = process.env.KK_LAYOUT_REPORTS_DIR
   ?? resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
+
+/** 时间戳视觉矩阵截图目录；未设置时不落盘，只在仓库外生成。 */
+const timestampShotsDir = process.env.KK_DEBUG_EVENTS_SHOTS_DIR
 
 async function expectSinglePlanningScroll(page: Page) {
   // 提示词完整自然高度，仅整列纵向滚动，不使用 50cqh 的嵌套滚动区。
@@ -16,6 +20,81 @@ async function expectSinglePlanningScroll(page: Page) {
   expect(metrics.overflowY).toBe('visible')
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight + 1)
   expect(metrics.columnOverflow).toBe('auto')
+}
+
+/**
+ * 事件行的三列事实必须各占其位：时间完整可读、徽标不压住时间、摘要仍有宽度。
+ *
+ * 断言用 Range 取时间文字的真实绘制范围——元素盒子在窄列里可能仍是整列宽，
+ * 只有文字的绘制矩形能证明它没有溢进徽标下面。
+ */
+async function expectEventRowFactsReadable(page: Page) {
+  const rows = page.locator('.thread-event')
+  expect(await rows.count()).toBeGreaterThan(0)
+
+  const metrics = await rows.evaluateAll((elements) =>
+    elements.map((element) => {
+      const time = element.querySelector<HTMLElement>('.thread-event-time')
+      const badge = element.querySelector<HTMLElement>('.thread-event-badge')
+      const summary = element.querySelector<HTMLElement>('.thread-event-summary')
+      if (time == null || badge == null || summary == null) {
+        return null
+      }
+      const box = (target: Element | Range) => {
+        const rect = target.getBoundingClientRect()
+        return { left: rect.left, right: rect.right, width: rect.width }
+      }
+      const textRange = document.createRange()
+      textRange.selectNodeContents(time)
+      return {
+        text: time.textContent ?? '',
+        timeBox: box(time),
+        textBox: box(textRange),
+        badgeBox: box(badge),
+        summaryWidth: summary.getBoundingClientRect().width,
+        clipped: time.scrollWidth > time.clientWidth + 1,
+      }
+    }),
+  ) as Array<{
+    text: string
+    timeBox: { left: number; right: number; width: number }
+    textBox: { left: number; right: number; width: number }
+    badgeBox: { left: number; right: number; width: number }
+    summaryWidth: number
+    clipped: boolean
+  } | null>
+
+  for (const row of metrics) {
+    expect(row, 'every event row renders time, badge and summary').not.toBeNull()
+    // 时间是事件的绝对定位依据，必须完整呈现而不是截断。
+    expect(row!.text).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+  }
+
+  const rendered = metrics.filter((row) => row != null)
+  const clipped = rendered.filter((row) => row.clipped)
+  expect(clipped, `时间被裁切的事件行：${describeRows(clipped)}`).toEqual([])
+
+  // 时间文字的真实绘制范围不得越出自己的列，也不得与类型徽标重叠。
+  const escaping = rendered.filter(
+    (row) =>
+      row.textBox.left < row.timeBox.left - 0.5 || row.textBox.right > row.timeBox.right + 0.5,
+  )
+  expect(escaping, `时间文字溢出时间列：${describeRows(escaping)}`).toEqual([])
+
+  const covered = rendered.filter((row) => row.textBox.right > row.badgeBox.left + 0.5)
+  expect(covered, `时间被类型徽标遮挡：${describeRows(covered)}`).toEqual([])
+
+  const collapsed = rendered.filter((row) => row.summaryWidth <= 0)
+  expect(collapsed, `摘要被挤成零宽：${describeRows(collapsed)}`).toEqual([])
+}
+
+/** 失败时只摘要前几行，避免整列事件把报错撑爆。 */
+function describeRows(rows: Array<{ text: string }>): string {
+  return rows
+    .slice(0, 3)
+    .map((row) => row.text)
+    .concat(rows.length > 3 ? [`…共 ${rows.length} 行`] : [])
+    .join(' | ')
 }
 
 test.describe('Responsive Debug Layout Real React Component Regression', () => {
@@ -572,4 +651,35 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(boxEvents.width).toBeCloseTo(boxDetail.width, 1)
     expect(boxPreview.width + boxEvents.width + boxDetail.width).toBeCloseTo((await shell.boundingBox())!.width, 0)
   })
+
+  // 审查发现：58px 固定时间列容不下完整时间戳，文字溢到徽标下面，读成「2026-11-2[ROOT]1:16」。
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    for (const viewport of [
+      { width: 1440, height: 900, name: '1440x900' },
+      { width: 390, height: 844, name: '390x844' },
+    ]) {
+      test(`event column keeps timestamps complete and clear of type badges (${locale} ${viewport.name})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await page.goto(`/browser-tests/debug-harness.html?locale=${locale}`)
+
+        const list = page.locator('.thread-events')
+        await expect(list).toBeVisible()
+        await expectEventRowFactsReadable(page)
+
+        // 时间列变宽不能把事件列表或外层壳推成横向滚动。
+        expect(await list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+        const shell = page.locator('.thread-events-shell')
+        expect(await shell.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+
+        if (timestampShotsDir) {
+          mkdirSync(timestampShotsDir, { recursive: true })
+          await page.screenshot({
+            path: resolve(timestampShotsDir, `debug-events-${locale}-${viewport.name}.png`),
+          })
+        }
+      })
+    }
+  }
 })
