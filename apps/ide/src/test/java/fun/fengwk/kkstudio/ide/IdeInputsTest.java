@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
+import java.util.List;
+
 /** 意图：客户端入参的错误码/文案保持原样；CREATE 与 RESUME 的显式实例与 epoch 约束不被放宽。 */
 class IdeInputsTest {
 
@@ -31,6 +33,20 @@ class IdeInputsTest {
         () -> IdeInputs.requireDirectory("/" + "a".repeat(4096)));
     assertValidation(
         "directory must not contain control characters", () -> IdeInputs.requireDirectory("/a\tb"));
+  }
+
+  /** 与 Daemon 侧同一控制字符集合（C0、DEL 与 C1）和同一码点计长，保证 Studio 放行的值 Daemon 不会拒绝。 */
+  @Test
+  void directoryRejectsC1AndCountsCodePointsLikeDaemonProtocol() {
+    for (String c1 : List.of("/a\u0080", "/a\u0085b", "/a\u009f")) {
+      assertValidation(
+          "directory must not contain control characters", () -> IdeInputs.requireDirectory(c1));
+    }
+    String supplementary = "\ud83d\ude00".repeat(4096);
+    assertEquals(supplementary, IdeInputs.requireDirectory(supplementary));
+    assertValidation(
+        "directory exceeds 4096 characters",
+        () -> IdeInputs.requireDirectory(supplementary + "\ud83d\ude00"));
   }
 
   @Test

@@ -9,6 +9,7 @@ import com.google.protobuf.UnknownFieldSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.util.List;
 import java.util.regex.Pattern;
 
 /** 字段级校验原语的分支契约：每类拒绝都给出固定文案，通过时返回原值。 */
@@ -158,6 +159,22 @@ class ControlProtocolFieldsTest {
     assertEquals(
         "f must not contain control characters",
         assertMessage(() -> ControlProtocolFields.requireIdePath("/tmp/\u007f", "f")));
+  }
+
+  /** 与 Daemon(Go) 的 {@code unicode.IsControl} 和 {@code RuneCountInString} 同口径：拒 C1，按码点计长。 */
+  @Test
+  void requireIdePathRejectsC1AndCountsCodePoints() {
+    for (String c1 : List.of("/tmp/\u0080", "/tmp/a\u0085b", "/tmp/\u009f")) {
+      assertEquals(
+          "f must not contain control characters",
+          assertMessage(() -> ControlProtocolFields.requireIdePath(c1, "f")));
+    }
+    String supplementary = "\ud83d\ude00".repeat(4096);
+    assertDoesNotThrow(() -> ControlProtocolFields.requireIdePath(supplementary, "f"));
+    assertEquals(
+        "f exceeds 4096 characters",
+        assertMessage(
+            () -> ControlProtocolFields.requireIdePath(supplementary + "\ud83d\ude00", "f")));
   }
 
   @Test

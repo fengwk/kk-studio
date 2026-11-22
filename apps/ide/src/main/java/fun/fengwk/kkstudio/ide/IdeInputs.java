@@ -17,7 +17,7 @@ public final class IdeInputs {
 
   private IdeInputs() {}
 
-  /** 目录：null 表示未指定；非 null 必须非空白、不超过 4096 字符且不含控制字符。 */
+  /** 目录：null 表示未指定；非 null 必须非空白、不超过 4096 个码点且不含控制字符（C0、DEL 与 C1）。 */
   public static String requireDirectory(String value) {
     if (value == null) {
       return null;
@@ -25,16 +25,13 @@ public final class IdeInputs {
     if (value.isBlank()) {
       throw DomainException.validation("environment", "directory must not be blank when present");
     }
-    if (value.length() > MAX_DIRECTORY_LENGTH) {
+    if (value.codePointCount(0, value.length()) > MAX_DIRECTORY_LENGTH) {
       throw DomainException.validation(
           "environment", "directory exceeds " + MAX_DIRECTORY_LENGTH + " characters");
     }
-    for (int i = 0; i < value.length(); i++) {
-      char c = value.charAt(i);
-      if (c < 0x20 || c == 0x7F) {
-        throw DomainException.validation(
-            "environment", "directory must not contain control characters");
-      }
+    if (value.codePoints().anyMatch(Character::isISOControl)) {
+      throw DomainException.validation(
+          "environment", "directory must not contain control characters");
     }
     return value;
   }

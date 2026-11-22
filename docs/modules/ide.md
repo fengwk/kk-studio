@@ -40,6 +40,8 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 失败回执只携带安全大写 `code` 与去敏 `message`，不把不同原因压成同一个错误。UUID 一律规范小写；Protobuf 的 `bindingEpoch` 是正 int64，`revision` 是非负 int64，HTTP 中均使用规范十进制字符串。`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。
 
+路径字段（`ideCommand.directory`、`ideResult.directory`、`ideResult.workspacePath` 与视图摘要中的同名字段）在 Studio 协议校验、IDE 入参校验与 Daemon(Go) 校验中使用同一口径：非空白、合法 Unicode、最多 4096 个码点（不按 UTF-16 单元计），且不含任何控制字符——C0、DEL 与 C1（U+0080–U+009F）全部拒绝。Studio 先行拒绝同一样本，不会出现 Studio 放行而 Daemon 以 `IDE_COMMAND` 校验失败终止命令的情形。
+
 `OPEN_VIEW` 是唯一安装/恢复入口，内部明确分成“确保 view 资源”和“绑定当前连接”：create 必须携带 `expectedBindingEpoch=0`，resume 必须携带最后确认的正 epoch；两者都核对 `expectedDaemonInstanceId`。同一已提交 claim 的完全相同请求返回同一绑定且不分配新 epoch，参数漂移为 `CLAIM_CONFLICT`；同一 owner 以不同 claim 对已有 view 再次 create 返回 `STALE_BINDING`，不会创建第二个 workspace。resume 不隐式创建视图、不改目录，也不占用新 view 容量；不同 `browserSessionId` 不得借租约到期接管。每个 Daemon 进程最多 64 个视图，创建预留与 CLOSING 同样占用容量。
 
 Server 只从 `CHANGE_DIRECTORY` 回执的完整快照读取目标视图的目录，并核对原绑定；缺失或不完整的快照使调用不可用。
