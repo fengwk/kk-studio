@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewRequestDTO;
@@ -55,9 +57,28 @@ class ModelPricingPreviewServiceTest {
     assertNull(missingFacts.getRates());
     assertNull(missingFacts.getActiveFrom());
     assertEquals(List.of(), missingFacts.getMatchedRules());
+  }
 
-    request.setInputTokens(-1);
-    assertThrows(IllegalArgumentException.class, () -> service.preview(request));
+  /**
+   * 测试意图：客户端可修正的输入错误必须以 validation 失败返回（HTTP 400），不能是裸 IllegalArgumentException（web 层会落到 500）。与保存路径
+   * ModelService.modelMutation 对非法价格的分类一致。
+   */
+  @Test
+  void rejectsClientInputErrorsAsValidationFailures() {
+    ModelPricingPreviewRequestDTO negativeTokens = new ModelPricingPreviewRequestDTO();
+    negativeTokens.setInputTokens(-1);
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> service.preview(negativeTokens)).code());
+
+    ModelPricingPreviewRequestDTO duplicateTier = new ModelPricingPreviewRequestDTO();
+    duplicateTier.setInputTokens(10);
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    pricing.setRules(List.of(tierMultiplier("fast"), tierMultiplier("fast")));
+    duplicateTier.setPricing(pricing);
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> service.preview(duplicateTier)).code());
   }
 
   private static ModelPricingDTO pricing() {
@@ -68,7 +89,7 @@ class ModelPricingPreviewServiceTest {
     base.setCacheRead(BigDecimal.ZERO);
     base.setCacheWriteByTtl(Map.of("300", new BigDecimal("2")));
     pricing.setBase(base);
-    pricing.setRules(List.of(range(), tierMultiplier(), time()));
+    pricing.setRules(List.of(range(), tierMultiplier("fast"), time()));
     ModelPricingChangeDTO change = new ModelPricingChangeDTO();
     change.setFrom("2027-01-01");
     ModelRateSetDTO changedBase = new ModelRateSetDTO();
@@ -92,10 +113,10 @@ class ModelPricingPreviewServiceTest {
     return rule;
   }
 
-  private static ModelPricingRuleDTO tierMultiplier() {
+  private static ModelPricingRuleDTO tierMultiplier(String serviceTier) {
     ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
     rule.setType("service_tier_multiplier");
-    rule.setServiceTier("fast");
+    rule.setServiceTier(serviceTier);
     rule.setFactor(new BigDecimal("2"));
     return rule;
   }

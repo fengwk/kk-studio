@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelPricingResolver;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewDTO;
@@ -18,7 +19,21 @@ import java.util.Map;
 @Service
 public class ModelPricingPreviewService {
 
+  private static final String RESOURCE = "model";
+
+  /**
+   * 试算不持久化任何状态：非法请求体与非法 pricing 都是客户端可修正的输入错误，统一按 validation 失败返回；与保存路径 {@code
+   * ModelService.modelMutation} 对同一份非法价格的分类一致。
+   */
   public ModelPricingPreviewDTO preview(ModelPricingPreviewRequestDTO request) {
+    try {
+      return resolvePreview(request);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
+    }
+  }
+
+  private static ModelPricingPreviewDTO resolvePreview(ModelPricingPreviewRequestDTO request) {
     if (request == null) {
       throw new IllegalArgumentException("pricing preview request is required");
     }
@@ -32,7 +47,8 @@ public class ModelPricingPreviewService {
     ModelPricingPreviewDTO result = new ModelPricingPreviewDTO();
     result.setRates(toRates(preview.rates()));
     result.setActiveFrom(preview.activeFrom() == null ? null : preview.activeFrom().toString());
-    result.setMatchedRules(preview.matchedRules().stream().map(this::toRule).toList());
+    result.setMatchedRules(
+        preview.matchedRules().stream().map(ModelPricingPreviewService::toRule).toList());
     return result;
   }
 
@@ -52,7 +68,7 @@ public class ModelPricingPreviewService {
     return dto;
   }
 
-  private ModelPricingRuleDTO toRule(ModelPricing.Rule rule) {
+  private static ModelPricingRuleDTO toRule(ModelPricing.Rule rule) {
     ModelPricingRuleDTO dto = new ModelPricingRuleDTO();
     if (rule instanceof ModelPricing.InputTokenRange range) {
       dto.setType("input_token_range");

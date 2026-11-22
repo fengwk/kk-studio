@@ -2,7 +2,10 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.invalid;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.parseTtl;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireDate;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireMinute;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireOptionalNonNegative;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireZone;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO;
@@ -11,10 +14,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
-import java.time.DateTimeException;
 import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +49,7 @@ final class ModelPricingValidator {
         if (change == null) {
           throw invalid(PATH + ".changes[" + i + "] must be an object");
         }
-        LocalDate date = date(change.getFrom(), PATH + ".changes[" + i + "].from");
+        LocalDate date = requireDate(change.getFrom(), PATH + ".changes[" + i + "].from");
         if (!dates.add(date)) {
           throw invalid(PATH + ".changes.from dates must be unique");
         }
@@ -177,13 +177,9 @@ final class ModelPricingValidator {
   private static void validateTime(ModelPricingRuleDTO rule, String path) {
     requireOnly(
         rule, path, union(Set.of("type", "start", "end", "timezone", "weekdays"), RATE_FIELDS));
-    validateTimeValue(rule.getStart(), false, path + ".start");
-    validateTimeValue(rule.getEnd(), true, path + ".end");
-    try {
-      ZoneId.of(rule.getTimezone());
-    } catch (DateTimeException | NullPointerException error) {
-      throw invalid(path + ".timezone must be a valid IANA zone");
-    }
+    requireMinute(rule.getStart(), false, path + ".start");
+    requireMinute(rule.getEnd(), true, path + ".end");
+    requireZone(rule.getTimezone(), path + ".timezone");
     validateWeekdays(rule.getWeekdays(), path + ".weekdays");
     validateFactors(rule, path);
   }
@@ -208,20 +204,6 @@ final class ModelPricingValidator {
     requireOptionalNonNegative(rule.getReasoningFactor(), path + ".reasoningFactor");
   }
 
-  private static void validateTimeValue(String value, boolean end, String path) {
-    if (end && "24:00".equals(value)) {
-      return;
-    }
-    if (value == null || !value.matches("(?:[01]\\d|2[0-3]):[0-5]\\d")) {
-      throw invalid(path + " must be HH:mm" + (end ? " or 24:00" : ""));
-    }
-    try {
-      LocalTime.parse(value);
-    } catch (DateTimeException | NullPointerException error) {
-      throw invalid(path + " must be HH:mm" + (end ? " or 24:00" : ""));
-    }
-  }
-
   private static void validateWeekdays(List<Integer> weekdays, String path) {
     if (weekdays == null) {
       return;
@@ -234,14 +216,6 @@ final class ModelPricingValidator {
       if (weekday == null || weekday < 1 || weekday > 7 || !unique.add(weekday)) {
         throw invalid(path + " must contain unique ISO weekdays from 1 to 7");
       }
-    }
-  }
-
-  private static LocalDate date(String value, String path) {
-    try {
-      return LocalDate.parse(value);
-    } catch (DateTimeException | NullPointerException error) {
-      throw invalid(path + " must be YYYY-MM-DD");
     }
   }
 

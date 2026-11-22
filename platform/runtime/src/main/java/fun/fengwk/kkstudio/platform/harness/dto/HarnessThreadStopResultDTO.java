@@ -17,7 +17,7 @@ public class HarnessThreadStopResultDTO {
   /** 结果状态，取 {@code StopStatus} 语义：STOPPED 或 REPLAYED。 */
   private Status status;
 
-  /** 停止操作后的权威 Thread 投影（与结果 version 一致）。 */
+  /** 停止操作后的权威 Thread 投影：取自 Stop 提交后的回读快照，因此版本可能高于 Stop 结果（提交后仍有并发写入推进同一 Thread）。 */
   private HarnessThreadDTO thread;
 
   /** 本次 Stop 的完整受影响集合回执（含目标自身），按 Runtime 的确定性顺序。 */

@@ -67,6 +67,7 @@ public class FfmpegStorageMediaProbe {
       if (headMetadata.contentLength() <= 0L || headMetadata.contentLength() > MAX_PROBE_SIZE) {
         throw new IllegalArgumentException("probe size is outside the supported range");
       }
+      Files.createDirectories(properties.getTempDir());
       Path workDir = Files.createTempDirectory(properties.getTempDir(), "canvas-probe-");
       try {
         Path original = workDir.resolve("original");

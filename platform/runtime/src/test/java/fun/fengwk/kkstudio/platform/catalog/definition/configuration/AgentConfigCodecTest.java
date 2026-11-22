@@ -114,6 +114,27 @@ class AgentConfigCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(duplicate));
   }
 
+  /**
+   * 测试意图：subagent 名（即 Agent 名）的 64 长度上限与保留字符集只在共享规则里定义一次；codec 是写路径的第一道 校验，必须与 Agent
+   * 名规则给出同一结论，而不能放行到 128。
+   */
+  @Test
+  void rejectsSubagentNamesOutsideTheSharedRule() {
+    AgentConfigDTO tooLong = config();
+    tooLong.setSubagents(List.of("a".repeat(65)));
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(tooLong));
+
+    AgentConfigDTO boundary = config();
+    boundary.setSubagents(List.of("a".repeat(64)));
+    assertEquals(List.of("a".repeat(64)), codec.decode(codec.encode(boundary)).getSubagents());
+
+    for (String reserved : List.of("my:agent", "my/agent", "my@agent", "my\\agent")) {
+      AgentConfigDTO separated = config();
+      separated.setSubagents(List.of(reserved));
+      assertThrows(IllegalArgumentException.class, () -> codec.encode(separated));
+    }
+  }
+
   /** 技能引用必须是合法对象结构，拒绝字符串或非法的结构。 */
   @Test
   void rejectsMalformedSkillReferences() {
