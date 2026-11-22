@@ -6,10 +6,18 @@ export interface SwitchProps {
   /** 开关没有可见文本，必须提供无障碍名称。 */
   label: string
   disabled?: boolean
+  /** 开关作用的说明文案，读屏随名称一起播报。 */
+  'aria-describedby'?: string
 }
 
 /** 共享开关：原生 button + role="switch"，Space/Enter 切换，焦点环由全局规则提供。 */
-export function Switch({ checked, onChange, label, disabled }: SwitchProps) {
+export function Switch({
+  checked,
+  onChange,
+  label,
+  disabled,
+  'aria-describedby': ariaDescribedBy,
+}: SwitchProps) {
   return (
     <button
       type="button"
@@ -17,6 +25,7 @@ export function Switch({ checked, onChange, label, disabled }: SwitchProps) {
       className="ui-switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={ariaDescribedBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >

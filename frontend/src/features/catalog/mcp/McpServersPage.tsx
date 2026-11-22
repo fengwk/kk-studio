@@ -7,13 +7,10 @@ import {
 } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
-import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
-import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
-import { SearchField } from '@/shared/ui/controls/SearchField'
+import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
 import { mcpServerService } from '@/features/catalog/mcp-server-service'
-import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { CreateMcpServerDialog } from './CreateMcpServerDialog'
@@ -37,6 +34,7 @@ import type { McpServerSummaryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * MCP Server 管理页：编排列表查询与搜索、两个编辑弹窗、删除确认与冲突呈现。
+ * 页面外壳（导航、搜索、加载/失败状态）复用 `AiConsoleFrame`，与其他 AI 目录页一致；
  * 表单状态、表单规则与写入副作用分别在 `mcp-server-forms`、`mcp-server-form-validation`
  * 与 `useMcpServerEditor` / `useMcpServerMutations` 中，本组件只负责把它们接起来。
  */
@@ -175,44 +173,33 @@ export function McpServersPage() {
   }
 
   return (
-    <section className="screen active">
-      <nav className="subbar">
-        <AiNavigation />
-        <SearchField value={search} onChange={setSearch} />
-      </nav>
-
-      <div className="screen-body">
-        {serversQuery.isLoading && <ResourceCardSkeleton label={t('ai.mcp.loading')} />}
-        {serversQuery.error && (
-          <StateBlock
-            title={
-              serversQuery.error instanceof Error
-                ? serversQuery.error.message
-                : t('ai.mcp.loadFailed')
-            }
-            tone="danger"
+    <AiConsoleFrame
+      search={search}
+      onSearchChange={setSearch}
+      busy={serversQuery.isLoading}
+      error={serversQuery.error}
+      onRetry={() => void serversQuery.refetch()}
+      hasCachedList={serversQuery.data !== undefined}
+      mutationError={null}
+      content={
+        <ResourceGrid>
+          <CreateCard
+            title={t('ai.mcp.create')}
+            subtitle={t('ai.mcp.createDescription')}
+            onClick={openCreateDialog}
           />
-        )}
-        {!serversQuery.isLoading && (
-          <ResourceGrid>
-            <CreateCard
-              title={t('ai.mcp.create')}
-              subtitle={t('ai.mcp.createDescription')}
-              onClick={openCreateDialog}
+          {servers.map((server) => (
+            <McpServerCard
+              key={server.name}
+              server={server}
+              deletePending={deleteMutation.isPending && deleteTarget?.name === server.name}
+              onEdit={() => openEditDialog(server)}
+              onDelete={() => openDeleteConfirm(server)}
             />
-            {servers.map((server) => (
-              <McpServerCard
-                key={server.name}
-                server={server}
-                deletePending={deleteMutation.isPending && deleteTarget?.name === server.name}
-                onEdit={() => openEditDialog(server)}
-                onDelete={() => openDeleteConfirm(server)}
-              />
-            ))}
-          </ResourceGrid>
-        )}
-      </div>
-
+          ))}
+        </ResourceGrid>
+      }
+    >
       {createForm && (
         <CreateMcpServerDialog
           form={createForm}
@@ -263,6 +250,6 @@ export function McpServersPage() {
         onRefresh={refreshAfterConflict}
         onClose={() => setConflict(null)}
       />
-    </section>
+    </AiConsoleFrame>
   )
 }

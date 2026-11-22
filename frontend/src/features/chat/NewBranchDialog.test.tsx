@@ -62,7 +62,12 @@ describe('NewBranchDialog', () => {
     await user.click(submit())
     expect(onConfirm).not.toHaveBeenCalled()
     expect(nameInput()).toHaveAttribute('aria-invalid', 'true')
-    expect(document.querySelector('.field-error')?.textContent?.length).toBeGreaterThan(0)
+    const error = document.querySelector<HTMLElement>('.field-error')!
+    expect(error.textContent?.length).toBeGreaterThan(0)
+    // 错误文案必须由 aria-describedby 关联，且不能放在包裹输入框的 label 里污染可访问名称。
+    expect(nameInput().getAttribute('aria-describedby')).toBe(error.id)
+    expect(error.closest('label')).toBeNull()
+    expect(nameInput()).toHaveAccessibleName('Thread 名称')
 
     await user.type(nameInput(), 'a'.repeat(257))
     await user.click(submit())

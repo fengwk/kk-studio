@@ -294,13 +294,19 @@ describe('PluginsTab', () => {
     })
   })
 
-  it('displays query error in StateBlock when listPlugins fails', async () => {
-    vi.mocked(client.listPlugins).mockRejectedValue(new Error('Failed to load plugins'))
+  // 列表读取失败按 HTTP 分类出本地化文案，并提供重试；不展示传输层或后端原文。
+  it('localizes the list failure and retries it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(client.listPlugins).mockRejectedValueOnce(new ApiError('boom', 500))
     renderTab()
 
-    await waitFor(() => {
-      expect(screen.getByText('Failed to load plugins')).toBeInTheDocument()
-    })
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('服务暂时异常，请稍后重试')
+    expect(screen.queryByText('boom')).not.toBeInTheDocument()
+
+    vi.mocked(client.listPlugins).mockResolvedValue([samplePlugin()])
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('MiniMax Mavis')).toBeInTheDocument()
   })
 
   it('shows warnings and error details for REFRESH_FAILED and REFRESH_UNCERTAIN', async () => {

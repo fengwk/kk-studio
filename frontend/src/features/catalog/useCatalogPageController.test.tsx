@@ -7,6 +7,7 @@ import {
   type CatalogPageScope,
 } from '@/features/catalog/useCatalogPageController'
 import { agentService } from '@/shared/api/agent-service'
+import { ApiError } from '@/shared/api/client'
 import { environmentService } from '@/features/environment/environment-service'
 import type {
   AgentDTO,
@@ -97,6 +98,66 @@ describe('useCatalogPageController', () => {
       })
     },
   )
+
+  // 页面级失败只能来自当前作用域的主列表：附属目录失败由能力面板就地降级，不能吞掉已读到的 Agent。
+  it('keeps the primary list usable when only the capability directories fail', async () => {
+    vi.mocked(agentService.listTools).mockRejectedValue(
+      new ApiError('tools down', 500),
+    )
+    vi.mocked(agentService.listSkillPackages).mockRejectedValue(
+      new ApiError('skills down', 500),
+    )
+
+    const { result } = renderHook(() => useCatalogPageController('agents'), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+
+    await waitFor(() => expect(result.current.agentPanelProps.agents).toHaveLength(1))
+    await waitFor(() => expect(agentService.listSkillPackages).toHaveBeenCalled())
+    expect(result.current.busy).toBe(false)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('surfaces the primary list failure and retries the same query', async () => {
+    vi.mocked(agentService.listAgents).mockRejectedValueOnce(
+      new ApiError('agents down', 500),
+    )
+
+    const { result } = renderHook(() => useCatalogPageController('agents'), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+
+    await waitFor(() => expect(result.current.error).not.toBeNull())
+    expect(result.current.agentPanelProps.agents).toHaveLength(0)
+
+    vi.mocked(agentService.listAgents).mockResolvedValue([agent()])
+    act(() => result.current.retry())
+
+    await waitFor(() => expect(result.current.error).toBeNull())
+    expect(result.current.agentPanelProps.agents).toHaveLength(1)
+  })
+
+  // 删除失败发生在确认弹窗内：错误随弹窗就地呈现，页面横幅不再承担它。
+  it('keeps a failed delete inside the confirm modal instead of the page banner', async () => {
+    vi.mocked(agentService.deleteAgent).mockRejectedValue(
+      new ApiError('Conflict', 409),
+    )
+
+    const { result } = renderHook(() => useCatalogPageController('agents'), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+    await waitFor(() => expect(result.current.agentPanelProps.agents).toHaveLength(1))
+
+    act(() => result.current.agentPanelProps.onDelete(agent()))
+    await act(async () => {
+      result.current.resourceDeleteConfirmModal.modal?.onConfirm()
+    })
+
+    await waitFor(() =>
+      expect(result.current.resourceDeleteConfirmModal.modal?.error).toBe('资源冲突，请刷新后重试'),
+    )
+    expect(result.current.mutationError).toBeNull()
+  })
 
   it('keeps provider, model, and agent editor and delete interactions in the Catalog runtime', async () => {
     const { result } = renderHook(() => useCatalogPageController('agents'), {

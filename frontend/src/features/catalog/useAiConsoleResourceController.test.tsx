@@ -451,6 +451,28 @@ describe('useAiConsoleResourceController', () => {
     expect(screen.getByTestId('skills-count')).toHaveTextContent('1')
     expect(agentService.listSkillPackages).toHaveBeenCalledTimes(2)
   })
+
+  // 删除失败必须留在发起它的确认弹窗里：弹窗关闭前用户只看得到弹窗内容。
+  it('reports a failed delete inside the confirm modal and clears it on close', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentService.deleteAgent).mockRejectedValue(new ApiError('Conflict', 409))
+
+    renderHarness()
+    await ready()
+
+    await user.click(screen.getByRole('button', { name: 'delete-agent' }))
+    expect(screen.getByTestId('delete-confirm-error')).toHaveTextContent('')
+    await user.click(screen.getByRole('button', { name: 'confirm-delete' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-confirm-error')).toHaveTextContent('资源冲突，请刷新后重试')
+    })
+    expect(screen.getByTestId('delete-confirm-open')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'close-delete' }))
+    expect(screen.queryByTestId('delete-confirm-open')).not.toBeInTheDocument()
+    expect(screen.getByTestId('delete-confirm-error')).toHaveTextContent('')
+  })
 })
 
 function ResourceControllerHarness() {
@@ -612,6 +634,7 @@ function ResourceControllerHarness() {
       {controller.deleteConfirmModal.modal && (
         <div data-testid="delete-confirm-open">open</div>
       )}
+      <div data-testid="delete-confirm-error">{controller.deleteConfirmModal.modal?.error ?? ''}</div>
       <button type="button" onClick={() => controller.deleteResource.provider('stub', '0')}>
         delete-provider
       </button>

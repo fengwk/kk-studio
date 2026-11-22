@@ -49,6 +49,8 @@ export function useCatalogPageController(scope: CatalogPageScope) {
   const resourceQueryEnabled = resourceQueryEnabledByScope[scope]
   const resourceController = useAiConsoleResourceController(resourceQueryEnabled)
   const { queries, resources, deletePending, editorActions, deleteResource } = resourceController
+  /** 页面级加载/失败只由当前作用域的主列表决定；附属目录失败由对应面板就地降级。 */
+  const primaryQuery = queryByScope(scope, queries)
   const agents = useMemo(
     () => filterAgents(resources.agents, deferredSearch),
     [deferredSearch, resources.agents],
@@ -61,14 +63,6 @@ export function useCatalogPageController(scope: CatalogPageScope) {
     () => filterProviders(resources.providers, deferredSearch),
     [deferredSearch, resources.providers],
   )
-  const queryResults = [
-    ...(resourceQueryEnabled.providers ? [queries.providers] : []),
-    ...(resourceQueryEnabled.models ? [queries.models] : []),
-    ...(resourceQueryEnabled.agents ? [queries.agents] : []),
-    ...(resourceQueryEnabled.tools ? [queries.tools] : []),
-    ...(resourceQueryEnabled.skills ? [queries.skills] : []),
-    ...(resourceQueryEnabled.environments ? [queries.environments] : []),
-  ]
   const resourceModalOpen = Boolean(resourceController.resourceEditorModal.modal)
   const rawMutationError = resourceModalOpen
     ? null
@@ -84,8 +78,11 @@ export function useCatalogPageController(scope: CatalogPageScope) {
   return {
     search,
     setSearch,
-    busy: queryResults.some((query) => query.isLoading),
-    error: queryResults.find((query) => query.error)?.error ?? null,
+    busy: primaryQuery.isLoading,
+    error: primaryQuery.error ?? null,
+    retry: () => {
+      void primaryQuery.refetch()
+    },
     mutationError,
     agentPanelProps: {
       agents,
@@ -118,3 +115,14 @@ export function useCatalogPageController(scope: CatalogPageScope) {
 }
 
 export type CatalogPageController = ReturnType<typeof useCatalogPageController>
+
+/** 作用域对应的主列表查询：页面栅格直接渲染的那一份资源。 */
+function queryByScope(
+  scope: CatalogPageScope,
+  queries: ReturnType<typeof useAiConsoleResourceController>['queries'],
+) {
+  if (scope === 'agents') {
+    return queries.agents
+  }
+  return scope === 'models' ? queries.models : queries.providers
+}

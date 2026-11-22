@@ -114,11 +114,21 @@ describe('McpServersPage', () => {
     expect(screen.getByLabelText('删除 MCP 服务 fs_prod')).toBeInTheDocument()
   })
 
-  it('handles loading and error states for the server list', async () => {
-    vi.mocked(mcpServerService.listServers).mockRejectedValue(new Error('Network offline'))
+  // 列表读取失败走共享页壳：按 HTTP 分类出本地化文案，并就地给出重试。
+  it('keeps the list failure inside the shared console frame with a retry', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.listServers).mockRejectedValueOnce(new ApiError('boom', 500))
+
     renderPage()
 
-    expect(await screen.findByText('Network offline')).toBeInTheDocument()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('服务暂时异常，请稍后重试')
+    expect(screen.queryByText('boom')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建 MCP 服务' })).not.toBeInTheDocument()
+
+    vi.mocked(mcpServerService.listServers).mockResolvedValueOnce([summary({ name: 'recovered' })])
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('recovered')).toBeInTheDocument()
   })
 
   it('filters the server list from the page search', async () => {
@@ -410,18 +420,25 @@ describe('McpServersPage', () => {
     expect(await screen.findByDisplayValue('https://example.com/ok')).toBeInTheDocument()
   })
 
-  it('refreshes cached servers on background refetch errors', async () => {
-    vi.mocked(mcpServerService.listServers).mockResolvedValueOnce([summary({ name: 'cached-server' })])
+  // 后台读取失败时，已加载的列表仍可用；重试成功后撤下错误提示。
+  it('localizes background refetch errors without hiding cached servers', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'cached-server' })])
     const { queryClient } = renderPage()
     expect(await screen.findByText('cached-server')).toBeInTheDocument()
 
-    vi.mocked(mcpServerService.listServers).mockRejectedValueOnce(new Error('background mcp error'))
+    vi.mocked(mcpServerService.listServers).mockRejectedValueOnce(
+      new ApiError('Failed to fetch', undefined, 'network_error'),
+    )
     await act(async () => {
       await queryClient.refetchQueries()
     })
 
-    expect(await screen.findByText('background mcp error')).toBeInTheDocument()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('网络异常，请稍后重试')
     expect(screen.getByText('cached-server')).toBeInTheDocument()
-    expect(screen.getByText('新建 MCP 服务')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(alert).not.toBeInTheDocument())
   })
 })

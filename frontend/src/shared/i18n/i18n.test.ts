@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -8,6 +10,7 @@ import {
   useI18n,
 } from '@/shared/i18n'
 import { messageCatalog } from '@/shared/i18n/catalogs'
+import { resourcesCatalog } from '@/shared/i18n/catalogs/resources'
 
 describe('i18n runtime', () => {
   it('defaults to en-US when the stored preference is absent or invalid', () => {
@@ -97,5 +100,57 @@ describe('i18n catalog locale alignment', () => {
     expect(
       Object.keys(catalog).filter((key) => key.startsWith('ai.environment.update.phase.')),
     ).toEqual([])
+  })
+})
+
+/**
+ * 动态拼出的 key 无法被静态匹配，只允许下列显式前缀；每个前缀都对应唯一的构造点，
+ * 新增动态 key 时必须同时在这里登记，否则守卫会把它们当成无引用文案。
+ */
+const DYNAMIC_KEY_PREFIXES = [
+  // CatalogEditorSection.tsx / AiConsoleResourceEditorModal.tsx: `ai.catalog.section.${name}`
+  'ai.catalog.section.',
+  // ModelPricingPlanEditor.tsx: `ai.catalog.form.weekday.${day}`（1..7）
+  'ai.catalog.form.weekday.',
+  // ModelPricingPlanEditor.tsx: `ai.catalog.form.${reason}`，reason 为
+  // pricingOverlapTokens / pricingDuplicateTier / pricingOverlapTime
+  'ai.catalog.form.pricing',
+]
+
+const sourceRoot = resolve(process.cwd(), 'src')
+const catalogDefinitionRoot = resolve(sourceRoot, 'shared/i18n/catalogs')
+
+/** 拼接源码文本：目录模块本身是 key 定义处，不能算引用方。 */
+function collectSourceText(dir: string): string {
+  const chunks: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (fullPath !== catalogDefinitionRoot) {
+        chunks.push(collectSourceText(fullPath))
+      }
+    } else if (/\.(?:ts|tsx)$/u.test(entry.name) && !/\.(?:test|spec)\./u.test(entry.name)) {
+      chunks.push(readFileSync(fullPath, 'utf8'))
+    }
+  }
+  return chunks.join('\n')
+}
+
+/**
+ * 文案只用来说明界面事实：资源目录里的每个 key 都必须还有源码引用方，
+ * 否则它是旧界面留下的废弃文案，只能靠全仓 grep 才能发现。
+ */
+describe('i18n catalog key usage', () => {
+  it('references every resources catalog key from source', () => {
+    const source = collectSourceText(sourceRoot)
+    const references = new Set(
+      Array.from(source.matchAll(/(['"`])([\w.-]+)\1/gu), ([, , key]) => key),
+    )
+    const unreferenced = Object.keys(resourcesCatalog).filter(
+      (key) =>
+        !DYNAMIC_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) && !references.has(key),
+    )
+
+    expect(unreferenced, 'catalog keys without a source reference').toEqual([])
   })
 })

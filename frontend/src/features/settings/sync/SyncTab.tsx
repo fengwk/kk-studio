@@ -152,7 +152,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
         <StateBlock title={t('settings.sync.loading')} />
       ) : null}
       {inventoryQuery.isError ? (
-        <div className="settings-error-state" role="alert">
+        <div className="settings-error-state">
           <StateBlock title={t('settings.sync.loadFailed')} tone="danger" />
           <Button
             variant="ghost"

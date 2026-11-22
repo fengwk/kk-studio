@@ -1,4 +1,6 @@
+import { useId } from 'react'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/shared/lib/numeric-input'
@@ -25,6 +27,7 @@ export function PricingTtlInputs({ rows, onChange }: {
   onChange: (rows: PricingTtlRow[]) => void
 }) {
   const { t } = useI18n()
+  const errorIdBase = `pricing-ttl-error-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const issues = findPricingTtlRowIssues(rows)
   const updateRow = (draftKey: string, patch: Partial<PricingTtlRow>) => {
     onChange(rows.map((row) => (row.draftKey === draftKey ? { ...row, ...patch } : row)))
@@ -33,6 +36,7 @@ export function PricingTtlInputs({ rows, onChange }: {
     <>
       {rows.map((row) => {
         const issue = issues[row.draftKey]
+        const errorId = issue ? `${errorIdBase}-${row.draftKey}` : undefined
         return (
           <div className="pricing-plan-row" key={row.draftKey}>
             <div className="form-grid-2">
@@ -41,6 +45,7 @@ export function PricingTtlInputs({ rows, onChange }: {
                 <TextInput
                   inputMode="numeric"
                   aria-label={t('ai.catalog.form.pricingTtlSeconds')}
+                  aria-describedby={errorId}
                   value={row.seconds}
                   invalid={issue === 'invalidSeconds' || issue === 'duplicateSeconds'}
                   onChange={(event) => updateRow(row.draftKey, { seconds: sanitizeIntegerInput(event.target.value) })} />
@@ -50,6 +55,7 @@ export function PricingTtlInputs({ rows, onChange }: {
                 <TextInput
                   inputMode="decimal"
                   aria-label={t('ai.catalog.form.cacheWritePrice')}
+                  aria-describedby={errorId}
                   value={row.rate}
                   placeholder={t('ai.catalog.form.pricingUnpriced')}
                   invalid={issue === 'rateRequired'}
@@ -61,7 +67,7 @@ export function PricingTtlInputs({ rows, onChange }: {
               className="ghost-inline-btn"
               aria-label={t('ai.catalog.form.removePricingRule')}
               onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}>×</button>
-            {issue ? <span className="field-error" role="alert">{t(ISSUE_KEYS[issue])}</span> : null}
+            {issue ? <FieldError id={errorId} role="alert">{t(ISSUE_KEYS[issue])}</FieldError> : null}
           </div>
         )
       })}

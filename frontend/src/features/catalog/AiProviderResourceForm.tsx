@@ -1,8 +1,11 @@
+import { useId } from 'react'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { TagInput } from '@/shared/ui/controls/TagInput'
+import { useFieldErrorId } from '@/shared/ui/controls/field-error'
 import type { ProviderType } from '@/shared/api/generated/contracts'
 import { PROVIDER_TYPE_VALUES } from '@/shared/api/generated/contracts'
 import type { ProviderDraft } from '@/features/catalog/ai-console-types'
@@ -24,20 +27,26 @@ export function ProviderForm({
   const isCustomRetry = draft.modelHttpRetryStatusCodes !== null && draft.modelHttpRetryStatusCodes !== undefined
   // 只有编辑已配置密钥的 Provider 才需要 CLEAR：创建表单只接受 SET（可留空）。
   const canClearCredential = mode === 'edit' && draft.credentialConfigured
+  const nameId = useId()
+  const nameErrorId = useFieldErrorId(fieldErrors.name)
+  const baseUrlId = useId()
+  const baseUrlErrorId = useFieldErrorId(fieldErrors.baseUrl)
   return (
     <>
-      <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
+      <div className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
+        <FieldLabel required htmlFor={nameId}>{t('ai.catalog.form.name')}</FieldLabel>
         <TextInput
+          id={nameId}
           invalid={Boolean(fieldErrors.name)}
+          aria-describedby={nameErrorId}
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
           placeholder="minimax"
           readOnly={mode === 'edit'}
           required
         />
-        {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
-      </label>
+        {fieldErrors.name ? <FieldError id={nameErrorId}>{fieldErrors.name}</FieldError> : null}
+      </div>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.apiKeyOptional')}</FieldLabel>
         <TextInput
@@ -103,11 +112,18 @@ export function ProviderForm({
           />
         )}
       </label>
-      <label className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>
-        <FieldLabel>{t('ai.catalog.form.baseUrl')}</FieldLabel>
-        <TextInput invalid={Boolean(fieldErrors.baseUrl)} value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
-        {fieldErrors.baseUrl ? <span className="field-error">{fieldErrors.baseUrl}</span> : null}
-      </label>
+      <div className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>
+        <FieldLabel htmlFor={baseUrlId}>{t('ai.catalog.form.baseUrl')}</FieldLabel>
+        <TextInput
+          id={baseUrlId}
+          invalid={Boolean(fieldErrors.baseUrl)}
+          aria-describedby={baseUrlErrorId}
+          value={draft.baseUrl}
+          onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })}
+          placeholder="https://api.example.com/v1"
+        />
+        {fieldErrors.baseUrl ? <FieldError id={baseUrlErrorId}>{fieldErrors.baseUrl}</FieldError> : null}
+      </div>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.modelCallTimeout')}</FieldLabel>
         <TextInput

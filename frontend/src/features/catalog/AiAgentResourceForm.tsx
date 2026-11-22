@@ -1,4 +1,6 @@
+import { useId } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -17,6 +19,7 @@ import { applyAgentModelSelection } from '@/features/catalog/ai-draft-normalizer
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { Select } from '@/shared/ui/controls/Select'
 import { ModelSelectionPicker } from '@/shared/ui/controls/ModelSelectionPicker'
+import { joinDescribedBy, useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { useI18n } from '@/shared/i18n'
 import type {
   AgentDTO,
@@ -55,6 +58,10 @@ export function AgentForm({
   const driver = draft.execution?.driver ?? 'builtin'
   const selectedModel = models.find((model) => model.name === draft.model)
   const modelUnavailable = isAgentModelUnavailable(draft, models, mode)
+  const nameId = useId()
+  const nameErrorId = useFieldErrorId(fieldErrors.name)
+  const modelErrorId = useFieldErrorId(fieldErrors.model)
+  const variantErrorId = useFieldErrorId(fieldErrors.variant)
   const {
     tools: toolCandidates,
     selectedTools: visibleSelectedTools,
@@ -66,18 +73,20 @@ export function AgentForm({
   return (
     <>
       <CatalogEditorSection name="basics">
-        <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-          <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
+        <div className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
+          <FieldLabel required htmlFor={nameId}>{t('ai.catalog.form.name')}</FieldLabel>
           <TextInput
+            id={nameId}
             invalid={Boolean(fieldErrors.name)}
+            aria-describedby={nameErrorId}
             value={draft.name}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
             placeholder="default-assistant"
             readOnly={mode === 'edit'}
             required
           />
-          {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
-        </label>
+          {fieldErrors.name ? <FieldError id={nameErrorId}>{fieldErrors.name}</FieldError> : null}
+        </div>
         <label className="form-group">
           <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
           {/* 多行描述：内部换行必须原样保留在 draft 与提交 payload 中。 */}
@@ -111,7 +120,7 @@ export function AgentForm({
         </label>
         {driver === 'builtin' ? (
           <>
-            <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
+            <div className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
               <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
               <ModelSelectionPicker
                 models={models}
@@ -127,8 +136,16 @@ export function AgentForm({
                 modelUnavailable={modelUnavailable}
                 variantUnavailable={modelUnavailable}
                 variantDisabled={selectedModel === undefined}
-                modelDescribedBy={modelUnavailable ? 'agent-model-identity-status' : undefined}
-                variantDescribedBy={modelUnavailable ? 'agent-model-variant-status' : undefined}
+                modelInvalid={Boolean(fieldErrors.model)}
+                variantInvalid={Boolean(fieldErrors.variant)}
+                modelDescribedBy={joinDescribedBy(
+                  modelUnavailable ? 'agent-model-identity-status' : undefined,
+                  modelErrorId,
+                )}
+                variantDescribedBy={joinDescribedBy(
+                  modelUnavailable ? 'agent-model-variant-status' : undefined,
+                  variantErrorId,
+                )}
                 onModelChange={(model) => {
                   if (model !== draft.model) onChange(applyAgentModelSelection(draft, model, models))
                 }}
@@ -139,14 +156,16 @@ export function AgentForm({
                   {t('ai.catalog.form.unavailableIdentityHint')}
                 </span>
               ) : null}
-              {fieldErrors.model ? <span className="field-error">{fieldErrors.model}</span> : null}
-            </label>
+              {fieldErrors.model ? <FieldError id={modelErrorId}>{fieldErrors.model}</FieldError> : null}
+            </div>
             {modelUnavailable ? (
               <span id="agent-model-variant-status" className="inline-hint" role="status">
                 {t('ai.catalog.form.unavailableModelVariants')}
               </span>
             ) : null}
-            {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
+            {fieldErrors.variant ? (
+              <FieldError id={variantErrorId}>{fieldErrors.variant}</FieldError>
+            ) : null}
             {models.length === 0 && (
               <div className="inline-hint" role="status">
                 {t('ai.catalog.form.needModel')}

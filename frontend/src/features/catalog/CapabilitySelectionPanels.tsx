@@ -1,7 +1,9 @@
 import { useId, useState } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { FieldError } from '@/shared/ui/controls/FieldError'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { useFieldErrorId } from '@/shared/ui/controls/field-error'
 import type { CapabilityOption } from '@/features/catalog/agent-capability-candidates'
 import { useI18n } from '@/shared/i18n'
 import './capability-picker.css'
@@ -26,6 +28,7 @@ export function CapabilitySelectionPanel({
 }) {
   const { t } = useI18n()
   const searchId = useId()
+  const errorId = useFieldErrorId(error)
   const [search, setSearch] = useState('')
   const [selectedOnly, setSelectedOnly] = useState(false)
   const checkedValues = new Set(selected)
@@ -44,12 +47,15 @@ export function CapabilitySelectionPanel({
   }
 
   return (
-    <fieldset className={`form-group capability-picker${error ? ' is-error' : ''}`}>
+    <fieldset
+      className={`form-group capability-picker${error ? ' is-error' : ''}`}
+      aria-describedby={errorId}
+    >
       <legend>{label} · {t('ai.catalog.form.selectedCount', { count: checkedValues.size })}</legend>
       <details className="capability-selection-details">
         <summary>{manageLabel}</summary>
         <div className="capability-selection-panel">
-          {error ? <span className="field-error">{error}</span> : null}
+          {error ? <FieldError id={errorId}>{error}</FieldError> : null}
           <label className="capability-search-label" htmlFor={searchId}>{searchLabel}</label>
           <TextInput
             id={searchId}

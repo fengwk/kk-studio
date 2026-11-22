@@ -82,6 +82,7 @@ export function SkillPackagesPage() {
       onSearchChange={setSearch}
       busy={packagesQuery.isLoading}
       error={packagesQuery.error}
+      onRetry={() => void packagesQuery.refetch()}
       mutationError={actionError ? new Error(actionError) : null}
       content={content}
     >
