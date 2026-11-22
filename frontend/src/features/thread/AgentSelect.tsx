@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { AgentSelectionPanel } from '@/features/thread/SelectionPanel'
+import { joinDescribedBy } from '@/shared/ui/controls/field-error'
 import { useI18n } from '@/shared/i18n'
 
 interface AgentSelectProps {
@@ -9,6 +10,8 @@ interface AgentSelectProps {
   onChange: (name: string) => void
   'aria-label': string
   'aria-invalid'?: boolean
+  /** 字段错误文案的 id：由调用方渲染错误文案，触发器经 aria-describedby 直接引用。 */
+  errorId?: string
   disabled?: boolean
   loading?: boolean
   catalogError?: boolean
@@ -22,6 +25,7 @@ export function AgentSelect({
   onChange,
   'aria-label': label,
   'aria-invalid': invalid,
+  errorId,
   disabled = false,
   loading = false,
   catalogError = false,
@@ -52,7 +56,7 @@ export function AgentSelect({
         type="button"
         className="ui-select-trigger"
         aria-label={label}
-        aria-describedby={value ? `${panelId}-value` : undefined}
+        aria-describedby={joinDescribedBy(value ? `${panelId}-value` : undefined, errorId)}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-invalid={invalid || undefined}

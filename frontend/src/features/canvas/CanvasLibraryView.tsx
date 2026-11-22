@@ -120,7 +120,7 @@ export function CanvasLibraryView() {
           />
         ) : null}
         {canvasesQuery.isError ? (
-          <div className="library-load-error" role="alert">
+          <div className="library-load-error">
             <StateBlock
               tone="danger"
               title={t('canvas.library.loadError', {

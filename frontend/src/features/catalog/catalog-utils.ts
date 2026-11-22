@@ -4,9 +4,21 @@ import { translate, type TranslationKey } from '@/shared/i18n'
 import type { AgentDTO, ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
 export function resourceTitle(modal: ResourceModal): string {
-  const prefix = modal.mode === 'create'
-    ? translate('ai.catalog.createPrefix')
-    : translate('ai.catalog.editPrefix')
+  if (modal.mode === 'edit') {
+    if (modal.kind === 'provider') {
+      return translate('ai.catalog.editProviderTitle', { name: modal.name })
+    }
+    if (modal.kind === 'model') {
+      return translate(
+        modal.resourceKind === 'GROUP'
+          ? 'ai.catalog.editModelGroupTitle'
+          : 'ai.catalog.editModelTitle',
+        { name: modal.name },
+      )
+    }
+    return translate('ai.catalog.editAgentTitle', { name: modal.name })
+  }
+  const prefix = translate('ai.catalog.createPrefix')
   if (modal.kind === 'provider') {
     return `${prefix} ${translate('ai.catalog.resourceType.provider')}`
   }

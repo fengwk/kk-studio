@@ -117,7 +117,7 @@ describe('SettingsPage server editor', () => {
     await userEvent.clear(bypass)
     await userEvent.type(bypass, 'localhost,127.*,::1,minio,*.internal')
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('所有更改已保存')).toBeInTheDocument())
     const sections = {
       tool: initial.tool,
       aiRuntime: initial.aiRuntime,
@@ -136,7 +136,7 @@ describe('SettingsPage server editor', () => {
 
     await userEvent.clear(screen.getByLabelText('代理地址'))
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('所有更改已保存')).toBeInTheDocument())
     expect(mocks.update.mock.calls[1]![0]).toEqual({
       ...sections,
       backendNetwork: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1,minio,*.internal' },
@@ -228,7 +228,7 @@ describe('SettingsPage server editor', () => {
     expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('所有更改已保存')).toBeInTheDocument())
     expect(mocks.update).toHaveBeenCalledTimes(1)
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
     expect(sent.expectedVersion).toBe('0')
@@ -259,7 +259,7 @@ describe('SettingsPage server editor', () => {
     await userEvent.type(queue, '256')
 
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('所有更改已保存')).toBeInTheDocument())
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
     expect(sent.advanced.processorLeaseDurationMillis).toBe('45000')
     expect(sent.advanced.applicationEventQueueCapacity).toBe(256)
@@ -320,11 +320,11 @@ describe('SettingsPage server editor', () => {
     await userEvent.click(await serverTab('AI 运行时'))
     const retries = screen.getByLabelText('最大重试次数')
     expect(retries).toHaveValue('3')
-    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByText('所有更改已保存')).toBeInTheDocument()
 
     resolveGet(fresh)
     await waitFor(() => expect(retries).toHaveValue('9'))
-    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByText('所有更改已保存')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '重置' })).toBeDisabled()
 
@@ -332,7 +332,7 @@ describe('SettingsPage server editor', () => {
     await userEvent.clear(delay)
     await userEvent.type(delay, '3000')
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('所有更改已保存')).toBeInTheDocument())
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       expectedVersion: '1',
       aiRuntime: { ...fresh.aiRuntime, retryBaseDelayMillis: '3000' },
@@ -360,7 +360,7 @@ describe('SettingsPage server editor', () => {
 
     await userEvent.clear(delay)
     await userEvent.type(delay, '2000')
-    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByText('所有更改已保存')).toBeInTheDocument()
     expect(delay).toHaveValue('3000')
     expect(mocks.update).not.toHaveBeenCalled()
   })
@@ -424,7 +424,7 @@ describe('SettingsPage server editor', () => {
     expect(field).toHaveValue('99999999')
 
     await userEvent.click(screen.getByRole('button', { name: '重置' }))
-    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByText('所有更改已保存')).toBeInTheDocument()
     await waitFor(() => expect(field).toHaveValue('90000'))
     expect(mocks.update).not.toHaveBeenCalled()
   })

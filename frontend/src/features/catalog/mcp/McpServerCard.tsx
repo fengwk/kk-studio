@@ -1,5 +1,6 @@
 import { formatBackendDate } from '@/shared/lib/date-format'
 import { useI18n } from '@/shared/i18n'
+import { formatDurationMillis } from '@/features/catalog/ai-resource-card-format'
 import { ResourceCardLayout, type ResourceCardRow } from '@/features/catalog/AiResourceCardLayout'
 import type { McpServerSummaryDTO } from '@/shared/api/generated/contracts'
 
@@ -12,28 +13,15 @@ function summaryRows(server: McpServerSummaryDTO, t: ReturnType<typeof useI18n>[
       : t('ai.mcp.statusUnverified')
 
   const rows: ResourceCardRow[] = [
-    {
-      pairs: [
-        { label: t('ai.mcp.status'), value: statusLabel },
-        { label: t('ai.mcp.toolCount'), value: String(server.toolCount) },
-      ],
-    },
-    {
-      pairs: [
-        { label: t('ai.mcp.version'), value: String(server.version) },
-        { label: t('ai.catalog.card.timeout'), value: t('ai.catalog.card.milliseconds', { value: server.timeoutMillis }) },
-      ],
-    },
-    {
-      pairs: [
-        {
-          label: t('ai.mcp.enabledState'),
-          value: server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled'),
-        },
-      ],
-    },
-    ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
+    [t('ai.mcp.status'), statusLabel],
+    [t('ai.mcp.toolCount'), String(server.toolCount)],
+    [t('ai.mcp.version'), String(server.version)],
+    [t('ai.catalog.card.timeout'), formatDurationMillis(server.timeoutMillis)],
+    [t('ai.mcp.enabledState'), server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled')],
   ]
+  if (updateTime) {
+    rows.push([t('ai.mcp.updated'), updateTime])
+  }
   return rows
 }
 

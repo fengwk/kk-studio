@@ -186,15 +186,16 @@ export function AgentForm({
       </CatalogEditorSection>
 
       <CatalogEditorSection name="prompt">
-        <label className="form-group">
-          <FieldLabel>{t('ai.catalog.form.systemPrompt')}</FieldLabel>
+        {/* 区块标题已经说明了字段含义；控件用 aria-label 保留可访问名称，不再重复可见标签。 */}
+        <div className="form-group">
           <TextArea
+            aria-label={t('ai.catalog.form.systemPrompt')}
             value={draft.systemPrompt}
             onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })}
             placeholder={t('ai.catalog.form.systemPromptPlaceholder')}
             rows={4}
           />
-        </label>
+        </div>
       </CatalogEditorSection>
 
       <CatalogEditorSection name="capabilities">

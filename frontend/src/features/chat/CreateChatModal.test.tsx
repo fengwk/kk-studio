@@ -164,11 +164,13 @@ describe('CreateChatModal', () => {
     const yoloSwitch = screen.getByRole('switch', { name: 'YOLO 模式' })
     expect(describedByText(yoloSwitch)).toEqual(['自动批准工具调用，跳过人工确认'])
 
-    // Agent 选择的可访问名称只是字段名；错误文案以 alert 插入，不进入字段名，也不在 label 内。
-    expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument()
+    // Agent 选择器的错误由触发器直接关联：触发器 aria-invalid 且 aria-describedby 指向错误文案，
+    // 触发器可访问名称只是字段名，错误文案以 alert 插入且不在 label 内。
+    const agentTrigger = screen.getByRole('button', { name: 'Agent' })
+    expect(agentTrigger).toHaveAttribute('aria-invalid', 'true')
+    expect(describedByText(agentTrigger)).toEqual(['Agent 已不可用'])
     const agentError = screen.getByText('Agent 已不可用')
     expect(agentError).toHaveAttribute('role', 'alert')
-    expect(describedByText(screen.getByRole('group', { name: 'Agent' }))).toEqual(['Agent 已不可用'])
     expect(agentError.closest('label')).toBeNull()
   })
 

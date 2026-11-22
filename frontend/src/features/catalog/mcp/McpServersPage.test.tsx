@@ -101,9 +101,19 @@ describe('McpServersPage', () => {
     expect(screen.getByText('Streamable HTTP')).toBeInTheDocument()
     expect(screen.getByText('可用')).toBeInTheDocument()
     expect(screen.getByText('5')).toBeInTheDocument()
-    expect(screen.getByText('45000 毫秒')).toBeInTheDocument()
+    // 与 Provider 卡同一套时长格式：整秒值按秒显示，不再是 45000 毫秒。
+    expect(screen.getByText('45 秒')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getByText('已启用')).toBeInTheDocument()
+
+    // 每条元信息都是独立行，共用卡片标签列；不存在脱离该列的成对行。
+    const card = screen.getByText('fs_prod').closest('article')
+    expect(card?.querySelectorAll('.resource-card-pairs')).toHaveLength(0)
+    expect(
+      Array.from(card?.querySelectorAll('.resource-card-meta-row .resource-card-meta-label') ?? []).map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(['状态', '工具数量', '版本', '超时', '启用状态', '更新时间'])
 
     // 列表项只有安全元数据：URL 与 headers 不进入卡片
     expect(screen.queryByText(/http:\/\//)).not.toBeInTheDocument()
@@ -216,6 +226,27 @@ describe('McpServersPage', () => {
     // 校验错误是用户可见文案：必须随界面语言走，而不是固定英文。
     expect(screen.getByRole('alert')).toHaveTextContent('服务名称需以小写字母开头')
     expect(mcpServerService.createServer).not.toHaveBeenCalled()
+  })
+
+  it('labels the create timeout with its unit and keeps the name pattern as one code token', async () => {
+    // 意图：表单时长直接提交毫秒，字段名必须带单位；名字正则是不可拆分的代码片段，
+    // 不能与说明文字混成同一段可随意断行的纯文本。
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
+    const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
+
+    const timeoutField = within(modal).getByLabelText('超时（毫秒）')
+    expect(timeoutField).toHaveValue('60000')
+
+    const hint = within(modal).getByText(/小写字母、数字或下划线/)
+    const pattern = within(hint).getByText('^[a-z][a-z0-9_]*$')
+    expect(pattern.tagName).toBe('CODE')
+    expect(pattern).toHaveClass('ui-mono', 'mcp-name-pattern')
+    // 说明文案里不再内联正则：否则那段文本又会被浏览器在 token 中间断开。
+    expect(hint.textContent).not.toContain('格式：^')
   })
 
   it('shows a conflict presenter when create conflicts', async () => {
@@ -368,7 +399,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_timeout'))
     const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_timeout' })
     // 清空超时后提交会回退为默认 60000，与已保存值一致，不应被当作未保存的变更。
-    await user.clear(within(modal).getByLabelText('超时'))
+    await user.clear(within(modal).getByLabelText('超时（毫秒）'))
     await user.click(within(modal).getByRole('button', { name: '发现工具' }))
 
     await waitFor(() => {
@@ -379,8 +410,8 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_timeout'))
     const reopened = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_timeout' })
     // 真正不同的超时仍然是未保存的变更，必须阻断发现工具。
-    await user.clear(within(reopened).getByLabelText('超时'))
-    await user.type(within(reopened).getByLabelText('超时'), '45000')
+    await user.clear(within(reopened).getByLabelText('超时（毫秒）'))
+    await user.type(within(reopened).getByLabelText('超时（毫秒）'), '45000')
     await user.click(within(reopened).getByRole('button', { name: '发现工具' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent('存在未保存的配置更改，请先保存再发现工具。')

@@ -391,8 +391,11 @@ describe('catalog utils', () => {
     expect(includesSearch('MiniMax', '')).toBe(true)
 
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('创建 提供商')
-    expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 模型')
+    expect(resourceTitle({ kind: 'provider', mode: 'edit', name: 'minimax', expectedVersion: '1' })).toBe('编辑提供商：minimax')
+    expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑模型：MiniMax-M2.7')
+    expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'GROUP', name: 'coding', expectedVersion: '1' })).toBe('编辑模型组：coding')
     expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('创建 Agent')
+    expect(resourceTitle({ kind: 'agent', mode: 'edit', name: 'assistant', expectedVersion: '1' })).toBe('编辑 Agent：assistant')
   })
 
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */

@@ -107,7 +107,12 @@ export function SkillPackagePreview({
         <div className="skill-section-heading">
           <h3>{t('ai.skillPackages.skills')}</h3>
           <span className="inline-hint">
-            {t('ai.skillPackages.skillCountValue', { count: preview.skills.length })}
+            {t(
+              preview.skills.length === 1
+                ? 'ai.skillPackages.skillCountOne'
+                : 'ai.skillPackages.skillCountMany',
+              { count: preview.skills.length },
+            )}
           </span>
         </div>
         <ul className="skill-list">

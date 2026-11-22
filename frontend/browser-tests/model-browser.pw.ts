@@ -345,14 +345,14 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         // 编辑已有资源直接进入对应表单，不显示类型 Tab。
         await page.getByRole('button', { name: '编辑 main', exact: true }).click()
         dialog = page.getByRole('dialog')
-        await expect(dialog).toHaveAccessibleName('编辑 模型')
+        await expect(dialog).toHaveAccessibleName('编辑模型：main')
         await expect(dialog.getByRole('tab')).toHaveCount(0)
         await expect(dialog.getByRole('button', { name: '提供商', exact: true })).toBeDisabled()
         await dialog.getByRole('button', { name: '关闭' }).click()
 
         await page.getByRole('button', { name: '编辑 coding', exact: true }).click()
         dialog = page.getByRole('dialog')
-        await expect(dialog).toHaveAccessibleName('编辑 模型组')
+        await expect(dialog).toHaveAccessibleName('编辑模型组：coding')
         await expect(dialog.getByRole('tab')).toHaveCount(0)
         await expect(dialog.locator('.group-member-row')).toHaveCount(2)
         await expect(dialog.locator('.group-member-row').nth(0)).toContainText('main')

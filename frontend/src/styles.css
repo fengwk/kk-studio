@@ -695,6 +695,11 @@ div.is-error {
   color: var(--fg-muted);
 }
 
+/* 中文不做大写变换：产品术语（如 Thread）保留原拼写，与同组中文标题一致。 */
+:lang(zh) .shortcut-group-title {
+  text-transform: none;
+}
+
 .shortcut-group-list {
   margin: 0;
   padding: 0;

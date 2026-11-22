@@ -321,7 +321,8 @@ describe('SkillPackagesPage', () => {
     const detailDialog = await screen.findByRole('dialog', { name: /详情：core-tools/ })
     await user.click(await within(detailDialog).findByRole('button', { name: '删除技能包 core-tools' }))
 
-    const modal = await screen.findByRole('alertdialog')
+    const modal = await screen.findByRole('alertdialog', { name: '删除技能包：core-tools' })
+    // 正文引号与全角问号之间没有空格字符：直接对渲染文本做精确断言。
     expect(within(modal).getByText('确认删除技能包“core-tools”？')).toBeInTheDocument()
     await user.click(within(modal).getByRole('button', { name: '删除技能包' }))
 
@@ -349,6 +350,7 @@ describe('SkillPackagesPage', () => {
     expect(within(modal).getByText('scripts')).toBeInTheDocument()
     expect(within(modal).getAllByText('SKILL.md')).toHaveLength(2)
     expect(within(modal).getByText('共 3 个文件')).toBeInTheDocument()
+    expect(within(modal).getByText('共 2 个技能')).toBeInTheDocument()
 
     expect(within(modal).queryByText('环境同步')).not.toBeInTheDocument()
 
@@ -358,6 +360,27 @@ describe('SkillPackagesPage', () => {
     })
     expect(clickSpy).toHaveBeenCalled()
     clickSpy.mockRestore()
+  })
+
+  // 测试意图：英文计数按数量区分单复数（1 skill / 1 file），不是固定用复数名词。
+  it('uses singular English count labels for a single skill and file', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentService.getSkillPackage).mockResolvedValue(
+      detail({ skills: [{ name: 'dev', description: 'developer workflow' }] }),
+    )
+    vi.mocked(agentService.listSkillPackageFiles).mockResolvedValue([
+      { path: 'dev/SKILL.md', size: '2048' },
+    ])
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const modal = await screen.findByRole('dialog', { name: /详情：core-tools/ })
+
+    act(() => setLocale('en-US'))
+
+    expect(await within(modal).findByText('1 skill')).toBeInTheDocument()
+    expect(await within(modal).findByText('1 file')).toBeInTheDocument()
   })
 
   it('switches list labels between zh-CN and en-US', async () => {

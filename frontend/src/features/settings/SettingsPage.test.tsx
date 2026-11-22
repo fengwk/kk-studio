@@ -375,7 +375,7 @@ describe('settings sync tab', () => {
     // draft 以导入后的权威重建，脏状态清除，显示服务端新值。
     await user.click(await tabByName('AI 运行时'))
     await waitFor(() => expect(screen.getByLabelText('基础延迟（毫秒）')).toHaveValue('7000'))
-    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByText('所有更改已保存')).toBeInTheDocument()
 
     // 下一次保存携带重新加载后捕获的版本，而不是导入前的 0。
     const reloaded = screen.getByLabelText('基础延迟（毫秒）')
@@ -418,7 +418,7 @@ describe('settings sync tab', () => {
     await user.click(await tabByName('AI 运行时'))
     const delay = await screen.findByLabelText('基础延迟（毫秒）')
     expect(delay).toHaveValue('2000')
-    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByText('所有更改已保存')).toBeInTheDocument()
     await user.clear(delay)
     await user.type(delay, '4000')
     mocks.update.mockImplementation(async (update) => ({ ...makeSettingsDto(), ...update, version: '1' }))

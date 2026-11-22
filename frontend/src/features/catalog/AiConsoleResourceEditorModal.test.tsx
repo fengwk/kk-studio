@@ -64,7 +64,7 @@ describe('model create kind tabs', () => {
       />,
     )
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '编辑 模型组' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '编辑模型组：group-a' })).toBeInTheDocument()
   })
 
   // 测试意图：类型切换必须是与选中页签互指的 tablist/tab/tabpanel，且只有一个 Tab 停靠点。

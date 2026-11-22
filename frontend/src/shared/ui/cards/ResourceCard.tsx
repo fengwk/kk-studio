@@ -1,23 +1,18 @@
 import type { ReactNode } from 'react'
 import './cards.css'
 
-export interface ResourceCardPair {
-  label: string
-  value: string
-}
-
 /**
- * 资源卡元信息行，四种形态覆盖现有资源列表：
+ * 资源卡元信息行，三种形态覆盖现有资源列表：
  * - `[label, value]` 简写文本行；
  * - 文本行对象（可选 wrap 两行截断）；
- * - 标签行（超出的标签折叠为 +N）；
- * - 成对字段行（如超时/idle，一行两项）。
+ * - 标签行（超出的标签折叠为 +N）。
+ *
+ * 所有行共用同一标签列；没有“一行两项”的变体，否则值起点会脱离共享列。
  */
 export type ResourceCardMetaRow =
   | [label: string, value: ReactNode]
   | { label: string; value?: ReactNode; wrap?: boolean }
   | { label: string; tags: string[]; limit?: number }
-  | { pairs: ResourceCardPair[] }
 
 export interface ResourceCardProps {
   /** 资源类型图标元素（通常为 20px 的 lucide 图标）；共享卡不绑定任何业务图标枚举。 */
@@ -39,10 +34,6 @@ function isTagsRow(
   row: ResourceCardMetaRow,
 ): row is { label: string; tags: string[]; limit?: number } {
   return !Array.isArray(row) && 'tags' in row
-}
-
-function isPairsRow(row: ResourceCardMetaRow): row is { pairs: ResourceCardPair[] } {
-  return !Array.isArray(row) && 'pairs' in row
 }
 
 /** 空标签行仍保留 label，右侧留空，不显示伪占位符。 */
@@ -146,20 +137,6 @@ export function ResourceCard({
                 <div className="resource-card-meta-row is-tags" key={`tags-${row.label}`}>
                   <span className="resource-card-meta-label">{row.label}</span>
                   <TagList tags={row.tags} limit={row.limit} />
-                </div>
-              )
-            }
-            if (isPairsRow(row)) {
-              return (
-                <div className="resource-card-pairs" key={`pairs-${index}`}>
-                  {row.pairs.map((pair) => (
-                    <div className="resource-card-pair" key={pair.label}>
-                      <span className="resource-card-pair-label">{pair.label}</span>
-                      <span className="resource-card-pair-value" title={pair.value}>
-                        {pair.value}
-                      </span>
-                    </div>
-                  ))}
                 </div>
               )
             }

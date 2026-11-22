@@ -18,7 +18,7 @@ test('retry backoff strategy options save and clear dirty state', async ({ page 
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('body')).toHaveAttribute('data-saved-strategy', 'FIXED')
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
-  await expect(page.getByText('已是最新')).toBeVisible()
+  await expect(page.getByText('所有更改已保存')).toBeVisible()
   await page.screenshot({ path: '../reports/layout/settings-catalog-saved.png' })
 })
 

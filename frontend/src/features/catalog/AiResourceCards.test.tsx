@@ -293,6 +293,15 @@ describe('AI resource cards', () => {
     expect(screen.getByText('基础 URL')).toBeInTheDocument()
     expect(screen.queryByText('URL')).toBeNull()
 
+    // 超时与空闲与其它元信息一样各占一行，共用卡片标签列（不再是一行两项）。
+    const card = screen.getByRole('heading', { level: 3 }).closest('article')
+    expect(card?.querySelectorAll('.resource-card-pairs')).toHaveLength(0)
+    expect(
+      Array.from(card?.querySelectorAll('.resource-card-meta-row .resource-card-meta-label') ?? []).map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(['类型', '基础 URL', 'API Key', '超时', '空闲', 'HTTP 重试'])
+
     rerender(
       <ProviderResourceCard
         provider={provider({

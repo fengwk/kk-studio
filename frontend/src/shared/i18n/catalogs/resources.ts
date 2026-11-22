@@ -26,10 +26,6 @@ export const resourcesCatalog = {
     'en-US': 'Create',
     'zh-CN': '创建',
   },
-  'ai.catalog.editPrefix': {
-    'en-US': 'Edit',
-    'zh-CN': '编辑',
-  },
   'ai.catalog.createAgentDescription': {
     'en-US': 'Combine Model, tools, skills, and policy',
     'zh-CN': '组合模型、工具、技能与策略',
@@ -49,6 +45,23 @@ export const resourcesCatalog = {
   'ai.catalog.createProviderDescription': {
     'en-US': 'Configure provider and credentials',
     'zh-CN': '配置提供商与凭据',
+  },
+  // 编辑弹窗标题指向具体对象，按 docs/modules/frontend.md「动作或对象：名称」书写。
+  'ai.catalog.editProviderTitle': {
+    'en-US': 'Edit Provider: {{name}}',
+    'zh-CN': '编辑提供商：{{name}}',
+  },
+  'ai.catalog.editModelTitle': {
+    'en-US': 'Edit Model: {{name}}',
+    'zh-CN': '编辑模型：{{name}}',
+  },
+  'ai.catalog.editModelGroupTitle': {
+    'en-US': 'Edit Model Group: {{name}}',
+    'zh-CN': '编辑模型组：{{name}}',
+  },
+  'ai.catalog.editAgentTitle': {
+    'en-US': 'Edit Agent: {{name}}',
+    'zh-CN': '编辑 Agent：{{name}}',
   },
   'ai.catalog.action.createSession': {
     'en-US': 'New Session',
@@ -796,24 +809,24 @@ export const resourcesCatalog = {
     'zh-CN': '添加预设',
   },
   'ai.catalog.deleteProviderTitle': {
-    'en-US': 'Delete Provider',
-    'zh-CN': '删除提供商',
+    'en-US': 'Delete Provider: {{name}}',
+    'zh-CN': '删除提供商：{{name}}',
   },
   'ai.catalog.deleteProviderDescription': {
     'en-US': 'Provider {{name}} will be deleted.',
     'zh-CN': '将删除提供商 {{name}}。',
   },
   'ai.catalog.deleteModelTitle': {
-    'en-US': 'Delete Model',
-    'zh-CN': '删除模型',
+    'en-US': 'Delete Model: {{name}}',
+    'zh-CN': '删除模型：{{name}}',
   },
   'ai.catalog.deleteModelDescription': {
     'en-US': 'Model {{name}} will be deleted.',
     'zh-CN': '将删除模型 {{name}}。',
   },
   'ai.catalog.deleteAgentTitle': {
-    'en-US': 'Delete Agent',
-    'zh-CN': '删除 Agent',
+    'en-US': 'Delete Agent: {{name}}',
+    'zh-CN': '删除 Agent：{{name}}',
   },
   'ai.catalog.deleteAgentDescription': {
     'en-US': 'Agent {{name}} will be deleted. Existing sessions remain, but new runs cannot use this Agent.',
@@ -1012,6 +1025,10 @@ export const resourcesCatalog = {
     'en-US': 'Delete Skill Package',
     'zh-CN': '删除技能包',
   },
+  'ai.skillPackages.deleteTitle': {
+    'en-US': 'Delete Skill Package: {{name}}',
+    'zh-CN': '删除技能包：{{name}}',
+  },
   'ai.skillPackages.deleteConfirm': {
     'en-US': 'Are you sure you want to delete skill package "{{name}}"?',
     'zh-CN': '确认删除技能包“{{name}}”？',
@@ -1164,7 +1181,11 @@ export const resourcesCatalog = {
     'en-US': 'Files',
     'zh-CN': '文件数',
   },
-  'ai.skillPackages.fileCountValue': {
+  'ai.skillPackages.fileCountOne': {
+    'en-US': '{{count}} file',
+    'zh-CN': '共 {{count}} 个文件',
+  },
+  'ai.skillPackages.fileCountMany': {
     'en-US': '{{count}} files',
     'zh-CN': '共 {{count}} 个文件',
   },
@@ -1244,7 +1265,11 @@ export const resourcesCatalog = {
     'en-US': 'Download Archive',
     'zh-CN': '下载归档',
   },
-  'ai.skillPackages.skillCountValue': {
+  'ai.skillPackages.skillCountOne': {
+    'en-US': '{{count}} skill',
+    'zh-CN': '共 {{count}} 个技能',
+  },
+  'ai.skillPackages.skillCountMany': {
     'en-US': '{{count}} skills',
     'zh-CN': '共 {{count}} 个技能',
   },
@@ -1361,9 +1386,12 @@ export const resourcesCatalog = {
     'zh-CN': '服务名称',
   },
   'ai.mcp.nameHint': {
-    'en-US':
-      'Lowercase letters, numbers, and underscores; must start with a letter. Pattern: ^[a-z][a-z0-9_]*$',
-    'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：^[a-z][a-z0-9_]*$',
+    'en-US': 'Lowercase letters, numbers, and underscores; must start with a letter. Pattern:',
+    'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：',
+  },
+  'ai.mcp.timeout': {
+    'en-US': 'Timeout (ms)',
+    'zh-CN': '超时（毫秒）',
   },
   'ai.mcp.url': {
     'en-US': 'Endpoint URL',

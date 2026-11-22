@@ -1,20 +1,7 @@
+import { formatDurationMillis } from '@/features/catalog/ai-resource-card-format'
 import { ResourceCardLayout } from '@/features/catalog/AiResourceCardLayout'
-import { translate, useI18n } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import type { ProviderDTO } from '@/shared/api/generated/contracts'
-
-function formatMs(value: number | string | null | undefined): string {
-  if (value == null || value === '') {
-    return translate('ai.catalog.card.emptyValue')
-  }
-  const n = Number(value)
-  if (!Number.isFinite(n)) {
-    return String(value)
-  }
-  if (n >= 60_000) {
-    return translate('ai.catalog.card.seconds', { value: Math.round(n / 1000) })
-  }
-  return translate('ai.catalog.card.milliseconds', { value: n })
-}
 
 export function ProviderResourceCard({
   provider,
@@ -42,12 +29,8 @@ export function ProviderResourceCard({
             ? t('ai.catalog.card.configured')
             : t('ai.catalog.card.unconfiguredApiKey'),
         ],
-        {
-          pairs: [
-            { label: t('ai.catalog.card.timeout'), value: formatMs(provider.modelCallTimeoutMillis) },
-            { label: t('ai.catalog.card.idle'), value: formatMs(provider.modelCallIdleTimeoutMillis) },
-          ],
-        },
+        [t('ai.catalog.card.timeout'), formatDurationMillis(provider.modelCallTimeoutMillis)],
+        [t('ai.catalog.card.idle'), formatDurationMillis(provider.modelCallIdleTimeoutMillis)],
         [
           t('ai.catalog.card.httpRetry'),
           provider.modelHttpRetryStatusCodes == null

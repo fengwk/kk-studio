@@ -120,6 +120,15 @@ describe('AgentForm current contracts', () => {
     expect(screen.queryByText('需要先创建模型才能配置 Agent。')).not.toBeInTheDocument()
   })
 
+  // 测试意图：系统提示词只由区块标题表达一次，控件靠 aria-label 保留可访问名称，不重复可见标签。
+  it('names the prompt field through the section heading without a duplicate label', () => {
+    const draft = { ...emptyAgentDraft(modelWithVariants()), name: 'assistant' }
+    render(<AgentForm draft={draft} models={[modelWithVariants()]} onChange={() => undefined} />)
+
+    expect(screen.getAllByText('系统提示词')).toHaveLength(1)
+    expect(screen.getByRole('textbox', { name: '系统提示词' })).toHaveValue('')
+  })
+
   it('preserves multiline description and prompt through controlled edits and serialization', () => {
     let latest = { ...emptyAgentDraft(modelWithVariants()), name: 'assistant' }
     function Harness() {
