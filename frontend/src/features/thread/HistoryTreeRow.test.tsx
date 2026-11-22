@@ -7,8 +7,8 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /** 预览中命中词位于深处（第 40 个 UTF-16 单元），单行省略会把它挤出可见区。 */
 const DEEP_HIT_PREVIEW = '## 结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录停机耗时'
-/** 摘录保留命中词前 12 个字符。 */
-const DEEP_HIT_EXCERPT = '…成，最后释放连接池并记录停机耗时'
+/** 摘录保留命中词前 6 个字符。 */
+const DEEP_HIT_EXCERPT = '…连接池并记录停机耗时'
 /** 命中已在开头附近时摘录不改变原预览。 */
 const EARLY_HIT_PREVIEW = '停机耗时统计：服务停机时先停止接收新请求'
 
@@ -26,6 +26,7 @@ function row(preview: string): HistoryTreeRow {
     entry,
     kind: 'assistant',
     preview,
+    text: preview,
     searchText: preview.toLowerCase(),
     lane: 0,
     gutter: [true],

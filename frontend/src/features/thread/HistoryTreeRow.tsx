@@ -1,7 +1,11 @@
 import { useI18n, type TranslationKey } from '@/shared/i18n'
-import type { HistoryEntryKind, HistoryTreeRow } from '@/features/thread/history-tree'
+import {
+  historyRowSearchPreview,
+  type HistoryEntryKind,
+  type HistoryTreeRow,
+} from '@/features/thread/history-tree'
 import { historyLaneGlyphs } from '@/features/thread/history-tree-row-state'
-import { highlightSegments, searchExcerpt } from '@/features/thread/search-highlight'
+import { highlightSegments } from '@/features/thread/search-highlight'
 import type { RefObject } from 'react'
 
 const KIND_LABEL_KEYS: Record<HistoryEntryKind, TranslationKey> = {
@@ -42,7 +46,7 @@ export function HistoryTreeRowView({
   const { t } = useI18n()
   const kindLabel = t(KIND_LABEL_KEYS[row.kind])
   const segments = tokens.length > 0
-    ? highlightSegments(searchExcerpt(row.preview, tokens), tokens)
+    ? highlightSegments(historyRowSearchPreview(row, tokens), tokens)
     : [{ text: row.preview, match: false }]
   return (
     <div role="listitem">

@@ -50,6 +50,16 @@ const HISTORY_ENTRIES: HarnessSessionEntryDTO[] = [
     'ASSISTANT',
   ),
   entry('entry-turn-end', 'TURN_END', 'entry-assistant', null),
+  entry('entry-user-2', 'MESSAGE', 'entry-turn-end', '还有别的注意事项吗？'),
+  // 长拉丁命中词位于 220 字预览上限之外：搜索预览必须从全文截取。
+  entry(
+    'entry-assistant-2',
+    'MESSAGE',
+    'entry-user-2',
+    `${'背景说明'.repeat(60)} 最后把 terminationGracePeriodSeconds 调大到 60 秒`,
+    'ASSISTANT',
+  ),
+  entry('entry-turn-end-2', 'TURN_END', 'entry-assistant-2', null),
 ]
 
 const SESSIONS: HarnessSessionSummaryDTO[] = [

@@ -3,6 +3,7 @@ import {
   activeAncestry,
   buildHistoryTree,
   historyRowMatches,
+  historyRowSearchPreview,
   historySearchTokens,
   isForkBoundary,
   type HistoryTreeRow,
@@ -153,6 +154,7 @@ describe('History tree lane projection', () => {
         'preview',
         'searchText',
         'startsLane',
+        'text',
       ])
     }
   })
@@ -235,6 +237,18 @@ describe('History tree search', () => {
     expect(row.preview.endsWith('…')).toBe(true)
     // 搜索使用未截断文本。
     expect(historyRowMatches(row, historySearchTokens('x'.repeat(250)))).toBe(true)
+  })
+
+  // 测试意图：命中落在预览上限之外时，搜索预览从全文命中处截取，用户能看到为什么这一行匹配。
+  it('builds the search preview from the full text when the hit lies beyond the preview limit', () => {
+    const text = `${'背景'.repeat(150)} 最后调大 terminationGracePeriodSeconds 即可`
+    const row = buildHistoryTree([messageEntry('m', 'ASSISTANT', text, null)])[0]!
+    expect(row.preview).not.toContain('termination')
+    const preview = historyRowSearchPreview(row, historySearchTokens('terminationGracePeriodSeconds'))
+    expect(preview).toBe('…最后调大 terminationGracePeriodSeconds 即可')
+    // 开头附近的命中与无命中都沿用普通预览。
+    expect(historyRowSearchPreview(row, historySearchTokens('背景'))).toBe(row.preview)
+    expect(historyRowSearchPreview(row, historySearchTokens('parser'))).toBe(row.preview)
   })
 
   it('excludes explicit thinking content from preview and search', () => {

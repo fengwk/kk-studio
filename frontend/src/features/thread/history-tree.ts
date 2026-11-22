@@ -1,6 +1,7 @@
 import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import { FORK_NOTICE_TEXT } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
+import { searchExcerpt } from '@/features/thread/search-highlight'
 import { translate } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
@@ -30,7 +31,9 @@ export interface HistoryTreeRow {
   kind: HistoryEntryKind
   /** 单行预览：折叠空白并按上限截断；没有可见文本时为占位文案。 */
   preview: string
-  /** 小写可见文本，用于搜索匹配；不受 preview 长度限制。 */
+  /** 折叠空白后的完整可见文本；搜索摘录从这里截取，不受 preview 长度限制。 */
+  text: string
+  /** `text` 的小写形式，用于搜索匹配。 */
   searchText: string
   lane: number
   gutter: boolean[]
@@ -118,11 +121,13 @@ export function buildHistoryTree(
       }
     }
     const parentId = entry.parentEntryId
+    const text = historyEntryText(entry)
     rows.push({
       entry,
       kind: historyEntryKind(entry),
-      preview: historyEntryPreview(entry),
-      searchText: historyEntrySearchText(entry),
+      preview: text ? truncatePreview(text, PROJECTED_PREVIEW_LIMIT) : translate('ai.chat.history.noBody'),
+      text,
+      searchText: text.toLowerCase(),
       lane,
       gutter: active.map((pending) => pending != null),
       startsLane: parentId != null && laneById.get(parentId) !== lane,
@@ -184,6 +189,15 @@ export function historyRowMatches(row: HistoryTreeRow, tokens: string[]): boolea
   return tokens.length > 0 && tokens.every((token) => row.searchText.includes(token))
 }
 
+/**
+ * 搜索时的行预览：命中在全文深处（包括超出预览上限的部分）时从命中处附近截取并按预览上限截断，
+ * 单行省略也能看到命中；命中已在开头附近或没有命中时沿用普通预览。
+ */
+export function historyRowSearchPreview(row: HistoryTreeRow, tokens: string[]): string {
+  const excerpt = searchExcerpt(row.text, tokens)
+  return excerpt === row.text ? row.preview : truncatePreview(excerpt, PROJECTED_PREVIEW_LIMIT)
+}
+
 function historyEntryKind(entry: HarnessSessionEntryDTO): HistoryEntryKind {
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
@@ -211,14 +225,9 @@ function historyEntryKind(entry: HarnessSessionEntryDTO): HistoryEntryKind {
   return 'other'
 }
 
-/** 单行预览；显式 thinking 内容不进入历史树。 */
-function historyEntryPreview(entry: HarnessSessionEntryDTO): string {
-  const flat = flattenVisibleText(historyEntryVisibleText(entry))
-  return flat ? truncatePreview(flat, PROJECTED_PREVIEW_LIMIT) : translate('ai.chat.history.noBody')
-}
-
-function historyEntrySearchText(entry: HarnessSessionEntryDTO): string {
-  return flattenVisibleText(historyEntryVisibleText(entry)).toLowerCase()
+/** 折叠成单行的可见文本；显式 thinking 内容不进入历史树。 */
+function historyEntryText(entry: HarnessSessionEntryDTO): string {
+  return flattenVisibleText(historyEntryVisibleText(entry))
 }
 
 function messageContents(entry: HarnessSessionEntryDTO): Record<string, unknown>[] {

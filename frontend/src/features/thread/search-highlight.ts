@@ -1,5 +1,5 @@
-/** 搜索摘录在首个命中处之前保留的上下文字数。 */
-const EXCERPT_CONTEXT = 12
+/** 搜索摘录在首个命中处之前保留的上下文字数：留一点上下文，窄行仍给长命中词留出位置。 */
+const EXCERPT_CONTEXT = 6
 
 /** 以空格分词的拉丁词字符；中文等不以空格分词的文字按字截取即可。 */
 const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u

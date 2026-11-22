@@ -12,6 +12,8 @@ const VIEWPORTS = [
 
 /** 历史树搜索词：只命中助手正文第 40 个字符处，单行省略默认会把它挤出可见区。 */
 const HIT = '停机耗时'
+/** 长拉丁命中词：位于 220 字预览上限之外，普通预览里根本没有它。 */
+const LONG_HIT = 'terminationGracePeriodSeconds'
 
 /** 行内命中片段必须完整落在单行预览的可见框内，不能被省略裁掉。 */
 async function expectMarkVisibleInsideRow(preview: Locator) {
@@ -67,6 +69,20 @@ for (const copy of LOCALES) {
       await expect(row).toHaveAttribute('aria-label', /## 结论 服务停机时先停止接收新请求/)
       await expectMarkVisibleInsideRow(preview)
       await page.screenshot({ path: testInfo.outputPath(`history-${copy.locale}-${size}.png`), fullPage: true })
+    })
+
+    test(`${copy.locale} ${size}: a long hit beyond the preview limit is shown inside the row`, async ({ page }, testInfo) => {
+      await openHarness(page, copy.locale, viewport)
+      const region = page.getByRole('region', { name: copy.historyTree })
+      await region.getByRole('searchbox', { name: copy.search }).fill(LONG_HIT)
+
+      // 搜索预览从全文命中处截取：长命中词在窄行里也完整可见。
+      const preview = region.locator('.history-tree-entry-preview')
+        .filter({ has: page.locator('mark', { hasText: LONG_HIT }) })
+      await expect(preview).toHaveCount(1)
+      await expect(preview).toContainText('…')
+      await expectMarkVisibleInsideRow(preview)
+      await page.screenshot({ path: testInfo.outputPath(`history-long-hit-${copy.locale}-${size}.png`), fullPage: true })
     })
 
     test(`${copy.locale} ${size}: bound Thread and its Session are the current selection`, async ({ page }, testInfo) => {

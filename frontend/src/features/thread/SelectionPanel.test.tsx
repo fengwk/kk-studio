@@ -189,8 +189,9 @@ describe('SelectionPanel', () => {
 
     await user.type(screen.getByRole('searchbox'), 'GracePeriod')
     const row = screen.getByRole('option', { name: /main/ })
+    // 命中在长词内部、上下文里没有空格可对齐：保留命中前 6 个字符。
     expect(row.querySelector('.thread-selection-item-subtitle')).toHaveTextContent(
-      '…terminationGracePeriodSeconds 调大',
+      '…nationGracePeriodSeconds 调大',
     )
     expect([...row.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['GracePeriod'])
 
