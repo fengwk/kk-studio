@@ -29,7 +29,9 @@ import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -152,6 +154,20 @@ public class IssueRunService {
   public List<IssueRun> listRuns(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
     return issueRunRepository.listByIssueId(issueId);
+  }
+
+  /**
+   * 看板读取面：项目内每个 Issue 至多一条当前/最近 Run，键为 Issue id，一个语句取回。
+   *
+   * <p>只用于只消费一条 Run 摘要的看板投影；Issue 详情需要完整 Run 列表时仍用 {@link #listRuns(UUID)}。
+   */
+  public Map<UUID, IssueRun> currentOrLatestRuns(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
+    Map<UUID, IssueRun> runs = new LinkedHashMap<>();
+    for (IssueRun run : issueRunRepository.listCurrentOrLatestByProjectId(projectId)) {
+      runs.put(run.getIssueId(), run);
+    }
+    return runs;
   }
 
   @Transactional

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -157,6 +158,25 @@ public class IssueRunRepository {
                 + COLUMNS
                 + " from project_issue_run where issue_id = :issueId order by ordinal asc")
         .param("issueId", issueId)
+        .query(ROW_MAPPER)
+        .list();
+  }
+
+  /**
+   * 看板读取面：一个语句取整个项目的当前/最近 Run，每个 Issue 至多一行。
+   *
+   * <p>选取语义与 {@link #getActiveByIssueId} 和 {@link #getLatestByIssueId}
+   * 的组合完全一致：先取活动（RUNNING/WAITING） Run，没有活动 Run 时取最大 ordinal；差别只在读取行数不随 Run 历史增长。
+   */
+  public List<IssueRun> listCurrentOrLatestByProjectId(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
+    return jdbc.sql(
+            "select distinct on (issue_id) "
+                + COLUMNS
+                + " from project_issue_run"
+                + " where issue_id in (select id from project_issue where project_id = :projectId)"
+                + " order by issue_id, (status in ('RUNNING', 'WAITING')) desc, ordinal desc")
+        .param("projectId", projectId)
         .query(ROW_MAPPER)
         .list();
   }

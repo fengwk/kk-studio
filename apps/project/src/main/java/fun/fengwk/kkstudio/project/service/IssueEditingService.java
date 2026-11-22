@@ -228,6 +228,12 @@ public class IssueEditingService {
     return issueAgentThreadRepository.listByIssueId(issueId);
   }
 
+  /** 看板读取面：一个语句取项目内全部稳定绑定，避免按 Issue 逐条读取（不做单 Issue 存在性校验）。 */
+  public List<IssueAgentThread> listProjectAgentThreads(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
+    return issueAgentThreadRepository.listByProjectId(projectId);
+  }
+
   private static int clampLimit(int limit) {
     if (limit <= 0) {
       throw DomainException.validation("limit", "limit must be positive");

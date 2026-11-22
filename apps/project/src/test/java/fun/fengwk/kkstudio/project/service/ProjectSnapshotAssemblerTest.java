@@ -5,8 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -34,6 +36,7 @@ import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -114,9 +117,8 @@ class ProjectSnapshotAssemblerTest {
             .version(0L)
             .startedAt(now)
             .build();
-    when(issueRunService.listRuns(issue1Id)).thenReturn(List.of());
-    when(issueRunService.listRuns(issue2Id)).thenReturn(List.of(run));
-    when(issueEditingService.listAgentThreads(issue2Id))
+    when(issueRunService.currentOrLatestRuns(projectId)).thenReturn(Map.of(issue2Id, run));
+    when(issueEditingService.listProjectAgentThreads(projectId))
         .thenReturn(List.of(new IssueAgentThread(issue2Id, "coder", UUID.randomUUID(), threadId)));
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
@@ -152,11 +154,6 @@ class ProjectSnapshotAssemblerTest {
     Issue blockedFromWork = referenceIssue(projectId, "BLOCKED", "WORK");
     when(issueEditingService.listIssues(projectId))
         .thenReturn(List.of(active, activeInit, blockedFromReview, done, blockedFromWork));
-    when(issueRunService.listRuns(active.getId())).thenReturn(List.of());
-    when(issueRunService.listRuns(activeInit.getId())).thenReturn(List.of());
-    when(issueRunService.listRuns(blockedFromReview.getId())).thenReturn(List.of());
-    when(issueRunService.listRuns(done.getId())).thenReturn(List.of());
-    when(issueRunService.listRuns(blockedFromWork.getId())).thenReturn(List.of());
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
 
@@ -182,7 +179,52 @@ class ProjectSnapshotAssemblerTest {
     var json = jsonMapper.valueToTree(snapshot);
     assertTrue(json.get("referencedStateCodes").isArray());
     assertEquals(0, json.get("referencedStateCodes").size());
-    verifyNoInteractions(issueRunService);
+    // 空项目也只做项目级读取：绝不回退到按 Issue 逐个读取 Run/绑定。
+    verify(issueRunService).currentOrLatestRuns(projectId);
+    verify(issueRunService, never()).listRuns(any());
+    verify(issueEditingService, never()).listAgentThreads(any());
+  }
+
+  @Test
+  void dashboardReadsOnlyCurrentOrLatestRunPerIssue() {
+    // 测试意图：看板只消费每 Issue 的当前/最近一条 Run，绝不回退到全量 Run 列表读取。
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
+    UUID issueId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    Issue issue =
+        Issue.builder()
+            .id(issueId)
+            .projectId(projectId)
+            .number(1L)
+            .title("Issue")
+            .state("WORK")
+            .version(0L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
+    when(issueEditingService.listIssues(projectId)).thenReturn(List.of(issue));
+    IssueRun active =
+        IssueRun.builder()
+            .id(UUID.randomUUID())
+            .issueId(issueId)
+            .ordinal(2L)
+            .state("WORK")
+            .threadId(threadId)
+            .status(IssueRunStatus.RUNNING)
+            .version(0L)
+            .startedAt(now)
+            .build();
+    // 历史 Run 留在库里，看板读取面只拿到一条“当前/最近”Run（历史裁剪由定向查询负责）。
+    when(issueRunService.currentOrLatestRuns(projectId)).thenReturn(Map.of(issueId, active));
+    when(issueEditingService.listProjectAgentThreads(projectId))
+        .thenReturn(List.of(new IssueAgentThread(issueId, "coder", UUID.randomUUID(), threadId)));
+
+    ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
+
+    assertEquals(2L, snapshot.getIssues().get(0).getCurrentOrLatestRun().getOrdinal());
+    assertEquals("coder", snapshot.getIssues().get(0).getCurrentOrLatestRun().getAgentName());
+    verify(issueRunService).currentOrLatestRuns(projectId);
+    verify(issueRunService, never()).listRuns(any());
   }
 
   private Issue referenceIssue(UUID ownerProjectId, String state, String blockedFromState) {
