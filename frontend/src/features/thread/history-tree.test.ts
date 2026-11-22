@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   activeAncestry,
   buildHistoryTree,
-  highlightSegments,
   historyRowMatches,
   historySearchTokens,
   isForkBoundary,
@@ -225,14 +224,6 @@ describe('History tree search', () => {
     // 多 token AND：只有同时命中两者才高亮。
     expect(historyRowMatches(rows[2]!, historySearchTokens('parser bug'))).toBe(true)
     expect(historyRowMatches(rows[3]!, historySearchTokens('parser bug'))).toBe(false)
-  })
-
-  it('splits a preview into merged highlight segments', () => {
-    const segments = highlightSegments('fix the parser parser bug', ['parser', 'fix'])
-    expect(segments.map((segment) => segment.text).join('')).toBe('fix the parser parser bug')
-    expect(segments.filter((segment) => segment.match).map((segment) => segment.text))
-      .toEqual(['fix', 'parser', 'parser'])
-    expect(highlightSegments('nothing', ['parser'])).toEqual([{ text: 'nothing', match: false }])
   })
 
   it('flattens whitespace and truncates long previews while searching the full text', () => {

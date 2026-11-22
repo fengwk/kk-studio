@@ -172,6 +172,36 @@ describe('SelectionPanel', () => {
     expect(screen.queryByRole('option', { name: /Beta/ })).not.toBeInTheDocument()
   })
 
+  // 测试意图：副标题是单行省略，深处命中要从命中处附近开始显示并高亮，用户才看得到为什么命中。
+  it('highlights hits and starts a long subtitle near a deep hit while searching', async () => {
+    const user = userEvent.setup()
+    const subtitle = '2026-11-22 10:08 · 空闲 · 结论 服务停机时先停止接收新请求，再把 terminationGracePeriodSeconds 调大'
+    render(
+      <SelectionPanel
+        title="选择 Thread"
+        items={[{ id: 't1', title: 'main', subtitle }]}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    const option = screen.getByRole('option', { name: /main/ })
+    expect(option.querySelector('mark')).toBeNull()
+
+    await user.type(screen.getByRole('searchbox'), 'GracePeriod')
+    const row = screen.getByRole('option', { name: /main/ })
+    expect(row.querySelector('.thread-selection-item-subtitle')).toHaveTextContent(
+      '…terminationGracePeriodSeconds 调大',
+    )
+    expect([...row.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['GracePeriod'])
+
+    // 标题命中同样高亮，副标题未命中时保持原样。
+    await user.clear(screen.getByRole('searchbox'))
+    await user.type(screen.getByRole('searchbox'), 'mai')
+    const titleRow = screen.getByRole('option', { name: /main/ })
+    expect([...titleRow.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['mai'])
+    expect(titleRow.querySelector('.thread-selection-item-subtitle')).toHaveTextContent(subtitle)
+  })
+
   it('shows loading state without options and keeps the search disabled during a pending selection', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()

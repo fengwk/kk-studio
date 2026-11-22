@@ -1,6 +1,7 @@
 import { useI18n, type TranslationKey } from '@/shared/i18n'
-import { highlightSegments, type HistoryEntryKind, type HistoryTreeRow } from '@/features/thread/history-tree'
+import type { HistoryEntryKind, HistoryTreeRow } from '@/features/thread/history-tree'
 import { historyLaneGlyphs } from '@/features/thread/history-tree-row-state'
+import { highlightSegments } from '@/features/thread/search-highlight'
 import type { RefObject } from 'react'
 
 const KIND_LABEL_KEYS: Record<HistoryEntryKind, TranslationKey> = {

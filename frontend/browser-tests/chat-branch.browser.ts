@@ -1400,6 +1400,14 @@ for (const locale of LOCALES) {
       const search = panel.getByRole('searchbox', { name: copy.search })
       await search.fill('verify，细节见 运行手册')
       await expect(sessionRow).toBeVisible()
+      // 预览末尾的命中：副标题从命中处附近开始显示，高亮的命中词完整落在可见区域内。
+      await search.fill('引用结论照旧')
+      const deepHit = sessionSubtitle.locator('mark')
+      await expect(deepHit).toHaveText('引用结论照旧')
+      const hitBox = (await deepHit.boundingBox())!
+      const subtitleBox = (await sessionSubtitle.boundingBox())!
+      expect(hitBox.x + hitBox.width).toBeLessThanOrEqual(subtitleBox.x + subtitleBox.width + 0.5)
+      await captureShot(page, testInfo, shotName(locale, viewport, 'session-selection-deep-hit'))
       // 链接地址不是可见的预览文本，不参加匹配。
       await search.fill('example.test/runbook')
       await expect(panel.getByRole('option')).toHaveCount(0)

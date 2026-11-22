@@ -99,9 +99,10 @@ export function SelectionPanel({
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const loadFailed = !loading && loadError != null
+  const searchTokens = useMemo(() => searchTokensOf(query), [query])
   const filteredItems = useMemo(
-    () => loading || catalogError || loadFailed ? [] : filterItems(items, searchTokensOf(query)),
-    [items, query, loading, catalogError, loadFailed],
+    () => loading || catalogError || loadFailed ? [] : filterItems(items, searchTokens),
+    [items, searchTokens, loading, catalogError, loadFailed],
   )
   const onKeyDown = useSelectionKeyboard({
     filteredItems,
@@ -211,6 +212,7 @@ export function SelectionPanel({
             disabled={selectionPending}
             selectedLabel={t('ai.chat.selected')}
             renameLabel={renameLabel}
+            searchTokens={searchTokens ?? []}
             onHover={() => setActiveId(item.id)}
             onSelect={() => void onSelect(item.id)}
             onRename={renameItem == null ? undefined : () => renameItem(item.id)}

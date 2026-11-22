@@ -153,6 +153,13 @@
   white-space: nowrap;
 }
 
+/* 搜索命中词：与历史树命中同一表面与文字色。 */
+.thread-selection-mark {
+  background: var(--surface-active);
+  color: var(--fg);
+  border-radius: 2px;
+}
+
 .thread-selection-empty {
   padding: 18px 10px;
   color: var(--fg-muted);
