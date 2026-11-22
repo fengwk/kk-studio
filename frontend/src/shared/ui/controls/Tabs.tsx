@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import './controls.css'
 
 export interface TabItem {
@@ -29,8 +29,8 @@ const NAVIGATION_KEYS = ['ArrowRight', 'ArrowLeft', 'Home', 'End']
  * 状态契约：activeId 指向不可用（不存在或 disabled）的 tab 时，不伪造选中，
  * tablist 不标选任何一项，children 以中性区域呈现；tabs 为空时不渲染 tablist。
  *
- * 窄屏下 tablist 横向滚动：选中项变化（点击、键盘或调用方切换）后，只水平滚动 tablist 本身，
- * 把选中项完整露出；不滚动页面或弹窗。
+ * 窄屏下 tablist 横向滚动：选中项变化（点击、键盘或调用方切换）后，在绘制前只水平滚动 tablist
+ * 本身，按选中样式（加粗后）的宽度把选中项完整露出；不滚动页面或弹窗。
  */
 export function Tabs({
   tabs,
@@ -53,7 +53,7 @@ export function Tabs({
   const panelClasses = ['ui-tab-panel', panelClassName].filter(Boolean).join(' ')
   const activeIndex = tabs.findIndex((tab) => tab.id === activeTab?.id)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const tab = tabRefs.current[activeIndex]
     const list = tab?.parentElement
     if (!tab || !list) {
