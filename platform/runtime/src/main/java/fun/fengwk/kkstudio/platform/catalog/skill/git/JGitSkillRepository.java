@@ -2,12 +2,14 @@ package fun.fengwk.kkstudio.platform.catalog.skill.git;
 
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.ConfigConstants;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.transport.CredentialsProvider;
@@ -111,6 +113,7 @@ public class JGitSkillRepository implements SkillGitRepository {
     try {
       work = Files.createTempDirectory("kkstudio-skill-");
       try (Git git = Git.init().setDirectory(work.toFile()).setBare(true).call()) {
+        disableAutoGc(git.getRepository());
         fetchCommit(git, repositoryUrl, commit, token);
         Repository repository = git.getRepository();
         ObjectId commitId = ObjectId.fromString(commit);
@@ -141,6 +144,19 @@ public class JGitSkillRepository implements SkillGitRepository {
     } finally {
       deleteRecursively(work);
     }
+  }
+
+  /**
+   * 一次性临时仓库不做 fetch 后的自动 GC。
+   *
+   * <p>JGit 默认在共享 WorkQueue 上后台执行它，后台任务会在 finally 删除临时目录时并发增删 {@code
+   * gc.log.lock}，使删除失败并把已成功的发布变成错误。
+   */
+  private static void disableAutoGc(Repository repository) throws IOException {
+    StoredConfig config = repository.getConfig();
+    config.setBoolean(
+        ConfigConstants.CONFIG_FETCH_SECTION, null, ConfigConstants.CONFIG_KEY_AUTOGC, false);
+    config.save();
   }
 
   /** 每次操作独立的 HTTP 保护：连接/读取超时与关闭断连由 factory 绑定的 transport 生效。 */
