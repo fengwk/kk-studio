@@ -9,6 +9,7 @@ import type { IssueDetailTabKey } from './IssueDetailTabs'
 import { IssueEvidencePane } from './IssueEvidencePane'
 import { IssueSpecPane } from './IssueSpecPane'
 import { IssueAgentThreadsPane, IssueRunsPane, IssueStageBudgetList } from './IssueTabPanes'
+import type { IssueActivityFeed } from './useIssueActivityFeed'
 import type { IssueStateNames } from '../../issue-labels'
 
 type Issue = IssueDetailDTO['issue']
@@ -40,6 +41,8 @@ interface IssueDetailTabPanelsProps {
     onChangeBody: (body: string) => void
     onSubmit: (event: React.FormEvent) => void
   }
+  /** 活动时间线已加载的事实与后续窗口入口。 */
+  activityFeed: IssueActivityFeed
   evidence: {
     evidences: IssueEvidenceDTO[]
     isLoading: boolean
@@ -71,6 +74,7 @@ export function IssueDetailTabPanels({
   isActionPending,
   spec,
   activity,
+  activityFeed,
   evidence,
   storageService,
   openResetBudget,
@@ -114,7 +118,7 @@ export function IssueDetailTabPanels({
 
       {activeTab === 'activities' && (
         <IssueActivitiesPane
-          activities={detail.activities ?? []}
+          activityFeed={activityFeed}
           kind={activity.kind}
           body={activity.body}
           isPending={isActionPending}

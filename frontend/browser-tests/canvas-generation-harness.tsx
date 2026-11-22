@@ -10,7 +10,9 @@ import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
-setLocale('zh-CN')
+const params = new URLSearchParams(window.location.search)
+const locale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
+setLocale(locale)
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const NODE_RES1 = '00000000-0000-4000-8000-000000000001'
@@ -123,11 +125,19 @@ const queryClient = new QueryClient({
 })
 
 export function CanvasGenerationHarnessApp() {
-  const [mode, setMode] = useState<'normal' | 'raw'>('normal')
+  const [mode, setMode] = useState<'normal' | 'raw'>(params.get('mode') === 'raw' ? 'raw' : 'normal')
   const [scheduledArgs, setScheduledArgs] = useState<Record<string, unknown> | null>(null)
 
   const runtime = {
     models,
+    // 面板在目录里查不到函数时渲染目录提示，必须给它一个确定就绪的查询状态。
+    modelsQuery: {
+      data: models,
+      isPending: false,
+      isError: false,
+      isFetching: false,
+      refetch: async () => undefined,
+    },
     scheduleFunctionConfig: (_nodeId: string, _modelKey: string, config: unknown) => {
       setScheduledArgs(config as Record<string, unknown>)
     },

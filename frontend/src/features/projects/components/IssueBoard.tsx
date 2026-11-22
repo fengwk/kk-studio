@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { IssueCard } from './IssueCard'
-import { stateNameOf, toStateNames } from '../issue-labels'
+import { toStateNames } from '../issue-labels'
 import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueBoardProps {
@@ -49,22 +49,21 @@ export function IssueBoard({
     return map
   }, [states])
 
-  // 过滤后的 Issue 列表
+  // 过滤后的 Issue 列表：只匹配用户可见名称（标题、编号与阶段显示名），不匹配内部阶段编码。
   const filteredIssues = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return issues.filter((item) => {
       if (!q) {
         return true
       }
-      const stageName = stateNameOf(stateNames, item.issue.state)
+      const stageName = stateNames.get(item.issue.state) ?? t('projects.board.otherStates')
       return (
         item.issue.title.toLowerCase().includes(q) ||
         item.issue.number.includes(q) ||
-        stageName.toLowerCase().includes(q) ||
-        item.issue.state.toLowerCase().includes(q)
+        stageName.toLowerCase().includes(q)
       )
     })
-  }, [issues, searchQuery, stateNames])
+  }, [issues, searchQuery, stateNames, t])
 
   // 按状态自然 token 组织 Issue 列表
   const issuesByState = useMemo(() => {

@@ -42,11 +42,10 @@ export interface CanvasNodeDraft {
     transform?: CanvasTransformDTO
     position?: { x: number; y: number }
   }
-  /** 冲突状态 */
+  /** 冲突状态：只存结构化事实，用户文案由渲染层按当前 locale 生成 */
   conflict?: {
     kind?: string
     type?: 'conflict' | 'remote_deleted' | 'error' | string
-    message?: string
     remoteValue?: unknown
     conflicts?: CanvasConflictDTO[]
   }

@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 import { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import * as canvasApi from '@/features/canvas/canvas-api'
+import { LOCALE_STORAGE_KEY, setLocale, translate } from '@/shared/i18n'
 import {
   clearPendingFunctionRun,
   discardPendingFunctionRun,
@@ -35,7 +36,12 @@ const FUNCTION_VERSION_B: CanvasFunctionVersionDTO = {
 }
 
 function cleanupTestStorage(): void {
+  // 只清理画布运行记录相关存储；locale 偏好不属于被清对象，清掉会让后续提示切到默认语言。
+  const locale = window.localStorage.getItem(LOCALE_STORAGE_KEY)
   window.localStorage.clear()
+  if (locale !== null) {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale)
+  }
 }
 
 function snapshot(run: CanvasFunctionRunDTO | null): CanvasSnapshotDTO {
@@ -213,7 +219,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     await act(async () => {
       await result.current.startFunctionRun(nodeId)
     })
-    expect(setToast).toHaveBeenCalledWith('forbidden')
+    expect(setToast).toHaveBeenCalledWith(translate('canvas.toast.runStartFailed'))
     expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
   })
 
@@ -709,7 +715,8 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
       expect(flushFunctionConfig).toHaveBeenCalledTimes(0)
       expect(startSpy).toHaveBeenCalledTimes(0)
-      expect(setToast).toHaveBeenCalledWith(expect.stringContaining('存储读取失败'))
+      // 存储整体不可用时 locale 也读不到（回退默认语言），按当前环境下的 catalog 文案断言。
+      expect(setToast).toHaveBeenCalledWith(translate('canvas.toast.runPendingUnreadable'))
     } finally {
       Object.defineProperty(window, 'localStorage', {
         configurable: true,
@@ -1038,5 +1045,20 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(startSpy).toHaveBeenCalledTimes(0)
     expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
     expect(setToast).toHaveBeenCalledWith(expect.stringContaining('目录版本'))
+  })
+
+  it('用户提示按当前 locale 从 canvas catalog 生成', async () => {
+    // 意图：运行提示不再硬编码中文；同一路径在英文 locale 下必须给出英文指引。
+    cleanupTestStorage()
+    setLocale('en-US')
+    const { result, setToast } = setupHook({ resolveFunctionVersion: () => null })
+
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+
+    expect(setToast).toHaveBeenCalledWith(
+      'The function catalog version could not be confirmed, so generation did not start. Refresh the catalog and try again.',
+    )
   })
 })

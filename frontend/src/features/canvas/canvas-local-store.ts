@@ -22,10 +22,10 @@ export function getCurrentUserId(): string {
   return DEFAULT_ANONYMOUS_USER
 }
 
-/** IndexedDB 在当前环境不可用；本地状态只能在当前标签页会话内保留。 */
+/** IndexedDB 在当前环境不可用；本地状态只能在当前标签页会话内保留。文案由渲染层按 locale 生成。 */
 export class CanvasStorageUnavailableError extends Error {
   constructor(
-    message = '本机 IndexedDB 不可用，草稿仅保留在当前标签页，刷新或关闭将丢失。',
+    message = 'IndexedDB is unavailable; drafts stay in this tab session only',
   ) {
     super(message)
     this.name = 'CanvasStorageUnavailableError'

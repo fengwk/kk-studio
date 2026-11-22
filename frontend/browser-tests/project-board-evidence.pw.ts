@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from './fixture'
 import type {
-  IssueDTO, IssueDetailDTO, IssueRunSummaryDTO, PauseReason, ProjectSnapshotDTO,
+  IssueActivityDTO, IssueDTO, IssueDetailDTO, IssueEvidenceDTO, IssueRunSummaryDTO, PauseReason,
+  ProjectDTO, ProjectSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 
 const PROJECT = 'a0000000-0000-0000-0000-000000000001'
@@ -15,6 +16,12 @@ const ISSUE_WAITING = 'b0000000-0000-0000-0000-000000000006'
 const ISSUE_FAILED = 'b0000000-0000-0000-0000-000000000007'
 const ISSUE_DONE = 'b0000000-0000-0000-0000-000000000008'
 const ISSUE_DETAIL = 'a0000000-0000-0000-0000-000000000002'
+/** 单阶段项目：英文阶段数必须用单数，与多阶段项目并排对照。 */
+const SINGLE_STAGE_PROJECT = 'a0000000-0000-0000-0000-000000000010'
+const EVIDENCE_BLOB = 'f0000000-0000-4000-8000-000000000001'
+/** 详情首窗口之后的活动游标与其中的唯一一条事实。 */
+const ACTIVITY_CURSOR = '6'
+const LATEST_ACTIVITY_SEQUENCE = '7'
 const STAMP = Date.UTC(2026, 9, 1)
 const BLOCK_REASON = 'Waiting for the settlement decision'
 /** 详情夹具的标题足够长：窄屏下标题必须换行，而不是把编辑动作挤出标题行。 */
@@ -75,7 +82,7 @@ const copy = {
     },
     running: '执行中',
     reason: '原因: Waiting for the settlement decision',
-    boardSearchPlaceholder: '搜索 Issue 标题或编号',
+    boardSearchPlaceholder: '搜索标题、编号或阶段',
     listTitle: '项目管理',
     listSearchPlaceholder: '搜索项目名称或描述',
     createHintStage: '创建后将自动进入「待开始」阶段。',
@@ -95,6 +102,20 @@ const copy = {
     evidenceFailed: '公开证据读取失败',
     evidenceEmpty: '暂无公开证据',
     retry: '重试',
+    stagesLabel: '工作流阶段',
+    stagesOne: '1 个阶段',
+    stagesMany: '4 个阶段',
+    singleStageProject: 'Solo Flow',
+    loadMore: '加载更多',
+    activitiesLoadMoreFailed: '活动读取失败',
+    activityLatest: 'Latest note',
+    evidenceOpenFailed: '证据打开失败，请重试',
+    downloadOrView: '下载/查看',
+    blockDialogTitle: '标记业务阻塞',
+    blockReasonField: '阻塞原因',
+    // 工作流给 BLOCKED 声明了自定义显示名：详情头部必须跟随声明名，而不是固定通用名。
+    customBlockedStage: '等待外部依赖',
+    genericBlockedStage: '业务阻塞',
   },
   'en-US': {
     project: 'Refund Gateway',
@@ -117,7 +138,7 @@ const copy = {
     },
     running: 'Running',
     reason: `Reason: ${BLOCK_REASON}`,
-    boardSearchPlaceholder: 'Search issue title or number',
+    boardSearchPlaceholder: 'Search title, number or stage',
     listTitle: 'Projects',
     listSearchPlaceholder: 'Search name or description',
     createHintStage: 'The issue starts in the "Not started" stage after creation.',
@@ -137,6 +158,19 @@ const copy = {
     evidenceFailed: 'Failed to load public evidence',
     evidenceEmpty: 'No public evidence yet',
     retry: 'Retry',
+    stagesLabel: 'Workflow stages',
+    stagesOne: '1 stage',
+    stagesMany: '4 stages',
+    singleStageProject: 'Solo Flow',
+    loadMore: 'Load more',
+    activitiesLoadMoreFailed: 'Failed to load activities',
+    activityLatest: 'Latest note',
+    evidenceOpenFailed: 'Failed to open the evidence. Try again.',
+    downloadOrView: 'Download / view',
+    blockDialogTitle: 'Mark as blocked',
+    blockReasonField: 'Blocked reason',
+    customBlockedStage: 'Waiting on external',
+    genericBlockedStage: 'Blocked',
   },
 } as const
 
@@ -297,6 +331,63 @@ function issueDetail(): IssueDetailDTO {
   }
 }
 
+/** 单阶段项目卡：与多阶段项目同屏对照，阶段数在英文下按单复数分别表述。 */
+function singleStageProject(locale: Locale): ProjectDTO {
+  const project = snapshotFor(locale).project
+  return {
+    ...project,
+    id: SINGLE_STAGE_PROJECT,
+    title: copy[locale].singleStageProject,
+    workflow: { states: project.workflow.states.slice(0, 1) },
+  }
+}
+
+/** 详情首窗口还有后续活动：页签只说明已加载多少，时间线末尾给出下一窗口入口。 */
+function paginatedDetail(): IssueDetailDTO {
+  return { ...issueDetail(), nextActivityCursor: ACTIVITY_CURSOR }
+}
+
+/** 后续窗口里的唯一一条事实：接在首窗口末尾，来源是人而不是系统。 */
+function latestActivity(): IssueActivityDTO {
+  return {
+    issueId: ISSUE_DETAIL, sequence: LATEST_ACTIVITY_SEQUENCE, kind: 'COMMENT', actorType: 'HUMAN',
+    actorAgentName: null, runId: null, body: copy['zh-CN'].activityLatest, createdAt: STAMP + 6000,
+  }
+}
+
+/** 阻塞态详情：工作流为 BLOCKED 声明了自定义名称，头部必须跟随声明名。 */
+function blockedDetail(): IssueDetailDTO {
+  const base = issueDetail()
+  return {
+    ...base,
+    issue: { ...base.issue, state: 'BLOCKED', blockedFromState: 'WORK', blockReason: BLOCK_REASON },
+  }
+}
+
+/** 公开证据行：签名地址不可用时整行就地失败，并保留重试入口。 */
+function evidenceFixture(): IssueEvidenceDTO {
+  return {
+    issueId: ISSUE_DETAIL, blobId: EVIDENCE_BLOB, uri: `blob://${EVIDENCE_BLOB}`,
+    name: 'settlement.log', actorAgentName: 'backend-dev', runId: RUN_TERMINAL, createdAt: STAMP,
+  }
+}
+
+/** 看板卡片直接打开详情时，服务端返回同一 Issue 的快照；活动与证据另行请求。 */
+function boardIssueDetail(locale: Locale, issueId: string): IssueDetailDTO {
+  const entry = snapshotFor(locale).issues.find((item) => item.issue.id === issueId)
+  if (!entry) {
+    throw new Error(`Unknown board issue ${issueId}`)
+  }
+  return {
+    issue: entry.issue,
+    activities: [],
+    nextActivityCursor: null,
+    runs: [],
+    stageBudgets: [],
+    agentThreads: [],
+  }
+}
+
 /**
  * 占位符是搜索入口里唯一的可见提示：按输入框自身的字体量出文本宽度，确认文案没被末尾裁掉。
  */
@@ -315,13 +406,43 @@ async function placeholderFit(input: Locator): Promise<{ placeholder: string
   })
 }
 
+interface TransportOptions {
+  /** 详情快照；默认是活动/证据垂直所用的 ISSUE_DETAIL。 */
+  detail?: IssueDetailDTO
+  /** 后续活动窗口：按 afterSequence 返回一页，'error' 表示该窗口读取失败。 */
+  activityPage?: (afterSequence: string) => { activities: IssueActivityDTO[]
+    nextActivityCursor: string | null } | 'error'
+  /** 公开证据列表。 */
+  evidences?: IssueEvidenceDTO[]
+  /** 签名地址不可用：证据行点击后就地失败。 */
+  failSignedUrl?: boolean
+  /** 详情读取挂起点：兑现前详情请求保持未完成，用于观察加载态。 */
+  holdDetail?: Promise<void>
+}
+
 interface TransportState {
   failEvidence: boolean
   evidenceReads: number
+  /** 后续活动窗口每次请求的 afterSequence，按请求顺序记录。 */
+  activityReads: string[]
+  failActivityPage: boolean
+  failSignedUrl: boolean
 }
 
-async function transport(page: Page, locale: Locale): Promise<TransportState> {
-  const state: TransportState = { failEvidence: false, evidenceReads: 0 }
+async function transport(
+  page: Page,
+  locale: Locale,
+  options: TransportOptions = {},
+): Promise<TransportState> {
+  const state: TransportState = {
+    failEvidence: false,
+    evidenceReads: 0,
+    activityReads: [],
+    failActivityPage: false,
+    failSignedUrl: options.failSignedUrl ?? false,
+  }
+  const detail = options.detail ?? issueDetail()
+  const evidences = options.evidences ?? []
   await page.routeWebSocket('**/ws/events', (socket) => {
     let connected = false
     socket.onMessage((raw) => {
@@ -341,29 +462,59 @@ async function transport(page: Page, locale: Locale): Promise<TransportState> {
       }
     })
   })
+  const unavailable = (title: string) => ({ status: 500, contentType: 'application/problem+json',
+    json: { type: 'about:blank', status: 500, code: 'internal', title } })
   await page.route('**/api/**', async (route) => {
-    const path = new URL(route.request().url()).pathname
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname
     if (path === `/api/project/projects/${PROJECT}/snapshot`) {
       await route.fulfill({ json: snapshotFor(locale) })
       return
     }
     if (path === '/api/project/projects') {
-      // 项目列表：页头搜索占位符是列表里唯一的可见提示文案。
-      await route.fulfill({ json: [snapshotFor(locale).project] })
+      // 项目列表：页头搜索占位符是列表里唯一的可见提示文案；两张卡对照单/复数阶段数。
+      await route.fulfill({ json: [snapshotFor(locale).project, singleStageProject(locale)] })
       return
     }
-    if (path === `/api/project/issues/${ISSUE_DETAIL}/evidence`) {
+    if (/^\/api\/project\/issues\/[^/]+\/evidence$/.test(path)) {
       state.evidenceReads++
       if (state.failEvidence) {
-        await route.fulfill({ status: 500, contentType: 'application/problem+json',
-          json: { type: 'about:blank', status: 500, code: 'internal', title: 'Evidence read failed' } })
+        await route.fulfill(unavailable('Evidence read failed'))
         return
       }
-      await route.fulfill({ json: [] })
+      await route.fulfill({ json: evidences })
       return
     }
-    if (path === `/api/project/issues/${ISSUE_DETAIL}`) {
-      await route.fulfill({ json: issueDetail() })
+    if (/^\/api\/platform\/storage\/blobs\/[^/]+\/(download|preview)-url$/.test(path)) {
+      if (state.failSignedUrl) {
+        await route.fulfill(unavailable('Storage unavailable'))
+        return
+      }
+      await route.fulfill({ json: { url: 'https://storage.invalid/evidence', expiresAt: STAMP + 60_000 } })
+      return
+    }
+    const issueMatch = /^\/api\/project\/issues\/([^/]+)$/.exec(path)
+    if (issueMatch && request.method() === 'GET') {
+      const afterSequence = url.searchParams.get('afterSequence')
+      if (afterSequence != null) {
+        state.activityReads.push(afterSequence)
+        const pageWindow = options.activityPage?.(afterSequence)
+        if (state.failActivityPage || !pageWindow || pageWindow === 'error') {
+          await route.fulfill(unavailable('Activity window failed'))
+          return
+        }
+        await route.fulfill({ json: pageWindow })
+        return
+      }
+      if (issueMatch[1] !== ISSUE_DETAIL) {
+        await route.fulfill({ json: boardIssueDetail(locale, issueMatch[1]) })
+        return
+      }
+      if (options.holdDetail) {
+        await options.holdDetail
+      }
+      await route.fulfill({ json: detail })
       return
     }
     throw new Error(`Unexpected harness request: ${path}`)
@@ -450,6 +601,9 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await expect(page.getByRole('button', { name: copy[locale].createIssue })).toHaveClass(/btn-primary/)
       await expect(page.locator('.project-board-section .btn-primary')).toHaveCount(0)
 
+      // 整块看板先成图：占位符溢出不阻止截图产出，失败仍由下一处断言给出。
+      await sliceShot(page, `project-board-${locale}-${viewport.width}`)
+
       // 看板自己的搜索占位符同样整段可读：英文文案不被输入框末尾裁字。
       const boardSearchInput = page.locator('.project-detail-toolbar .searchbox input')
       await expect(boardSearchInput).toBeVisible()
@@ -477,8 +631,6 @@ for (const locale of Object.keys(copy) as Locale[]) {
         await scroller.evaluate((el) => el.scrollTo({ left: 0 }))
         await expect(transition).toBeInViewport()
       }
-
-      await sliceShot(page, `project-board-${locale}-${viewport.width}`)
     })
 
     test(`issue evidence separates failure, retry and real empty in ${locale} at ${viewport.width}px`, async ({
@@ -629,7 +781,152 @@ for (const locale of Object.keys(copy) as Locale[]) {
       const search = await placeholderFit(searchInput)
       expect(search.placeholder).toBe(copy[locale].listSearchPlaceholder)
       expect(search.textWidth).toBeLessThanOrEqual(search.boxWidth)
+
+      // 阶段数按卡片自己的工作流计算：单阶段项目在英文下必须是单数，多阶段项目仍是复数。
+      const stagesValue = (title: string) => page.locator('.resource-card')
+        .filter({ hasText: title })
+        .locator('.resource-card-meta-row')
+        .filter({ hasText: copy[locale].stagesLabel })
+        .locator('.resource-card-meta-value')
+      await expect(stagesValue(copy[locale].project)).toHaveText(copy[locale].stagesMany)
+      await expect(stagesValue(copy[locale].singleStageProject)).toHaveText(copy[locale].stagesOne)
       await sliceShot(page, `projects-list-${locale}-${viewport.width}`)
+    })
+
+    test(`activity tab counts loaded facts and fetches the next window in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      const state = await transport(page, locale, {
+        detail: paginatedDetail(),
+        activityPage: () => ({ activities: [latestActivity()], nextActivityCursor: null }),
+      })
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+
+      const dialog = page.getByRole('dialog')
+      // 还有未加载窗口：页签只声明已加载多少，末尾给出下一窗口入口。
+      const moreTab = dialog.getByRole('tab', {
+        name: new RegExp(`${copy[locale].activitiesTab} \\(6\\+\\)`),
+      })
+      await expect(moreTab).toBeVisible()
+      await moreTab.click()
+      const items = dialog.locator('.activity-item')
+      await expect(items).toHaveCount(6)
+      const loadMore = dialog.getByRole('button', { name: copy[locale].loadMore })
+      await expect(loadMore).toBeVisible()
+      if (sliceShotsDir) await loadMore.scrollIntoViewIfNeeded()
+      await sliceShot(page, `project-issue-activity-more-${locale}-${viewport.width}`)
+
+      // 后续窗口失败：已加载的事实不变，时间线末尾就地说明并可重试。
+      state.failActivityPage = true
+      await loadMore.click()
+      const failed = dialog.locator('.activity-more [role="alert"]')
+      await expect(failed.getByText(copy[locale].activitiesLoadMoreFailed)).toBeVisible()
+      await expect(failed.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
+      await expect(items).toHaveCount(6)
+      await expect(moreTab).toBeVisible()
+      if (sliceShotsDir) await failed.scrollIntoViewIfNeeded()
+      await sliceShot(page, `project-issue-activity-more-failed-${locale}-${viewport.width}`)
+
+      // 重试成功：追加窗口接在末尾，游标耗尽后页签才给出确定的计数。
+      state.failActivityPage = false
+      await failed.getByRole('button', { name: copy[locale].retry }).click()
+      await expect(items).toHaveCount(7)
+      await expect(dialog.locator('.activity-timeline')).toContainText(copy[locale].activityLatest)
+      await expect(dialog.getByRole('tab', {
+        name: new RegExp(`${copy[locale].activitiesTab} \\(7\\)`),
+      })).toBeVisible()
+      await expect(dialog.getByRole('button', { name: copy[locale].loadMore })).toHaveCount(0)
+      // 两次读取只请求同一个游标：失败重试不换页，也不重复追加。
+      expect(state.activityReads).toEqual([ACTIVITY_CURSOR, ACTIVITY_CURSOR])
+    })
+
+    test(`detail header names the blocked stage from the workflow in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale, { detail: blockedDetail() })
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+
+      const header = page.getByRole('dialog').locator('.issue-detail-header-left')
+      // 阻塞徽标使用工作流声明的阶段名，与看板列头一致，而不是固定通用名。
+      const badge = header.locator('.ui-badge')
+      await expect(badge).toHaveCount(1)
+      await expect(badge).toHaveText(copy[locale].customBlockedStage)
+      await expect(badge).not.toHaveText(copy[locale].genericBlockedStage)
+      await sliceShot(page, `project-issue-header-blocked-${locale}-${viewport.width}`)
+    })
+
+    test(`detail header holds the stage badge until the snapshot arrives in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      let release: () => void = () => {}
+      const holdDetail = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      await transport(page, locale, { holdDetail })
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+
+      const header = page.getByRole('dialog').locator('.issue-detail-header-left')
+      // 快照未到达：没有阶段事实，也没有内部编码冒充阶段。
+      await expect(header.locator('.issue-number')).toHaveText('#...')
+      await expect(header.locator('.ui-badge')).toHaveCount(0)
+      await expect(page.getByRole('dialog')).not.toContainText('INIT')
+      await sliceShot(page, `project-issue-loading-${locale}-${viewport.width}`)
+
+      // 快照到达后徽标才出现，且用工作流名称。
+      release()
+      await expect(header.locator('.ui-badge')).toHaveText(copy[locale].columns.WORK)
+    })
+
+    test(`evidence row reports an unavailable signed url inline in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale, { evidences: [evidenceFixture()], failSignedUrl: true })
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('tab', {
+        name: new RegExp(`${copy[locale].evidenceTab} \\(1\\)`),
+      }).click()
+      const row = dialog.locator('.evidence-card')
+      await expect(row).toHaveCount(1)
+      await expect(row).toContainText('settlement.log')
+
+      // 下载/预览地址都不可用：行内说明失败并给出重试，而不是点击后没有任何反馈。
+      await row.getByRole('link', { name: copy[locale].downloadOrView }).click()
+      const failure = row.getByRole('alert')
+      await expect(failure.getByText(copy[locale].evidenceOpenFailed)).toBeVisible()
+      await expect(failure.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
+      await sliceShot(page, `project-evidence-open-failed-${locale}-${viewport.width}`)
+
+      // 重试仍失败：提示留在行内，链接动作与重试入口继续可用。
+      await failure.getByRole('button', { name: copy[locale].retry }).click()
+      await expect(row.getByRole('alert')).toBeVisible()
+      await expect(failure.getByRole('button', { name: copy[locale].retry })).toBeEnabled()
+    })
+
+    test(`card block action opens the detail with the reason form ready in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await transport(page, locale)
+      await page.goto(`/browser-tests/project-workflow-harness.html?board&locale=${locale}`)
+      await expect(page.getByRole('heading', { name: copy[locale].project, exact: true })).toBeVisible()
+
+      await page.getByTestId(`issue-card-${ISSUE_INIT}`)
+        .getByRole('button', { name: copy[locale].block }).click()
+
+      // 卡片动作承诺填写原因：详情打开后原因表单已经展开，不需要再点一次。
+      await expect(page.getByRole('dialog')).toHaveCount(2)
+      const blockDialog = page.getByRole('dialog', { name: copy[locale].blockDialogTitle })
+      await expect(blockDialog).toBeVisible()
+      const reason = blockDialog.getByRole('textbox', { name: copy[locale].blockReasonField })
+      await expect(reason).toBeVisible()
+      await expect(reason).toBeFocused()
+      await sliceShot(page, `project-issue-block-intent-${locale}-${viewport.width}`)
     })
   }
 }

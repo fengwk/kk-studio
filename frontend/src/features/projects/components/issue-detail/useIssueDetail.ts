@@ -7,6 +7,7 @@ import type { ProjectsApi } from '../../projects-api'
 import type { IssueDetailTabKey } from './IssueDetailTabs'
 import { useIssueActionForms } from './useIssueActionForms'
 import { useIssueActionRunner } from './useIssueActionRunner'
+import { useIssueActivityFeed } from './useIssueActivityFeed'
 import { useIssueEvidence } from './useIssueEvidence'
 import { useIssueLifecycleActions } from './useIssueLifecycleActions'
 import { useIssueSpecDraft } from './useIssueSpecDraft'
@@ -52,6 +53,7 @@ export function useIssueDetail({
     enabled: isOpen && Boolean(issueId),
   })
   const issue = detail?.issue
+  const activityFeed = useIssueActivityFeed({ issueId, api, detail })
 
   const [activeTab, setActiveTab] = useState<IssueDetailTabKey>('spec')
 
@@ -135,6 +137,7 @@ export function useIssueDetail({
     detail,
     issue,
     isLoading,
+    activityFeed,
     activeTab,
     setActiveTab,
     displayedError,

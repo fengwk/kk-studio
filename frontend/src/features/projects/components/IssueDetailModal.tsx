@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { HashFile } from '@/shared/lib/upload-file'
 import { storageService as defaultStorageService, type StorageService } from '@/shared/api/storage-service'
 import { useI18n } from '@/shared/i18n'
@@ -17,6 +17,7 @@ import { IssueDetailTabs } from './issue-detail/IssueDetailTabs'
 import { useIssueDetail } from './issue-detail/useIssueDetail'
 import { toStateNames } from '../issue-labels'
 import './issue-detail-alerts.css'
+import type { IssueDetailIntent } from '../types'
 import type { ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueDetailModalProps {
@@ -24,6 +25,8 @@ export interface IssueDetailModalProps {
   issueId: string | null
   projectId?: string
   workflow?: ProjectWorkflowDTO
+  /** 打开意图：卡片上的“阻塞”动作要求详情直接展开阻塞原因表单。 */
+  initialAction?: IssueDetailIntent | null
   onClose: () => void
   onUpdated?: () => void
   onIssueUpdated?: () => void
@@ -43,6 +46,7 @@ export function IssueDetailModal({
   issueId,
   projectId = '',
   workflow,
+  initialAction = null,
   onClose,
   onUpdated,
   onIssueUpdated,
@@ -70,11 +74,26 @@ export function IssueDetailModal({
     issueQueryKey: queryKeys.projects.issue(projectId, issueId ?? ''),
   })
 
+  // 打开意图只消费一次：用户关掉表单后不再自动重开，关闭详情后同一意图仍可再次生效。
+  const openBlockForm = state.forms.block.open
+  const appliedIntentRef = useRef<IssueDetailIntent | null>(null)
+  useEffect(() => {
+    if (!isOpen) {
+      appliedIntentRef.current = null
+      return
+    }
+    if (!initialAction || appliedIntentRef.current === initialAction) {
+      return
+    }
+    appliedIntentRef.current = initialAction
+    openBlockForm()
+  }, [isOpen, initialAction, openBlockForm])
+
   if (!isOpen || !issueId) {
     return null
   }
 
-  const { detail, issue, isLoading, activeTab, setActiveTab, displayedError, runner, spec, forms, lifecycle, evidence } = state
+  const { detail, issue, isLoading, activityFeed, activeTab, setActiveTab, displayedError, runner, spec, forms, lifecycle, evidence } = state
   const isBlocked = issue?.state === 'BLOCKED' || Boolean(issue?.blockedFromState)
   const isDone = issue?.state === 'DONE'
   const availableNextStates = workflow?.states.find((s) => s.state === issue?.state)?.next ?? []
@@ -87,7 +106,7 @@ export function IssueDetailModal({
       header={
         <IssueDetailHeader
           issueNumber={issue?.number || '...'}
-          state={issue?.state || 'INIT'}
+          state={issue?.state ?? null}
           stateNames={stateNames}
           isBlocked={isBlocked}
           blockedReason={issue?.blockReason ?? null}
@@ -132,7 +151,8 @@ export function IssueDetailModal({
         activeTab={activeTab}
         onChange={setActiveTab}
         counts={{
-          activities: detail?.activities?.length ?? 0,
+          activities: activityFeed.activities.length,
+          activityHasMore: activityFeed.hasMore,
           runs: detail?.runs?.length ?? 0,
           stageBudgets: detail?.stageBudgets?.length ?? 0,
           agentThreads: detail?.agentThreads?.length ?? 0,
@@ -149,6 +169,7 @@ export function IssueDetailModal({
           isActionPending={runner.isActionPending}
           spec={spec}
           activity={forms.activity}
+          activityFeed={activityFeed}
           evidence={evidence}
           storageService={storageService}
           openResetBudget={() => forms.budget.open(detail?.stageBudgets[0]?.state)}

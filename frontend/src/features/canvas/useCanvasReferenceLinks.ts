@@ -5,6 +5,7 @@ import { readResourceReferences, withDraftReferences } from '@/features/canvas/c
 import { readJsonObject } from '@/features/canvas/domain'
 import { functionSupportsReferences } from '@/features/canvas/generation'
 import type { CanvasResourceReference } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 import type {
   CanvasCommandDTO,
   CanvasFunctionDefinitionDTO,
@@ -34,6 +35,7 @@ export function useCanvasReferenceLinks({
   setToast,
 }: ReferenceLinksInput) {
   const { draftsRef } = scope
+  const { t } = useI18n()
 
   /** 用新的引用数组同时更新本地函数草稿（若存在）并提交命令。 */
   const commitReferences = useCallback(async (
@@ -88,7 +90,7 @@ export function useCanvasReferenceLinks({
       return
     }
     if (existingReferences.length >= (policy?.maxReferences ?? Infinity)) {
-      setToast('当前模型的参考资源数量已达到上限。')
+      setToast(t('canvas.generation.referenceLimit'))
       return
     }
     const kindLimit = sourceResource ? policy?.maxByKind?.[sourceResource.kind] : undefined
@@ -97,7 +99,7 @@ export function useCanvasReferenceLinks({
         current?.nodes.find((n) => n.id === ref.nodeId)?.resources[ref.index]?.kind === sourceResource.kind
       )).length
       if (kindCount >= kindLimit) {
-        setToast('当前模型的该类参考资源数量已达到上限。')
+        setToast(t('canvas.generation.referenceKindLimit'))
         return
       }
     }
@@ -106,7 +108,7 @@ export function useCanvasReferenceLinks({
       ...existingReferences,
       { type: 'resource', nodeId: sourceNodeId, index: 0 },
     ])
-  }, [commitReferences, draftsRef, flushFunctionConfig, models, scope, setToast, snapshot])
+  }, [commitReferences, draftsRef, flushFunctionConfig, models, scope, setToast, snapshot, t])
 
   const deleteLink = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
     await flushFunctionConfig(targetNodeId).catch(() => undefined)

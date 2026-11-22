@@ -2,12 +2,15 @@ import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import type { Group, ResourceNode } from '@/features/canvas/domain'
 
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import type { TranslationKey } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
 } from '@/shared/api/generated/contracts'
 
 export type CanvasView = 'library' | 'editor'
+/** 冲突横幅是否提供整体重试入口，由产生冲突的结构决定，不靠文案字面量匹配。 */
+export type CanvasConflictKind = 'recoverable' | 'terminal'
 export type AddMenuAction =
   | 'image-resource'
   | 'video-resource'
@@ -40,6 +43,8 @@ export interface CanvasLocalState {
   uploadProgress: Record<string, number>
   commandPending: boolean
   draftPersistPending: boolean
+  /** 当前冲突横幅的结构化分类：recoverable 可原地重试恢复，terminal 只能就地处理冲突草稿。 */
+  conflictKind: CanvasConflictKind | null
   conflictMessage: string | null
   textEditor: CanvasTextEditorState | null
 }
@@ -60,7 +65,8 @@ export interface CanvasFunctionConfig {
   references: CanvasResourceReference[]
   parameters: Record<string, unknown>
   rawArgs?: Record<string, unknown>
-  rawError?: string
+  /** 进入完整 JSON 模式的原因（i18n key），由面板按当前 locale 渲染。 */
+  rawErrorKey?: TranslationKey
 }
 
 export interface PendingFunctionConfig {

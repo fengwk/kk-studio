@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
+import { CanvasFunctionCatalogNotice } from '@/features/canvas/CanvasFunctionCatalogNotice'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { AddMenuAction } from '@/features/canvas/types'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
@@ -25,12 +26,16 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
     setAddMenuIndex,
     handleAddAction,
     uploadFiles,
+    modelsQuery,
   } = useCanvasRuntime()
   const { t } = useI18n()
 
   const menuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const menuButtons = MENU_ITEMS
+  const catalogBlocked = modelsQuery.isPending || modelsQuery.isError
+  const isBlocked = (item: (typeof MENU_ITEMS)[number]) => catalogBlocked
+    && (item.action === 'image-function' || item.action === 'video-function')
 
   useEffect(() => {
     if (!state.addMenuOpen || !menuRef.current) {
@@ -78,7 +83,9 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
       }
       return
     }
-    handleAddAction(item.action)
+    if (!isBlocked(item)) {
+      handleAddAction(item.action)
+    }
   }
 
   return (
@@ -89,24 +96,25 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
       hidden={!state.addMenuOpen}
       inert={!state.addMenuOpen}
       aria-hidden={!state.addMenuOpen}
-      role="menu"
-      aria-label={t('canvas.add.ariaLabel')}
-      onKeyDown={handleMenuKeyDown}
     >
-      {menuButtons.map((item, index) => (
-        <button
-          key={item.action}
-          type="button"
-          role="menuitem"
-          data-add-action={item.action}
-          tabIndex={state.addMenuOpen && index === state.addMenuIndex ? 0 : -1}
-          onClick={() => selectItem(item)}
-          onMouseEnter={() => setAddMenuIndex(index)}
-        >
-          <span className="add-menu-icon">{item.icon}</span>
-          <span>{t(item.labelKey)}</span>
-        </button>
-      ))}
+      <div role="menu" aria-label={t('canvas.add.ariaLabel')} onKeyDown={handleMenuKeyDown}>
+        {menuButtons.map((item, index) => (
+          <button
+            key={item.action}
+            type="button"
+            role="menuitem"
+            aria-disabled={isBlocked(item) || undefined}
+            data-add-action={item.action}
+            tabIndex={state.addMenuOpen && index === state.addMenuIndex ? 0 : -1}
+            onClick={() => selectItem(item)}
+            onMouseEnter={() => setAddMenuIndex(index)}
+          >
+            <span className="add-menu-icon">{item.icon}</span>
+            <span>{t(item.labelKey)}</span>
+          </button>
+        ))}
+      </div>
+      {catalogBlocked ? <div className="add-menu-catalog"><CanvasFunctionCatalogNotice /></div> : null}
       <input
         ref={fileInputRef}
         type="file"

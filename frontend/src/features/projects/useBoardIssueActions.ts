@@ -11,6 +11,7 @@ import {
   storePendingAction,
   type PendingIssueAction,
 } from './pending-action-sidecar'
+import type { IssueDetailIntent } from './types'
 import type { ProjectsApi } from './projects-api'
 
 type BoardIssueActionKind = Extract<
@@ -21,8 +22,8 @@ type BoardIssueActionKind = Extract<
 interface UseBoardIssueActionsInput {
   projectId: string
   api: ProjectsApi
-  /** 打开详情以展示侧车异常时使用。 */
-  onSelectIssue: (issueId: string | null) => void
+  /** 打开详情；intent 决定详情打开后是否直接展开某个表单（侧车异常时为不指定）。 */
+  onSelectIssue: (issueId: string, intent?: IssueDetailIntent) => void
 }
 
 /**
@@ -181,8 +182,9 @@ export function useBoardIssueActions({ projectId, api, onSelectIssue }: UseBoard
       t('projects.detail.action.reopen'),
     )
 
-  /** 阻塞需要填写原因：看板只把用户带到详情弹窗，由那里的表单收取原因。 */
-  const openBlockDialog = (issueId: string, _expectedVersion: string) => onSelectIssue(issueId)
+  /** 阻塞需要填写原因：看板把用户带到详情弹窗，并直接展开那里的原因表单。 */
+  const openBlockDialog = (issueId: string, _expectedVersion: string) =>
+    onSelectIssue(issueId, 'block')
 
   return {
     actionError,

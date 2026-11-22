@@ -12,6 +12,7 @@ import {
   groupMemberTransforms,
 } from '@/features/canvas/node-commands'
 import type { AddMenuAction, CanvasLocalState } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 import type {
   CanvasCommandDTO,
   CanvasCommandDeleteGroup,
@@ -61,6 +62,7 @@ export function useCanvasNodeActions({
 }: NodeActionsInput) {
   const { setState } = scope
   const { selectedIds, positionDrafts, drafts } = state
+  const { t } = useI18n()
 
   const renameNode = useCallback((nodeId: string, name: string, expectedName: string) => {
     const normalized = name.trim()
@@ -75,13 +77,13 @@ export function useCanvasNodeActions({
       item.outputs?.some((o) => o.kind === outputKind) && item.available !== false
     ) ?? models?.find((item) => item.outputs?.some((o) => o.kind === outputKind))
     if (!fnDef || fnDef.available === false) {
-      setToast(fnDef?.unavailableReason || `没有可用的${outputKind === 'IMAGE' ? '图片' : '视频'}模型`)
+      setToast(t(outputKind === 'IMAGE' ? 'canvas.catalog.noImageFunction' : 'canvas.catalog.noVideoFunction'))
       return
     }
-    const alias = reserveNodeAlias(outputKind === 'IMAGE' ? '图片生成' : '视频生成')
+    const alias = reserveNodeAlias(t(outputKind === 'IMAGE' ? 'canvas.add.imageFunction' : 'canvas.add.videoFunction'))
     const nodeId = crypto.randomUUID()
     const defaultConfig = createDefaultFunctionConfig(fnDef)
-    defaultConfig.prompt = outputKind === 'IMAGE' ? '描述要生成的图片' : '描述要生成的视频'
+    defaultConfig.prompt = t(outputKind === 'IMAGE' ? 'canvas.generation.defaultImagePrompt' : 'canvas.generation.defaultVideoPrompt')
     void executeCommands([
       { type: 'CREATE_NODE', nodeId, name: alias, transform: nextTransform(), resources: [] },
       {
@@ -91,7 +93,7 @@ export function useCanvasNodeActions({
         function: { name: fnDef.name, args: configToFunctionArgs(defaultConfig, fnDef) },
       },
     ]).catch(() => undefined).finally(() => releaseNodeAlias(alias))
-  }, [executeCommands, models, nextTransform, releaseNodeAlias, reserveNodeAlias, setToast])
+  }, [executeCommands, models, nextTransform, releaseNodeAlias, reserveNodeAlias, setToast, t])
 
   const handleAddAction = useCallback((action: AddMenuAction) => {
     setState((current) => ({ ...current, addMenuOpen: false }))
@@ -110,7 +112,7 @@ export function useCanvasNodeActions({
       .map((id) => projected?.resourceNodes.find((node) => node.id === id))
       .filter((node): node is ResourceNode => Boolean(node))
     if (members.length === 0 || members.length !== selectedIds.length || members.some((node) => node.groupId)) {
-      setToast('请先选择未分组的资源节点。')
+      setToast(t('canvas.toast.selectUngroupedResources'))
       return
     }
     const memberTransforms = groupMemberTransforms(members, positionDrafts)
@@ -119,7 +121,7 @@ export function useCanvasNodeActions({
       {
         type: 'CREATE_GROUP',
         groupId,
-        title: '分组',
+        title: t('canvas.group.defaultTitle'),
         transform: groupBounds(memberTransforms),
       },
       ...members.map((node) => ({
@@ -129,12 +131,12 @@ export function useCanvasNodeActions({
         groupId,
       })),
     ]).catch(() => undefined)
-  }, [executeCommands, positionDrafts, selectedIds, setToast, snapshot])
+  }, [executeCommands, positionDrafts, selectedIds, setToast, snapshot, t])
 
   const ungroupGroup = useCallback((groupId: string) => {
     const memberNodes = (snapshot?.nodes ?? []).filter((node) => node.groupId === groupId)
     if (memberNodes.length === 0) {
-      setToast('当前分组没有成员。')
+      setToast(t('canvas.toast.groupEmpty'))
       return
     }
     void executeCommands(memberNodes.map((node) => ({
@@ -143,7 +145,7 @@ export function useCanvasNodeActions({
       expectedGroupId: groupId,
       groupId: null,
     }))).catch(() => undefined)
-  }, [executeCommands, setToast, snapshot?.nodes])
+  }, [executeCommands, setToast, snapshot?.nodes, t])
 
   const renameGroup = useCallback((groupId: string, title: string, expectedTitle: string) => {
     const normalized = title.trim()
@@ -233,7 +235,7 @@ export function useCanvasNodeActions({
     const commands: CanvasCommandDTO[] = [{
       type: 'CREATE_NODE',
       nodeId: newId,
-      name: draft.text?.name ?? suggestNodeAlias('新节点'),
+      name: draft.text?.name ?? suggestNodeAlias(t('canvas.node.newAlias')),
       transform: nextTransform(),
       resources: text ? [{ type: 'TEXT', name: 'text', textContent: text }] : [],
     }]
@@ -243,11 +245,11 @@ export function useCanvasNodeActions({
     try {
       await executeCommands(commands)
       dismissDraft(nodeId)
-      setToast('已另存为新节点')
+      setToast(t('canvas.toast.draftSavedAsNew'))
     } catch {
-      setToast('另存为新节点失败')
+      setToast(t('canvas.toast.draftSaveAsNewFailed'))
     }
-  }, [dismissDraft, drafts, executeCommands, nextTransform, setToast, suggestNodeAlias])
+  }, [dismissDraft, drafts, executeCommands, nextTransform, setToast, suggestNodeAlias, t])
 
   const retryDraft = useCallback(async (nodeId: string) => {
     const draft = drafts[nodeId]
@@ -256,7 +258,7 @@ export function useCanvasNodeActions({
     }
     const remoteNode = currentCanvasSnapshot(scope, snapshot)?.nodes.find((n) => n.id === nodeId)
     if (!remoteNode) {
-      setToast('远端节点已被删除，请选择另存为新节点')
+      setToast(t('canvas.toast.draftRemoteDeleted'))
       return
     }
     const commands: CanvasCommandDTO[] = []
@@ -287,11 +289,11 @@ export function useCanvasNodeActions({
     try {
       await executeCommands(commands)
       dismissDraft(nodeId)
-      setToast('重试成功')
+      setToast(t('canvas.toast.draftRetrySucceeded'))
     } catch {
       // 冲突处理分支会自动刷新草稿状态
     }
-  }, [dismissDraft, drafts, executeCommands, scope, setToast, snapshot])
+  }, [dismissDraft, drafts, executeCommands, scope, setToast, snapshot, t])
 
   return {
     renameNode,

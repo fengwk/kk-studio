@@ -142,7 +142,7 @@ export function useFunctionConfigDraft({
       setConfig((current) => ({
         ...current,
         rawArgs: current.rawArgs ? (jsonDirty ? current.rawArgs : sourceConfig.rawArgs) : undefined,
-        rawError: sourceConfig.rawError,
+        rawErrorKey: sourceConfig.rawErrorKey,
         references: sourceConfig.references,
         parameters: jsonDirty ? current.parameters : sourceConfig.parameters,
       }))
@@ -276,7 +276,7 @@ export function useFunctionConfigDraft({
 
   /** 完整 JSON 通道（模型不声明字符串 prompt / 入参结构非常规时使用）：解析结果写回 rawArgs。 */
   function changeRawJson(text: string) {
-    editJsonArgs(text, (parsed) => updateConfig({ ...config, rawArgs: parsed, rawError: undefined }))
+    editJsonArgs(text, (parsed) => updateConfig({ ...config, rawArgs: parsed, rawErrorKey: undefined }))
   }
 
   /** 参数 JSON 通道：非法草稿只留在 textarea，绝不覆盖仍然有效的表单值。 */

@@ -9,6 +9,8 @@ interface IssueDetailTabsProps {
   onChange: (tab: IssueDetailTabKey) => void
   counts: {
     activities: number
+    /** 活动还有未加载的后续窗口：计数只说明已加载多少。 */
+    activityHasMore: boolean
     runs: number
     stageBudgets: number
     agentThreads: number
@@ -22,7 +24,7 @@ interface IssueDetailTabsProps {
  * Issue 详情的六个 tab（Spec、活动、Run、阶段预算、Agent 线程、证据）及其内容区。
  *
  * <p>计数直接取自当前快照长度，标签只在快照到达后渲染；证据计数在读取成功前为 null，
- * 标签因此不写数字。
+ * 标签因此不写数字；活动还有后续窗口时在计数后加“+”，说明标签只算已加载部分。
  */
 export function IssueDetailTabs({ activeTab, onChange, counts, children }: IssueDetailTabsProps) {
   const { t } = useI18n()
@@ -47,7 +49,11 @@ export function IssueDetailTabs({ activeTab, onChange, counts, children }: Issue
           label: (
             <>
               <Activity size={14} aria-hidden="true" />
-              <span>{t('projects.issue.tabActivities', { count: counts.activities })}</span>
+              <span>
+                {counts.activityHasMore
+                  ? t('projects.issue.tabActivitiesMore', { count: counts.activities })
+                  : t('projects.issue.tabActivities', { count: counts.activities })}
+              </span>
             </>
           ),
         },

@@ -4,6 +4,7 @@ import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { ResourceNode } from '@/features/canvas/domain'
 import type { CanvasLocalState } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 import type {
   CanvasCommandDTO,
   CanvasSnapshotDTO,
@@ -37,6 +38,7 @@ export function useCanvasTextEditor({
   nextTransform,
 }: TextEditorInput) {
   const { setState, draftsRef, targetDraftsRef } = scope
+  const { t } = useI18n()
 
   const editTextNode = useCallback((node: ResourceNode) => {
     const resource = node.resources[0]
@@ -60,11 +62,11 @@ export function useCanvasTextEditor({
       textEditor: {
         mode: 'create',
         nodeId: null,
-        name: suggestNodeAlias('文本'),
-        markdown: '# 新文本\n\n在这里编写 Markdown。',
+        name: suggestNodeAlias(t('canvas.textEditor.defaultName')),
+        markdown: t('canvas.textEditor.defaultMarkdown'),
       },
     }))
-  }, [setState, suggestNodeAlias])
+  }, [setState, suggestNodeAlias, t])
 
   const setTextEditorDraft = useCallback((patch: { name?: string; markdown?: string }) => {
     setState((current) => {

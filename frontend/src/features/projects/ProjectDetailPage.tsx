@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { IssueBoard } from './components/IssueBoard'
 import { ProjectBoardToolbar } from './components/project-detail/ProjectBoardToolbar'
@@ -14,6 +14,7 @@ import { useBoardIssueActions } from './useBoardIssueActions'
 import { useProjectArchive, useProjectBoardModals } from './useProjectBoardModals'
 import { useProjectBoardRoute } from './useProjectBoardRoute'
 import { useProjectThreadGate } from './useProjectThreadGate'
+import type { IssueDetailIntent } from './types'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import './projects.css'
@@ -34,7 +35,18 @@ export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: Proj
   const queryClient = useQueryClient()
   const modals = useProjectBoardModals()
   const route = useProjectBoardRoute({ onDismissManualDetail: modals.dismissManualDetail })
+  const { selectIssue: selectIssueRoute } = route
   const [searchQuery, setSearchQuery] = useState('')
+  const [detailIntent, setDetailIntent] = useState<IssueDetailIntent | null>(null)
+
+  // 选中 Issue 时重置打开意图：只有卡片“阻塞”动作要求详情打开后直接展开原因表单。
+  const selectIssue = useCallback(
+    (issueId: string | null, intent: IssueDetailIntent | null = null) => {
+      setDetailIntent(intent)
+      selectIssueRoute(issueId)
+    },
+    [selectIssueRoute],
+  )
 
   const {
     data: snapshot,
@@ -54,7 +66,7 @@ export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: Proj
   }
 
   const archive = useProjectArchive({ api, onUpdated: invalidateSnapshot })
-  const boardActions = useBoardIssueActions({ projectId, api, onSelectIssue: route.selectIssue })
+  const boardActions = useBoardIssueActions({ projectId, api, onSelectIssue: selectIssue })
   const threadGate = useProjectThreadGate({
     projectId,
     issueId: route.issueId,
@@ -66,9 +78,10 @@ export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: Proj
   const closeIssueDetail = () => {
     if (route.threadId) {
       modals.dismissManualDetail()
+      setDetailIntent(null)
       return
     }
-    route.selectIssue(null)
+    selectIssue(null)
   }
 
   if (!snapshot) {
@@ -119,7 +132,7 @@ export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: Proj
           workflow={project.workflow}
           issues={snapshot.issues}
           searchQuery={searchQuery}
-          onSelectIssue={route.selectIssue}
+          onSelectIssue={selectIssue}
           onTransitionIssue={boardActions.transitionIssue}
           onBlockIssue={boardActions.openBlockDialog}
           onRecoverIssue={boardActions.recoverIssue}
@@ -159,6 +172,7 @@ export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: Proj
         issueDetail={{
           isOpen: isIssueDetailOpen,
           issueId: route.issueId,
+          intent: detailIntent,
           onClose: closeIssueDetail,
           onOpenThread: route.openThread,
         }}

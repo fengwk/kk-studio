@@ -22,6 +22,7 @@ interface ProjectCardProps {
  */
 export function ProjectCard({ project, onOpen, onEdit, onArchiveToggle, onDelete }: ProjectCardProps) {
   const { t } = useI18n()
+  const stageCount = project.workflow?.states?.length ?? 0
   return (
     <ResourceCard
       className={project.archivedAt ? 'is-archived' : undefined}
@@ -35,7 +36,9 @@ export function ProjectCard({ project, onOpen, onEdit, onArchiveToggle, onDelete
         ],
         [
           t('projects.meta.stages'),
-          t('projects.meta.stagesValue', { count: project.workflow?.states?.length ?? 0 }),
+          stageCount === 1
+            ? t('projects.meta.stagesValue.one', { count: stageCount })
+            : t('projects.meta.stagesValue.other', { count: stageCount }),
         ],
         [t('projects.meta.updatedAt'), formatBackendDate(project.updatedAt)],
         [t('projects.meta.nextIssueNumber'), `#${project.nextIssueNumber}`],

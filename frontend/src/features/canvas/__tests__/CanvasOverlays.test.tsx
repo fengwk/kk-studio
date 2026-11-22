@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
+import { setLocale } from '@/shared/i18n'
 
 function createFakeController(overrides?: Partial<CanvasController>): CanvasController {
   return {
@@ -22,6 +23,7 @@ function createFakeController(overrides?: Partial<CanvasController>): CanvasCont
       uploadProgress: {},
       commandPending: false,
       draftPersistPending: false,
+      conflictKind: null,
       conflictMessage: null,
       textEditor: null,
     },
@@ -88,56 +90,144 @@ function createFakeController(overrides?: Partial<CanvasController>): CanvasCont
   }
 }
 
-describe('CanvasOverlays UI recovery entry', () => {
-  it('renders retry action when conflictMessage indicates blocked/recoverable queue operations', async () => {
-    // 意图：当存在未确认操作未能自动重放或队列受阻时，UI 渲染横幅并提供最小 retry 入口，点击后调用 retryRecovery。
+function renderOverlays(controller: CanvasController) {
+  return render(
+    <CanvasRuntimeContext.Provider value={controller}>
+      <CanvasOverlays />
+    </CanvasRuntimeContext.Provider>,
+  )
+}
+
+describe('CanvasOverlays recovery entry', () => {
+  it('renders the retry entry for a recoverable conflict even when the message carries no matching wording', async () => {
+    // 意图：恢复入口由结构化 conflictKind 决定；消息改成英文/改写后仍必须提供整体重试。
     const user = userEvent.setup()
     const retryRecovery = vi.fn().mockResolvedValue(undefined)
     const dismissConflictMessage = vi.fn()
-
-    const controller = createFakeController({
+    const base = createFakeController()
+    renderOverlays(createFakeController({
       retryRecovery,
       dismissConflictMessage,
       state: {
-        ...createFakeController().state,
-        conflictMessage: '部分未确认操作未能自动重放，请检查网络后重试。',
+        ...base.state,
+        conflictKind: 'recoverable',
+        conflictMessage: 'Some unconfirmed operations could not be replayed. Check the connection and retry.',
       },
-    })
+    }))
 
-    render(
-      <CanvasRuntimeContext.Provider value={controller}>
-        <CanvasOverlays />
-      </CanvasRuntimeContext.Provider>,
-    )
-
-    expect(screen.getByText('部分未确认操作未能自动重放，请检查网络后重试。')).toBeInTheDocument()
+    expect(screen.getByText('Some unconfirmed operations could not be replayed. Check the connection and retry.'))
+      .toBeInTheDocument()
     const retryButton = screen.getByRole('button', { name: '重试' })
-    expect(retryButton).toBeInTheDocument()
-
     await user.click(retryButton)
     expect(retryRecovery).toHaveBeenCalledTimes(1)
 
-    const dismissButton = screen.getByRole('button', { name: '关闭' })
-    await user.click(dismissButton)
+    await user.click(screen.getByRole('button', { name: '关闭' }))
     expect(dismissConflictMessage).toHaveBeenCalledTimes(1)
   })
 
-  it('does not render retry button for non-recoverable conflict banner', () => {
-    // 意图：非队列恢复类的普通冲突信息只提供关闭，不展示恢复重试按钮。
-    const controller = createFakeController({
+  it('hides the retry entry for a terminal conflict even when the message contains recovery wording', () => {
+    // 意图：终态冲突（409 等服务端裁决）只做就地处理，不能因文案里出现「重试」而显示整体重试。
+    const base = createFakeController()
+    renderOverlays(createFakeController({
       state: {
-        ...createFakeController().state,
-        conflictMessage: '画布已在其他位置更新。',
+        ...base.state,
+        conflictKind: 'terminal',
+        conflictMessage: '部分未确认操作未能自动重放，请检查网络后重试。',
       },
-    })
-
-    render(
-      <CanvasRuntimeContext.Provider value={controller}>
-        <CanvasOverlays />
-      </CanvasRuntimeContext.Provider>,
-    )
+    }))
 
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument()
+  })
+})
+
+describe('CanvasOverlays localized text', () => {
+  it('renders draft conflict messages from the catalog with the node name interpolated', () => {
+    // 意图：冲突文案按原始结构 + 当前 locale 生成，节点名通过占位符插值而不是拼接中文模板。
+    setLocale('zh-CN')
+    const base = createFakeController()
+    renderOverlays(createFakeController({
+      state: {
+        ...base.state,
+        drafts: {
+          'node-deleted': {
+            generation: 1,
+            updatedAt: 1,
+            text: { name: '故事板', markdown: 'x' },
+            conflict: { kind: 'TARGET_MISSING', type: 'remote_deleted' },
+          },
+          'node-stale': {
+            generation: 1,
+            updatedAt: 1,
+            conflict: { kind: 'STALE_NODE', remoteValue: {} },
+          },
+        },
+      },
+    }))
+
+    expect(screen.getByText('节点「故事板」已在远端被删除，本地保留未保存草稿')).toBeInTheDocument()
+    expect(screen.getByText('节点在远端已被修改，请对比后决定。')).toBeInTheDocument()
+  })
+
+  it('keeps every overlay hint in English for the English locale', async () => {
+    // 意图：英文 locale 下叠层不留中文；冲突消息、存储告警与按钮都来自 canvas catalog。
+    const user = userEvent.setup()
+    setLocale('en-US')
+    const retryDraftPersist = vi.fn(async () => {})
+    const base = createFakeController()
+    const controller = createFakeController({
+      retryDraftPersist,
+      state: {
+        ...base.state,
+        storageError: 'Local storage is unavailable; drafts stay in this tab only and are lost if you refresh or close it.',
+        drafts: {
+          'node-deleted': {
+            generation: 1,
+            updatedAt: 1,
+            text: { name: 'Storyboard', markdown: 'x' },
+            conflict: { kind: 'TARGET_MISSING', type: 'remote_deleted' },
+          },
+          'node-referenced': {
+            generation: 1,
+            updatedAt: 1,
+            conflict: {
+              kind: 'NODE_REFERENCED',
+              conflicts: [{ type: 'NODE_REFERENCED', nodeId: 'node-referenced', referencingNodeIds: ['reference-source'] }],
+            },
+          },
+        },
+      },
+    })
+    const view = renderOverlays(controller)
+
+    expect(screen.getByText('Local storage is unavailable; drafts stay in this tab only and are lost if you refresh or close it.'))
+      .toBeInTheDocument()
+    expect(screen.getByText('The node “Storyboard” was deleted remotely; the unsaved draft is kept locally'))
+      .toBeInTheDocument()
+    expect(screen.getByText('Other nodes reference this node. Remove those references first'))
+      .toHaveAttribute('title', 'Referencing node IDs: reference-source')
+    expect(view.container.textContent).not.toMatch(/[\u4e00-\u9fff]/u)
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(retryDraftPersist).toHaveBeenCalledTimes(1)
+    // 两个冲突草稿各有一个救援/放弃入口，另一个提供「使用最新版本重试」
+    expect(screen.getAllByRole('button', { name: 'Save as a new node' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Discard draft' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Retry with the latest version' })).toBeInTheDocument()
+  })
+
+  it('shows the localized storage hint verbatim instead of a raw exception or message template', () => {
+    // 意图：存储不可用直接展示已本地化的提示，不再把底层异常文本塞进模板。
+    setLocale('zh-CN')
+    const base = createFakeController()
+    const view = renderOverlays(createFakeController({
+      state: {
+        ...base.state,
+        storageError: '本机 IndexedDB 不可用，草稿仅保留在当前标签页，刷新或关闭将丢失。',
+      },
+    }))
+
+    expect(screen.getByText('本机 IndexedDB 不可用，草稿仅保留在当前标签页，刷新或关闭将丢失。')).toBeInTheDocument()
+    expect(view.container.textContent).not.toContain('⟦missing:')
   })
 })

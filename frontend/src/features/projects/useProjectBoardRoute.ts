@@ -37,8 +37,13 @@ export function useProjectBoardRoute({ onDismissManualDetail }: UseProjectBoardR
   const selectIssue = useCallback((id: string | null) => {
     onDismissManualDetail()
     updateParams((next) => {
+      const previousIssueId = next.get('issue')
       if (id) {
         next.set('issue', id)
+        // 线程属于打开它的 Issue：切到另一个 Issue 时一并清除，否则 URL 会留下互相矛盾的 issue/thread。
+        if (previousIssueId !== id) {
+          next.delete('thread')
+        }
         return
       }
       next.delete('issue')

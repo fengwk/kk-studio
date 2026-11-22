@@ -23,6 +23,7 @@ export function createInitialCanvasState(initialCanvasId?: string): CanvasLocalS
     uploadProgress: {},
     commandPending: false,
     draftPersistPending: false,
+    conflictKind: null,
     conflictMessage: null,
     textEditor: null,
   }

@@ -632,6 +632,12 @@
   margin-top: 12px;
 }
 
+/* 时间线末尾的增量入口：不撑满整行，失败时就地换成重试提示。 */
+.activity-more {
+  display: flex;
+  justify-content: center;
+}
+
 .activity-item {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -902,9 +908,16 @@
   border-radius: var(--radius-sm);
   padding: 10px 14px;
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 8px;
   align-items: center;
   justify-content: space-between;
   font-size: var(--font-size-sm);
+}
+
+/* 行内失败提示独占证据行的一整行：名称与下载动作仍在同一行，提示另起一行。 */
+.evidence-card > .evidence-feedback {
+  flex-basis: 100%;
 }
 
 /* ---------- 受控 Issue Agent Dock ---------- */

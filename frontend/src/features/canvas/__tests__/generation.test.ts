@@ -245,7 +245,7 @@ describe('Canvas canonical generation codec & policy', () => {
     }
     const parsedObjPrompt = parseFunctionConfig(objectPromptArgs, imageModel)
     expect(parsedObjPrompt.rawArgs).toEqual(objectPromptArgs)
-    expect(parsedObjPrompt.rawError).toBeDefined()
+    expect(parsedObjPrompt.rawErrorKey).toBe('canvas.generation.rawConfig.promptNotString')
     // configToFunctionArgs 必须直接无损回传原始对象，绝不丢失 prompt 数据
     expect(configToFunctionArgs(parsedObjPrompt, imageModel)).toEqual(objectPromptArgs)
 
@@ -258,7 +258,7 @@ describe('Canvas canonical generation codec & policy', () => {
     }
     const parsedMalformedRef = parseFunctionConfig(malformedRefArgs, imageModel)
     expect(parsedMalformedRef.rawArgs).toEqual(malformedRefArgs)
-    expect(parsedMalformedRef.rawError).toBeDefined()
+    expect(parsedMalformedRef.rawErrorKey).toBe('canvas.generation.rawConfig.referencesInvalidItem')
     expect(configToFunctionArgs(parsedMalformedRef, imageModel)).toEqual(malformedRefArgs)
 
     // 3. schema 定义中 prompt 并非 string（例如 prompt 为 object）：转入 rawArgs 模式
@@ -278,7 +278,7 @@ describe('Canvas canonical generation codec & policy', () => {
     }
     const parsedComplexSchema = parseFunctionConfig({ prompt: { text: 'hi' } }, objectPromptSchemaModel)
     expect(parsedComplexSchema.rawArgs).toBeDefined()
-    expect(parsedComplexSchema.rawError).toBeDefined()
+    expect(parsedComplexSchema.rawErrorKey).toBe('canvas.generation.rawConfig.promptSchemaNotString')
   })
 
   it('strictly validates functionSupportsReferences against schema properties and never injects references if undeclared', () => {
@@ -348,7 +348,7 @@ describe('Canvas canonical generation codec & policy', () => {
     }
     const parsedExtraKeyRef = parseFunctionConfig(extraKeyRefArgs, imageModel)
     expect(parsedExtraKeyRef.rawArgs).toEqual(extraKeyRefArgs)
-    expect(parsedExtraKeyRef.rawError).toBeDefined()
+    expect(parsedExtraKeyRef.rawErrorKey).toBe('canvas.generation.rawConfig.referencesInvalidItem')
 
     // 2. 分清创建默认和解析补 default：
     // 未显式提供 default 的 enum，在 extractParameters 中 defaultValue 为 null；
@@ -381,7 +381,7 @@ describe('Canvas canonical generation codec & policy', () => {
     }
     const parsedUnsupportedRefs = parseFunctionConfig(reportWithRefs, reportModelNoRef)
     expect(parsedUnsupportedRefs.rawArgs).toEqual(reportWithRefs)
-    expect(parsedUnsupportedRefs.rawError).toContain('不支持参考资源')
+    expect(parsedUnsupportedRefs.rawErrorKey).toBe('canvas.generation.rawConfig.referencesUnsupported')
 
     // 4. absent prompt 保留 optional 缺失，不强加空字符串
     const absentPromptArgs = { ratio: '16:9' }

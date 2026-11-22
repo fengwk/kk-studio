@@ -11,16 +11,13 @@ import {
   CanvasQueueBlockedError,
 } from '@/features/canvas/command-queue'
 import type { CanvasLocalState } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   CanvasCommandDTO,
   CanvasConflictDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/generated/contracts'
-
-const REPLAY_CONFLICT_MESSAGE = '部分未确认操作因服务端内容已变化而未能自动重放，请检查最新内容。'
-const REPLAY_FAILED_MESSAGE = '部分未确认操作未能自动重放，请检查网络后重试。'
-const RECOVERY_FAILED_MESSAGE = '待确认操作恢复失败，请检查网络后重试。'
 
 interface CommandQueueInput {
   scope: CanvasScope
@@ -52,6 +49,7 @@ export function useCanvasCommandQueue({
   applyDraftAcks,
 }: CommandQueueInput) {
   const { setState, canvasEpochRef, queueRef, queueCanvasIdRef, draftsRef, targetDraftsRef } = scope
+  const { t } = useI18n()
   const pendingCommandCountRef = useRef(0)
 
   useEffect(() => {
@@ -89,18 +87,30 @@ export function useCanvasCommandQueue({
           return
         }
         if (result.conflicted > 0) {
-          setState((current) => ({ ...current, conflictMessage: REPLAY_CONFLICT_MESSAGE }))
+          setState((current) => ({
+            ...current,
+            conflictKind: 'recoverable',
+            conflictMessage: t('canvas.conflict.replayConflict'),
+          }))
         } else if (result.failed > 0) {
-          setState((current) => ({ ...current, conflictMessage: REPLAY_FAILED_MESSAGE }))
+          setState((current) => ({
+            ...current,
+            conflictKind: 'recoverable',
+            conflictMessage: t('canvas.conflict.replayFailed'),
+          }))
         }
       })
       .catch(() => {
         if (queueRef.current !== queue) {
           return
         }
-        setState((current) => ({ ...current, conflictMessage: RECOVERY_FAILED_MESSAGE }))
+        setState((current) => ({
+          ...current,
+          conflictKind: 'recoverable',
+          conflictMessage: t('canvas.conflict.recoveryFailed'),
+        }))
       })
-  }, [ackDurableDraftsForScope, canvasEpochRef, canvasId, queryClient, queueCanvasIdRef, queueRef, setState, snapshot])
+  }, [ackDurableDraftsForScope, canvasEpochRef, canvasId, queryClient, queueCanvasIdRef, queueRef, setState, snapshot, t])
 
   // 应用事件 WebSocket 订阅：更高 revision 直接刷新权威 Snapshot
   const refreshCanvasSnapshot = useCallback(() => {
@@ -123,7 +133,7 @@ export function useCanvasCommandQueue({
       throw new Error('Canvas snapshot is not ready')
     }
     pendingCommandCountRef.current += 1
-    setState((current) => ({ ...current, commandPending: true, conflictMessage: null }))
+    setState((current) => ({ ...current, commandPending: true, conflictKind: null, conflictMessage: null }))
     try {
       return await queue.enqueue(commands, ack && ack.length > 0 ? { ack } : undefined)
     } catch (error) {
@@ -138,20 +148,23 @@ export function useCanvasCommandQueue({
           return {
             ...current,
             drafts: nextDrafts,
-            conflictMessage: error.message,
-            toast: '画布已在其他位置更新，请检查最新内容后重试。',
+            conflictKind: 'terminal',
+            conflictMessage: t('canvas.conflict.serverUpdated'),
+            toast: t('canvas.toast.serverUpdated'),
           }
         })
       } else if (error instanceof CanvasQueueBlockedError) {
         setState((current) => ({
           ...current,
-          conflictMessage: '存在未确认操作阻塞队列，请检查网络后点击重试。',
-          toast: '队列受阻：存在未完成同步的修改，请重试。',
+          conflictKind: 'recoverable',
+          conflictMessage: t('canvas.conflict.queueBlocked'),
+          toast: t('canvas.toast.queueBlocked'),
         }))
       } else {
+        console.error('[canvas] Command batch failed:', error)
         setState((current) => ({
           ...current,
-          toast: error instanceof Error ? error.message : '画布操作失败',
+          toast: t('canvas.toast.operationFailed'),
         }))
       }
       throw error
@@ -161,7 +174,7 @@ export function useCanvasCommandQueue({
         setState((current) => ({ ...current, commandPending: false }))
       }
     }
-  }, [draftsRef, queueRef, setState, targetDraftsRef])
+  }, [draftsRef, queueRef, setState, t, targetDraftsRef])
 
   const retryRecovery = useCallback(async () => {
     const queue = queueRef.current
@@ -177,22 +190,28 @@ export function useCanvasCommandQueue({
         applyDraftAcks(result.ackedDrafts)
       }
       const conflictMessage = result.conflicted > 0
-        ? REPLAY_CONFLICT_MESSAGE
-        : result.failed > 0 ? REPLAY_FAILED_MESSAGE : null
-      setState((current) => ({ ...current, conflictMessage }))
+        ? t('canvas.conflict.replayConflict')
+        : result.failed > 0 ? t('canvas.conflict.replayFailed') : null
+      setState((current) => ({
+        ...current,
+        conflictKind: conflictMessage ? 'recoverable' : null,
+        conflictMessage,
+      }))
       return result
     } catch (error) {
       if (queueRef.current !== queue) {
         throw error
       }
+      console.error('[canvas] Queue recovery failed:', error)
       setState((current) => ({
         ...current,
-        conflictMessage: RECOVERY_FAILED_MESSAGE,
-        toast: error instanceof Error ? error.message : '恢复失败',
+        conflictKind: 'recoverable',
+        conflictMessage: t('canvas.conflict.recoveryFailed'),
+        toast: t('canvas.toast.recoveryFailed'),
       }))
       throw error
     }
-  }, [applyDraftAcks, queueRef, setState])
+  }, [applyDraftAcks, queueRef, setState, t])
 
   return { executeCommands, retryRecovery }
 }
@@ -211,7 +230,6 @@ function markConflicts(
     if (conf.type === 'STALE_NODE') {
       withConflict(conf.nodeId, {
         kind: 'STALE_NODE',
-        message: `节点在远端已被修改（${conf.group}），请对比后决定。`,
         remoteValue: conf.current,
         conflicts,
       })
@@ -219,13 +237,11 @@ function markConflicts(
       withConflict(conf.targetId, {
         kind: 'TARGET_MISSING',
         type: 'remote_deleted',
-        message: '目标在远端已被删除',
         conflicts,
       })
     } else if (conf.type === 'NODE_REFERENCED') {
       withConflict(conf.nodeId, {
         kind: 'NODE_REFERENCED',
-        message: `节点被其他节点引用 (${conf.referencingNodeIds.join(', ')})，请先解除引用`,
         conflicts,
       })
     }

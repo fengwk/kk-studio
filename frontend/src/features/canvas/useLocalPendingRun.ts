@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { inspectLocalPendingRun } from '@/features/canvas/function-run-pending'
 
 export interface LocalPendingRun {
-  message: string
   raw: string | null
 }
 
@@ -28,7 +27,7 @@ export function useLocalPendingRun(
     }
     const inspected = inspectLocalPendingRun(canvasId, nodeId)
     setState(inspected.error && inspected.raw !== null
-      ? { message: inspected.error, raw: inspected.raw }
+      ? { raw: inspected.raw }
       : null)
   }, [canvasId, nodeId, runtimeErrors])
 

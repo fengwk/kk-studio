@@ -1,5 +1,6 @@
 import { MoveHorizontal, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { CanvasFunctionCatalogNotice } from '@/features/canvas/CanvasFunctionCatalogNotice'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
 import {
@@ -50,7 +51,7 @@ export function CanvasGenerationPanel({
   const { t } = useI18n()
   const { flushFunctionConfig } = runtime
 
-  // 本地未决记录与丢弃确认属于面板生命周期：目录短暂为空导致面板不渲染时也不能重置。
+  // 目录状态变化不重置本地未决记录和丢弃确认。
   const [localPending, setLocalPending] = useLocalPendingRun(
     snapshot.document.id,
     node.id,
@@ -83,7 +84,7 @@ export function CanvasGenerationPanel({
   })
 
   const { model } = draft
-  if (!node.function || !model) {
+  if (!node.function) {
     return null
   }
 
@@ -105,41 +106,47 @@ export function CanvasGenerationPanel({
         onToggleExpanded={() => setExpanded((current) => !current)}
         onClose={() => runtime.setSelection([])}
       />
-      {draft.config.rawArgs
-        ? <RawJsonEditor draft={draft} />
-        : <PromptEditor draft={draft} active={active} />}
-      <div className="generation-footer">
-        <OutputBadges model={model} />
-        <div className="generation-controls">
-          <ModelSelect draft={draft} model={model} disabled={active} />
-          {draft.config.rawArgs ? null : (
-            <>
-              <ParameterControls draft={draft} disabled={active} />
-              <ParameterJsonToggle draft={draft} />
-            </>
-          )}
-          <UnknownResolutionControls
-            node={node}
-            resolution={unknownResolution}
-            verification={verificationText}
-            onResolutionChange={setUnknownResolution}
-            onVerificationChange={setVerificationText}
-          />
-          <LocalPendingRunNotice
-            node={node}
-            pending={localPending}
-            active={active}
-            confirmingDiscard={confirmingDiscard}
-            onRequestDiscard={() => setConfirmingDiscard(true)}
-            onCancelDiscard={() => setConfirmingDiscard(false)}
-            onDiscarded={() => {
-              setConfirmingDiscard(false)
-              setLocalPending(null)
-            }}
-          />
-          <RunFeedback node={node} />
-        </div>
-      </div>
+      {model ? (
+        <>
+          {draft.config.rawArgs
+            ? <RawJsonEditor draft={draft} />
+            : <PromptEditor draft={draft} active={active} />}
+          <div className="generation-footer">
+            <OutputBadges model={model} />
+            <div className="generation-controls">
+              <ModelSelect draft={draft} model={model} disabled={active} />
+              {draft.config.rawArgs ? null : (
+                <>
+                  <ParameterControls draft={draft} disabled={active} />
+                  <ParameterJsonToggle draft={draft} />
+                </>
+              )}
+              <UnknownResolutionControls
+                node={node}
+                resolution={unknownResolution}
+                verification={verificationText}
+                onResolutionChange={setUnknownResolution}
+                onVerificationChange={setVerificationText}
+              />
+              <RunFeedback node={node} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="generation-footer"><CanvasFunctionCatalogNotice showMissing /></div>
+      )}
+      <LocalPendingRunNotice
+        node={node}
+        pending={localPending}
+        active={active}
+        confirmingDiscard={confirmingDiscard}
+        onRequestDiscard={() => setConfirmingDiscard(true)}
+        onCancelDiscard={() => setConfirmingDiscard(false)}
+        onDiscarded={() => {
+          setConfirmingDiscard(false)
+          setLocalPending(null)
+        }}
+      />
     </section>
   )
 }
@@ -211,7 +218,7 @@ function PanelHeader({
   onClose,
 }: {
   node: ResourceNode
-  model: CanvasFunctionDefinitionDTO
+  model: CanvasFunctionDefinitionDTO | null
   expanded: boolean
   onToggleExpanded: () => void
   onClose: () => void
@@ -221,7 +228,7 @@ function PanelHeader({
     <div className="generation-panel-head">
       <div>
         <span className="generation-node-kicker">{t('canvas.generation.nodeKicker')}</span>
-        <strong>{model.description || model.name}</strong>
+        <strong>{model?.description || model?.name || node.name}</strong>
         <span className={`generation-node-status ${node.run?.status.toLowerCase() ?? 'ready'}`}>
           {node.run ? t(runStatusKey(node.run.status)) : t('canvas.generation.status.ready')}
         </span>
@@ -357,13 +364,13 @@ function LocalPendingRunNotice({
     <>
       <div className="generation-local-pending-error" role="alert" data-testid="local-pending-error">
         <strong>{t('canvas.generation.localPendingTitle')}</strong>
-        <p>{pending.message}</p>
+        <p>{t('canvas.generation.localPendingUnreadable')}</p>
         <Button
           variant="inline"
           size="compact"
           danger
           data-testid="discard-pending-btn"
-          disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
+          disabled={pending.raw === null || active || Boolean(runtime.isNodeInFlight?.(node.id))}
           onClick={onRequestDiscard}
         >
           {t('canvas.generation.discardPending')}

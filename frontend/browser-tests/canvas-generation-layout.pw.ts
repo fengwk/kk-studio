@@ -1,13 +1,79 @@
+import type { Page } from '@playwright/test'
+import fs from 'node:fs'
+import path from 'node:path'
 import { expect, test } from './fixture'
 
-test('discarding a corrupt pending record uses the shared confirmation', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 360, height: 740 })
+/** 截图路径：显式给 KK_SLICE_SHOTS 时写到该目录，否则走 Playwright 输出目录。 */
+function shotPath(name: string): string {
+  const dir = process.env.KK_SLICE_SHOTS
+  if (!dir) {
+    return test.info().outputPath(name)
+  }
+  fs.mkdirSync(dir, { recursive: true })
+  return path.join(dir, name)
+}
+
+/** JSON 通道的双语文案：原因说明与编辑器可访问名都取自同一本地化层。 */
+const JSON_COPY = {
+  'zh-CN': {
+    reason: '入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。',
+    jsonArgs: '参数 JSON',
+    pending: '无法读取本地未决记录，请核实运行后再继续。',
+  },
+  'en-US': {
+    reason: 'The prompt argument is not a plain string, so the full JSON configuration is used to keep the data.',
+    jsonArgs: 'Parameter JSON',
+    pending: 'Could not read the local unsettled record. Verify the run before continuing.',
+  },
+} as const
+type JsonCopyLocale = keyof typeof JSON_COPY
+
+test.describe('Canvas generation panel localized JSON reason', () => {
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ] as const) {
+      test(`raw JSON mode explains why the full configuration is used for ${locale} at ${viewport.width}x${viewport.height}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport)
+        await page.goto(`/browser-tests/canvas-generation-harness.html?mode=raw&locale=${locale}`)
+
+        const panel = page.locator('.generation-panel')
+        await expect(panel).toBeVisible()
+        const copy = JSON_COPY[locale as JsonCopyLocale]
+        // 原因说明是本地化的角色 alert，不是硬编码中文。
+        await expect(panel.getByRole('alert')).toHaveText(copy.reason)
+        await expect(panel.getByRole('textbox', { name: copy.jsonArgs })).toBeVisible()
+        await page.screenshot({
+          path: shotPath(`canvas-json-reason-${locale}-${viewport.width}x${viewport.height}.png`),
+        })
+      })
+
+      test(`explains unreadable local run records in ${locale} at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+        await page.setViewportSize(viewport)
+        await seedCorruptPendingRecord(page)
+        await page.goto(`/browser-tests/canvas-generation-harness.html?locale=${locale}`)
+        await expect(page.getByTestId('local-pending-error')).toContainText(JSON_COPY[locale].pending)
+        await page.screenshot({ path: shotPath(`canvas-pending-record-${locale}-${viewport.width}x${viewport.height}.png`) })
+      })
+    }
+  }
+})
+
+async function seedCorruptPendingRecord(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem(
       'kk-studio.canvas.pending-run:8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f:00000000-0000-4000-8000-000000000009',
       'invalid-json',
     )
   })
+}
+
+test('discarding a corrupt pending record uses the shared confirmation', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 360, height: 740 })
+  await seedCorruptPendingRecord(page)
   await page.goto('/browser-tests/canvas-generation-harness.html')
   const discard = page.getByTestId('discard-pending-btn')
   await discard.click()

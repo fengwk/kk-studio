@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
@@ -13,7 +14,7 @@ const CANVAS_ID: string = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
 /** Stage 依赖 @xyflow/react，Editor 测试只验证状态渲染、导航与线程开关 wiring。 */
 vi.mock('@/features/canvas/CanvasStage', () => ({
-  CanvasStage: () => <div data-testid="canvas-stage" />,
+  CanvasStage: () => <div data-testid="canvas-stage"><CanvasToolRail menuId="test-menu" /></div>,
 }))
 
 interface EditorQueryState {
@@ -143,6 +144,8 @@ function renderEditor(options: {
   query?: Partial<EditorQueryState>
   commandPending?: boolean
   withLibraryRoute?: boolean
+  modelsQuery?: Partial<CanvasController['modelsQuery']>
+  addMenuOpen?: boolean
 } = {}) {
   const refetch = vi.fn(async () => undefined)
   const state = {
@@ -156,10 +159,11 @@ function renderEditor(options: {
     draftPersistPending: false,
     viewport: { x: 0, y: 0, zoom: 1 },
     toast: null,
-    addMenuOpen: false,
+    addMenuOpen: options.addMenuOpen ?? false,
     addMenuIndex: 0,
     uploadProgress: {},
     commandPending: options.commandPending ?? false,
+    conflictKind: null,
     conflictMessage: null,
     textEditor: null,
   }
@@ -176,6 +180,7 @@ function renderEditor(options: {
       options.snapshot ?? null,
       buildSnapshotQuery(nextQuery, options.snapshot ?? null),
     )
+    Object.assign(controller.modelsQuery, options.modelsQuery)
     return (
       <MemoryRouter initialEntries={['/canvas/abc']}>
         <CanvasRuntimeContext.Provider value={controller}>
@@ -201,6 +206,20 @@ function renderEditor(options: {
 }
 
 describe('CanvasEditor state rendering', () => {
+  it('can retry the failed function catalog directly from the add menu', async () => {
+    const retry = vi.fn()
+    renderEditor({ snapshot: snapshotDTO(), query: { isLoading: false }, addMenuOpen: true,
+      modelsQuery: { data: undefined, isError: true, refetch: retry } })
+    expect(screen.getByRole('alert')).toHaveTextContent('函数目录读取失败')
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it('names the zoom reset button with the current visible percentage', () => {
+    const view = renderEditor({ snapshot: snapshotDTO(), query: { isLoading: false } })
+    view.rerenderWith({ viewport: { x: 0, y: 0, zoom: 1.25 } })
+    expect(screen.getByRole('button', { name: '125%，重置缩放' })).toHaveTextContent('125%')
+  })
   it('shows the loading state while the snapshot query is pending', () => {
     renderEditor()
     expect(screen.getByRole('status')).toHaveTextContent('正在加载画布…')

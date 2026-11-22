@@ -19,6 +19,7 @@ import {
   startCanvasFunctionRun,
 } from '@/features/canvas/canvas-api'
 import { ApiError } from '@/shared/api/client'
+import { LOCALE_STORAGE_KEY } from '@/shared/i18n'
 import { storageService } from '@/shared/api/storage-service'
 import type {
   ApplyCanvasCommandsRequestDTO,
@@ -416,7 +417,12 @@ describe('useCanvasController real snapshot runtime', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     canvasEventSubscriptions.splice(0)
+    // 只清理画布存储；locale 偏好不属于被清对象，清掉会让后续提示切到默认语言。
+    const locale = localStorage.getItem(LOCALE_STORAGE_KEY)
     localStorage.clear()
+    if (locale !== null) {
+      localStorage.setItem(LOCALE_STORAGE_KEY, locale)
+    }
     current = snapshot()
     commands = []
     vi.mocked(getCanvas).mockImplementation(async () => current)
@@ -578,7 +584,7 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_NODE'
     ))).toBe(true))
-    expect(result.current.state.toast).toContain('没有可用的视频模型')
+    expect(result.current.state.toast).toContain('没有可用的视频生成函数')
 
     act(() => {
       result.current.setSelection([])
@@ -1504,7 +1510,8 @@ describe('useCanvasController real snapshot runtime', () => {
       expect.objectContaining({ type: 'SET_NODE_FUNCTION', expectedFunction: remoteFunction }),
       expect.objectContaining({ type: 'DELETE_NODE', expectedFunction: visible }),
     ] : [expect.objectContaining({ type: 'SET_NODE_FUNCTION', expectedFunction: visible })])
-    expect(result.current.state.conflictMessage).toContain('Canvas changed on the server')
+    expect(result.current.state.conflictKind).toBe('terminal')
+    expect(result.current.state.conflictMessage).toContain('画布已在其他位置更新')
     expect(result.current.state.selectedIds).toEqual([NODE_FN])
     expect(current.nodes.find((node) => node.id === NODE_FN)?.function?.args)
       .toMatchObject({ prompt: mode === 'in-flight' ? 'local edit' : 'remote edit' })
@@ -1572,7 +1579,7 @@ describe('useCanvasController real snapshot runtime', () => {
       await deletion
     })
     expect(postCanvasCommands).toHaveBeenCalledTimes(2)
-    expect(result.current.state.conflictMessage).toContain('Canvas changed on the server')
+    expect(result.current.state.conflictMessage).toContain('画布已在其他位置更新')
     expect(result.current.state.selectedIds).toEqual([NODE_FN])
   })
 
@@ -1590,7 +1597,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(postCanvasCommands).toHaveBeenCalledExactlyOnceWith(CANVAS_ID, expect.objectContaining({
       commands: [expect.objectContaining({ type: 'SET_NODE_FUNCTION', nodeId: NODE_FN })],
     }), expect.anything())
-    expect(result.current.state.toast).toBe('save failed')
+    expect(result.current.state.toast).toBe('画布操作失败，请重试。')
     expect(result.current.state.selectedIds).toEqual([NODE_FN, NODE_NOTE])
     expect(result.current.state.drafts[NODE_FN]?.function?.args).toMatchObject({ prompt: 'keep draft' })
   })
@@ -1846,7 +1853,7 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.saveTextEditor()
     })
 
-    await waitFor(() => expect(result.current.state.conflictMessage).toContain('Canvas changed on the server'))
+    await waitFor(() => expect(result.current.state.conflictMessage).toContain('画布已在其他位置更新'))
     expect(result.current.state.drafts[NODE_NOTE]?.conflict).toBeDefined()
     expect(result.current.state.drafts[NODE_NOTE]?.conflict?.kind).toBe('STALE_NODE')
 

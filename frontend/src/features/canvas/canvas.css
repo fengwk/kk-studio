@@ -705,6 +705,7 @@
   left: 50%;
   z-index: var(--z-raised);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   width: min(560px, calc(100% - 40px));
   gap: 7px;
   padding: 10px;
@@ -1036,14 +1037,15 @@
 }
 
 .canvas-feature .generation-local-pending-error p {
-  margin: 0 0 6px 0;
-  word-break: break-all;
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
   color: var(--fg);
 }
 
 /* 未定义类与内联样式的替代：JSON 编辑区与 UNKNOWN 核查区使用已定义的作用域布局。 */
 .canvas-feature .generation-raw-editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 8px 12px;
 }
@@ -1390,14 +1392,32 @@
 .canvas-feature .add-menu {
   display: grid;
   width: 230px;
-  max-height: 320px;
-  gap: 2px;
+  max-height: min(380px, calc(50dvh - var(--space-4)));
+  gap: var(--space-1);
   overflow: auto;
   padding: 6px;
   border-radius: 13px;
 }
 
-.canvas-feature .add-menu button {
+.canvas-feature .add-menu [role="menu"] {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.canvas-feature .add-menu-catalog {
+  padding: var(--space-2);
+  color: var(--fg-muted);
+}
+
+.canvas-feature .canvas-catalog-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--danger);
+}
+
+.canvas-feature .add-menu button[role="menuitem"] {
   display: flex;
   min-height: 39px;
   align-items: center;
@@ -1407,8 +1427,13 @@
   text-align: left;
 }
 
-.canvas-feature .add-menu button:hover,
-.canvas-feature .add-menu button:focus {
+.canvas-feature .add-menu button[aria-disabled="true"] {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+.canvas-feature .add-menu button[role="menuitem"]:hover,
+.canvas-feature .add-menu button[role="menuitem"]:focus {
   background: var(--surface-active);
 }
 
@@ -1452,11 +1477,20 @@
   background: var(--surface-active);
 }
 
-.canvas-feature .toast {
+.canvas-feature .canvas-notices {
   position: fixed;
-  top: 80px;
-  left: 50%;
+  inset: 64px var(--space-3) auto;
   z-index: var(--z-dropdown);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.canvas-feature .toast {
+  order: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 9px 13px;
   border: 1px solid var(--accent-border);
   border-radius: 8px;
@@ -1464,40 +1498,43 @@
   background: var(--accent-deep);
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -12px);
+  transform: translateY(calc(-1 * var(--space-2)));
   transition: var(--duration-base);
+}
+
+.canvas-feature .toast:not(.visible) {
+  position: absolute;
+  padding: 0;
+  border: 0;
 }
 
 .canvas-feature .toast.visible {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
 }
 
 .canvas-feature .canvas-conflict-banner {
-  position: fixed;
-  top: 64px;
-  left: 50%;
-  z-index: var(--z-dropdown);
-  max-width: min(680px, calc(100% - 24px));
+  max-width: min(680px, 100%);
+  pointer-events: auto;
+  overflow-wrap: anywhere;
   padding: 8px 12px;
   border: 1px solid var(--warning);
   border-radius: 8px;
   color: var(--warning);
   background: var(--surface);
-  transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-2) var(--space-4);
 }
 
 .canvas-feature .canvas-storage-error-banner {
-  position: fixed;
-  top: 110px;
-  left: 50%;
-  z-index: var(--z-dropdown);
-  max-width: min(680px, calc(100% - 24px));
+  max-width: min(680px, 100%);
+  pointer-events: auto;
+  overflow-wrap: anywhere;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
@@ -1505,14 +1542,14 @@
   border-radius: 8px;
   color: var(--danger);
   background: var(--surface);
-  transform: translateX(-50%);
 }
 
 .canvas-feature .canvas-conflict-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: var(--space-2);
+  max-width: 100%;
 }
 
 @keyframes canvas-spin {

@@ -18,6 +18,8 @@ export function CanvasToolRail({ menuId }: { menuId: string }) {
   } = useCanvasRuntime()
   const { t } = useI18n()
 
+  const percentage = `${Math.round(state.viewport.zoom * 100)}%`
+
   return (
     <>
       <div className="canvas-tool-rail">
@@ -41,10 +43,10 @@ export function CanvasToolRail({ menuId }: { menuId: string }) {
         <button type="button" aria-label={t('canvas.stage.fitAll')} onClick={() => fitViewRef.current?.()}>⊙</button>
         <button
           type="button"
-          aria-label={t('canvas.stage.resetZoom')}
+          aria-label={t('canvas.stage.resetZoom', { percentage })}
           onClick={() => zoomRef.current?.(1)}
         >
-          {`${Math.round(state.viewport.zoom * 100)}%`}
+          {percentage}
         </button>
         <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_CANVAS_ZOOM, state.viewport.zoom * 1.15))}>＋</button>
       </div>
