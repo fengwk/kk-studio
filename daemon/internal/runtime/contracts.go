@@ -127,6 +127,8 @@ type IDEUpdateAdmission interface {
 type Connection interface {
 	Receive(context.Context) (*protocol.Envelope, error)
 	Send(context.Context, *protocol.Envelope) error
+	// Only the call that performs the close reports a close failure.
+	// Calls on an already closed connection return an error matching net.ErrClosed.
 	Close() error
 }
 

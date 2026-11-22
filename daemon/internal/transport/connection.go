@@ -145,7 +145,6 @@ type ControlConnection struct {
 	closed        chan struct{}
 	stopControl   chan struct{}
 	closeOnce     sync.Once
-	closeErr      error
 	controlReady  chan struct{}
 	controlStream io.ReadWriteCloser
 	resolver      ViewResolver
@@ -349,17 +348,19 @@ func (c *ControlConnection) awaitControl(ctx context.Context) error {
 }
 
 // Close terminates the WebSocket transport and its HTTP/2 server.
+// Calls that do not perform the close return net.ErrClosed.
 func (c *ControlConnection) Close() error {
+	err := net.ErrClosed
 	c.closeOnce.Do(func() {
 		close(c.stopControl)
 		close(c.closed)
 		connErr := c.conn.Close()
-		c.closeErr = c.server.Close()
-		if c.closeErr == nil {
-			c.closeErr = connErr
+		err = c.server.Close()
+		if err == nil {
+			err = connErr
 		}
 	})
-	return c.closeErr
+	return err
 }
 
 type controlPipe struct {

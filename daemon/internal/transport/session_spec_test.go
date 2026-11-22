@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"testing"
@@ -27,7 +28,7 @@ func TestControlConnection_CloseTerminatesPeer(t *testing.T) {
 	if _, err := peer.Read(make([]byte, 1)); err == nil {
 		t.Fatal("peer connection remained open after graceful close")
 	}
-	if err := cc.Close(); err != nil {
-		t.Fatalf("repeated close: %v", err)
+	if err := cc.Close(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("repeated Close error = %v, want net.ErrClosed", err)
 	}
 }
