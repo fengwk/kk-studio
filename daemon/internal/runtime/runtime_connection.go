@@ -19,6 +19,10 @@ type activeConnection struct {
 	// goaway records that this generation ended through a control GOAWAY. Its retirement closes the
 	// old connection once and reconnects immediately instead of applying the disconnect backoff.
 	goaway atomic.Bool
+	// configChanged is set before closing a generation to switch endpoints.
+	configChanged atomic.Bool
+	// sentReady is owned by the generation loop and survives connection teardown.
+	sentReady bool
 }
 
 // controlAttempt carries transport-level events for one connection attempt back to the runtime. It
@@ -102,10 +106,8 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 		r.runMu.Unlock()
 		return errors.New("runtime can only be run once")
 	}
-	r.running = true
 	r.hasRun = true
 	r.runMu.Unlock()
-	defer func() { r.runMu.Lock(); r.running = false; r.runMu.Unlock() }()
 	runCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.sendCtx = runCtx
@@ -190,6 +192,12 @@ func (r *Runtime) serveGenerations(runCtx context.Context) error {
 		if active.goaway.Load() {
 			// A graceful GOAWAY already retired this generation: reconnect immediately and keep the
 			// existing backoff state instead of waiting on it.
+			continue
+		}
+		if active.sentReady {
+			delay = r.options.InitialReconnectDelay
+		}
+		if active.configChanged.Load() {
 			continue
 		}
 		if !waitReconnect(runCtx, delay) {
@@ -334,8 +342,16 @@ func (r *Runtime) closeActiveConnection() error {
 	return err
 }
 
-func (r *Runtime) dropActiveConnection() {
-	_ = r.closeActiveConnection()
+func (r *Runtime) reconnectForConfigChange() {
+	r.mu.RLock()
+	active := r.connection
+	if active != nil {
+		active.configChanged.Store(true)
+	}
+	r.mu.RUnlock()
+	if active != nil {
+		_ = r.dropConnection(active)
+	}
 }
 
 func (r *Runtime) heartbeatLoop(ctx context.Context, done chan<- struct{}) {

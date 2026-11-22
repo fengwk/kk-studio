@@ -2,6 +2,24 @@ package runtime
 
 import "testing"
 
+func completeJournalForTest(t *testing.T, journal *InvocationJournal, id string, state InvocationState, terminal []byte) bool {
+	t.Helper()
+	completed, err := journal.CompleteDurable(id, state, terminal, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return completed
+}
+
+func confirmExitForTest(t *testing.T, journal *InvocationJournal, id string) bool {
+	t.Helper()
+	confirmed, err := journal.ConfirmExitDurable(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return confirmed
+}
+
 // Checks that journal start is atomic and duplicates reuse the running entry.
 func TestJournalDeduplicatesRunning(t *testing.T) {
 	j, err := NewInvocationJournal(2)
@@ -27,7 +45,7 @@ func TestJournalCapacityWaitsForExitAcknowledgement(t *testing.T) {
 	if start := journal.Start("old"); !start.Created || start.Err != nil {
 		t.Fatalf("start old: %+v", start)
 	}
-	if !journal.Complete("old", InvocationCompleted, []byte("done")) {
+	if !completeJournalForTest(t, journal, "old", InvocationCompleted, []byte("done")) {
 		t.Fatal("completion failed")
 	}
 	if start := journal.Start("new"); start.Err != errInvocationJournalFull {

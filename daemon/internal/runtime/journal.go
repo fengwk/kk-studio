@@ -110,11 +110,6 @@ func (j *InvocationJournal) Start(id string) JournalStart {
 	return JournalStart{Entry: cloneEntry(entry), Created: true}
 }
 
-func (j *InvocationJournal) Complete(id string, state InvocationState, terminal []byte) bool {
-	completed, _ := j.CompleteDurable(id, state, terminal, true)
-	return completed
-}
-
 func (j *InvocationJournal) CompleteDurable(id string, state InvocationState, terminal []byte, replayable bool) (bool, error) {
 	return j.completeDurable(id, state, terminal, replayable, false)
 }
@@ -148,11 +143,6 @@ func (j *InvocationJournal) completeDurable(id string, state InvocationState, te
 		return false, err
 	}
 	return true, nil
-}
-
-func (j *InvocationJournal) ConfirmExit(id string) bool {
-	confirmed, _ := j.ConfirmExitDurable(id)
-	return confirmed
 }
 
 func (j *InvocationJournal) ConfirmExitDurable(id string) (bool, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
@@ -152,6 +153,105 @@ func TestRuntimeRetriesTransientConnectFailure(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Fake time distinguishes a reset backoff, an immediate reconnect, and GOAWAY's preserved backoff.
+func TestRuntimeReconnectDelayByGenerationOutcome(t *testing.T) {
+	const initialDelay = time.Second
+	for _, tc := range []struct {
+		name string
+		want time.Duration
+	}{
+		{"disconnect after READY", initialDelay},
+		{"Studio URL changed", 0},
+		{"proxy URL changed", 0},
+		{"GOAWAY then dial failure", 2 * initialDelay},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				initial := initialRuntimeConfig()
+				manager, err := NewEnvironmentConfigRuntime(EnvironmentConfigOptions{
+					Initial: initial, Cache: &testCacheWriter{}, Prepare: (&testConfigurationPreparer{}).prepare, Status: NewStatusTracker(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				conn := newTestConnection()
+				conn.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
+				environmentFrame := func(version int64, cfg *protocol.DaemonConfiguration) *protocol.Envelope {
+					return &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(version), Config: cfg}}}
+				}
+				conn.in <- environmentFrame(initial.ConfigVersion, configurationOf(initial))
+				var observer ControlObserver
+				var attempts int
+				dials := make(chan time.Time)
+				factory := reconnectFactoryFunc(func(ctx context.Context, attempt ControlObserver) (Connection, error) {
+					attempts++
+					switch attempts {
+					case 1:
+						return nil, errors.New("initial dial failure")
+					case 2:
+						observer = attempt
+						return conn, nil
+					case 3:
+						if tc.name == "GOAWAY then dial failure" {
+							return nil, errors.New("dial failure after GOAWAY")
+						}
+					}
+					select {
+					case dials <- time.Now():
+					case <-ctx.Done():
+					}
+					return nil, ErrRegistrationRejected
+				})
+				r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", EnvironmentConfig: manager, Connections: factory, InitialReconnectDelay: initialDelay, MaxReconnectDelay: time.Minute})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				done := make(chan error, 1)
+				go func() { done <- r.Run(ctx) }()
+				time.Sleep(initialDelay)
+				synctest.Wait()
+				if !conn.sent(protocol.MessageType_READY) {
+					t.Fatal("second attempt did not send READY")
+				}
+				started := time.Now()
+				switch tc.name {
+				case "disconnect after READY":
+					conn.fail(errors.New("disconnected"))
+				case "GOAWAY then dial failure":
+					observer.NotifyGoaway(0)
+				default:
+					next := configurationOf(initial)
+					if tc.name == "Studio URL changed" {
+						next.StudioUrl = "https://new-studio.example"
+					} else {
+						next.ProxyUrl = stringPtr("http://new-proxy.example:8080")
+					}
+					conn.in <- environmentFrame(initial.ConfigVersion+1, next)
+				}
+				select {
+				case at := <-dials:
+					if got := at.Sub(started); got != tc.want {
+						t.Errorf("reconnect after %v, want %v", got, tc.want)
+					}
+				case <-time.After(time.Minute):
+					t.Fatal("did not reconnect")
+				}
+				if err := <-done; !errors.Is(err, ErrRegistrationRejected) {
+					t.Fatalf("Run = %v, want registration rejection from final attempt", err)
+				}
+			})
+		})
+	}
+}
+
+type reconnectFactoryFunc func(context.Context, ControlObserver) (Connection, error)
+
+func (f reconnectFactoryFunc) Connect(ctx context.Context, observer ControlObserver) (Connection, error) {
+	return f(ctx, observer)
 }
 
 type retryingConnectionFactory struct {

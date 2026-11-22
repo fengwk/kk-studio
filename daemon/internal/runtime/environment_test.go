@@ -12,7 +12,7 @@ import (
 
 // Collects a complete, supported set of host facts for READY.
 func TestDetectHostInfoCollectsHostFacts(t *testing.T) {
-	info, err := detectHostInfo()
+	info, err := DetectHostInfo()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestDetectHostInfoCollectsHostFacts(t *testing.T) {
 func TestDetectHostInfoReportsJavaZoneIDWhenTZUnset(t *testing.T) {
 	const probe = "KK_STUDIO_TEST_TZ_UNSET"
 	if os.Getenv(probe) == "1" {
-		info, err := detectHostInfo()
+		info, err := DetectHostInfo()
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -58,7 +58,7 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	defer close(shutdownPlatform)
 	cc, err := Dial(ctx, DialConfig{
 		Applied:    config.DaemonConfig{TokenPath: writeTokenFile(t, "secret-token"), StudioURL: platform.URL, EnvironmentID: testEnvironment},
-		InstanceID: "daemon-instance", Platform: "linux",
+		InstanceID: "daemon-instance", Platform: "linux-amd64",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	defer cc.Close()
 	select {
 	case h := <-handshake:
-		if h.Get("Authorization") != "Bearer secret-token" || h.Get("KK-Daemon-Protocol") != "4" || h.Get("KK-Daemon-Instance") != "daemon-instance" || h.Get("KK-Daemon-Platform") != "linux" || h.Get("KK-Environment-Id") != testEnvironment {
+		if h.Get("Authorization") != "Bearer secret-token" || h.Get("KK-Daemon-Protocol") != "4" || h.Get("KK-Daemon-Instance") != "daemon-instance" || h.Get("KK-Daemon-Platform") != "linux-amd64" || h.Get("KK-Environment-Id") != testEnvironment {
 			t.Fatalf("unexpected handshake headers: %v", h)
 		}
 	case <-ctx.Done():

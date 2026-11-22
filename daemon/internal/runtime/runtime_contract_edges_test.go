@@ -60,7 +60,7 @@ func TestRuntimeCancelReplaysStoredExitAfterTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.journal.Complete("cancel-after-terminal", InvocationFailed, encoded) || !r.journal.ConfirmExit("cancel-after-terminal") {
+	if !completeJournalForTest(t, r.journal, "cancel-after-terminal", InvocationFailed, encoded) || !confirmExitForTest(t, r.journal, "cancel-after-terminal") {
 		t.Fatal("terminal result and exit confirmation were not recorded")
 	}
 	if err := r.handleCancel(&protocol.Envelope{InvocationId: stringPtr("cancel-after-terminal")}); err != nil {
@@ -185,7 +185,7 @@ func TestRuntimeRecoverAndDuplicateInvokeReplayTerminalExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.journal.Complete(testInvocationID, InvocationFailed, encoded) || !r.journal.ConfirmExit(testInvocationID) {
+	if !completeJournalForTest(t, r.journal, testInvocationID, InvocationFailed, encoded) || !confirmExitForTest(t, r.journal, testInvocationID) {
 		t.Fatal("terminal result and exit confirmation were not recorded")
 	}
 	if err := r.handleRecover(&protocol.Envelope{InvocationId: stringPtr("unknown")}); err != nil {
@@ -194,7 +194,7 @@ func TestRuntimeRecoverAndDuplicateInvokeReplayTerminalExit(t *testing.T) {
 	if err := r.handleRecover(&protocol.Envelope{InvocationId: stringPtr(testInvocationID)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.handleInvoke(context.Background(), invocationEnvelope()); err != nil {
+	if err := r.handleInvoke(context.Background(), invocationEnvelope(), true); err != nil {
 		t.Fatal(err)
 	}
 	frames := connection.frames()
