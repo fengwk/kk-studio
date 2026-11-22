@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const ideTestID = "123e4567-e89b-12d3-a456-426614174000"
@@ -23,6 +24,77 @@ type codedViewResolutionError struct{ code string }
 
 func (e codedViewResolutionError) Error() string     { return "view is not open for this binding epoch" }
 func (e codedViewResolutionError) ErrorCode() string { return e.code }
+
+func newTestIDEClient(t *testing.T, proxy string) *http.Client {
+	t.Helper()
+	policy, err := NewProxyPolicy(proxy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := policy.HTTPClient()
+	t.Cleanup(client.CloseIdleConnections)
+	return client
+}
+
+// Sequential IDE requests reuse a local socket even with an explicit external proxy.
+func TestHandleIDE_HTTPReusesLoopbackConnection(t *testing.T) {
+	var accepted atomic.Int32
+	closed := make(chan struct{}, 8)
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("backend"))
+	}))
+	backend.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			accepted.Add(1)
+		case http.StateClosed:
+			closed <- struct{}{}
+		}
+	}
+	backend.Start()
+	defer backend.Close()
+	host, portText, err := net.SplitHostPort(backend.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := mustPort(t, portText)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("IDE request reached explicit proxy")
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+	local, peer := net.Pipe()
+	defer peer.Close()
+	connection := &ControlConnection{
+		httpClient:  newTestIDEClient(t, proxy.URL),
+		conn:        local,
+		server:      &http.Server{},
+		closed:      make(chan struct{}),
+		stopControl: make(chan struct{}),
+		resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+			return ViewUpstream{Host: host, Port: port, Path: "/"}, nil
+		}),
+	}
+	defer connection.Close()
+	for range 8 {
+		response := httptest.NewRecorder()
+		connection.handleIDE(response, httptest.NewRequest(http.MethodGet, "http://studio/ide/"+ideTestID+"/1/", nil))
+		if response.Code != http.StatusOK || response.Body.String() != "backend" {
+			t.Fatalf("response=%d body=%q", response.Code, response.Body.String())
+		}
+	}
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("upstream accepted %d connections, want 1", got)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("closing the control connection did not close the idle upstream socket")
+	}
+}
 
 func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +122,7 @@ func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 		}
 		return ViewUpstream{Host: "127.0.0.1", Port: mustPort(t, portText), Path: "/base/api?q=one", Headers: http.Header{"X-Upstream": []string{"private"}}, Cookie: "session=private", Release: func() { released.Add(1) }}, nil
 	})
-	connection := &ControlConnection{resolver: resolver}
+	connection := &ControlConnection{httpClient: newTestIDEClient(t, ""), resolver: resolver}
 	req := httptest.NewRequest(http.MethodGet, "http://studio/ide/"+ideTestID+"/8/api?q=one", nil)
 	req.Header.Set("Connection", "keep-alive, X-Hop")
 	req.Header.Set("X-Hop", "filtered")

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
@@ -111,8 +112,8 @@ func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
 	}
 }
 
-// Only the caller that closes the transport sees the underlying close failure.
-func TestControlConnection_CloseReportsFailureOnce(t *testing.T) {
+// A transport handshake error does not prevent the first Close from succeeding.
+func TestControlConnection_CloseIgnoresTransportHandshakeFailure(t *testing.T) {
 	left, right := net.Pipe()
 	defer right.Close()
 	closeErr := errors.New("transport close failed")
@@ -122,11 +123,43 @@ func TestControlConnection_CloseReportsFailureOnce(t *testing.T) {
 		closed:      make(chan struct{}),
 		stopControl: make(chan struct{}),
 	}
-	if err := cc.Close(); !errors.Is(err, closeErr) {
-		t.Fatalf("first Close error = %v, want %v", err, closeErr)
+	if err := cc.Close(); err != nil {
+		t.Fatalf("first Close error = %v, want nil", err)
 	}
 	if err := cc.Close(); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("second Close error = %v, want net.ErrClosed", err)
+	}
+}
+
+// Simulate shutdown owning Close after Studio abruptly disconnects, without a competing reader.
+func TestControlConnection_FirstCloseAfterPeerDisconnect(t *testing.T) {
+	peerClosed := make(chan error, 1)
+	studio := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err == nil {
+			err = ws.CloseNow()
+		}
+		peerClosed <- err
+	}))
+	defer studio.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, studio.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.CloseNow()
+	if err := <-peerClosed; err != nil {
+		t.Fatalf("disconnect Studio: %v", err)
+	}
+	cc := &ControlConnection{
+		conn:        websocket.NetConn(ctx, ws, websocket.MessageBinary),
+		server:      &http.Server{},
+		closed:      make(chan struct{}),
+		stopControl: make(chan struct{}),
+	}
+	if err := cc.Close(); err != nil {
+		t.Fatalf("shutdown Close after peer disconnect: %v", err)
 	}
 }
 

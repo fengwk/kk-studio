@@ -46,14 +46,16 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := &websocket.DialOptions{HTTPHeader: registrationHeaders(c, token), CompressionMode: websocket.CompressionDisabled, HTTPClient: policy.HTTPClient()}
+	client := policy.HTTPClient()
+	options := &websocket.DialOptions{HTTPHeader: registrationHeaders(c, token), CompressionMode: websocket.CompressionDisabled, HTTPClient: client}
 	ws, resp, err := websocket.Dial(ctx, wsURL, options)
 	if err != nil {
+		client.CloseIdleConnections()
 		return nil, handshakeFailure(c.Observer, resp, err)
 	}
 	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
 	ws.SetReadLimit(1 << 20)
-	return newControlConnection(conn, c.Resolver, c.Observer), nil
+	return newControlConnection(conn, c.Resolver, c.Observer, client), nil
 }
 
 // daemonWebSocketURL derives the control endpoint from the applied Studio URL.
@@ -134,6 +136,7 @@ var _ runtimeapi.Connection = (*ControlConnection)(nil)
 type ControlConnection struct {
 	conn          net.Conn
 	server        *http.Server
+	httpClient    *http.Client
 	listener      *singleConnListener
 	mu            sync.Mutex
 	readMu        sync.Mutex
@@ -152,8 +155,8 @@ type ControlConnection struct {
 	observer      runtimeapi.ControlObserver
 }
 
-func newControlConnection(conn net.Conn, resolver ViewResolver, observer runtimeapi.ControlObserver) *ControlConnection {
-	cc := &ControlConnection{closed: make(chan struct{}), stopControl: make(chan struct{}), controlReady: make(chan struct{}), resolver: resolver, observer: observer}
+func newControlConnection(conn net.Conn, resolver ViewResolver, observer runtimeapi.ControlObserver, client *http.Client) *ControlConnection {
+	cc := &ControlConnection{httpClient: client, closed: make(chan struct{}), stopControl: make(chan struct{}), controlReady: make(chan struct{}), resolver: resolver, observer: observer}
 	cc.conn = &idleConn{Conn: conn, timeout: inboundIdleTimeout, observer: &h2FrameObserver{}, onGoaway: cc.signalGoaway}
 	if observer != nil {
 		cc.goaway = make(chan uint32, 1)
@@ -354,10 +357,11 @@ func (c *ControlConnection) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.stopControl)
 		close(c.closed)
-		connErr := c.conn.Close()
+		// coder/websocket releases the underlying socket even if the close handshake fails.
+		_ = c.conn.Close()
 		err = c.server.Close()
-		if err == nil {
-			err = connErr
+		if c.httpClient != nil {
+			c.httpClient.CloseIdleConnections()
 		}
 	})
 	return err

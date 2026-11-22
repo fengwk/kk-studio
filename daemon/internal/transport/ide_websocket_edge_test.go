@@ -127,7 +127,7 @@ func TestTunnel_HTTPBodyFailureAfterHeadersAbortsStream(t *testing.T) {
 			t.Fatalf("panic=%v, want http.ErrAbortHandler", recovered)
 		}
 	}()
-	(&ControlConnection{}).proxyIDEHTTP(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"})
+	(&ControlConnection{httpClient: newTestIDEClient(t, "")}).proxyIDEHTTP(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"})
 }
 
 func TestResponseBodyWriterFlushesWrittenWebSocketData(t *testing.T) {
