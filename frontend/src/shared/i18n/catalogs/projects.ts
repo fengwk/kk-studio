@@ -141,7 +141,11 @@ export const projectsCatalog = {
     'zh-CN': '工作流阶段',
     'en-US': 'Workflow stages',
   },
-  'projects.meta.stagesValue': {
+  'projects.meta.stagesValue.one': {
+    'zh-CN': '{{count}} 个阶段',
+    'en-US': '{{count}} stage',
+  },
+  'projects.meta.stagesValue.other': {
     'zh-CN': '{{count}} 个阶段',
     'en-US': '{{count}} stages',
   },
@@ -178,8 +182,8 @@ export const projectsCatalog = {
     'en-US': 'Search issues',
   },
   'projects.detail.searchPlaceholder': {
-    'zh-CN': '搜索 Issue 标题或编号',
-    'en-US': 'Search issue title or number',
+    'zh-CN': '搜索标题、编号或阶段',
+    'en-US': 'Search title, number or stage',
   },
   'projects.detail.editWorkflow': {
     'zh-CN': '编辑 / 工作流',
@@ -862,6 +866,10 @@ export const projectsCatalog = {
     'zh-CN': '阻塞前阶段:',
     'en-US': 'Stage before blocking:',
   },
+  'projects.issue.stageUnknown': {
+    'zh-CN': '未知阶段',
+    'en-US': 'Unknown stage',
+  },
   'projects.issue.blockReasonLabel': {
     'zh-CN': '阻塞原因:',
     'en-US': 'Blocked reason:',
@@ -905,6 +913,14 @@ export const projectsCatalog = {
   'projects.issue.emptyActivities': {
     'zh-CN': '暂无活动记录',
     'en-US': 'No activities yet',
+  },
+  'projects.issue.loadMoreActivities': {
+    'zh-CN': '加载更多',
+    'en-US': 'Load more',
+  },
+  'projects.issue.activitiesLoadMoreFailed': {
+    'zh-CN': '活动读取失败',
+    'en-US': 'Failed to load activities',
   },
   'projects.issue.actorHuman': {
     'zh-CN': '人类',
@@ -1050,6 +1066,10 @@ export const projectsCatalog = {
   'projects.issue.tabActivities': {
     'zh-CN': '活动时间线 ({{count}})',
     'en-US': 'Activity timeline ({{count}})',
+  },
+  'projects.issue.tabActivitiesMore': {
+    'zh-CN': '活动时间线 ({{count}}+)',
+    'en-US': 'Activity timeline ({{count}}+)',
   },
   'projects.issue.tabRuns': {
     'zh-CN': 'Run 报告 ({{count}})',
@@ -1254,6 +1274,10 @@ export const projectsCatalog = {
   'projects.issue.evidenceLoadFailed': {
     'zh-CN': '公开证据读取失败',
     'en-US': 'Failed to load public evidence',
+  },
+  'projects.issue.evidenceOpenFailed': {
+    'zh-CN': '证据打开失败，请重试',
+    'en-US': 'Failed to open the evidence. Try again.',
   },
   'projects.issue.runStatus.waiting': {
     'zh-CN': '等待中',

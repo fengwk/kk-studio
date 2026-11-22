@@ -3,6 +3,7 @@ import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type { CanvasFunctionConfig, CanvasResourceReference } from '@/features/canvas/types'
 import type { CanvasSnapshot, Resource, ResourceNode } from '@/features/canvas/domain'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { TranslationKey } from '@/shared/i18n'
 
 export interface ReferenceCandidate {
   nodeId: string
@@ -133,8 +134,8 @@ function hasUnsupportedPromptSchema(model?: CanvasFunctionDefinitionDTO | null):
 }
 
 /** 需要走完整 JSON 通道时的原始入参解释；各分支都保留 rawArgs，绝不静默丢弃无法表达的数据。 */
-function rawConfigFallback(args: Record<string, unknown>, rawError: string): CanvasFunctionConfig {
-  return { references: [], parameters: {}, rawArgs: args, rawError }
+function rawConfigFallback(args: Record<string, unknown>, rawErrorKey: TranslationKey): CanvasFunctionConfig {
+  return { references: [], parameters: {}, rawArgs: args, rawErrorKey }
 }
 
 /**
@@ -145,15 +146,15 @@ function rawConfigFallback(args: Record<string, unknown>, rawError: string): Can
 function rawConfigReason(
   args: Record<string, unknown>,
   model: CanvasFunctionDefinitionDTO,
-): string | null {
+): TranslationKey | null {
   // 若 schema 声明的 prompt 并非字符串类型，不能默认为简单字符串表单，切换至完整 JSON 通道
   if (hasUnsupportedPromptSchema(model)) {
-    return '模型定义的提示词并非字符串类型，已进入完整 JSON 模式。'
+    return 'canvas.generation.rawConfig.promptSchemaNotString'
   }
 
   // 入参 prompt 包含非字符串结构（如对象、数组）：绝不能静默覆盖为 ''
   if ('prompt' in args && typeof args.prompt !== 'string') {
-    return '入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。'
+    return 'canvas.generation.rawConfig.promptNotString'
   }
 
   if (!('references' in args)) {
@@ -161,16 +162,16 @@ function rawConfigReason(
   }
   // 入参 references 并非数组或包含非规范引用项：绝不能静默过滤删除
   if (!Array.isArray(args.references)) {
-    return '入参 references 并非数组，已进入完整 JSON 模式以防止数据丢失。'
+    return 'canvas.generation.rawConfig.referencesNotArray'
   }
   for (const item of args.references) {
     if (!isCanonicalResourceReference(item)) {
-      return '入参 references 包含非规范项，已进入完整 JSON 模式以防止数据丢失。'
+      return 'canvas.generation.rawConfig.referencesInvalidItem'
     }
   }
   // 入参带有 reference 但 schema 不支持：不能剥离，必须 raw 保留以防保存时丢弃
   if (args.references.length > 0 && !functionSupportsReferences(model)) {
-    return '当前模型不支持参考资源，但入参包含引用数据，已切换至完整 JSON 模式以防止数据丢失。'
+    return 'canvas.generation.rawConfig.referencesUnsupported'
   }
   return null
 }

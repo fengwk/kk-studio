@@ -218,7 +218,7 @@ export function useCanvasController(initialCanvasId?: string) {
   })
   const { openEditor, openLibrary, setViewport, setSelection, completeInitialFit, initialFitPending } = navigation
   const dismissConflictMessage = useCallback(() => {
-    setState((current) => ({ ...current, conflictMessage: null }))
+    setState((current) => ({ ...current, conflictKind: null, conflictMessage: null }))
   }, [])
 
   const textEditor = useCanvasTextEditor({

@@ -190,6 +190,7 @@ function renderPanel(
   run: ResourceNode['run'] = null,
   availableModels: CanvasFunctionDefinitionDTO[] = models,
   rawAnchor?: CanvasGenerationPanelAnchor | { targetNodeId: string },
+  catalog = { isPending: false, isError: false, isFetching: false, refetch: vi.fn() },
 ) {
   const scheduleFunctionConfig = vi.fn()
   const flushFunctionConfig = vi.fn(async () => undefined)
@@ -199,6 +200,7 @@ function renderPanel(
   const isNodeInFlight = vi.fn(() => false)
   const runtime = {
     models: availableModels,
+    modelsQuery: catalog,
     scheduleFunctionConfig,
     flushFunctionConfig,
     setToast,
@@ -246,6 +248,19 @@ function renderPanel(
 }
 
 describe('Canvas generic generation panel', () => {
+  it.each([
+    { isPending: true, isError: false, role: 'status', text: '正在读取函数目录…' },
+    { isPending: false, isError: true, role: 'alert', text: '函数目录读取失败' },
+    { isPending: false, isError: false, role: 'status', text: '目录中没有此函数' },
+  ])('keeps the selected function panel visible: $text', async ({ isPending, isError, role, text }) => {
+    const refetch = vi.fn()
+    renderPanel(null, [], undefined, { isPending, isError, isFetching: false, refetch })
+    expect(screen.getByRole(role)).toHaveTextContent(text)
+    if (isError) {
+      await userEvent.click(screen.getByRole('button', { name: '重试' }))
+      expect(refetch).toHaveBeenCalledOnce()
+    }
+  })
   it('toggles independent references and displays attached chips', async () => {
     // 验证 UI 简化：引用作为附件芯片，点击 candidate 切换挂载，删除按钮移除指定引用
     const user = userEvent.setup()
@@ -300,7 +315,7 @@ describe('Canvas generic generation panel', () => {
   it('initializes when models arrive late and accepts a genuine external config change', async () => {
     // Late registry data and a later server edit both rehydrate from authoritative config.
     const view = renderPanel(null, [])
-    expect(screen.queryByLabelText('Function 生成面板')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Function 生成面板')).toHaveTextContent('目录中没有此函数')
 
     view.runtime.models = models
     view.rerenderPanel(view.snapshot, view.target)
@@ -849,7 +864,7 @@ describe('Canvas generic generation panel', () => {
 
     view.runtime.models = []
     view.rerenderPanel(view.snapshot, view.target)
-    expect(screen.queryByLabelText('Function 生成面板')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Function 生成面板')).toHaveTextContent('目录中没有此函数')
 
     view.runtime.models = models
     view.rerenderPanel(view.snapshot, view.target)

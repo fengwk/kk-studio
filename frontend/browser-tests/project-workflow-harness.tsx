@@ -21,14 +21,21 @@ const client = new QueryClient({
 })
 
 /**
- * 视图由查询串选择：`?issue` 打开详情弹窗，`?list` 打开项目列表，其余为项目详情。
+ * 视图由查询串选择：`?issue` 打开详情弹窗，`?list` 打开项目列表，`?board` 固定为项目看板，
+ * 其余也为项目详情。
  *
  * <p>浏览器测试跑在 MPA 静态预览上，只按 HTML 文件提供入口；`/list` 这类子路径会被当作缺失文件，
  * 所以列表入口与返回列表都用查询串表达，刷新或直接打开都能落到同一个 harness。
+ * 看板的选中 Issue 也写在 `issue` 查询参数上，所以点卡片前必须先声明 `board`，
+ * 否则会落入固定详情弹窗入口。
  */
 export function HarnessRoutes() {
   const navigate = useNavigate()
   const params = new URLSearchParams(location.search)
+  if (params.has('board')) {
+    return <ProjectDetailPage projectId="a0000000-0000-0000-0000-000000000001"
+      onBack={() => navigate({ search: '?list' })} />
+  }
   if (params.has('issue')) {
     return <IssueVisualHarness />
   }
@@ -42,13 +49,14 @@ export function HarnessRoutes() {
 /**
  * 详情弹窗的阶段名称来自工作流：夹具按当前语言给出各阶段名称，弹窗只按工作流名称展示阶段。
  * 阶段不给出 next，避免夹具额外渲染流转动作，干扰详情头部与页签断言。
+ * BLOCKED 故意用自定义名称：详情头部必须跟随工作流声明名，而不是返回固定通用名。
  */
 const detailWorkflow: ProjectWorkflowDTO = {
   states: [
     { state: 'INIT', name: locale === 'en-US' ? 'Not started' : '待开始', next: [], agent: null, environment: null, instructions: null, maxRuns: null },
     { state: 'WORK', name: locale === 'en-US' ? 'In progress' : '处理中', next: [], agent: null, environment: null, instructions: null, maxRuns: null },
     { state: 'DONE', name: locale === 'en-US' ? 'Done' : '完成', next: [], agent: null, environment: null, instructions: null, maxRuns: null },
-    { state: 'BLOCKED', name: locale === 'en-US' ? 'Blocked' : '业务阻塞', next: [], agent: null, environment: null, instructions: null, maxRuns: null },
+    { state: 'BLOCKED', name: locale === 'en-US' ? 'Waiting on external' : '等待外部依赖', next: [], agent: null, environment: null, instructions: null, maxRuns: null },
   ],
 }
 

@@ -69,13 +69,141 @@ export const canvasCatalog = {
     'en-US': 'Failed to create canvas',
     'zh-CN': '创建画布失败',
   },
-  'canvas.draft.saveFailed': {
-    'en-US': 'Failed to save the draft: {{message}}',
-    'zh-CN': '保存草稿失败：{{message}}',
+  'canvas.toast.operationFailed': {
+    'en-US': 'The canvas action failed. Try again.',
+    'zh-CN': '画布操作失败，请重试。',
+  },
+  'canvas.toast.recoveryFailed': {
+    'en-US': 'Recovery failed. Try again.',
+    'zh-CN': '恢复失败，请重试。',
+  },
+  'canvas.toast.serverUpdated': {
+    'en-US': 'Some changes were not saved. Handle them in the conflict banner.',
+    'zh-CN': '部分修改未能保存，请在冲突提示中处理。',
+  },
+  'canvas.toast.queueBlocked': {
+    'en-US': 'Queue blocked: some changes have not finished syncing. Try again.',
+    'zh-CN': '队列受阻：存在未完成同步的修改，请重试。',
+  },
+  'canvas.toast.draftSaveFailed': {
+    'en-US': 'Failed to save the draft; your changes are not saved',
+    'zh-CN': '保存草稿失败，数据未保存',
+  },
+  'canvas.toast.storageUnavailable': {
+    'en-US': 'Local storage is unavailable; drafts stay in this tab only and are lost if you refresh or close it.',
+    'zh-CN': '本机 IndexedDB 不可用，草稿仅保留在当前标签页，刷新或关闭将丢失。',
+  },
+  'canvas.toast.selectUngroupedResources': {
+    'en-US': 'Select resource nodes that are not in a group first.',
+    'zh-CN': '请先选择未分组的资源节点。',
+  },
+  'canvas.toast.groupEmpty': {
+    'en-US': 'This group has no members.',
+    'zh-CN': '当前分组没有成员。',
+  },
+  'canvas.toast.draftSavedAsNew': {
+    'en-US': 'Saved as a new node',
+    'zh-CN': '已另存为新节点',
+  },
+  'canvas.toast.draftSaveAsNewFailed': {
+    'en-US': 'Failed to save the draft as a new node',
+    'zh-CN': '另存为新节点失败',
+  },
+  'canvas.toast.draftRemoteDeleted': {
+    'en-US': 'The node was deleted remotely. Save the draft as a new node.',
+    'zh-CN': '远端节点已被删除，请选择另存为新节点',
+  },
+  'canvas.toast.draftRetrySucceeded': {
+    'en-US': 'Retry succeeded',
+    'zh-CN': '重试成功',
+  },
+  'canvas.toast.runStorageUnreadable': {
+    'en-US': 'Browser storage is unavailable, so the run record could not be read. Check storage permissions and try again.',
+    'zh-CN': '浏览器存储不可用，无法读取运行记录。请检查存储权限后重试。',
+  },
+  'canvas.toast.runCatalogVersionUnknown': {
+    'en-US': 'The function catalog version could not be confirmed, so generation did not start. Refresh the catalog and try again.',
+    'zh-CN': '无法确认该函数的目录版本，未启动生成。请刷新函数目录后重试。',
+  },
+  'canvas.toast.runStartFailed': {
+    'en-US': 'Generation could not start. Check the function configuration and try again.',
+    'zh-CN': '启动生成失败，请检查函数配置后重试。',
+  },
+  'canvas.toast.runPendingSaveFailed': {
+    'en-US': 'The run record could not be saved, so generation did not start',
+    'zh-CN': '无法保存运行记录，未启动生成',
+  },
+  'canvas.toast.runCancelFailed': {
+    'en-US': 'Generation could not be cancelled. Try again.',
+    'zh-CN': '取消生成失败，请重试。',
+  },
+  'canvas.toast.runResolveFailed': {
+    'en-US': 'The verification decision could not be submitted. Try again.',
+    'zh-CN': '核查确认失败，请重试。',
+  },
+  'canvas.toast.runPendingCorruptDiscarded': {
+    'en-US': 'The local unsettled run record was invalid and has been discarded. Check the catalog, then run again.',
+    'zh-CN': '本地未决运行记录已失效（缺少目录版本或内容非法），已丢弃该记录。请确认函数目录后重新点击运行。',
+  },
+  'canvas.toast.runPendingCorruptNotDiscarded': {
+    'en-US': 'The local unsettled run record is invalid and could not be cleared safely (another tab may have replaced it). Confirm it, then run again.',
+    'zh-CN': '本地未决运行记录已失效，且未能安全清理（记录可能已被其它标签页替换）。请重新确认后再运行。',
+  },
+  'canvas.toast.runPendingUnreadable': {
+    'en-US': 'The unsettled run record is corrupt or unreadable, so generation is paused to avoid overwriting data. Check storage and discard the record in the panel.',
+    'zh-CN': '未决运行记录损坏或存储读取失败，已暂停生成以防数据覆盖。请排查存储并在面板放弃。',
+  },
+  'canvas.toast.runRequestRejected': {
+    'en-US': 'This run did not start: the request was rejected. Refresh the function catalog, then confirm the run again.',
+    'zh-CN': '本次运行未启动：请求被拒绝（函数目录或运行状态可能已变化）。请刷新函数目录后重新确认运行。',
   },
   'canvas.conflict.remoteDeleted': {
     'en-US': 'The node was deleted remotely; the unsaved draft is kept locally',
     'zh-CN': '节点已被远端删除，本地保留未保存草稿',
+  },
+  'canvas.conflict.remoteDeletedNamed': {
+    'en-US': 'The node “{{name}}” was deleted remotely; the unsaved draft is kept locally',
+    'zh-CN': '节点「{{name}}」已在远端被删除，本地保留未保存草稿',
+  },
+  'canvas.conflict.remoteDeletedMany': {
+    'en-US': 'Some nodes were deleted remotely; unsaved drafts are kept locally',
+    'zh-CN': '部分节点已在远端被删除，本地保留未保存草稿。',
+  },
+  'canvas.conflict.staleNode': {
+    'en-US': 'The node changed remotely. Compare the versions before deciding',
+    'zh-CN': '节点在远端已被修改，请对比后决定。',
+  },
+  'canvas.conflict.groupDiagnostic': {
+    'en-US': 'Changed field group: {{group}}',
+    'zh-CN': '变更的字段组：{{group}}',
+  },
+  'canvas.conflict.referencesDiagnostic': {
+    'en-US': 'Referencing node IDs: {{ids}}',
+    'zh-CN': '引用此节点的节点 ID：{{ids}}',
+  },
+  'canvas.conflict.nodeReferenced': {
+    'en-US': 'Other nodes reference this node. Remove those references first',
+    'zh-CN': '节点被其他节点引用，请先解除引用。',
+  },
+  'canvas.conflict.serverUpdated': {
+    'en-US': 'The canvas changed elsewhere. Review the latest content and try again.',
+    'zh-CN': '画布已在其他位置更新，请检查最新内容后重试。',
+  },
+  'canvas.conflict.queueBlocked': {
+    'en-US': 'Unconfirmed operations are blocking the queue. Check the connection and retry.',
+    'zh-CN': '存在未确认操作阻塞队列，请检查网络后点击重试。',
+  },
+  'canvas.conflict.replayConflict': {
+    'en-US': 'Some unconfirmed operations could not be replayed because the server content changed. Review the latest content.',
+    'zh-CN': '部分未确认操作因服务端内容已变化而未能自动重放，请检查最新内容。',
+  },
+  'canvas.conflict.replayFailed': {
+    'en-US': 'Some unconfirmed operations could not be replayed. Check the connection and retry.',
+    'zh-CN': '部分未确认操作未能自动重放，请检查网络后重试。',
+  },
+  'canvas.conflict.recoveryFailed': {
+    'en-US': 'Unconfirmed operations could not be recovered. Check the connection and retry.',
+    'zh-CN': '待确认操作恢复失败，请检查网络后重试。',
   },
   'canvas.conflict.contentConflict': {
     'en-US': 'The node content conflicts with the remote version',
@@ -150,8 +278,8 @@ export const canvasCatalog = {
     'zh-CN': '适应全部内容',
   },
   'canvas.stage.resetZoom': {
-    'en-US': 'Reset zoom to 100%',
-    'zh-CN': '重置缩放为 100%',
+    'en-US': '{{percentage}}, reset zoom',
+    'zh-CN': '{{percentage}}，重置缩放',
   },
   'canvas.stage.zoomIn': {
     'en-US': 'Zoom in',
@@ -213,6 +341,14 @@ export const canvasCatalog = {
     'en-US': 'Group',
     'zh-CN': '组',
   },
+  'canvas.node.newAlias': {
+    'en-US': 'New node',
+    'zh-CN': '新节点',
+  },
+  'canvas.group.defaultTitle': {
+    'en-US': 'Group',
+    'zh-CN': '分组',
+  },
   'canvas.node.handleIn': {
     'en-US': 'Function reference input',
     'zh-CN': 'Function 引用输入',
@@ -220,6 +356,34 @@ export const canvasCatalog = {
   'canvas.node.handleOut': {
     'en-US': 'Resource reference output',
     'zh-CN': '资源引用输出',
+  },
+  'canvas.catalog.loading': {
+    'en-US': 'Loading function catalog…',
+    'zh-CN': '正在读取函数目录…',
+  },
+  'canvas.catalog.failed': {
+    'en-US': 'Could not load the function catalog',
+    'zh-CN': '函数目录读取失败',
+  },
+  'canvas.catalog.functionMissing': {
+    'en-US': 'This function is not in the catalog',
+    'zh-CN': '目录中没有此函数',
+  },
+  'canvas.catalog.noImageFunction': {
+    'en-US': 'No image generation function is available',
+    'zh-CN': '没有可用的图片生成函数',
+  },
+  'canvas.catalog.noVideoFunction': {
+    'en-US': 'No video generation function is available',
+    'zh-CN': '没有可用的视频生成函数',
+  },
+  'canvas.generation.defaultImagePrompt': {
+    'en-US': 'Describe the image to generate',
+    'zh-CN': '描述要生成的图片',
+  },
+  'canvas.generation.defaultVideoPrompt': {
+    'en-US': 'Describe the video to generate',
+    'zh-CN': '描述要生成的视频',
   },
   'canvas.generation.panelAria': {
     'en-US': 'Function generation panel',
@@ -296,6 +460,30 @@ export const canvasCatalog = {
   'canvas.generation.referenceLimit': {
     'en-US': 'The model reference limit has been reached.',
     'zh-CN': '当前模型的参考资源数量已达到上限。',
+  },
+  'canvas.generation.referenceKindLimit': {
+    'en-US': 'The model limit for this kind of reference has been reached.',
+    'zh-CN': '当前模型的该类参考资源数量已达到上限。',
+  },
+  'canvas.generation.rawConfig.promptSchemaNotString': {
+    'en-US': 'The model prompt is not a string, so the full JSON configuration is used.',
+    'zh-CN': '模型定义的提示词并非字符串类型，已进入完整 JSON 模式。',
+  },
+  'canvas.generation.rawConfig.promptNotString': {
+    'en-US': 'The prompt argument is not a plain string, so the full JSON configuration is used to keep the data.',
+    'zh-CN': '入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。',
+  },
+  'canvas.generation.rawConfig.referencesNotArray': {
+    'en-US': 'The references argument is not an array, so the full JSON configuration is used to keep the data.',
+    'zh-CN': '入参 references 并非数组，已进入完整 JSON 模式以防止数据丢失。',
+  },
+  'canvas.generation.rawConfig.referencesInvalidItem': {
+    'en-US': 'The references argument contains a non-canonical item, so the full JSON configuration is used to keep the data.',
+    'zh-CN': '入参 references 包含非规范项，已进入完整 JSON 模式以防止数据丢失。',
+  },
+  'canvas.generation.rawConfig.referencesUnsupported': {
+    'en-US': 'The model does not support reference resources but the arguments contain them, so the full JSON configuration is used to keep the data.',
+    'zh-CN': '当前模型不支持参考资源，但入参包含引用数据，已切换至完整 JSON 模式以防止数据丢失。',
   },
   'canvas.generation.modelUnavailable': {
     'en-US': 'unavailable',
@@ -384,6 +572,10 @@ export const canvasCatalog = {
   'canvas.generation.localPendingTitle': {
     'en-US': 'Unsettled run record error',
     'zh-CN': '未决运行记录异常',
+  },
+  'canvas.generation.localPendingUnreadable': {
+    'en-US': 'Could not read the local unsettled record. Verify the run before continuing.',
+    'zh-CN': '无法读取本地未决记录，请核实运行后再继续。',
   },
   'canvas.generation.discardPending': {
     'en-US': 'Discard the local unsettled record',
@@ -548,6 +740,14 @@ export const canvasCatalog = {
   'canvas.textEditor.cancel': {
     'en-US': 'Cancel',
     'zh-CN': '取消',
+  },
+  'canvas.textEditor.defaultName': {
+    'en-US': 'Text',
+    'zh-CN': '文本',
+  },
+  'canvas.textEditor.defaultMarkdown': {
+    'en-US': '# New text\n\nWrite Markdown here.',
+    'zh-CN': '# 新文本\n\n在这里编写 Markdown。',
   },
   'canvas.textEditor.save': {
     'en-US': 'Save',

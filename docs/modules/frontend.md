@@ -387,7 +387,7 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
 冲突由每条命令的语义前置条件裁决。patch 连续且较新时应用，
 空回执或 revision 缺口回读 Snapshot；语义 409 结算操作并保留草稿供人工恢复，
-网络未知结果保留原 key/body 阻塞队列。
+网络未知结果保留原 key/body 阻塞队列。冲突横幅只为可恢复的队列状态提供重试入口，文案与恢复判定分离。
 重命名的 `expectedName`/`expectedTitle` 基线在打开菜单时冻结，保存时不以最新远端值替换。
 单删与选区删除在触发时冻结资源、函数与分组成员基线。删除节点前先保存待提交的函数草稿；
 由删除触发的保存也使用点击时的函数基线；只有从该基线连续确认的自有保存值可以推进删除的函数基线，远端变更仍由 CAS 裁决。
@@ -399,6 +399,7 @@ generation 防止旧响应清除新输入，卸载围栏保护底层存储。
 “已保存”要求 command、draft 均无 pending 且无 storageError。
 bfcache 恢复时复验 scope 所有权，活标签冲突触发安全 reload。
 
+添加 Function 或打开已有 Function 的配置时，目录加载、读取失败与目录缺少函数分别反馈；读取失败可就地重试。
 Function 配置使用扁平 args，资源引用为 `{type:'resource',nodeId,index}`。
 复杂 prompt/references 使用完整 JSON 编辑模式；连线前 flush 目标 Function config。
 Run 提交前冻结 requestId 与请求：4xx 确定拒绝清理记录，408/429、5xx 或网络断开保留原

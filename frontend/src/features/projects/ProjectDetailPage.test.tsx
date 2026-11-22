@@ -426,6 +426,29 @@ describe('ProjectDetailPage', () => {
     expect(screen.queryByText('Design DB schema')).not.toBeInTheDocument()
   })
 
+  it('searches issues by title, number or stage name and never by internal state code', async () => {
+    // 搜索框提示与实际匹配范围必须一致：标题、编号与阶段显示名可搜，内部状态码不是用户可见名称。
+    const api = createMockApi()
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    await screen.findByText('Design DB schema')
+    const searchInput = screen.getByLabelText('搜索 Issue')
+
+    fireEvent.change(searchInput, { target: { value: 'INIT' } })
+    expect(screen.queryByText('Design DB schema')).not.toBeInTheDocument()
+    expect(screen.queryByText('Implement REST API')).not.toBeInTheDocument()
+
+    expect(searchInput).toHaveAttribute('placeholder', '搜索标题、编号或阶段')
+
+    fireEvent.change(searchInput, { target: { value: '待开始' } })
+    expect(screen.getByText('Design DB schema')).toBeInTheDocument()
+    expect(screen.queryByText('Implement REST API')).not.toBeInTheDocument()
+
+    fireEvent.change(searchInput, { target: { value: '2' } })
+    expect(screen.getByText('Implement REST API')).toBeInTheDocument()
+    expect(screen.queryByText('Design DB schema')).not.toBeInTheDocument()
+  })
+
   it('triggers transitionIssue when clicking quick transition button', async () => {
     // 测试意图：验证点击卡片上的合法状态转移按钮时，向 transitionIssue 发送目标状态与 frozen requestKey
     const api = createMockApi()
@@ -457,6 +480,21 @@ describe('ProjectDetailPage', () => {
     fireEvent.click(screen.getByText('Design DB schema'))
 
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+  })
+
+  it('opens the block reason form directly when the card block action is used', async () => {
+    // 卡片的“阻塞”承诺设置阻塞原因：详情打开后阻塞原因表单必须已展开，不能要求用户再点一次动作条。
+    const api = createMockApi()
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    await screen.findByText('Design DB schema')
+    const card = screen.getByTestId('issue-card-b0000000-0000-0000-0000-000000000001')
+    fireEvent.click(within(card).getByRole('button', { name: '阻塞' }))
+
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+    const blockDialog = await screen.findByRole('dialog', { name: '标记业务阻塞' })
+    expect(within(blockDialog).getByLabelText(/阻塞原因/)).toHaveValue('')
+    expect(api.blockIssue).not.toHaveBeenCalled()
   })
 
   it('reloads the snapshot when a project change is broadcast', async () => {
@@ -723,9 +761,17 @@ describe('ProjectDetailPage', () => {
   })
 
   it('closes the manual detail in the same commit when selecting another issue from the dock', async () => {
-    // 测试意图：手动打开详情后再从看板选中另一个 issue 时，旧弹窗必须在同一提交内关闭，
-    // 不得先渲染一帧“新 issue 已打开”的弹窗；URL 也应指向新 issue。
-    const api = createMockApi()
+    // 测试意图：手动打开详情后再从看板选中另一个 issue 时，旧的“手动打开详情”意图不得在新 issue 上生效，
+    // dock 随旧 issue 一起关闭，新 issue 的详情在 URL 生效的同时打开。
+    const api = createMockApi({
+      getIssue: vi.fn().mockImplementation((issueId: string) =>
+        Promise.resolve(
+          issueId === mockSnapshot.issues[1].issue.id
+            ? { ...mockIssueDetail, issue: mockSnapshot.issues[1].issue, agentThreads: [] }
+            : mockIssueDetail,
+        ),
+      ),
+    })
     const firstIssueId = mockSnapshot.issues[0].issue.id
     const secondIssueId = mockSnapshot.issues[1].issue.id
     const { getNav } = renderPage(
@@ -742,13 +788,51 @@ describe('ProjectDetailPage', () => {
 
     detailModalRenders.length = 0
     fireEvent.click(screen.getByRole('button', { name: /Issue #2 Implement REST API/ }))
-    // 看板选中新 issue 后，旧的“手动打开详情”意图不得在新 issue 上生效。
     await waitFor(() => {
-      expect(new URLSearchParams(getNav().location.search).get('issue')).toBe(secondIssueId)
+      const params = new URLSearchParams(getNav().location.search)
+      expect(params.get('issue')).toBe(secondIssueId)
+      expect(params.get('thread')).toBeNull()
     })
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    // 关键断言：选中新 issue 到 URL 生效之间不存在“手动详情已重开”的渲染。
-    expect(detailModalRenders.filter((render) => render.isOpen)).toEqual([])
+    expect(await screen.findByLabelText('Issue #2 详情')).toBeInTheDocument()
+    // 关键断言：从选中新 issue 开始，不存在“旧 issue 的详情仍打开”的渲染帧。
+    expect(
+      detailModalRenders.filter((render) => render.isOpen && render.issueId !== secondIssueId),
+    ).toEqual([])
+  })
+
+  it('drops the open thread and opens the detail when another issue card is selected from the board', async () => {
+    // 线程属于打开它的那个 Issue：看板上选中另一张卡片时，线程参数必须一并清除，
+    // 否则 URL 同时携带互相矛盾的 issue/thread，详情不打开、右侧面板变成“线程被拒绝”。
+    // 每个 Issue 的详情都将被读取：目标 Issue 的详情没有绑定线程，才会暴露错误携带的 thread 参数。
+    const api = createMockApi({
+      getIssue: vi.fn().mockImplementation((issueId: string) =>
+        Promise.resolve(
+          issueId === mockSnapshot.issues[1].issue.id
+            ? { ...mockIssueDetail, issue: mockSnapshot.issues[1].issue, agentThreads: [] }
+            : mockIssueDetail,
+        ),
+      ),
+    })
+    const firstIssueId = mockSnapshot.issues[0].issue.id
+    const secondIssueId = mockSnapshot.issues[1].issue.id
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}?issue=${firstIssueId}&thread=th-valid-101`],
+    )
+
+    await screen.findByTestId('agent-pane')
+
+    fireEvent.click(screen.getByRole('button', { name: /Issue #2 Implement REST API/ }))
+
+    await waitFor(() => {
+      const params = new URLSearchParams(getNav().location.search)
+      expect(params.get('issue')).toBe(secondIssueId)
+      expect(params.get('thread')).toBeNull()
+    })
+    expect(await screen.findByLabelText('Issue #2 详情')).toBeInTheDocument()
+    expect(screen.queryByText(/已拒绝接入/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('agent-pane')).not.toBeInTheDocument()
   })
 
   it('navigates with MemoryRouter in dock mode: Back closes manual modal and Forward does not resurrect it', async () => {

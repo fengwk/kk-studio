@@ -72,6 +72,7 @@ export function useCanvasNavigation({
       drafts: {},
       storageError: null,
       viewport: loadCanvasViewport(canvasId),
+      conflictKind: null,
       conflictMessage: null,
       textEditor: null,
     }))
@@ -91,6 +92,7 @@ export function useCanvasNavigation({
       storageError: null,
       addMenuOpen: false,
       textEditor: null,
+      conflictKind: null,
       conflictMessage: null,
     }))
   }, [leaveCanvas, setState])

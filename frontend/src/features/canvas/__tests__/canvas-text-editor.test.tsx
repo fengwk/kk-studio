@@ -80,6 +80,7 @@ function renderTextEditor(options: {
     addMenuIndex: 0,
     uploadProgress: {},
     commandPending: false,
+    conflictKind: null,
     conflictMessage: null,
     textEditor: options.textEditor ?? null,
   }

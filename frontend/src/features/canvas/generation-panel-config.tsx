@@ -16,9 +16,9 @@ export function RawJsonEditor({ draft }: { draft: FunctionConfigDraft }) {
   const { t } = useI18n()
   return (
     <div className="generation-raw-editor">
-      {draft.config.rawError ? (
+      {draft.config.rawErrorKey ? (
         <div role="alert" className="generation-json-error">
-          {draft.config.rawError}
+          {t(draft.config.rawErrorKey)}
         </div>
       ) : null}
       <span className="generation-prompt-label">{t('canvas.generation.jsonConfiguration')}</span>

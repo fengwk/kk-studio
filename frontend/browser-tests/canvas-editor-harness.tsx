@@ -26,10 +26,23 @@ import type {
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
-const locale = new URLSearchParams(window.location.search).get('locale') === 'en-US'
-  ? 'en-US'
-  : 'zh-CN'
+const params = new URLSearchParams(window.location.search)
+const locale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
 setLocale(locale)
+
+/**
+ * 夹具开关：目录三态、已存在的 Function 节点与命令 409 都由查询参数选择，
+ * 因此每条浏览器用例只声明它要观察的真实状态，不在用例里改产品行为。
+ */
+const catalogMode = params.get('catalog') ?? 'ready'
+/** `catalog=fail` 时先失败的请求数：默认只失败一次，重试即恢复。 */
+const catalogFailures = Number(params.get('catalogFailures') ?? '1')
+const conflictMode = params.get('conflict') ?? 'none'
+/** 命令批写入失败的确定 5xx：用户看到的是本地化 toast，不是静默或中文提示。 */
+const commandsFailure = params.get('commands') === 'fail'
+
+// 目录状态标记：用例只等这个标记，不靠网络时序猜测加载 / 失败 / 就绪。
+document.documentElement.dataset.functionCatalog = 'loading'
 
 const documentFixture: CanvasDocumentDTO = {
   id: CANVAS_ID as CanvasDocumentDTO['id'],
@@ -56,8 +69,21 @@ const functionCatalog: CanvasFunctionDefinitionDTO[] = [{
   unavailableReason: null,
 }]
 
+/** 目录里已经没有该函数的既有节点：面板必须说明事实，而不是消失或当成空目录。 */
+const missingFunctionNode: CanvasResourceNodeDTO = {
+  id: 'b0000000-0000-4000-8000-000000000001',
+  canvasId: CANVAS_ID,
+  name: 'Retired Function',
+  transform: { x: 80, y: 80, width: 320, height: 260 },
+  groupId: null,
+  resources: [],
+  function: { name: 'retired-model', args: { prompt: 'kept draft prompt' } },
+  run: null,
+}
+
 let revision = 0
-let nodes: CanvasResourceNodeDTO[] = []
+let nodes: CanvasResourceNodeDTO[] = params.get('nodes') === 'function' ? [missingFunctionNode] : []
+let catalogFailureCount = 0
 
 function snapshot(): CanvasSnapshotDTO {
   return {
@@ -116,6 +142,14 @@ function jsonResponse(status: number, data: unknown): Response {
   })
 }
 
+/** 冲突按后端 problem+json 回执：客户端只在该媒体类型下读取 `errors`。 */
+function problemResponse(status: number, data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/problem+json' },
+  })
+}
+
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
   const path = url.replace(/^[a-z]+:\/\/[^/]+/i, '')
@@ -128,12 +162,45 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
     return jsonResponse(200, snapshot())
   }
   if (method === 'GET' && path === '/api/canvas/functions') {
+    if (catalogMode === 'pending') {
+      // 读取中：请求永不结算，菜单保持加载态。
+      return new Promise<Response>(() => undefined)
+    }
+    if (catalogMode === 'fail' && catalogFailureCount < catalogFailures) {
+      catalogFailureCount += 1
+      document.documentElement.dataset.functionCatalog = 'failed'
+      return problemResponse(500, { type: 'about:blank', status: 500, title: 'catalog unavailable' })
+    }
     // 标记目录已就绪，使浏览器用例只在 Function 目录可用后点击「图片生成」。
     document.documentElement.dataset.functionCatalog = 'ready'
     return jsonResponse(200, functionCatalog)
   }
   if (method === 'POST' && path === `/api/canvas/canvases/${CANVAS_ID}/commands`) {
-    return jsonResponse(200, applyCommands(body?.commands ?? []))
+    const commands = body?.commands ?? []
+    if (commandsFailure) {
+      return problemResponse(500, { type: 'about:blank', status: 500, title: 'command failed' })
+    }
+    if (conflictMode === 'stale') {
+      // 语义 409：批次整批不写入，冲突指向该批要创建的节点，草稿保留供用户决定。
+      const created = commands.find((command) => command.type === 'CREATE_NODE')
+      if (created && created.type === 'CREATE_NODE') {
+        return problemResponse(409, {
+          type: 'about:blank',
+          status: 409,
+          code: 'conflict',
+          title: 'Canvas changed',
+          errors: {
+            conflicts: [{
+              type: 'STALE_NODE',
+              nodeId: created.nodeId,
+              group: 'FUNCTION',
+              current: { ...missingFunctionNode, id: created.nodeId, name: created.name },
+            }],
+          },
+        })
+      }
+    }
+    return jsonResponse(200, applyCommands(commands))
   }
   return jsonResponse(404, { type: 'about:blank', status: 404, title: 'not found' })
 }) as typeof window.fetch

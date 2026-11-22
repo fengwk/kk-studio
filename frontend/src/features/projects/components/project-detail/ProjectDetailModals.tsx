@@ -1,6 +1,7 @@
 import { CreateIssueModal } from '../CreateIssueModal'
 import { DeleteProjectModal } from '../DeleteProjectModal'
 import { EditProjectModal } from '../EditProjectModal'
+import type { IssueDetailIntent } from '../../types'
 import { IssueDetailModal } from '../IssueDetailModal'
 import type { ProjectsApi } from '../../projects-api'
 import type { ProjectDTO, ProjectSnapshotDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
@@ -23,6 +24,8 @@ interface ProjectDetailModalsProps {
   issueDetail: {
     isOpen: boolean
     issueId: string | null
+    /** 详情打开意图：卡片“阻塞”要求打开后直接展开阻塞原因表单。 */
+    intent: IssueDetailIntent | null
     onClose: () => void
     onOpenThread: (threadId: string) => void
   }
@@ -86,6 +89,7 @@ export function ProjectDetailModals({
         projectId={projectId}
         issueId={issueDetail.issueId}
         workflow={workflow}
+        initialAction={issueDetail.intent}
         onClose={issueDetail.onClose}
         onUpdated={onProjectUpdated}
         onOpenThread={issueDetail.onOpenThread}

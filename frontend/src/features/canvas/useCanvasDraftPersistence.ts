@@ -13,9 +13,8 @@ import {
 } from '@/features/canvas/canvas-local-store'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { CanvasLocalState } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
-
-const SAVE_FAILED_TOAST = '保存草稿失败，数据未保存'
 
 type DraftPositions = Record<string, { x: number; y: number }>
 
@@ -34,6 +33,7 @@ interface DraftPersistenceInput {
  */
 export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snapshot }: DraftPersistenceInput) {
   const { setState, isMountedRef, canvasEpochRef, activeCanvasIdRef, draftsRef, positionsRef, targetDraftsRef, draftPersistChainRef, draftBaselineRef } = scope
+  const { t } = useI18n()
   const [draftReloadToken, setDraftReloadToken] = useState(0)
   const [draftLoadEpoch, setDraftLoadEpoch] = useState(0)
 
@@ -77,30 +77,30 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
       if (cancelled || canvasEpochRef.current !== currentEpoch) {
         return
       }
+      console.error('[canvas] Failed to load local drafts:', err)
       setState((current) => ({
         ...current,
-        storageError: err instanceof Error ? err.message : String(err),
-        toast: SAVE_FAILED_TOAST,
+        storageError: t('canvas.toast.draftSaveFailed'),
+        toast: t('canvas.toast.draftSaveFailed'),
       }))
     })
     return () => {
       cancelled = true
     }
-  }, [activeCanvasIdRef, canvasEpochRef, canvasId, draftBaselineRef, draftReloadToken, draftsRef, positionsRef, setState, targetDraftsRef, view])
+  }, [activeCanvasIdRef, canvasEpochRef, canvasId, draftBaselineRef, draftReloadToken, draftsRef, positionsRef, setState, t, targetDraftsRef, view])
 
   // 监听持久化存储异常
   useEffect(() => {
     return onCanvasStorageError((error) => {
-      const toast = error instanceof CanvasStorageUnavailableError
-        ? error.message
-        : SAVE_FAILED_TOAST
-      setState((current) => ({
-        ...current,
-        storageError: error.message,
-        toast,
-      }))
+      if (!(error instanceof CanvasStorageUnavailableError)) {
+        console.error('[canvas] Local draft storage failed:', error)
+      }
+      const message = error instanceof CanvasStorageUnavailableError
+        ? t('canvas.toast.storageUnavailable')
+        : t('canvas.toast.draftSaveFailed')
+      setState((current) => ({ ...current, storageError: message, toast: message }))
     })
-  }, [setState])
+  }, [setState, t])
 
   // 本地草稿持久化：按 scope/epoch 隔离，事务成功后推进 baseline
   const runDraftPersistence = useCallback(() => {
@@ -119,12 +119,12 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
     )
     const canReport = () => isMountedRef.current && canvasEpochRef.current === taskEpoch
     const reportFailure = (err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err)
       if (canReport()) {
+        console.error('[canvas] Failed to persist local draft:', err)
         setState((cur) => ({
           ...cur,
-          storageError: message,
-          toast: SAVE_FAILED_TOAST,
+          storageError: t('canvas.toast.draftSaveFailed'),
+          toast: t('canvas.toast.draftSaveFailed'),
         }))
       }
     }
@@ -171,7 +171,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
         setState((cur) => ({ ...cur, draftPersistPending: false }))
       }
     })
-  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, isMountedRef, setState, targetDraftsRef, view])
+  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, isMountedRef, setState, t, targetDraftsRef, view])
 
   useEffect(() => {
     runDraftPersistence()
@@ -194,7 +194,6 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
             conflict: {
               kind: 'TARGET_MISSING',
               type: 'remote_deleted',
-              message: `节点「${draft.text?.name || '已删除节点'}」已在远端被删除，本地保留未保存草稿。`,
             },
           }
         }
@@ -207,10 +206,11 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
       return {
         ...current,
         drafts: nextDrafts,
-        conflictMessage: '部分节点已在远端被删除，本地保留未保存草稿。',
+        conflictKind: 'terminal',
+        conflictMessage: t('canvas.conflict.remoteDeletedMany'),
       }
     })
-  }, [canvasId, draftsRef, setState, snapshot, targetDraftsRef])
+  }, [canvasId, draftsRef, setState, snapshot, t, targetDraftsRef])
 
   const ackDurableDraftsForScope = useCallback((
     targetCanvasId: string,
@@ -347,11 +347,13 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
       delete nextDrafts[nodeId]
       const nextPositions = { ...current.positionDrafts }
       delete nextPositions[nodeId]
+      const keepsConflictMessage = Object.values(nextDrafts).some((d) => d.conflict)
       return {
         ...current,
         drafts: nextDrafts,
         positionDrafts: nextPositions,
-        conflictMessage: Object.values(nextDrafts).some((d) => d.conflict) ? current.conflictMessage : null,
+        conflictKind: keepsConflictMessage ? current.conflictKind : null,
+        conflictMessage: keepsConflictMessage ? current.conflictMessage : null,
       }
     })
   }, [draftsRef, positionsRef, setState, targetDraftsRef])

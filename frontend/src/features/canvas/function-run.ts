@@ -19,6 +19,7 @@ import {
   type PendingFunctionRunAttempt,
 } from '@/features/canvas/function-run-pending'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import type {
   CanvasFunctionRunDTO,
   CanvasFunctionUnknownResolution,
@@ -27,7 +28,9 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /** 面板需要展示的本地未决记录异常，按 nodeId 索引。 */
-type LocalPendingErrors = Record<string, { message: string; raw: string | null }>
+type LocalPendingErrors = Record<string, { raw: string | null }>
+
+type Translate = (key: TranslationKey, values?: InterpolationValues) => string
 
 export interface FunctionRunActions {
   startFunctionRun: (nodeId: string) => Promise<void>
@@ -61,6 +64,7 @@ export function useCanvasFunctionRun(options: {
   resolveFunctionVersion: (nodeId: string) => CanvasFunctionVersionDTO | null
 }): FunctionRunActions {
   const { canvasId, queryClient, setToast, flushFunctionConfig, resolveFunctionVersion } = options
+  const { t } = useI18n()
   const inFlightNodesRef = useRef(new Set<string>())
   const [localPendingErrors, setLocalPendingErrors] = useState<LocalPendingErrors>({})
 
@@ -81,10 +85,11 @@ export function useCanvasFunctionRun(options: {
       }
       return deleted
     } catch (err) {
-      setToast(err instanceof Error ? err.message : '无法读取浏览器存储，请检查存储权限')
+      console.error('[canvas] Failed to discard pending function run attempt:', err)
+      setToast(t('canvas.toast.runStorageUnreadable'))
       return false
     }
-  }, [canvasId, setToast])
+  }, [canvasId, setToast, t])
 
   const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: string | null) => {
     if (!canvasId) {
@@ -128,6 +133,7 @@ export function useCanvasFunctionRun(options: {
           nodeId,
           setLocalPendingErrors,
           setToast,
+          translate: t,
         })
         return
       }
@@ -138,13 +144,14 @@ export function useCanvasFunctionRun(options: {
       if (!attempt) {
         if (!clickedVersion) {
           // 缺定义：不得 flush、不得生成 requestId、不得 POST。
-          setToast('无法确认该函数的目录版本，未启动生成。请刷新函数目录后重试。')
+          setToast(t('canvas.toast.runCatalogVersionUnknown'))
           return
         }
         try {
           await flushFunctionConfig(nodeId)
         } catch (error) {
-          setToast(error instanceof Error ? error.message : '启动生成失败')
+          console.error('[canvas] Failed to flush function config before run:', error)
+          setToast(t('canvas.toast.runStartFailed'))
           return
         }
         attempt = {
@@ -165,15 +172,15 @@ export function useCanvasFunctionRun(options: {
         savePendingFunctionRun(attempt)
       } catch (err) {
         console.error('[canvas] Failed to save pending function run attempt:', err)
-        setToast('无法保存运行记录，未启动生成')
+        setToast(t('canvas.toast.runPendingSaveFailed'))
         return
       }
 
-      await submitStartAttempt({ canvasId, nodeId, attempt, queryClient, publishRun, setToast })
+      await submitStartAttempt({ canvasId, nodeId, attempt, queryClient, publishRun, setToast, translate: t })
     } finally {
       inFlightNodesRef.current.delete(nodeId)
     }
-  }, [canvasId, flushFunctionConfig, publishRun, queryClient, readBasisRequestId, resolveFunctionVersion, setToast])
+  }, [canvasId, flushFunctionConfig, publishRun, queryClient, readBasisRequestId, resolveFunctionVersion, setToast, t])
 
   const cancelFunctionRun = useCallback(async (
     nodeId: string,
@@ -189,11 +196,12 @@ export function useCanvasFunctionRun(options: {
       clearPendingFunctionRun(canvasId, nodeId, targetRequestId)
       publishRun(run, targetRequestId)
     } catch (error) {
-      setToast(error instanceof Error ? error.message : '取消生成失败')
+      console.error('[canvas] Failed to cancel function run:', error)
+      setToast(t('canvas.toast.runCancelFailed'))
     } finally {
       inFlightNodesRef.current.delete(nodeId)
     }
-  }, [canvasId, publishRun, readBasisRequestId, setToast])
+  }, [canvasId, publishRun, readBasisRequestId, setToast, t])
 
   const resolveFunctionRun = useCallback(async (
     nodeId: string,
@@ -214,11 +222,12 @@ export function useCanvasFunctionRun(options: {
       clearPendingFunctionRun(canvasId, nodeId, requestId)
       publishRun(run, requestId)
     } catch (error) {
-      setToast(error instanceof Error ? error.message : '核查确认失败')
+      console.error('[canvas] Failed to resolve function run:', error)
+      setToast(t('canvas.toast.runResolveFailed'))
     } finally {
       inFlightNodesRef.current.delete(nodeId)
     }
-  }, [canvasId, publishRun, setToast])
+  }, [canvasId, publishRun, setToast, t])
 
   return {
     startFunctionRun,
@@ -263,9 +272,10 @@ function reportPendingLoadFailure(
     nodeId: string
     setLocalPendingErrors: Dispatch<SetStateAction<LocalPendingErrors>>
     setToast: (toast: string) => void
+    translate: Translate
   },
 ): void {
-  const { canvasId, nodeId, setLocalPendingErrors, setToast } = context
+  const { canvasId, nodeId, setLocalPendingErrors, setToast, translate } = context
   const message = err instanceof Error ? err.message : String(err)
   console.error('[canvas] Failed to load pending function run attempt:', message)
 
@@ -280,25 +290,25 @@ function reportPendingLoadFailure(
     }
     if (discarded) {
       forgetPendingError(setLocalPendingErrors, nodeId)
-      setToast('本地未决运行记录已失效（缺少目录版本或内容非法），已丢弃该记录。请确认函数目录后重新点击运行。')
+      setToast(translate('canvas.toast.runPendingCorruptDiscarded'))
     } else {
       setLocalPendingErrors((prev) => ({
         ...prev,
-        [nodeId]: { message, raw: err.raw },
+        [nodeId]: { raw: err.raw },
       }))
-      setToast('本地未决运行记录已失效，且未能安全清理（记录可能已被其它标签页替换）。请重新确认后再运行。')
+      setToast(translate('canvas.toast.runPendingCorruptNotDiscarded'))
     }
     return
   }
 
   setLocalPendingErrors((prev) => ({
     ...prev,
-    [nodeId]: { message, raw: readRawPendingRun(canvasId, nodeId) },
+    [nodeId]: { raw: readRawPendingRun(canvasId, nodeId) },
   }))
-  setToast('未决运行记录损坏或存储读取失败，已暂停生成以防数据覆盖。请排查存储并在面板放弃。')
+  setToast(translate('canvas.toast.runPendingUnreadable'))
 }
 
-/** 读取原始字节用于面板展示；存储不可用时返回 null（面板此时只展示 message）。 */
+/** 读取原始字节用于面板展示；存储不可用时返回 null（面板此时仅展示读取失败提示）。 */
 function readRawPendingRun(canvasId: string, nodeId: string): string | null {
   try {
     const storage = getLocalStorageSafe()
@@ -316,8 +326,9 @@ async function submitStartAttempt(context: {
   queryClient: QueryClient
   publishRun: (run: CanvasFunctionRunDTO, basisRequestId: string | null) => void
   setToast: (toast: string) => void
+  translate: Translate
 }): Promise<void> {
-  const { canvasId, nodeId, attempt, queryClient, publishRun, setToast } = context
+  const { canvasId, nodeId, attempt, queryClient, publishRun, setToast, translate } = context
   const basisRequestId = attempt.basisRequestId
   const requestId = attempt.request.requestId
   try {
@@ -331,12 +342,13 @@ async function submitStartAttempt(context: {
     if (error instanceof ApiError && error.status === 409) {
       clearPendingFunctionRun(canvasId, nodeId, requestId)
       void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvasFunctions })
-      setToast('本次运行未启动：请求被拒绝（函数目录或运行状态可能已变化）。请刷新函数目录后重新确认运行。')
+      setToast(translate('canvas.toast.runRequestRejected'))
       return
     }
     if (isTerminalClientError(error)) {
       clearPendingFunctionRun(canvasId, nodeId, requestId)
-      setToast(error instanceof Error ? error.message : '启动生成失败')
+      console.error('[canvas] Function run start was rejected:', error)
+      setToast(translate('canvas.toast.runStartFailed'))
       return
     }
 
@@ -350,7 +362,8 @@ async function submitStartAttempt(context: {
     } catch {
       // 对账失败保留原 attempt 供重试
     }
-    setToast(error instanceof Error ? error.message : '启动生成失败')
+    console.error('[canvas] Function run start failed:', error)
+    setToast(translate('canvas.toast.runStartFailed'))
   }
 }
 

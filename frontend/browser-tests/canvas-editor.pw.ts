@@ -19,6 +19,20 @@ const COPY = {
     description: '选中 Function 节点即可运行',
     addEntry: '添加资源或 Function',
     imageFunction: '图片生成',
+    catalogLoading: '正在读取函数目录…',
+    catalogFailed: '函数目录读取失败',
+    retry: '重试',
+    functionMissing: '目录中没有此函数',
+    panelAria: 'Function 生成面板',
+    conflictStale: '节点在远端已被修改，请对比后决定。',
+    conflictRetryLatest: '使用最新版本重试',
+    conflictSaveAsNew: '另存为新节点',
+    conflictDiscard: '放弃草稿',
+    toastServerUpdated: '部分修改未能保存，请在冲突提示中处理。',
+    toastOperationFailed: '画布操作失败，请重试。',
+    zoomGroup: '画布缩放控制',
+    zoomIn: '放大',
+    resetZoom: (percentage: string) => `${percentage}，重置缩放`,
   },
   'en-US': {
     saved: 'Saved',
@@ -26,6 +40,20 @@ const COPY = {
     description: 'Select a Function node to run it.',
     addEntry: 'Add resource or Function',
     imageFunction: 'Image generation',
+    catalogLoading: 'Loading function catalog…',
+    catalogFailed: 'Could not load the function catalog',
+    retry: 'Retry',
+    functionMissing: 'This function is not in the catalog',
+    panelAria: 'Function generation panel',
+    conflictStale: 'The node changed remotely. Compare the versions before deciding',
+    conflictRetryLatest: 'Retry with the latest version',
+    conflictSaveAsNew: 'Save as a new node',
+    conflictDiscard: 'Discard draft',
+    toastServerUpdated: 'Some changes were not saved. Handle them in the conflict banner.',
+    toastOperationFailed: 'The canvas action failed. Try again.',
+    zoomGroup: 'Canvas zoom controls',
+    zoomIn: 'Zoom in',
+    resetZoom: (percentage: string) => `${percentage}, reset zoom`,
   },
 } as const
 
@@ -57,6 +85,162 @@ async function box(locator: Locator): Promise<Box> {
 function headerText(page: Page): Promise<string> {
   return page.locator('.editor-header').innerText().then((text) => text.replace(/\s+/g, ' ').trim())
 }
+
+const VIEWPORTS = [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+] as const
+
+const LOCALES = ['zh-CN', 'en-US'] as const
+
+/** 文案表与查询参数的组合矩阵：清单在这里，用例体只描述行为。 */
+function localeMatrix(): Array<{ locale: SliceLocale; viewport: { width: number; height: number } }> {
+  return LOCALES.flatMap((locale) => VIEWPORTS.map((viewport) => ({ locale, viewport })))
+}
+
+test.describe('Canvas editor canvas-only surface regressions', () => {
+  for (const { locale, viewport } of localeMatrix()) {
+    const suffix = `${locale}-${viewport.width}x${viewport.height}`
+
+    test(`the add menu reports a catalog failure and recovers on retry ${suffix}`, async ({ page }) => {
+      const copy = COPY[locale]
+      await page.setViewportSize(viewport)
+      // 第一次目录请求 500，之后的请求（用户点“重试”触发的 refetch）返回真实目录。
+      await page.goto(`${HARNESS_URL}?locale=${locale}&catalog=fail`)
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'failed')
+
+      await page.locator('.canvas-tool-rail .dock-add').click()
+      await expect(page.getByRole('menu', { name: copy.addEntry })).toBeVisible()
+
+      const notice = page.locator('.add-menu-catalog')
+      // 失败说成失败：不是“没有可用的图片模型”，也不是空态。
+      await expect(notice.getByRole('alert')).toHaveText(copy.catalogFailed)
+      const retry = notice.getByRole('button', { name: copy.retry, exact: true })
+      await expect(retry).toBeInViewport({ ratio: 1 })
+      const imageFunction = page.getByRole('menuitem', { name: copy.imageFunction })
+      await expect(imageFunction).toHaveAttribute('aria-disabled', 'true')
+      await expect(page.locator('.react-flow__node')).toHaveCount(0)
+      await page.screenshot({ path: shotPath(`canvas-catalog-failed-${suffix}.png`) })
+
+      // 重试真的重新读取目录：就绪后提示消失，Function 项恢复可选。
+      await retry.click()
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
+      await expect(page.locator('.add-menu-catalog')).toHaveCount(0)
+      await expect(imageFunction).not.toHaveAttribute('aria-disabled', 'true')
+      await imageFunction.click()
+      await expect(page.locator('.react-flow__node')).toHaveCount(1)
+      await page.screenshot({ path: shotPath(`canvas-catalog-recovered-${suffix}.png`) })
+    })
+
+    test(`the add menu explains a catalog that is still loading ${suffix}`, async ({ page }) => {
+      const copy = COPY[locale]
+      await page.setViewportSize(viewport)
+      await page.goto(`${HARNESS_URL}?locale=${locale}&catalog=pending`)
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'loading')
+
+      await page.locator('.canvas-tool-rail .dock-add').click()
+      const notice = page.locator('.add-menu-catalog')
+      // 读取中与失败、空态是三条不同的说明。
+      await expect(notice.getByRole('status')).toHaveText(copy.catalogLoading)
+      await expect(page.getByRole('menuitem', { name: copy.imageFunction }))
+        .toHaveAttribute('aria-disabled', 'true')
+      await page.screenshot({ path: shotPath(`canvas-catalog-loading-${suffix}.png`) })
+    })
+
+    test(`an existing Function node explains a missing catalog entry ${suffix}`, async ({ page }) => {
+      const copy = COPY[locale]
+      await page.setViewportSize(viewport)
+      // 快照里的节点引用了目录中已不存在的函数：面板必须留下，并说明事实。
+      await page.goto(`${HARNESS_URL}?locale=${locale}&nodes=function`)
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
+
+      const node = page.locator('.react-flow__node')
+      await expect(node).toHaveCount(1)
+      await node.locator('.canvas-node-header').click()
+
+      const panel = page.getByRole('region', { name: copy.panelAria })
+      await expect(panel).toBeVisible()
+      await expect(panel.getByRole('status')).toHaveText(copy.functionMissing)
+      await page.screenshot({ path: shotPath(`canvas-function-missing-${suffix}.png`) })
+    })
+
+    test(`a semantic 409 shows the localized conflict banner and toast ${suffix}`, async ({ page }) => {
+      const copy = COPY[locale]
+      await page.setViewportSize(viewport)
+      await page.goto(`${HARNESS_URL}?locale=${locale}&conflict=stale`)
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
+
+      await page.locator('.canvas-tool-rail .dock-add').click()
+      await page.getByRole('menuitem', { name: copy.imageFunction }).click()
+
+      // toast 在 2.8s 后自动消失：先等淡入完成再断言与截图，避免截到空提示。
+      const toast = page.locator('#toast')
+      await expect(toast).toHaveText(copy.toastServerUpdated)
+      await expect(toast).toHaveCSS('opacity', '1')
+      const banner = page.locator('.canvas-conflict-banner')
+      await expect(banner).toContainText(copy.conflictStale)
+      await expect(banner.getByRole('button', { name: copy.conflictRetryLatest })).toBeVisible()
+      await expect(banner.getByRole('button', { name: copy.conflictSaveAsNew })).toBeVisible()
+      await expect(banner.getByRole('button', { name: copy.conflictDiscard })).toBeInViewport({ ratio: 1 })
+      const bannerBox = await banner.boundingBox()
+      const toastBox = await toast.boundingBox()
+      expect(toastBox!.y).toBeGreaterThanOrEqual(bannerBox!.y + bannerBox!.height)
+      await page.screenshot({ path: shotPath(`canvas-conflict-${suffix}.png`) })
+      // 409 是终态冲突：不出现“整体重试”恢复入口，只提供就地处理草稿的动作。
+      await expect(page.getByRole('alert').getByRole('button', { name: copy.retry, exact: true }))
+        .toHaveCount(0)
+      await expect(page.locator('.react-flow__node')).toHaveCount(0)
+    })
+
+    test(`a failed command batch explains itself with a localized toast ${suffix}`, async ({ page }) => {
+      const copy = COPY[locale]
+      await page.setViewportSize(viewport)
+      await page.goto(`${HARNESS_URL}?locale=${locale}&commands=fail`)
+      await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
+
+      await page.locator('.canvas-tool-rail .dock-add').click()
+      await page.getByRole('menuitem', { name: copy.imageFunction }).click()
+
+      const toast = page.locator('#toast')
+      // 批量写入失败的 toast 也走 i18n，并且不在 canvas 上留下假节点。
+      await expect(toast).toHaveText(copy.toastOperationFailed)
+      await expect(toast).toHaveCSS('opacity', '1')
+      await expect(page.locator('.canvas-conflict-banner')).toHaveCount(0)
+      await expect(page.locator('.react-flow__node')).toHaveCount(0)
+      await page.screenshot({ path: shotPath(`canvas-toast-${suffix}.png`) })
+    })
+
+    test(`the zoom reset button is named after its visible percentage ${suffix}`, async ({ page }) => {
+      const copy = COPY[locale]
+      await page.setViewportSize(viewport)
+      await page.goto(`${HARNESS_URL}?locale=${locale}`)
+
+      const group = page.getByRole('group', { name: copy.zoomGroup })
+      await expect(group).toBeVisible()
+      // 结构顺序：缩小、适应全部、百分比重置、放大。
+      const reset = group.locator('button').nth(2)
+      await expect(reset).toHaveText('100%')
+
+      // WCAG 2.5.3：可访问名必须包含可见文本，且用同一百分比插值。
+      const initialLabel = await reset.getAttribute('aria-label')
+      expect(initialLabel).toBe(copy.resetZoom('100%'))
+      expect(initialLabel).toContain('100%')
+
+      await group.getByRole('button', { name: copy.zoomIn }).click()
+      await expect.poll(async () => (await reset.innerText()).trim()).not.toBe('100%')
+      const zoomed = (await reset.innerText()).trim()
+      const zoomedLabel = await reset.getAttribute('aria-label')
+      expect(zoomedLabel).toBe(copy.resetZoom(zoomed))
+      expect(zoomedLabel).toContain(zoomed)
+
+      // 点击仍然重置到 100%，可访问名随可见百分比一起回退。
+      await reset.click()
+      await expect.poll(async () => (await reset.innerText()).trim()).toBe('100%')
+      await expect(reset).toHaveAttribute('aria-label', copy.resetZoom('100%'))
+      await page.screenshot({ path: shotPath(`canvas-zoom-${suffix}.png`) })
+    })
+  }
+})
 
 test.describe('Canvas editor empty canvas', () => {
   test('the header shows only the title and save state, and the guidance never blocks the stage', async ({ page }) => {

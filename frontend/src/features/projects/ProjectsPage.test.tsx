@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
+import { setLocale } from '@/shared/i18n'
 import { ProjectsPage } from './ProjectsPage'
 import type { ProjectsApi } from './projects-api'
 import { invalidateProjectQueries } from './projects-invalidation'
@@ -445,6 +446,23 @@ describe('ProjectsPage', () => {
     })
     expect(await screen.findByText('Latest Project')).toBeInTheDocument()
     expect(screen.queryByText('Initial Project')).not.toBeInTheDocument()
+  })
+
+  it('pluralizes the workflow stage count in English project cards', async () => {
+    // 英文卡片阶段数按数量区分单复数：1 stage / 4 stages，中文两档文案相同。
+    setLocale('en-US')
+    const [initState, blockedState, doneState] = mockProjects[0].workflow!.states
+    const reviewState = { ...doneState, state: 'REVIEW', name: 'Review' }
+    const api = createMockApi({
+      listProjects: vi.fn().mockResolvedValue([
+        { ...mockProjects[0], workflow: { states: [initState] } },
+        { ...mockProjects[1], workflow: { states: [initState, blockedState, doneState, reviewState] } },
+      ]),
+    })
+    renderProjectsPage(<ProjectsPage api={api} />)
+
+    expect(await screen.findByText('1 stage')).toBeInTheDocument()
+    expect(screen.getByText('4 stages')).toBeInTheDocument()
   })
 
   it('enforces UI consistency with single CreateCard as first item, shared card skin, and modern checkbox', async () => {

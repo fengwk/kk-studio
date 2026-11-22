@@ -1,4 +1,4 @@
-import { Bot, Eye, User } from 'lucide-react'
+import { Bot, CircleAlert, Eye, User } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 import { formatBackendDate } from '@/shared/lib/date-format'
 import { Button } from '@/shared/ui/controls/Button'
@@ -12,45 +12,68 @@ import {
   type IssueStateNames,
 } from '../../issue-labels'
 import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
+import type { IssueActivityFeed } from './useIssueActivityFeed'
 
-/** 活动事实流：区分 Agent、人与系统三类行为者。 */
-export function IssueActivityTimeline({ activities }: { activities: IssueDetailDTO['activities'] }) {
+/** 活动事实流：区分 Agent、人与系统三类行为者，并在末尾提供后续窗口的入口。 */
+export function IssueActivityTimeline({ feed }: { feed: IssueActivityFeed }) {
   const { t } = useI18n()
+  const { activities } = feed
   return (
     <div className="activity-timeline">
-      {activities.length === 0 ? (
+      {activities.length === 0 && !feed.hasMore ? (
         <EmptyState title={t('projects.issue.emptyActivities')} />
       ) : (
-        activities.map((act) => (
-          <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
-            <div className="activity-item-header">
-              <span className="activity-badge-kind" title={act.kind}>
-                {t(ACTIVITY_KIND_LABEL_KEY[act.kind])}
-              </span>
-              <span className="activity-actor">
-                {act.actorType === 'AGENT' ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    <Bot size={12} aria-hidden="true" />
-                    <span>{act.actorAgentName || 'Agent'}</span>
-                  </span>
-                ) : act.actorType === 'HUMAN' ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    <User size={12} aria-hidden="true" />
-                    <span>{t('projects.issue.actorHuman')}</span>
-                  </span>
-                ) : (
-                  <span>{t('projects.issue.actorSystem')}</span>
-                )}
-              </span>
-              <span className="activity-time">{formatBackendDate(act.createdAt)}</span>
-              <span className="activity-seq">#{act.sequence}</span>
-            </div>
+        <>
+          {activities.map((act) => (
+            <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
+              <div className="activity-item-header">
+                <span className="activity-badge-kind" title={act.kind}>
+                  {t(ACTIVITY_KIND_LABEL_KEY[act.kind])}
+                </span>
+                <span className="activity-actor">
+                  {act.actorType === 'AGENT' ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <Bot size={12} aria-hidden="true" />
+                      <span>{act.actorAgentName || 'Agent'}</span>
+                    </span>
+                  ) : act.actorType === 'HUMAN' ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <User size={12} aria-hidden="true" />
+                      <span>{t('projects.issue.actorHuman')}</span>
+                    </span>
+                  ) : (
+                    <span>{t('projects.issue.actorSystem')}</span>
+                  )}
+                </span>
+                <span className="activity-time">{formatBackendDate(act.createdAt)}</span>
+                <span className="activity-seq">#{act.sequence}</span>
+              </div>
 
-            {act.body && (
-              <div className="activity-body-text">{act.body}</div>
-            )}
-          </div>
-        ))
+              {act.body && (
+                <div className="activity-body-text">{act.body}</div>
+              )}
+            </div>
+          ))}
+
+          {feed.hasMore && (
+            <div className="activity-more">
+              {/* 后续窗口读取失败：就地说明并可重试，已加载的活动不因失败消失。 */}
+              {feed.loadFailed ? (
+                <div className="evidence-feedback" role="alert">
+                  <CircleAlert size={16} aria-hidden="true" />
+                  <span>{t('projects.issue.activitiesLoadMoreFailed')}</span>
+                  <Button size="compact" variant="ghost" disabled={feed.isLoadingMore} onClick={feed.loadMore}>
+                    {t('shared.retry')}
+                  </Button>
+                </div>
+              ) : (
+                <Button size="compact" variant="ghost" loading={feed.isLoadingMore} onClick={feed.loadMore}>
+                  {t('projects.issue.loadMoreActivities')}
+                </Button>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

@@ -3,8 +3,8 @@ import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
-import type { IssueActivityDTO } from '@/shared/api/generated/contracts'
 import { IssueActivityTimeline } from './IssueTabPanes'
+import type { IssueActivityFeed } from './useIssueActivityFeed'
 
 type ActivityKind = 'COMMENT' | 'INSTRUCTION'
 
@@ -12,7 +12,8 @@ const isActivityKind = (value: string): value is ActivityKind =>
   value === 'COMMENT' || value === 'INSTRUCTION'
 
 interface IssueActivitiesPaneProps {
-  activities: IssueActivityDTO[]
+  /** 已加载的活动事实与时间线末尾的后续窗口入口。 */
+  activityFeed: IssueActivityFeed
   kind: ActivityKind
   body: string
   isPending: boolean
@@ -28,7 +29,7 @@ interface IssueActivitiesPaneProps {
  * <p>COMMENT 只入时间线；INSTRUCTION 会投递给当前活跃 Run。
  */
 export function IssueActivitiesPane({
-  activities,
+  activityFeed,
   kind,
   body,
   isPending,
@@ -94,7 +95,7 @@ export function IssueActivitiesPane({
         </div>
       </form>
 
-      <IssueActivityTimeline activities={activities} />
+      <IssueActivityTimeline feed={activityFeed} />
     </div>
   )
 }
