@@ -100,6 +100,11 @@
   color: var(--fg-muted);
 }
 
+/* 焦点环只由外框承担：`ui-search-input` 自带的 outline 在这里会与外框叠成双环。 */
+.searchbox input:focus-visible {
+  outline: 0;
+}
+
 @media (max-width: 860px) {
   .searchbox {
     order: 1;

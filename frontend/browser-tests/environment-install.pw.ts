@@ -1270,5 +1270,34 @@ for (const [locale, labels] of Object.entries(environmentPageCopy)) {
       await sliceShot(page, `environment-search-refresh-failed-${locale}-${viewport.width}`)
       await expectNoHorizontalOverflow(page, viewport.width)
     })
+
+    // 页级搜索框走共享 SearchField：焦点环只由外框画一次，输入框自身不再叠第二道环。
+    test(`environment search keeps a single focus ring in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      await page.route('**/api/platform/environments**', async route => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/runtime')) return route.fulfill({ json: testRuntimeStatus() })
+        return route.fulfill({ json: [testEnvironment({ id: 'env-alpha', name: 'alpha-box' })] })
+      })
+
+      await page.goto(`${HARNESS_URL}?locale=${locale}`)
+      await expect(page.locator('.environment-card')).toHaveCount(1, { timeout: 15000 })
+
+      const search = page.locator('.environment-toolbar input.ui-search-input')
+      const searchBox = page.locator('.environment-toolbar .searchbox')
+      await search.fill('alpha')
+      await expect(search).toBeFocused()
+      // 焦点只在搜索框外框上显现一次，输入框自身的 outline 必须为零。
+      await expect(searchBox).toHaveCSS('outline-style', 'solid')
+      await expect(searchBox).toHaveCSS('outline-width', '2px')
+      await expect(searchBox).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
+      await expect(search).toHaveCSS('outline-style', 'none')
+      await expect(search).toHaveCSS('outline-width', '0px')
+
+      await sliceShot(page, `environment-search-focus-${locale}-${viewport.width}`)
+      await expectNoHorizontalOverflow(page, viewport.width)
+    })
   }
 }
