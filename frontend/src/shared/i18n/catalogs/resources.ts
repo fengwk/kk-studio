@@ -586,7 +586,8 @@ export const resourcesCatalog = {
   'ai.catalog.section.pricing': { 'en-US': 'Pricing and rates', 'zh-CN': '价格与费率' },
   'ai.catalog.section.execution': { 'en-US': 'Execution', 'zh-CN': '执行' },
   'ai.catalog.section.prompt': { 'en-US': 'System prompt', 'zh-CN': '系统提示词' },
-  'ai.catalog.section.capabilities': { 'en-US': 'Tools, skills and subagents', 'zh-CN': '工具 / 技能 / 子 Agent' },
+  // 区块导航列很窄，中文标签只在“ / ”分隔处换行：「子 Agent」是不可拆分的术语，用不换行空格粘连。
+  'ai.catalog.section.capabilities': { 'en-US': 'Tools, skills and subagents', 'zh-CN': '工具 / 技能 / 子\u00A0Agent' },
   'ai.catalog.form.agentTools': { 'en-US': 'Tools', 'zh-CN': '工具' },
   'ai.catalog.form.agentSkills': { 'en-US': 'Skills', 'zh-CN': '技能' },
   'ai.catalog.form.agentSubagents': { 'en-US': 'Subagents', 'zh-CN': '子 Agent' },

@@ -46,6 +46,8 @@
   font-size: var(--font-size-sm);
   line-height: 1.4;
   text-align: left;
+  /* 窄导航列只在分隔处换行：词内（含中文词）不断开，完整标签不出列。 */
+  word-break: keep-all;
   cursor: pointer;
 }
 
