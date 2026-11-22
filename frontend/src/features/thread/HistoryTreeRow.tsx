@@ -1,7 +1,7 @@
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { HistoryEntryKind, HistoryTreeRow } from '@/features/thread/history-tree'
 import { historyLaneGlyphs } from '@/features/thread/history-tree-row-state'
-import { highlightSegments } from '@/features/thread/search-highlight'
+import { highlightSegments, searchExcerpt } from '@/features/thread/search-highlight'
 import type { RefObject } from 'react'
 
 const KIND_LABEL_KEYS: Record<HistoryEntryKind, TranslationKey> = {
@@ -27,8 +27,9 @@ export interface HistoryTreeRowViewProps {
 /**
  * 历史树的一行：kind + 可见文本预览，命中搜索时只高亮命中的片段。
  *
- * 无障碍标签把结构事实（kind、是否在当前路径、是否 head）拼进名字里，因为视觉上
- * 这些事实只由 lane 字形与颜色表达。
+ * 预览是单行省略，命中词在深处时按搜索摘录从命中处附近开始显示，窄行也能看到命中；
+ * 无障碍标签把结构事实（kind、是否在当前路径、是否 head）拼进名字里，并保留完整预览，
+ * 因为视觉上这些事实与全文只由 lane 字形、颜色和省略呈现。
  */
 export function HistoryTreeRowView({
   row,
@@ -41,7 +42,7 @@ export function HistoryTreeRowView({
   const { t } = useI18n()
   const kindLabel = t(KIND_LABEL_KEYS[row.kind])
   const segments = tokens.length > 0
-    ? highlightSegments(row.preview, tokens)
+    ? highlightSegments(searchExcerpt(row.preview, tokens), tokens)
     : [{ text: row.preview, match: false }]
   return (
     <div role="listitem">
