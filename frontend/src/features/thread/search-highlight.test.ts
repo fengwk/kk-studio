@@ -11,11 +11,12 @@ describe('search highlight', () => {
   })
 
   // The split follows text order, not token order, without dropping boundary whitespace.
-  it('separates the prefix from the first hit onward', () => {
+  it('separates the prefix and boundary space from the first hit and suffix', () => {
     expect(splitSearchHit('Checks  Pull requests', ['requests', 'pull'])).toEqual({
-      prefix: 'Checks  ',
-      segments: [
-        { text: 'Pull', match: true },
+      prefix: 'Checks',
+      spaceBeforeHit: '  ',
+      hit: 'Pull',
+      suffix: [
         { text: ' ', match: false },
         { text: 'requests', match: true },
       ],
@@ -23,11 +24,12 @@ describe('search highlight', () => {
   })
 
   it('does not split when there is no hit or when the hit starts the text', () => {
-    expect(splitSearchHit('main', ['parser'])).toEqual({ prefix: '', segments: [{ text: 'main', match: false }] })
+    expect(splitSearchHit('main', ['parser'])).toEqual({ prefix: '', spaceBeforeHit: '', hit: '', suffix: [{ text: 'main', match: false }] })
     expect(splitSearchHit('main Branch', ['main', 'branch'])).toEqual({
       prefix: '',
-      segments: [
-        { text: 'main', match: true },
+      spaceBeforeHit: '',
+      hit: 'main',
+      suffix: [
         { text: ' ', match: false },
         { text: 'Branch', match: true },
       ],

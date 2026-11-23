@@ -18,18 +18,30 @@ export async function readSearchHitText(scope: Locator) {
     firstGlyph.setStart(firstText, 0)
     firstGlyph.setEnd(firstText, (firstText.textContent!.codePointAt(0) ?? 0) > 0xffff ? 2 : 1)
 
+    // Measure from the last non-space character, not the DOM whitespace (which bidi can reorder).
+    const prefixText = prefix?.firstElementChild?.firstChild
+    const prefixEnd = prefixText?.textContent?.trimEnd().length ?? 0
+    let gapBeforeMark = 0
+    if (prefixText && prefixEnd > 0) {
+      const lastGlyph = document.createRange()
+      lastGlyph.setStart(prefixText, prefixEnd - 1)
+      lastGlyph.setEnd(prefixText, prefixEnd)
+      gapBeforeMark = markRect.left - lastGlyph.getBoundingClientRect().right
+    }
+
     // The painted ellipsis can cover the end of a mark whose DOM rectangle still fits.
-    let matchVisibleRight = matchRect.right
+    let matchVisibleRight = boxRect.right
     if (match.scrollWidth > match.clientWidth) {
       const style = getComputedStyle(match)
       const canvas = document.createElement('canvas').getContext('2d')!
       canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
-      matchVisibleRight -= canvas.measureText('…').width
+      matchVisibleRight = matchRect.right - canvas.measureText('…').width
     }
     return {
       text: box.textContent ?? '',
       availableWidth: boxRect.width,
       markWidth: markRect.width,
+      gapBeforeMark,
       markLeft: markRect.left - boxRect.left,
       markRight: markRect.right - boxRect.left,
       visibleLeft: Math.max(boxRect.left, scopeRect.left, matchRect.left) - boxRect.left,

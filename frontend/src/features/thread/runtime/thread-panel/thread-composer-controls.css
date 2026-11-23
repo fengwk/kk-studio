@@ -18,7 +18,6 @@
 }
 
 .thread-composer-controls-right {
-  /* 两组都以内容宽度为基准收缩，模型不再只取左侧剩余空间。 */
   justify-content: flex-end;
 }
 
@@ -195,6 +194,11 @@
 }
 
 @container (max-width: 520px) {
+  /* 模型名较长，先多让出一些空间，避免环境名缩成一两个字符。 */
+  .thread-composer-controls-right {
+    flex-shrink: 4;
+  }
+
   .thread-composer-model-control {
     max-width: 220px;
   }

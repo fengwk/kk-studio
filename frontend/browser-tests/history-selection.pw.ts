@@ -119,11 +119,14 @@ for (const copy of LOCALES) {
 
       // R7 场景之一：选中行（选中只改变底色与光标字形）里，长命中词完整可见。
       const selected = await readSearchHitText(preview)
+      recordSearchHitMetrics(testInfo, `tree-r7-selected-${copy.locale}-${size}`, selected)
       expectFirstMarkVisible(selected, `${copy.locale} ${size} R7 选中行`)
+      if (copy.locale === 'en-US' && viewport.width === 390) {
+        expect(selected.visibleRight - selected.markRight, '窄屏选中行给长命中保留字体差异余量').toBeGreaterThanOrEqual(4)
+      }
       if (viewport.width >= WIDE) {
         expectNoLeadingClipping(selected, `${copy.locale} ${size} R7 选中行`)
       }
-      recordSearchHitMetrics(testInfo, `tree-r7-selected-${copy.locale}-${size}`, selected)
       await captureSearchHitShot(region, testInfo, `tree-r7-selected-${copy.locale}-${size}`)
 
       // R7 场景之二：选中另一行后命中行回到未选中态，可用宽度与命中可见性不变。
@@ -198,6 +201,7 @@ for (const copy of LOCALES) {
       expectFirstMarkVisible(subtitle, `${copy.locale} ${size} 会话副标题深层命中`)
       if (viewport.width >= WIDE) {
         expectNoLeadingClipping(subtitle, `${copy.locale} ${size} 会话副标题深层命中`)
+        expect(subtitle.gapBeforeMark, '命中前的空格在最后一个字与高亮之间可见').toBeGreaterThan(1)
       }
       recordSearchHitMetrics(testInfo, `list-subtitle-deep-hit-${copy.locale}-${size}`, subtitle)
       await captureSearchHitShot(region, testInfo, `list-subtitle-deep-hit-${copy.locale}-${size}`)

@@ -27,7 +27,7 @@ const detail: IssueDetailDTO = {
   runs: [{
     id: RUN, issueId: ISSUE, ordinal: '1', state: 'WORK', agentName: null,
     sessionId: RUN, threadId: RUN, status: 'COMPLETED', startEntryId: RUN,
-    endEntryId: RUN, finalAnswerEntryId: null, nextState: 'DONE',
+    endEntryId: RUN, finalAnswerEntryId: RUN, nextState: 'DONE',
     observedActivitySequence: '0', remainingExecutionMs: '0', error: null,
     version: '1', startedAt: STAMP, endedAt: STAMP,
   }],
@@ -117,6 +117,24 @@ async function token(locator: Locator, property: 'color' | 'backgroundColor' | '
 
 async function noOverflow(dialog: Locator) {
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+}
+
+for (const [locale, tab, label] of [
+  ['zh-CN', 'Run 报告 (1)', '最终回答条目:'],
+  ['en-US', 'Run reports (1)', 'Final answer entry:'],
+]) {
+  test(`run report labels the final answer entry (${locale})`, async ({ page }, info) => {
+    await transport(page)
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport)
+      await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('tab', { name: tab, exact: true }).click()
+      await expect(dialog.getByText(label, { exact: true })).toBeVisible()
+      await noOverflow(dialog)
+      await page.screenshot({ path: info.outputPath(`final-answer-entry-${locale}-${viewport.width}x${viewport.height}.png`) })
+    }
+  })
 }
 
 for (const width of [320, 1280]) {

@@ -1843,6 +1843,23 @@ async function expectBreadcrumb({
   }
 }
 
+test('breadcrumb keeps main whole beside Back to conversation at IDE split width', async ({ page }, testInfo) => {
+  const { chatTitle, sessionName, shortThread } = BREADCRUMB_NAMES['en-US']
+  await installChatApi(page, { names: { chatTitle, sessionName, threadName: shortThread } })
+  await bindFirstPaneToThread(page)
+  const viewport = { width: 1440, height: 900 }
+  await openHarness(page, 'en-US', viewport)
+  // Model the width left by the 720px IDE and its 8px divider without starting the IDE.
+  await page.getByTestId('scenario').evaluate((frame) => { frame.style.width = '712px' })
+  await expect(page.getByRole('link', { name: 'Back to conversation' })).toBeVisible()
+  const breadcrumb = page.locator('.chat-workspace-breadcrumb')
+  const branch = breadcrumb.locator('[data-breadcrumb="branch"]')
+  await expect(branch).toHaveText(shortThread)
+  expect(await isInside(branch, breadcrumb)).toBe(true)
+  expect((await readBreadcrumbSegment(branch)).truncated, 'main should fit in full').toBe(false)
+  await captureShot(page, testInfo, 'breadcrumb-ide-split-en-US-1440x900')
+})
+
 for (const locale of LOCALES) {
   for (const viewport of VIEWPORTS) {
     test(`breadcrumb keeps a short Thread name whole while parents shrink (${locale}, ${viewportKey(viewport)})`, async ({
