@@ -30,6 +30,7 @@ import {
   waitForModelContentDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
+import { uploadPngAttachment } from '../lib/image-attachment.mjs'
 import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
@@ -879,7 +880,73 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. 现有其他真实 case（迁移至 minimax-anthropic/MiniMax-M3）
+// 3. 图片输入：32 × 32、每个像素均为 RGB(255, 0, 0) 的 PNG。
+// ---------------------------------------------------------------------------
+
+const RED_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+for (const def of REAL_MODEL_DEFINITIONS.filter((model) => model.imageInput)) {
+  registerCase({
+    id: `real.image_input.${def.idSuffix}`,
+    level: 'L2',
+    title: `${def.title} 真实图片输入`,
+    requires: ['real', 'canvas-storage'],
+    docs: `向 ${def.modelName}（${def.variant}）发送纯红 PNG 的 USER_MESSAGE 附件，要求用一个英文单词回答颜色；断言无 ASSISTANT_ERROR、回复含 red、七字段用量完整，并记录脱敏结果`,
+    async run(ctx) {
+      const { modelName, variant, model } = await resolveRealModel(ctx, def)
+      assert(model.config?.abilities?.inputModalities?.includes('IMAGE'), `${modelName} must declare IMAGE input`)
+      const name = `e2e-image-${def.idSuffix}-${cid().slice(0, 8)}`
+      let agent = null
+      let chat = null
+      try {
+        agent = (await ctx.call('POST', '/api/platform/agents', {
+          name,
+          description: `Temporary image input agent for ${def.title}.`,
+          systemPrompt: 'Answer the user directly without calling tools.',
+          execution: { driver: 'builtin', settings: { modelName, variant } },
+          config: { tools: [], skills: [], subagents: [] },
+        })).json
+        chat = await createChat(ctx, { title: name, agentName: agent.name, yoloEnabled: false })
+        const command = userMessageCommand('What color is the image? Reply with exactly one English word.', cid())
+        command.contents.push(await uploadPngAttachment(ctx, RED_PNG))
+        const threadId = cid()
+        const accepted = await createNewSession(ctx, {
+          owner: chatOwner(chat.id),
+          sessionId: cid(),
+          threadId,
+          rootSettings: branchSettingsOf(agent, agent.execution.settings),
+          yoloEnabled: false,
+          commands: [command],
+        })
+        assert(accepted.acceptedCommands[0]?.type === 'USER_MESSAGE', 'expected accepted image USER_MESSAGE')
+        const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 180_000, intervalMs: 500 })
+        assert(thread.status === 'IDLE', `image input thread not IDLE: ${thread.status}`)
+        const { entries } = await getThreadSnapshot(ctx, threadId)
+        assert(!entries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'), 'unexpected ASSISTANT_ERROR for image input')
+        const assistant = normalAssistantEntries(entries).at(-1)
+        assert(assistant && /\bred\b/i.test(messageText(assistant)), 'expected assistant reply to contain red')
+        const usage = parseEntryPayload(assistant).assistantMetadata?.usage
+        assertAssistantUsage(usage, { requirePositiveIO: true })
+        const { inputTokens, outputTokens, reasoningTokens, cacheReadTokens, cacheWriteTokens, cacheWriteByTtl, providerTotalTokens } = usage
+        ctx.writeArtifact(`real-image-input-${def.idSuffix}.json`, safeDiagnosticJson({
+          modelName,
+          variant,
+          matchedExpectedColor: true,
+          usage: { inputTokens, outputTokens, reasoningTokens, cacheReadTokens, cacheWriteTokens, cacheWriteByTtl, providerTotalTokens },
+        }, 2))
+      } finally {
+        await cleanupChat(ctx, chat)
+        await cleanupAgent(ctx, agent)
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 4. 现有其他真实 case（迁移至 minimax-anthropic/MiniMax-M3）
 // ---------------------------------------------------------------------------
 
 registerCase({

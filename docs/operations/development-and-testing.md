@@ -452,10 +452,12 @@ export TEST_OPENAI_API_KEY="$CPA_API_KEY"
 
 Runner 只读取导出的 `TEST_*`，不直接读取 `CPA_*`。
 
-对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
+对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-6-luna`、
 `minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4.1-flash`；这些是 Provider 与 wire modelId
-的固定组合，逻辑模型名以 seed 定义为准，不会静默改 provider 或 modelId。OpenAI
-与 DeepSeek 的 Base URL 会去掉尾部斜杠并补齐 `/v1`；Gemini 与 MiniMax Anthropic 只去尾部斜杠。
+的固定组合，逻辑模型名以 seed 定义为准，不会静默改 provider 或 modelId。OpenAI Responses
+的 E2E 代理模型 GPT-6 Luna 使用原生 `xhigh` 和 `max` 推理等级，与 `off`、`low`、`medium`、
+`high` 一起由 `real.reasoning_levels.*` 验收。OpenAI 与 DeepSeek 的 Base URL 会去掉尾部斜杠
+并补齐 `/v1`；Gemini 与 MiniMax Anthropic 只去尾部斜杠。
 
 同步通过 backend API 写入 E2E database 中对应的 seed Provider row，credential 不进入 seed
 SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment 或报告。不要把
@@ -466,6 +468,12 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
 database 中的 `minimax` Responses Provider。该 pair 与 E2E 四组凭据同处
 `sync-provider-credentials.mjs` 的统一清单，运行时从已导出的环境变量读取。
+
+`real.image_input.*` 覆盖 seed 声明支持图片的 Gemini、OpenAI Responses 与 MiniMax Anthropic，
+需同时启用 `real` 和 `canvas-storage`。每例上传纯红 PNG，以 `USER_MESSAGE` 附件发给模型，
+要求用一个英文单词回答颜色，校验回复含 `red`、没有 `ASSISTANT_ERROR` 且用量七字段完整。
+`real-image-input-*.json` 仅记录模型、变体、颜色是否匹配和用量，不包含原始图片或回复。
+具体用例 ID 和契约以 `--list` / `--docs` 为准。
 
 四种协议的文本缓存验收已注册为 `real.text_cache.*`，可由矩阵自动执行，不需要另加手工探针。
 取得付费授权、提供上述四组凭据后，必须使用隔离的新 DB、S3 与后端，不复用开发或生产环境。

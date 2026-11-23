@@ -19,6 +19,7 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
+import { uploadPngAttachment } from '../lib/image-attachment.mjs'
 import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import { cases as seedCases } from './seed-and-harness.mjs'
 
@@ -371,11 +372,7 @@ registerCase({
         JSON.stringify(mock.requests[0].body),
       )
 
-      const uploadId = await uploadReadyFile(ctx, {
-        filename: 'pixel.png',
-        mediaType: 'image/png',
-        content: image,
-      })
+      const attachment = await uploadPngAttachment(ctx, image)
       const secondAccepted = await acceptCommandBatch(ctx, {
         owner: chatOwner(chat.id),
         target: threadTarget({
@@ -387,7 +384,7 @@ registerCase({
             idempotencyKey: cid(),
             contents: [
               { type: 'TEXT', text: `inspect inline image ${suffix}` },
-              { type: 'ATTACHMENT', uploadId },
+              attachment,
             ],
           },
         ],
@@ -484,32 +481,6 @@ registerCase({
     if (primaryError != null) throw primaryError
   },
 })
-
-async function uploadReadyFile(ctx, { filename, mediaType, content }) {
-  const sha256 = createHash('sha256').update(content).digest('hex')
-  const pending = (
-      await ctx.call('POST', '/api/platform/storage/uploads', {
-        filename,
-        mediaType,
-        sizeBytes: String(content.length),
-        sha256,
-      })
-    ).json
-  const put = await fetch(pending.presignedPut.url, {
-    method: 'PUT',
-    headers: pending.presignedPut.headers || {},
-    body: content,
-  })
-  assert(put.ok, `presigned PUT failed: ${put.status} ${await put.text()}`)
-  const ready = (
-      await ctx.call(
-        'POST',
-        `/api/platform/storage/uploads/${encodeURIComponent(String(pending.id))}/complete`,
-      )
-    ).json
-  assert(ready.type === 'READY', JSON.stringify(ready))
-  return String(ready.id)
-}
 
 async function startResponsesProbe() {
   const requests = []

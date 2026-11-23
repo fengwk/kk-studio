@@ -126,6 +126,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     variant: 'minimal',
     variants: ['minimal', 'low', 'medium', 'high'],
     providerType: 'google',
+    imageInput: true,
   })
 
   const openai = REAL_MODEL_DEFINITIONS.find((d) => d.idSuffix === 'openai_responses')
@@ -133,10 +134,11 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     idSuffix: 'openai_responses',
     title: 'OpenAI Responses',
     providerName: 'openai',
-    modelName: 'gpt-5.6-luna',
+    modelName: 'gpt-6-luna',
     variant: 'off',
     variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
     providerType: 'openai_responses',
+    imageInput: true,
   })
 
   const minimax = REAL_MODEL_DEFINITIONS.find((d) => d.idSuffix === 'minimax_anthropic')
@@ -148,6 +150,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     variant: 'off',
     variants: ['off', 'minimal', 'low', 'medium', 'high'],
     providerType: 'anthropic',
+    imageInput: true,
   })
 
   const deepseek = REAL_MODEL_DEFINITIONS.find((d) => d.idSuffix === 'deepseek_chat')
