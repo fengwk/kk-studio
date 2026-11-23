@@ -14,7 +14,7 @@ import type {
  * 390 宽 Composer 控件行回归基座：`?locale=zh-CN|en-US`。
  *
  * 模型名、variant 后缀与环境名取 R2-9 截图同一组真实值（`gpt-mock-large (default)`
- * 与 `dev-workstation`），用来复现「环境完整、模型只剩 g…」的截断优先级倒置。
+ * 与 `dev-workstation`），用来验证窄屏下两者都保留可辨认的前缀。
  * 页面只铺满视口，不加额外内边距，使 Composer 的行宽与真实 Thread 面板一致。
  */
 const params = new URLSearchParams(window.location.search)

@@ -4,7 +4,9 @@
 }
 
 .search-hit-prefix,
-.search-hit-match {
+.search-hit-match,
+.search-hit-suffix,
+.search-hit-space {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -22,8 +24,22 @@
   unicode-bidi: isolate;
 }
 
-/* Reserve the hit and its tail first, up to the available width. */
+/* Reserve the remainder before the prefix, and the first hit before the suffix. */
+.search-hit-remainder,
+.search-hit-head {
+  display: flex;
+  min-width: 0;
+}
+
+.search-hit-remainder,
+.search-hit-head,
 .search-hit-match {
-  flex: 0 0 auto;
+  flex: none;
   max-width: 100%;
+}
+
+/* The boundary space must not force a hit that just fits to be ellipsized. */
+.search-hit-space {
+  text-overflow: clip;
+  white-space: pre;
 }

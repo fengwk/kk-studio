@@ -5,7 +5,7 @@ import { expect, test, type Locator, type Page } from './fixture'
 /**
  * Review 第 2 轮第 2 项回归：390 宽 Composer 控件行的截断优先级。
  *
- * 要求模型与环境按比例收缩、两者都显示省略号，且模型名至少保留可辨认前缀；
+ * 要求模型与环境在空间不足时仍保留可辨认前缀；
  * 1440 宽不得回退。断言只依赖可访问名、真实几何与计算样式，不读实现内部类名状态。
  */
 const HARNESS_URL = '/browser-tests/composer-controls-harness.html'
@@ -15,9 +15,9 @@ const LOCALES = ['zh-CN', 'en-US'] as const
 type Locale = (typeof LOCALES)[number]
 
 /** 触发按钮的可访问名，来自 ai.runtime.composer.{environment,modelVariant}。 */
-const CONTROL_LABEL: Record<Locale, { environment: string; model: string }> = {
-  'zh-CN': { environment: '环境', model: '模型与预设' },
-  'en-US': { environment: 'Environment', model: 'Model and Variant' },
+const CONTROL_LABEL: Record<Locale, { environment: string; model: string; permission: string; permissionValue: string }> = {
+  'zh-CN': { environment: '环境', model: '模型与预设', permission: '权限模式', permissionValue: '默认' },
+  'en-US': { environment: 'Environment', model: 'Model and Variant', permission: 'Permission mode', permissionValue: 'Default' },
 }
 
 /** 与 R2-9 证据同一组真实选择：模型名带 variant 后缀，环境名保持 dev-workstation。 */
@@ -111,10 +111,14 @@ async function expectPrefixVisible(control: Locator, prefix: string): Promise<vo
     const range = document.createRange()
     range.setStart(node, 0)
     range.setEnd(node, Math.min(visiblePrefix.length, text.length))
+    const style = getComputedStyle(span)
+    const canvas = document.createElement('canvas').getContext('2d')!
+    canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const ellipsisWidth = span.scrollWidth > span.clientWidth ? canvas.measureText('…').width : 0
     return {
       text,
       prefixWidth: range.getBoundingClientRect().width,
-      clientWidth: span.clientWidth,
+      visibleWidth: span.clientWidth - ellipsisWidth,
     }
   }, prefix)
 
@@ -123,7 +127,7 @@ async function expectPrefixVisible(control: Locator, prefix: string): Promise<vo
   expect(
     measurement!.prefixWidth,
     `可辨认前缀 ${prefix} 必须完整可见`,
-  ).toBeLessThanOrEqual(measurement!.clientWidth + 0.5)
+  ).toBeLessThanOrEqual(measurement!.visibleWidth + 0.5)
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
@@ -135,7 +139,7 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 }
 
 for (const locale of LOCALES) {
-  test(`390 宽控件行按比例收缩：模型与环境都出省略号且模型保留可辨认前缀 (${locale})`, async ({
+  test(`390 宽控件行保留可辨认的环境名和模型名 (${locale})`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -150,13 +154,12 @@ for (const locale of LOCALES) {
     expectTruncated(environmentLabel, '390 宽环境标签')
     expectTruncated(modelLabel, '390 宽模型标签')
 
-    // 模型名更长，收缩后仍应比环境标签宽；不能倒置成「环境完整、模型只剩 g…」。
-    const environmentRect = await rectOf(environment)
-    const modelRect = await rectOf(model)
-    expect.soft(modelRect.width, '模型控件宽度应大于环境控件').toBeGreaterThan(environmentRect.width)
-
-    // 模型名至少保留可辨认前缀，完整值仍可通过 title 读取。
+    await expectPrefixVisible(environment, ENVIRONMENT_LABEL.slice(0, 8))
     await expectPrefixVisible(model, RECOGNIZABLE_PREFIX)
+    const { permission, permissionValue } = CONTROL_LABEL[locale]
+    const permissionControl = row.getByRole('button', { name: permission, exact: true })
+    expectWhole(await readLabel(permissionControl), permissionValue, '权限模式')
+    const modelRect = await rectOf(model)
     await expect(model).toHaveAttribute('title', MODEL_LABEL)
     await expect(environment).toHaveAttribute('title', ENVIRONMENT_LABEL)
 

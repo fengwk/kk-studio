@@ -987,7 +987,7 @@ export const projectsCatalog = {
     'en-US': 'Running',
   },
   'projects.issue.finalAnswerEntryLabel': {
-    'zh-CN': '最终报告条目:',
+    'zh-CN': '最终回答条目:',
     'en-US': 'Final answer entry:',
   },
   'projects.issue.handoverTargetLabel': {

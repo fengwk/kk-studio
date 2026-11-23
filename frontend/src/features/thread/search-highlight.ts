@@ -55,7 +55,12 @@ export function highlightSegments(text: string, tokens: string[]): HighlightSegm
 /** Split at the first hit without losing any text, including boundary whitespace. */
 export function splitSearchHit(text: string, tokens: string[]) {
   const segments = highlightSegments(text, tokens)
-  return segments[1]?.match
-    ? { prefix: segments[0].text, segments: segments.slice(1) }
-    : { prefix: '', segments }
+  const first = segments.findIndex((segment) => segment.match)
+  if (first < 0) {
+    return { prefix: '', spaceBeforeHit: '', hit: '', suffix: segments }
+  }
+  const before = first > 0 ? segments[0].text : ''
+  // Trailing whitespace in the RTL prefix would be visually reordered to its left edge.
+  const prefix = before.trimEnd()
+  return { prefix, spaceBeforeHit: before.slice(prefix.length), hit: segments[first].text, suffix: segments.slice(first + 1) }
 }

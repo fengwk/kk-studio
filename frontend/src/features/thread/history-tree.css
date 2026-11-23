@@ -67,6 +67,7 @@
 @media (max-width: 480px) {
   .history-tree-entry {
     gap: var(--space-1);
+    padding-inline: var(--space-2);
   }
 }
 

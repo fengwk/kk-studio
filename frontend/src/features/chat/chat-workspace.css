@@ -75,6 +75,12 @@
   font-weight: 600;
 }
 
+/* 当前 Thread 优先保留名称：短名不参与压缩，长名最多占约三分之一。 */
+.chat-workspace-breadcrumb-item[data-breadcrumb='branch'] {
+  flex: 0 0 auto;
+  max-width: 36%;
+}
+
 .workspace-view-identity {
   min-width: 0;
   max-width: 32vw;
@@ -192,12 +198,6 @@
   /* 先保证返回、身份与复制动作可读，标题另起稳定一行，避免 320px 时挤成零宽。 */
   .chat-workspace-title > h1 {
     flex: 1 0 100%;
-  }
-
-  /* 当前 Thread 优先保留名称：短名不参与压缩，长名最多占约三分之一。 */
-  .chat-workspace-breadcrumb-item[data-breadcrumb='branch'] {
-    flex: 0 0 auto;
-    max-width: 36%;
   }
 
   .chat-workspace-title > .thread-breadcrumb-separator {
