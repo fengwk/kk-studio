@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.cluster;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -27,7 +28,8 @@ class ClusterPresenceConfigurationTest {
               new MapPropertySource(
                   "cluster-test",
                   Map.of(
-                      "kk-studio.cluster.internal-url", "http://platform-only.internal:8080",
+                      "kk-studio.cluster.internal-url", "https://platform-only.internal:8443",
+                      "kk-studio.cluster.ssl-bundle", "cluster-internal",
                       "kk-studio.cluster.secret", "test-cluster-secret-0123456789abcdef")));
       context.registerBean(JdbcClient.class, () -> mock(JdbcClient.class));
       context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
@@ -35,9 +37,44 @@ class ClusterPresenceConfigurationTest {
       context.refresh();
 
       ClusterProperties properties = context.getBean(ClusterProperties.class);
-      assertEquals("http://platform-only.internal:8080", properties.getInternalUrl());
+      assertEquals("https://platform-only.internal:8443", properties.getInternalUrl());
+      assertEquals("cluster-internal", properties.getSslBundle());
       assertTrue(properties.remoteRoutingConfigured());
       assertNotNull(context.getBean(RealtimeSubscriptionService.class));
     }
+  }
+
+  /** 明文 http 的内部地址在属性绑定时即失败，使应用启动失败并指明配置项。 */
+  @Test
+  void plaintextInternalUrlFailsStartup() {
+    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+      context
+          .getEnvironment()
+          .getPropertySources()
+          .addFirst(
+              new MapPropertySource(
+                  "cluster-test",
+                  Map.of("kk-studio.cluster.internal-url", "http://platform-only.internal:8080")));
+      context.registerBean(JdbcClient.class, () -> mock(JdbcClient.class));
+      context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
+      context.register(ClusterPresenceConfiguration.class);
+
+      RuntimeException error = assertThrows(RuntimeException.class, context::refresh);
+
+      assertTrue(
+          messageChain(error).contains("kk-studio.cluster.internal-url"),
+          "startup failure must name the config item: " + messageChain(error));
+    }
+  }
+
+  private static String messageChain(Throwable error) {
+    StringBuilder messages = new StringBuilder();
+    for (Throwable current = error; current != null; current = current.getCause()) {
+      messages.append(current.getMessage()).append('\n');
+      if (current.getCause() == current) {
+        break;
+      }
+    }
+    return messages.toString();
   }
 }

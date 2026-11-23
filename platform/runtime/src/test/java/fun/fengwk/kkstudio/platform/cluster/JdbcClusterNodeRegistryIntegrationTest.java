@@ -32,7 +32,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
   private static final UUID NODE_A = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID NODE_B = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   private static final String SECRET = "test-cluster-secret-0123456789abcdef";
-  private static final String NODE_B_URL = "http://node-b.internal:8080";
+  private static final String NODE_B_URL = "https://node-b.internal:8443";
   private static final Instant NOW = Instant.now();
 
   private JdbcClient jdbcClient;
@@ -59,7 +59,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
 
   private JdbcClusterNodeRegistry registry(UUID localNodeId, String secret) {
     ClusterProperties properties = new ClusterProperties();
-    properties.setInternalUrl("http://node-a.internal:8080");
+    properties.setInternalUrl("https://node-a.internal:8443");
     properties.setSecret(secret);
     return new JdbcClusterNodeRegistry(jdbcClient, localNodeId, properties);
   }
@@ -178,6 +178,15 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     assertTrue(registry(NODE_A, SECRET).route(ENV).isEmpty());
   }
 
+  /** 已登记的明文 http origin 不产生路由：节点间流量只允许经证书校验的 https。 */
+  @Test
+  void remoteOwnerWithPlaintextRegistryOriginHasNoRoute() {
+    seedConnection(NODE_B, "READY", "{}", NOW.plusSeconds(60));
+    seedNode(NODE_B, "http://node-b.internal:8080", NOW.plusSeconds(60));
+
+    assertTrue(registry(NODE_A, SECRET).route(ENV).isEmpty());
+  }
+
   @Test
   void remoteRoutingUsesDatabaseNowInsteadOfProcessClock() {
     jdbcClient
@@ -217,12 +226,12 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
   @Test
   void registrationAndHeartbeatRefreshTheLocalNodeLease() {
     JdbcClusterNodeRegistry registry = registry(NODE_A, SECRET);
-    registry.registerLocalNode(URI.create("http://node-a.internal:8080"), Duration.ofSeconds(60));
+    registry.registerLocalNode(URI.create("https://node-a.internal:8443"), Duration.ofSeconds(60));
 
     Integer registered =
         jdbcClient
             .sql("select count(*) from cluster_node where instance_id = ? and internal_url = ?")
-            .params(NODE_A, "http://node-a.internal:8080")
+            .params(NODE_A, "https://node-a.internal:8443")
             .query(Integer.class)
             .single();
     assertEquals(1, registered);

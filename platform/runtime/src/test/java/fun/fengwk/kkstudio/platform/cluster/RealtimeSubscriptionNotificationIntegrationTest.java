@@ -187,7 +187,7 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
 
   private RealtimeSubscriptionService service(UUID nodeInstanceId) {
     ClusterProperties properties = new ClusterProperties();
-    properties.setInternalUrl("http://node.internal:8080");
+    properties.setInternalUrl("https://node.internal:8443");
     properties.setSecret(SECRET);
     properties.setNodeLease(LEASE);
     properties.setHeartbeatInterval(Duration.ofSeconds(15));
@@ -232,7 +232,7 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
                 lease_until = excluded.lease_until,
                 last_seen_at = excluded.last_seen_at
             """)
-        .params(nodeInstanceId, "http://" + nodeInstanceId + ".internal:8080", LEASE.toMillis())
+        .params(nodeInstanceId, "https://" + nodeInstanceId + ".internal:8443", LEASE.toMillis())
         .update();
   }
 

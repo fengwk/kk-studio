@@ -598,11 +598,21 @@ HOME、临时目录），断线保留最后已接受的 metadata；`daemonVersio
 
 ## 跨节点内部认证
 
+节点间流量由两层保护各自负责一件事：HMAC 认证说明是哪个节点在调用，TLS 保护报文本身。
+
 内部请求使用共享秘密做 HMAC-SHA256 认证，以确认发送方持有集群共享秘密，并校验请求方法、路径（含查询字符串）与目标节点。
 接收方只接受时间戳在允许偏差内（默认 30 秒）的请求，并拒绝已使用的 nonce，防止窗口内重放。
 
-HMAC 不保护请求正文的完整性或机密性：正文不参与签名，HMAC 也不提供加密。
-跨节点部署的 `kk-studio.cluster.internal-url` 必须位于可信网络内，或使用 `https`。
+HMAC 不保护请求正文的完整性或机密性：正文不参与签名，HMAC 也不提供加密。因此多节点部署的节点间流量强制使用
+经证书校验的 HTTPS：`kk-studio.cluster.internal-url` 一旦配置只接受 `https`，写成其它 scheme 时应用启动失败并指出
+该配置项与要求；`cluster_node` 中登记的非 https origin 不产生跨节点路由。TLS 承担正文完整性与机密性以及服务器身份
+（主机名与 SNI 校验），HMAC 继续承担节点身份与防重放，两者不能互相替代。未配置 `internal-url` 与 `secret` 的节点
+保持单节点模式，不发起内部请求，也不需要证书配置。
+
+节点间 HTTP 客户端与 IDE WebSocket 转发共用 `kk-studio.cluster.ssl-bundle` 指定的 Spring Boot SSL bundle 的
+SSLContext；留空时使用 JVM 默认信任库，指定的 bundle 名不存在时启动失败。节点自身如何提供 https
+（`server.ssl.bundle` 或外部 TLS 终结代理）、证书与信任材料如何配置，见
+[部署与运行](../operations/deployment.md#多节点内部-tls)。
 
 ## 构建期 Plugin
 
@@ -812,7 +822,10 @@ Daemon；浏览器的网络策略独立。
 | `kk-studio.storage.maintenance` | 后台轮询与过期上传对象清理 lease |
 | `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
 | `kk-studio.plugins` | 凭据刷新节奏与 Plugin 资源端口预算 |
-| `kk-studio.cluster` | 节点注册与节点间内部认证 |
+| `kk-studio.cluster` | 节点注册、节点间内部认证与内部流量 TLS 信任（`ssl-bundle`） |
+
+节点证书与内部信任另外使用 Spring Boot 自身的 `server.ssl.bundle` 与 `spring.ssl.bundle.*`，它们不在上表范围内，
+配置方式见[部署与运行](../operations/deployment.md#多节点内部-tls)。
 
 应用模块各自拥有部署参数：`kk-studio.project.reconcile` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
 属于 [Canvas](canvas.md#部署参数)。

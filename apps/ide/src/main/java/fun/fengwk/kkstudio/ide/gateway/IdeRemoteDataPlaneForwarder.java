@@ -11,17 +11,20 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
-import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,12 +33,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 /**
  * 非 owner 节点的 IDE 数据面转发服务：单跳转发到目标 owner 内部端口。
  *
- * <p>HTTP 请求使用 JDK HttpClient 流式转发，携带 HMAC 签名头； WebSocket 握手使用原始 TCP 发送带 HMAC 头的 HTTP/1.1
+ * <p>HTTP 请求使用 JDK HttpClient 流式转发，携带 HMAC 签名头； WebSocket 握手通过节点间连接发送带 HMAC 头的 HTTP/1.1
  * Upgrade，有界读取响应头后中继字节。
  */
 @Slf4j
@@ -225,14 +230,38 @@ public class IdeRemoteDataPlaneForwarder {
     Objects.requireNonNull(owner, "owner");
     String targetPath = IdeDataPaths.dataWebSocketPath(environmentId, viewId, rawPathAndQuery);
     URI uri = owner.internalUrl();
-    int port =
-        uri.getPort() > 0 ? uri.getPort() : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
+    boolean secure = "https".equalsIgnoreCase(uri.getScheme());
+    String host = uri.getHost();
+    int port = uri.getPort() > 0 ? uri.getPort() : (secure ? 443 : 80);
+    int connectTimeout = Math.toIntExact(IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toMillis());
 
-    AsynchronousSocketChannel channel = AsynchronousSocketChannel.open();
+    Socket transport = new Socket();
+    Socket socket = transport;
+    boolean handedOver = false;
     try {
-      channel
-          .connect(new InetSocketAddress(uri.getHost(), port))
-          .get(IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      transport.connect(new InetSocketAddress(host, port), connectTimeout);
+      if (secure) {
+        SSLSocket tls =
+            (SSLSocket)
+                httpClient
+                    .sslContext()
+                    .getSocketFactory()
+                    .createSocket(transport, host, port, true);
+        socket = tls;
+        SSLParameters parameters = tls.getSSLParameters();
+        parameters.setEndpointIdentificationAlgorithm("HTTPS");
+        // SNI names are DNS names, not IP literals.
+        if (host.indexOf(':') < 0 && !host.matches("[0-9.]+")) {
+          parameters.setServerNames(List.of(new SNIHostName(host)));
+        }
+        tls.setSSLParameters(parameters);
+        runWithTimeout(
+            () -> {
+              tls.startHandshake();
+              return null;
+            },
+            connectTimeout);
+      }
 
       Map<String, String> authHeaders = clusterClient.signHeaders("GET", targetPath, owner);
 
@@ -258,32 +287,30 @@ public class IdeRemoteDataPlaneForwarder {
       }
       req.append("\r\n");
 
-      ByteBuffer requestBuffer =
-          ByteBuffer.wrap(req.toString().getBytes(StandardCharsets.ISO_8859_1));
-      while (requestBuffer.hasRemaining()) {
-        channel
-            .write(requestBuffer)
-            .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      }
+      OutputStream output = socket.getOutputStream();
+      byte[] requestBytes = req.toString().getBytes(StandardCharsets.ISO_8859_1);
+      runWithTimeout(
+          () -> {
+            output.write(requestBytes);
+            return null;
+          },
+          IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toMillis());
 
+      socket.setSoTimeout(connectTimeout);
       HttpResponseHeader head =
-          readHeaderBlock(
-              channel,
-              IdeGatewayConstants.MAX_HEADER_BYTES,
-              IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toMillis());
+          readHeaderBlock(socket.getInputStream(), IdeGatewayConstants.MAX_HEADER_BYTES);
 
       if (head.status == 101) {
-        TcpTunnelStream tunnelStream = new TcpTunnelStream(channel, head.remainingBytes);
+        socket.setSoTimeout(0);
+        TcpTunnelStream tunnelStream = new TcpTunnelStream(socket, transport, head.remainingBytes);
         JettyConnectionHandover.handover(request, 101, head.headers, tunnelStream);
+        handedOver = true;
       } else {
-        channel.close();
         IdeDataHeaderPolicy.sendError(response, head.status);
       }
     } catch (Exception error) {
-      try {
-        channel.close();
-      } catch (IOException closeErr) {
-        log.debug("failed to close channel after forward error", closeErr);
+      if (error instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
       }
       log.info(
           "remote ide data plane forward failed; phase=IDE_REMOTE_WS_FORWARD; environmentId={}; viewId={}; exception={}",
@@ -293,6 +320,33 @@ public class IdeRemoteDataPlaneForwarder {
       if (!response.isCommitted()) {
         IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
       }
+    } finally {
+      if (!handedOver) {
+        closeSocket(transport);
+        if (socket != transport) {
+          closeSocket(socket);
+        }
+      }
+    }
+  }
+
+  // Socket SO_TIMEOUT only bounds reads. Use a separate task for writes and TLS handshake;
+  // on failure the caller closes the raw transport to abort any pending I/O.
+  private static void runWithTimeout(Callable<Void> action, long timeoutMillis) throws Exception {
+    FutureTask<Void> task = new FutureTask<>(action);
+    Thread.startVirtualThread(task);
+    try {
+      task.get(timeoutMillis, TimeUnit.MILLISECONDS);
+    } finally {
+      task.cancel(true);
+    }
+  }
+
+  private static void closeSocket(Socket socket) {
+    try {
+      socket.close();
+    } catch (IOException error) {
+      log.debug("failed to close socket after forward error", error);
     }
   }
 
@@ -306,23 +360,16 @@ public class IdeRemoteDataPlaneForwarder {
 
   record HttpResponseHeader(int status, Map<String, List<String>> headers, byte[] remainingBytes) {}
 
-  static HttpResponseHeader readHeaderBlock(
-      AsynchronousSocketChannel channel, int maxBytes, long timeoutMillis) throws Exception {
-    ByteBuffer buffer = ByteBuffer.allocate(Math.min(maxBytes, 8192));
+  static HttpResponseHeader readHeaderBlock(InputStream input, int maxBytes) throws IOException {
+    byte[] buffer = new byte[Math.min(maxBytes, 8192)];
     ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
-    int totalRead = 0;
 
-    while (totalRead < maxBytes) {
-      buffer.clear();
-      int read = channel.read(buffer).get(timeoutMillis, TimeUnit.MILLISECONDS);
+    while (headerBytes.size() < maxBytes) {
+      int read = input.read(buffer, 0, Math.min(buffer.length, maxBytes - headerBytes.size()));
       if (read < 0) {
         break;
       }
-      buffer.flip();
-      byte[] chunk = new byte[read];
-      buffer.get(chunk);
-      headerBytes.write(chunk);
-      totalRead += read;
+      headerBytes.write(buffer, 0, read);
 
       byte[] current = headerBytes.toByteArray();
       int headerEndIndex = findHeaderEnd(current);

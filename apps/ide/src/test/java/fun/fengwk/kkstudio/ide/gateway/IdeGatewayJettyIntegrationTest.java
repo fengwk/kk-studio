@@ -3,8 +3,10 @@ package fun.fengwk.kkstudio.ide.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -18,6 +20,7 @@ import org.eclipse.jetty.ee11.servlet.ServletHolder;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.websocket.core.CloseStatus;
 import org.eclipse.jetty.websocket.core.CoreSession;
 import org.eclipse.jetty.websocket.core.Frame;
@@ -28,14 +31,22 @@ import org.eclipse.jetty.websocket.core.client.WebSocketCoreClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.boot.ssl.DefaultSslBundleRegistry;
+import org.springframework.boot.ssl.SslBundle;
+import org.springframework.boot.ssl.SslBundles;
+import org.springframework.boot.ssl.SslStoreBundle;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
+import fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeConfiguration;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.ClusterProperties;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
@@ -45,6 +56,7 @@ import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -56,7 +68,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyStore;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +85,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -81,6 +98,8 @@ import java.util.function.Function;
  *   <li>非 101 握手响应只返回 HTTP 状态码并关闭连接
  *   <li>Owner 本地大响应在客户端慢读条件下保持有界内存传输
  *   <li>{@link JettyConnectionHandover} 在真实 Jetty EE11 上下文与异常分支下的完整验证
+ *   <li>节点间转发走真实 TLS：证书在测试运行时由 JDK {@code keytool} 生成，owner 是 Jetty TLS 服务端，客户端信任来自真实 Spring Boot
+ *       SSL bundle；内部 HTTP 与 WebSocket 转发在证书受信且主机名匹配时成功，主机名不匹配或证书不受信时失败
  * </ul>
  */
 class IdeGatewayJettyIntegrationTest {
@@ -96,11 +115,32 @@ class IdeGatewayJettyIntegrationTest {
   private static int node1Port;
   private static int node2Port;
 
+  /** 生产配置 {@code kk-studio.cluster.ssl-bundle} 使用的 bundle 名。 */
+  private static final String CLUSTER_BUNDLE_NAME = "cluster";
+
+  private static final String KEY_STORE_PASSWORD = "changeit";
+
+  /** 受信证书覆盖的主机名；转发目标解析到 {@code 127.0.0.1}。 */
+  private static final String TLS_HOST = "localhost";
+
+  @TempDir static Path tlsDir;
+
   private static String sessionCookie;
   private static TestEnvironmentTunnels ownerTunnels;
   private static WebSocketCoreClient wsClient;
   private static HttpClient httpClient;
   private static IdeBootstrapTicketService ticketService;
+  private static IdeDataViewAuthorizer authorizer;
+  private static IdeBrowserSessionHandler sessionHandler;
+  private static IdeClusterClient clusterClient;
+
+  private static SslBundles sslBundles;
+  private static int tlsOwnerPort;
+  private static int tlsGatewayPort;
+  private static Server tlsOwnerServer;
+  private static Server tlsGatewayServer;
+  private static final AtomicReference<ForwardingTarget> forwardingTarget = new AtomicReference<>();
+  private static final List<HttpClient> tlsClients = new ArrayList<>();
 
   @BeforeAll
   static void startServers() throws Exception {
@@ -130,13 +170,11 @@ class IdeGatewayJettyIntegrationTest {
 
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
-    SessionIdeDataViewAuthorizer authorizer =
-        new SessionIdeDataViewAuthorizer(registry, snapshots, transport);
+    authorizer = new SessionIdeDataViewAuthorizer(registry, snapshots, transport);
 
     ticketService = mock(IdeBootstrapTicketService.class);
-    IdeBrowserSessionHandler sessionHandler =
-        new IdeBrowserSessionHandler(ticketService, registry, snapshots, transport);
-    IdeClusterClient clusterClient = mock(IdeClusterClient.class);
+    sessionHandler = new IdeBrowserSessionHandler(ticketService, registry, snapshots, transport);
+    clusterClient = mock(IdeClusterClient.class);
     when(clusterClient.signHeaders(any(), any(), any()))
         .thenReturn(Map.of("X-KK-Cluster-Signature", "sig123"));
 
@@ -193,12 +231,25 @@ class IdeGatewayJettyIntegrationTest {
     node1Server.setHandler(node1Context);
     node1Server.start();
     node1Port = node1Connector.getLocalPort();
+
+    // 4. Start the TLS owner and the TLS forwarding gateway
+    startTlsOwnerAndGateway(node2DataPlane);
   }
 
   @AfterAll
   static void stopServers() throws Exception {
     if (wsClient != null) {
       wsClient.stop();
+    }
+    for (HttpClient client : tlsClients) {
+      client.close();
+    }
+    tlsClients.clear();
+    if (tlsOwnerServer != null) {
+      tlsOwnerServer.stop();
+    }
+    if (tlsGatewayServer != null) {
+      tlsGatewayServer.stop();
     }
     if (node1Server != null) {
       node1Server.stop();
@@ -669,6 +720,355 @@ class IdeGatewayJettyIntegrationTest {
       return Base64.getEncoder().encodeToString(digest);
     } catch (Exception e) {
       throw new RuntimeException(e);
+    }
+  }
+
+  // --- Node-to-node TLS ---
+
+  /**
+   * 运行时用 JDK {@code keytool} 生成一张只覆盖 {@code localhost} 的自签证书，并启动真实 Jetty TLS owner 与常驻 TLS 网关。
+   *
+   * <p>TLS owner 复用 Node 2 的 owner 数据面；owner 强制 SNI；客户端信任来自真实 Spring Boot bundle，经 {@code
+   * kk-studio.cluster.ssl-bundle} 的 bundle 名解析。
+   */
+  private static void startTlsOwnerAndGateway(IdeGatewayDataPlane ownerDataPlane) throws Exception {
+    Path keyStore = tlsDir.resolve("cluster.p12");
+    generateSelfSignedCertificate(keyStore);
+    sslBundles =
+        new DefaultSslBundleRegistry(
+            CLUSTER_BUNDLE_NAME, SslBundle.of(SslStoreBundle.of(null, null, trustStore(keyStore))));
+
+    SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+    sslContextFactory.setKeyStorePath(keyStore.toString());
+    sslContextFactory.setKeyStorePassword(KEY_STORE_PASSWORD);
+    sslContextFactory.setKeyManagerPassword(KEY_STORE_PASSWORD);
+    sslContextFactory.setSniRequired(true);
+
+    tlsOwnerServer = new Server();
+    ServerConnector ownerConnector = new ServerConnector(tlsOwnerServer, sslContextFactory);
+    ownerConnector.setHost("127.0.0.1");
+    ownerConnector.setPort(0);
+    tlsOwnerServer.addConnector(ownerConnector);
+    ServletContextHandler ownerContext = new ServletContextHandler();
+    ownerContext.setContextPath("/");
+    ownerContext.addServlet(
+        new ServletHolder(new InternalServlet(ownerDataPlane)), "/internal/ide/environments/*");
+    tlsOwnerServer.setHandler(ownerContext);
+    tlsOwnerServer.start();
+    tlsOwnerPort = ownerConnector.getLocalPort();
+
+    tlsGatewayServer = new Server();
+    ServerConnector gatewayConnector = new ServerConnector(tlsGatewayServer);
+    gatewayConnector.setHost("127.0.0.1");
+    gatewayConnector.setPort(0);
+    tlsGatewayServer.addConnector(gatewayConnector);
+    ServletContextHandler gatewayContext = new ServletContextHandler();
+    gatewayContext.setContextPath("/");
+    gatewayContext.addServlet(new ServletHolder(new TlsForwardingServlet()), "/tls-ide/*");
+    tlsGatewayServer.setHandler(gatewayContext);
+    tlsGatewayServer.start();
+    tlsGatewayPort = gatewayConnector.getLocalPort();
+  }
+
+  /** 生产装配：bundle 名经 {@code kk-studio.cluster.ssl-bundle} 解析，由生产 bean 工厂建出共享客户端。 */
+  private static HttpClient clusterInternalHttpClient(SslBundles bundles) {
+    ClusterProperties properties = new ClusterProperties();
+    properties.setSslBundle(CLUSTER_BUNDLE_NAME);
+    StaticListableBeanFactory beanFactory =
+        new StaticListableBeanFactory(Map.of("sslBundles", bundles));
+    return new ClusterEnvironmentIdeConfiguration()
+        .clusterInternalHttpClient(properties, beanFactory.getBeanProvider(SslBundles.class));
+  }
+
+  /** 受 bundle 信任的用例客户端。 */
+  private static HttpClient trustedClusterClient() {
+    return track(clusterInternalHttpClient(sslBundles));
+  }
+
+  /** 只用 JVM 默认信任的用例客户端。 */
+  private static HttpClient systemDefaultTrustClient() {
+    return track(HttpClient.newHttpClient());
+  }
+
+  /** 用例客户端统一在 {@link #stopServers()} 关闭，不把连接与共享线程留在测试进程里。 */
+  private static HttpClient track(HttpClient client) {
+    tlsClients.add(client);
+    return client;
+  }
+
+  /** 把常驻网关指向目标 owner；{@code host} 决定主机身份是否被证书覆盖（IP 字面量不发送 SNI）。 */
+  private static void forwardTo(HttpClient client, String host) {
+    forwardingTarget.set(
+        new ForwardingTarget(
+            new IdeRemoteDataPlaneForwarder(client, clusterClient),
+            ClusterOwnerRoute.remote(
+                UUID.randomUUID(), URI.create("https://" + host + ":" + tlsOwnerPort))));
+  }
+
+  /** owner 侧隧道：读完请求正文后按 200 回一段 JSON；用来区分“TLS 未建立”与“已经送达 owner”。 */
+  private static void setHttpTunnel(AtomicReference<String> receivedBody, String responsePayload) {
+    ownerTunnels.setTunnel(
+        new SimpleEnvironmentTunnel(
+            IDENTITY,
+            req -> {
+              SimpleTunnelExchange exchange = new SimpleTunnelExchange(req);
+              Thread.ofVirtual()
+                  .start(
+                      () -> {
+                        try {
+                          ByteArrayOutputStream body = new ByteArrayOutputStream();
+                          while (true) {
+                            ByteBuffer chunk =
+                                exchange
+                                    .peer()
+                                    .read()
+                                    .toCompletableFuture()
+                                    .get(5, TimeUnit.SECONDS);
+                            if (chunk == null) {
+                              break;
+                            }
+                            byte[] bytes = new byte[chunk.remaining()];
+                            chunk.get(bytes);
+                            body.write(bytes);
+                          }
+                          receivedBody.set(body.toString(StandardCharsets.UTF_8));
+                          exchange.respond(
+                              new TunnelExchange.Response(
+                                  200, Map.of("Content-Type", List.of("application/json"))));
+                          exchange
+                              .peer()
+                              .write(
+                                  ByteBuffer.wrap(responsePayload.getBytes(StandardCharsets.UTF_8)))
+                              .toCompletableFuture()
+                              .get(5, TimeUnit.SECONDS);
+                          exchange
+                              .peer()
+                              .endOutput()
+                              .toCompletableFuture()
+                              .get(5, TimeUnit.SECONDS);
+                        } catch (Exception error) {
+                          exchange.close();
+                        }
+                      });
+              return exchange;
+            },
+            req -> {
+              throw new UnsupportedOperationException();
+            }));
+  }
+
+  /** owner 侧 WebSocket 隧道：完成 200 握手并在客户端帧到达后回一帧；{@code reached} 记录握手是否真的到达 owner。 */
+  private static void setWebSocketEchoTunnel(AtomicBoolean reached, String replyText) {
+    ownerTunnels.setTunnel(
+        new SimpleEnvironmentTunnel(
+            IDENTITY,
+            req -> {
+              throw new UnsupportedOperationException();
+            },
+            req -> {
+              SimpleTunnelExchange exchange = new SimpleTunnelExchange(req);
+              String accept = computeAcceptHeader(req);
+              Thread.ofVirtual()
+                  .start(
+                      () -> {
+                        try {
+                          reached.set(true);
+                          exchange.respond(
+                              new TunnelExchange.Response(
+                                  200, Map.of("Sec-WebSocket-Accept", List.of(accept))));
+                          ByteBuffer frame =
+                              exchange
+                                  .peer()
+                                  .read()
+                                  .toCompletableFuture()
+                                  .get(10, TimeUnit.SECONDS);
+                          if (frame != null) {
+                            exchange
+                                .peer()
+                                .write(serverTextFrame(replyText))
+                                .toCompletableFuture()
+                                .get(5, TimeUnit.SECONDS);
+                          }
+                        } catch (Exception error) {
+                          exchange.close();
+                        }
+                      });
+              return exchange;
+            }));
+  }
+
+  private static HttpResponse<String> sendTlsHttpRequest() throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + tlsGatewayPort
+                        + "/tls-ide/"
+                        + ENV
+                        + "/"
+                        + VIEW
+                        + "/data/save"))
+            .POST(HttpRequest.BodyPublishers.ofString("{\"message\":\"hello over tls\"}"))
+            .header("Cookie", IdeGatewayConstants.SESSION_COOKIE_NAME + "=" + sessionCookie)
+            .header("Content-Type", "application/json")
+            .build();
+    return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+  }
+
+  @Test
+  void tlsInternalHttpForwardingWithTrustedBundle() throws Exception {
+    AtomicReference<String> receivedBody = new AtomicReference<>();
+    setHttpTunnel(receivedBody, "{\"status\":\"saved\"}");
+    forwardTo(trustedClusterClient(), TLS_HOST);
+
+    HttpResponse<String> response = sendTlsHttpRequest();
+
+    assertEquals(200, response.statusCode());
+    assertEquals("{\"status\":\"saved\"}", response.body());
+    assertEquals("{\"message\":\"hello over tls\"}", receivedBody.get());
+  }
+
+  @Test
+  void tlsWebSocketForwardingWithTrustedBundle() throws Exception {
+    AtomicBoolean ownerReached = new AtomicBoolean();
+    setWebSocketEchoTunnel(ownerReached, "tls-echo");
+    forwardTo(trustedClusterClient(), TLS_HOST);
+
+    TestFrameHandler clientHandler = new TestFrameHandler();
+    URI wsUri =
+        URI.create(
+            "ws://127.0.0.1:" + tlsGatewayPort + "/tls-ide/" + ENV + "/" + VIEW + "/ws-terminal");
+    CoreClientUpgradeRequest upgradeRequest =
+        CoreClientUpgradeRequest.from(wsClient, wsUri, clientHandler);
+    upgradeRequest.headers(
+        h -> h.add("Cookie", IdeGatewayConstants.SESSION_COOKIE_NAME + "=" + sessionCookie));
+    CoreSession session = upgradeRequest.sendAsync().get(10, TimeUnit.SECONDS);
+    session.sendFrame(new Frame(OpCode.TEXT, "tls-hello"), Callback.NOOP, false);
+    Frame echo = clientHandler.nextFrame(10, TimeUnit.SECONDS);
+
+    assertNotNull(echo, "owner 的 WebSocket 帧必须经 TLS 转发回浏览器");
+    assertEquals(OpCode.TEXT, echo.getOpCode());
+    assertEquals("tls-echo", echo.getPayloadAsUTF8());
+    assertTrue(ownerReached.get(), "浏览器帧必须经 TLS 送达 owner");
+    session.close(1000, "normal", Callback.NOOP);
+  }
+
+  @Test
+  void tlsInternalHttpForwardingRejectsHostNameMismatch() throws Exception {
+    AtomicReference<String> receivedBody = new AtomicReference<>();
+    setHttpTunnel(receivedBody, "{\"status\":\"saved\"}");
+    // 证书链受信，但不覆盖 127.0.0.1（且 IP 字面量不发送 SNI）：主机身份校验必须失败。
+    forwardTo(trustedClusterClient(), "127.0.0.1");
+
+    assertEquals(503, sendTlsHttpRequest().statusCode());
+    assertNull(receivedBody.get(), "主机名不匹配时请求不得送达 owner");
+  }
+
+  @Test
+  void tlsWebSocketForwardingRejectsHostNameMismatch() throws Exception {
+    AtomicBoolean ownerReached = new AtomicBoolean();
+    setWebSocketEchoTunnel(ownerReached, "tls-echo");
+    forwardTo(trustedClusterClient(), "127.0.0.1");
+
+    assertEquals(
+        502,
+        sendRawWebSocketUpgrade(
+            tlsGatewayPort,
+            "/tls-ide/" + ENV + "/" + VIEW + "/ws-terminal",
+            IdeGatewayConstants.SESSION_COOKIE_NAME + "=" + sessionCookie));
+    assertFalse(ownerReached.get(), "主机名不匹配时握手不得送达 owner");
+  }
+
+  @Test
+  void tlsInternalHttpForwardingRejectsUntrustedCertificate() throws Exception {
+    AtomicReference<String> receivedBody = new AtomicReference<>();
+    setHttpTunnel(receivedBody, "{\"status\":\"saved\"}");
+    forwardTo(systemDefaultTrustClient(), TLS_HOST);
+
+    assertEquals(503, sendTlsHttpRequest().statusCode());
+    assertNull(receivedBody.get(), "证书不受信时请求不得送达 owner");
+  }
+
+  /** 运行时生成一张只覆盖 {@code localhost} 的自签证书；私钥只落在临时目录，不提交。 */
+  private static void generateSelfSignedCertificate(Path keyStore) throws Exception {
+    keytool(
+        "-genkeypair",
+        "-alias",
+        "cluster",
+        "-keyalg",
+        "RSA",
+        "-dname",
+        "CN=localhost,OU=kk-studio-test",
+        "-ext",
+        "SAN=dns:localhost",
+        "-validity",
+        "2",
+        "-storetype",
+        "PKCS12",
+        "-keystore",
+        keyStore.toString(),
+        "-storepass",
+        KEY_STORE_PASSWORD,
+        "-keypass",
+        KEY_STORE_PASSWORD);
+  }
+
+  private static void keytool(String... arguments) throws Exception {
+    List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "keytool").toString());
+    command.addAll(List.of(arguments));
+    Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+    if (!process.waitFor(60, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      fail("keytool timed out: " + String.join(" ", command));
+    }
+    String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    if (process.exitValue() != 0) {
+      fail("keytool failed: " + String.join(" ", command) + System.lineSeparator() + output);
+    }
+  }
+
+  /** 只把自签公钥证书从 PKCS12 复制进信任库（私钥不进入 bundle）。 */
+  private static KeyStore trustStore(Path keyStore) throws Exception {
+    KeyStore keyMaterial = KeyStore.getInstance("PKCS12");
+    try (InputStream in = Files.newInputStream(keyStore)) {
+      keyMaterial.load(in, KEY_STORE_PASSWORD.toCharArray());
+    }
+    KeyStore trustStore = KeyStore.getInstance("PKCS12");
+    trustStore.load(null, null);
+    trustStore.setCertificateEntry("cluster", keyMaterial.getCertificate("cluster"));
+    return trustStore;
+  }
+
+  /** 常驻 TLS 网关的转发目标：每个用例只替换它，不再新起 Jetty。 */
+  private record ForwardingTarget(IdeRemoteDataPlaneForwarder forwarder, ClusterOwnerRoute owner) {}
+
+  private static class TlsForwardingServlet extends HttpServlet {
+
+    @Override
+    protected void service(HttpServletRequest request, HttpServletResponse response)
+        throws ServletException, IOException {
+      ForwardingTarget target = forwardingTarget.get();
+      String prefix = "/tls-ide/" + ENV + "/" + VIEW;
+      String uri = request.getRequestURI();
+      if (target == null || !uri.startsWith(prefix)) {
+        response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+        return;
+      }
+      String rawPathAndQuery = uri.substring(prefix.length());
+      String query = request.getQueryString();
+      if (query != null && !query.isEmpty()) {
+        rawPathAndQuery = rawPathAndQuery + "?" + query;
+      }
+      if (IdeOriginPolicy.isWebSocketUpgrade(request)) {
+        target
+            .forwarder()
+            .forwardWebSocket(request, response, target.owner(), ENV, VIEW, rawPathAndQuery);
+      } else {
+        target
+            .forwarder()
+            .forwardDataHttp(request, response, target.owner(), ENV, VIEW, rawPathAndQuery);
+      }
     }
   }
 

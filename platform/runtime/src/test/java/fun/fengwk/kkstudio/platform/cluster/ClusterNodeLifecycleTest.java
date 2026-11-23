@@ -16,7 +16,7 @@ import java.time.Duration;
 /** ClusterNodeLifecycle：复用节点心跳续租订阅、节点续约失败不误续租、退出清理订阅。 */
 class ClusterNodeLifecycleTest {
 
-  private static final URI ORIGIN = URI.create("http://node-a.internal:8080");
+  private static final URI ORIGIN = URI.create("https://node-a.internal:8443");
   private static final Duration LEASE = Duration.ofSeconds(45);
 
   private final JdbcClusterNodeRegistry registry = mock(JdbcClusterNodeRegistry.class);
