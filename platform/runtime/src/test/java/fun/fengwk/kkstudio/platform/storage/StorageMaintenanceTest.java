@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.media.StorageMediaProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
@@ -382,6 +383,7 @@ class StorageMaintenanceTest {
           mock(S3StorageService.class),
           mock(S3PresignService.class),
           mock(FfmpegStorageMediaProbe.class),
+          new StorageMediaProperties(),
           mock(StorageBlobPreviewService.class),
           mock(StorageObjectCleanupService.class),
           mock(StorageUploadOperationLock.class),

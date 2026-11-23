@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.media.StorageMediaProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
@@ -196,6 +197,7 @@ public class S3StorageConfiguration {
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
       FfmpegStorageMediaProbe mediaProbe,
+      StorageMediaProperties mediaProperties,
       StorageBlobPreviewService blobPreviewService,
       StorageObjectCleanupService storageObjectCleanupService,
       StorageUploadOperationLock storageUploadOperationLock,
@@ -211,6 +213,7 @@ public class S3StorageConfiguration {
         s3StorageService,
         s3PresignService,
         mediaProbe,
+        mediaProperties,
         blobPreviewService,
         storageObjectCleanupService,
         storageUploadOperationLock,

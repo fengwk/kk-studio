@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.media.StorageMediaProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
@@ -87,6 +88,7 @@ public class StorageUploadService {
   private final StorageBlobManager blobManager;
   private final S3StorageService s3StorageService;
   private final FfmpegStorageMediaProbe mediaProbe;
+  private final StorageMediaProperties mediaProperties;
   private final StorageBlobPreviewService blobPreviewService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
@@ -104,6 +106,7 @@ public class StorageUploadService {
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
       FfmpegStorageMediaProbe mediaProbe,
+      StorageMediaProperties mediaProperties,
       StorageBlobPreviewService blobPreviewService,
       StorageObjectCleanupService objectCleanupService,
       StorageUploadOperationLock operationLock,
@@ -118,6 +121,7 @@ public class StorageUploadService {
     this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
     Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
+    this.mediaProperties = Objects.requireNonNull(mediaProperties, "mediaProperties");
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
     this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
@@ -236,8 +240,11 @@ public class StorageUploadService {
   }
 
   /**
-   * 服务端有界 spool 输入流并准备一个可消费的 READY upload。调用前不得存在活动事务；实现先在 upload 操作锁内以独立短事务登记 PENDING
-   * candidate，再在事务外执行对象写入、媒体探针与复制，最后以短事务完成去重绑定（登记失败在写入任何对象之前直接上抛，不做对象清理）。输入流由调用方关闭。
+   * 服务端有界 spool 输入流并准备一个可消费的 READY upload。调用前不得存在活动事务。
+   *
+   * <p>spool 文件在 {@code kk-studio.storage.media.temp-dir} 配置的目录下创建，成功与失败都会在返回前尝试清理， 删除失败只记录日志。实现先在
+   * upload 操作锁内以独立短事务登记 PENDING candidate，再在事务外执行对象写入、媒体探针与复制，
+   * 最后以短事务完成去重绑定（登记失败在写入任何对象之前直接上抛，不做对象清理）。输入流由调用方关闭。
    *
    * @param maxBytes 允许的最大字节数
    */
@@ -251,7 +258,9 @@ public class StorageUploadService {
     String normalizedMediaType = normalizeMediaType(mediaType);
     Path spool = null;
     try {
-      spool = Files.createTempFile("storage-stage-", ".tmp");
+      Path spoolDir = mediaProperties.getTempDir();
+      Files.createDirectories(spoolDir);
+      spool = Files.createTempFile(spoolDir, "storage-stage-", ".tmp");
       MessageDigest digest = Sha256.newDigest();
       long total = 0;
       try (OutputStream output = Files.newOutputStream(spool)) {
