@@ -64,7 +64,10 @@ import javax.sql.DataSource;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -80,6 +83,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 /**
  * 全局 Blob 存储上传契约的 PostgreSQL 集成测试（内存 S3 假件）。
@@ -97,9 +101,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
       "kk-studio.storage.s3.region=us-east-1",
       "kk-studio.storage.s3.bucket=test-bucket",
       "kk-studio.storage.s3.access-key=local-test-access-key",
-      "kk-studio.storage.s3.secret-key=local-test-secret-key"
+      "kk-studio.storage.s3.secret-key=local-test-secret-key",
+      // 服务端 stage spool 的部署临时目录：与进程级 java.io.tmpdir 不同，从这里能否观察到 spool 证明该配置项控制落盘位置。
+      "kk-studio.storage.media.temp-dir=target/storage-media-temp"
     })
 class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
+
+  /** 配置属性 kk-studio.storage.media.temp-dir 的预期值；测试直接用期望值而不是读回绑定后的对象。 */
+  private static final Path MEDIA_TEMP_DIR = Path.of("target", "storage-media-temp");
+
+  /** 服务端 stage spool 的文件名前缀，用于在目录快照中区分 spool 与其它临时文件。 */
+  private static final String SPOOL_PREFIX = "storage-stage-";
 
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private StorageBlobManager storageBlobManager;
@@ -188,6 +200,44 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
     assertNotNull(staged.blobId());
     assertFalse(observed.isEmpty());
+  }
+
+  /**
+   * 测试意图：服务端 stage 的 spool 必须落在 kk-studio.storage.media.temp-dir（这里配置为独立于 java.io.tmpdir 的目录），
+   * 并在成功返回前被清理。修复前 Files.createTempFile 缺少目录参数，spool 落在进程级 java.io.tmpdir。
+   */
+  @Test
+  void serverStageSpoolsUnderConfiguredMediaTempDirAndDeletesSpoolAfterSuccess() throws Exception {
+    byte[] content = "staged-spool".getBytes(StandardCharsets.UTF_8);
+    List<Path> spoolsBefore = spoolCandidates(MEDIA_TEMP_DIR);
+    List<Path> tmpSpoolsBefore = spoolCandidates(javaIoTmpDir());
+    SpoolObservingInputStream probe = new SpoolObservingInputStream(content, MEDIA_TEMP_DIR);
+
+    StorageUploadService.StagedUpload staged =
+        storageUploadService.stage("spool.txt", "text/plain", probe, content.length);
+
+    assertSingleSpoolUnderMediaTempDirDeleted(spoolsBefore, tmpSpoolsBefore, probe);
+    assertNotNull(staged.blobId());
+  }
+
+  /** 测试意图：spool 超过 maxBytes 时 stage 失败，但 spool 仍必须落在配置目录并在失败后被清理，不得泄漏临时文件。 */
+  @Test
+  void serverStageDeletesSpoolAfterContentExceedsLimit() throws Exception {
+    byte[] content = "staged-over-limit".getBytes(StandardCharsets.UTF_8);
+    long maxBytes = 4;
+    List<Path> spoolsBefore = spoolCandidates(MEDIA_TEMP_DIR);
+    List<Path> tmpSpoolsBefore = spoolCandidates(javaIoTmpDir());
+    SpoolObservingInputStream probe = new SpoolObservingInputStream(content, MEDIA_TEMP_DIR);
+
+    DomainException failure =
+        assertThrows(
+            DomainException.class,
+            () ->
+                storageUploadService.stage(
+                    "spool.bin", "application/octet-stream", probe, maxBytes));
+
+    assertEquals(DomainErrorCode.VALIDATION, failure.code());
+    assertSingleSpoolUnderMediaTempDirDeleted(spoolsBefore, tmpSpoolsBefore, probe);
   }
 
   /**
@@ -1592,6 +1642,48 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     return assertInstanceOf(StorageUploadPendingDTO.class, upload);
   }
 
+  /** 当前进程级 java.io.tmpdir：修复前 stage spool 落在那里。 */
+  private static Path javaIoTmpDir() {
+    return Path.of(System.getProperty("java.io.tmpdir"));
+  }
+
+  /** 目录下匹配 stage spool 命名的文件快照；目录不存在时为空。 */
+  private static List<Path> spoolCandidates(Path directory) throws IOException {
+    if (!Files.isDirectory(directory)) {
+      return List.of();
+    }
+    try (Stream<Path> files = Files.list(directory)) {
+      return files
+          .filter(file -> file.getFileName().toString().startsWith(SPOOL_PREFIX))
+          .sorted()
+          .toList();
+    }
+  }
+
+  /** 只保留观察窗口内新增的 spool，排除先前测试或运行遗留的文件。 */
+  private static List<Path> newSpoolCandidates(List<Path> before, List<Path> during) {
+    return during.stream().filter(file -> !before.contains(file)).toList();
+  }
+
+  /**
+   * 断言观察窗口内恰好新增一个 spool 落在配置目录，且 stage 返回后它已被清理（删除失败会记日志，测试环境无删除失败）。 落盘位置不匹配时把 java.io.tmpdir 里新增的
+   * spool 一并报告，直接暴露旧实现的落盘目录。
+   */
+  private void assertSingleSpoolUnderMediaTempDirDeleted(
+      List<Path> spoolsBefore, List<Path> tmpSpoolsBefore, SpoolObservingInputStream probe) {
+    List<Path> spooled = newSpoolCandidates(spoolsBefore, probe.spooledInConfiguredDir());
+    assertEquals(
+        1,
+        spooled.size(),
+        "stage spool must be created under "
+            + MEDIA_TEMP_DIR
+            + " (kk-studio.storage.media.temp-dir); java.io.tmpdir picked up "
+            + newSpoolCandidates(tmpSpoolsBefore, probe.spooledInTmpDir()));
+    for (Path spool : spooled) {
+      assertFalse(Files.exists(spool), "stage must clean up its spool: " + spool);
+    }
+  }
+
   private static byte[] tinyPng() throws IOException {
     try (InputStream input =
         StorageUploadServiceIntegrationTest.class.getResourceAsStream(
@@ -1703,4 +1795,43 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
       Long durationMs,
       long refCount,
       StorageBlobState state) {}
+
+  /**
+   * 在首次 read(byte[], int, int) 时拍摄 spool 目录快照：此时 stage 已创建 spool、还没走到 finally 清理，
+   * 所以快照反映的就是它真实的落盘目录；随后照常返回内容字节。
+   */
+  private static final class SpoolObservingInputStream extends ByteArrayInputStream {
+
+    private final Path configuredDir;
+    private List<Path> spooledInConfiguredDir;
+    private List<Path> spooledInTmpDir;
+
+    private SpoolObservingInputStream(byte[] content, Path configuredDir) {
+      super(content);
+      this.configuredDir = configuredDir;
+    }
+
+    @Override
+    public synchronized int read(byte[] buffer, int offset, int length) {
+      if (spooledInConfiguredDir == null) {
+        try {
+          spooledInConfiguredDir = spoolCandidates(configuredDir);
+          spooledInTmpDir = spoolCandidates(javaIoTmpDir());
+        } catch (IOException error) {
+          throw new UncheckedIOException("failed to observe the stage spool", error);
+        }
+      }
+      return super.read(buffer, offset, length);
+    }
+
+    private List<Path> spooledInConfiguredDir() {
+      assertNotNull(spooledInConfiguredDir, "stage must read the input stream before returning");
+      return spooledInConfiguredDir;
+    }
+
+    private List<Path> spooledInTmpDir() {
+      assertNotNull(spooledInTmpDir, "stage must read the input stream before returning");
+      return spooledInTmpDir;
+    }
+  }
 }

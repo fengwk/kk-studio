@@ -531,7 +531,8 @@ complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD �
 稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
 绑定提交后，临时对象与未使用候选对象的删除是尽力而为：删除失败只记录日志，complete 仍返回 READY；
 残留对象由上传过期清理按上传行记录的临时键与候选键回收。
-服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
+服务端 `stage` 把上传内容有界 spool 到 `kk-studio.storage.media.temp-dir`（服务端上传暂存与 ffprobe/ffmpeg
+共用同一部署临时目录），计算摘要后复用上传生命周期；成功与失败都在返回前尝试清理 spool，删除失败只记录日志。清理先取得同一操作锁、
 登记耐久对象 key，再在事务外删除，避免与 complete/stage 的对象写入交错。
 
 `storage_object_cleanup` 永久保存删除记录，按数据库时间领取、提前安排下一次尝试，
@@ -539,7 +540,7 @@ complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD �
 该保证不是存储侧写入围栏。
 
 [`storage/media`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/media/) 在上传确认后用 ffprobe 补充权威媒体事实、
-用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录由
+用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录（含服务端上传暂存）由
 `kk-studio.storage.media` 配置。用户上传的已缩放图片将原始尺寸与存储尺寸保存在 durable Resource 中，Provider 读取时直接发送存储字节。图片前的英文标签包含 `resource://files/<uuid>`、原始尺寸和显示尺寸；仅当图像实际缩放时提示将坐标映射回原图。插件原图保持不变；首次需要缩放时按原图与档位生成独立 Blob，并在 `storage_image_model_view` 持久化原图、档位、模型视图 Blob 与尺寸。模型视图由该关联持有引用，原图最后一个引用释放时同事务删除关联并释放模型视图。被移到用户消息的工具图片以 `Tool call <toolCallId> image:` 标出来源。
 
 `storageMedia.maxImagesPerRequest` 默认 20。接受新用户消息时，图片数量取用户设置与所选模型协议已知上限的较小值；超出的图片在写入历史前截去，并附加模型可见的英文说明。该限制只处理当前新消息，不删减历史中的图片；跨历史累计超限由压缩流程处理。Provider attempt 读取缓存权重总计 100 MiB、单项最多 8 MiB，只按容量淘汰，不按时间过期；持久模型视图不会因缓存淘汰而重算。
@@ -810,7 +811,7 @@ Daemon；浏览器的网络策略独立。
 | `kk-studio.harness.runtime` | worker 开关 |
 | `kk-studio.storage.s3` | S3 端点/凭据/bucket 与公网 endpoint 映射 |
 | `kk-studio.storage.maintenance` | 后台轮询与过期上传对象清理 lease |
-| `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
+| `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件、媒体处理与服务端上传暂存临时目录 |
 | `kk-studio.plugins` | 凭据刷新节奏与 Plugin 资源端口预算 |
 | `kk-studio.cluster` | 节点注册与节点间内部认证 |
 
