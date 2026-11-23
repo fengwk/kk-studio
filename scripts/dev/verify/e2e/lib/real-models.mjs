@@ -1,7 +1,7 @@
 /**
  * 四指定模型声明式定义，严格匹配公共 seed/credential 契约：
  * - google/gemini-3.8-flash, variant minimal, provider type google
- * - openai/gpt-5.6-luna, variant off, provider type openai_responses
+ * - openai/gpt-6-luna, variant off, provider type openai_responses
  * - minimax-anthropic/MiniMax-M3, variant off, provider type anthropic
  * - deepseek/deepseek-v4.1-flash, variant off, provider type openai
  */
@@ -14,15 +14,17 @@ export const REAL_MODEL_DEFINITIONS = [
     variant: 'minimal',
     variants: ['minimal', 'low', 'medium', 'high'],
     providerType: 'google',
+    imageInput: true,
   },
   {
     idSuffix: 'openai_responses',
     title: 'OpenAI Responses',
     providerName: 'openai',
-    modelName: 'gpt-5.6-luna',
+    modelName: 'gpt-6-luna',
     variant: 'off',
     variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
     providerType: 'openai_responses',
+    imageInput: true,
   },
   {
     idSuffix: 'minimax_anthropic',
@@ -32,6 +34,7 @@ export const REAL_MODEL_DEFINITIONS = [
     variant: 'off',
     variants: ['off', 'minimal', 'low', 'medium', 'high'],
     providerType: 'anthropic',
+    imageInput: true,
   },
   {
     idSuffix: 'deepseek_chat',

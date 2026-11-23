@@ -846,9 +846,9 @@
   },
   {
     "provider": "openai",
-    "name": "gpt-5.6-luna",
-    "modelId": "gpt-5.6-luna",
-    "description": "GPT-5.6 Luna",
+    "name": "gpt-6-luna",
+    "modelId": "gpt-6-luna",
+    "description": "GPT-6 Luna",
     "config": {
       "limit": {
         "context": 272000,
@@ -894,11 +894,11 @@
         },
         {
           "id": "xhigh",
-          "reasoningEffort": "high"
+          "reasoningEffort": "xhigh"
         },
         {
           "id": "max",
-          "reasoningEffort": "high"
+          "reasoningEffort": "max"
         }
       ]
     }

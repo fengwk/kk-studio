@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
+import { ALL_CASES } from '../run-matrix.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
@@ -28,15 +29,17 @@ test('四指定模型声明式定义与 MINIMAX_ANTHROPIC_M3 契约值严格对�
       variant: 'minimal',
       variants: ['minimal', 'low', 'medium', 'high'],
       providerType: 'google',
+      imageInput: true,
     },
     {
       idSuffix: 'openai_responses',
       title: 'OpenAI Responses',
       providerName: 'openai',
-      modelName: 'gpt-5.6-luna',
+      modelName: 'gpt-6-luna',
       variant: 'off',
       variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
       providerType: 'openai_responses',
+      imageInput: true,
     },
     {
       idSuffix: 'minimax_anthropic',
@@ -46,6 +49,7 @@ test('四指定模型声明式定义与 MINIMAX_ANTHROPIC_M3 契约值严格对�
       variant: 'off',
       variants: ['off', 'minimal', 'low', 'medium', 'high'],
       providerType: 'anthropic',
+      imageInput: true,
     },
     {
       idSuffix: 'deepseek_chat',
@@ -60,6 +64,23 @@ test('四指定模型声明式定义与 MINIMAX_ANTHROPIC_M3 契约值严格对�
 
   assert.deepEqual(REAL_MODEL_DEFINITIONS, expected)
   assert.equal(MINIMAX_ANTHROPIC_M3, REAL_MODEL_DEFINITIONS[2])
+})
+
+test('真实图片用例仅注册给 seed 声明 IMAGE 输入的模型', () => {
+  // 用 seed 目录对照矩阵，防止图片能力与付费、存储门禁漂移。
+  const catalog = JSON.parse(readFileSync(path.join(REPO_ROOT,
+    'platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/pi-model-catalog.json'), 'utf8'))
+  const expectedIds = REAL_MODEL_DEFINITIONS.filter((def) => {
+    const model = catalog.find((entry) => entry.provider === def.providerName && entry.name === def.modelName)
+    assert.ok(model, `missing seed model: ${def.modelName}`)
+    return model.config.abilities.inputModalities.includes('IMAGE')
+  }).map((def) => `real.image_input.${def.idSuffix}`)
+  const imageCases = ALL_CASES.filter((entry) => entry.id.startsWith('real.image_input.'))
+  assert.deepEqual(imageCases.map((entry) => entry.id), expectedIds)
+  for (const entry of imageCases) {
+    assert.equal(entry.level, 'L2')
+    assert.deepEqual([...entry.requires].sort(), ['canvas-storage', 'real'])
+  }
 })
 
 test('ui-smoke 必须引用共享契约且杜绝硬编码裸露的 MiniMax 供应商与模型字面量', () => {
