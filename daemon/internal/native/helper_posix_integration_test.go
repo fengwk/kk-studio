@@ -254,6 +254,7 @@ func TestPOSIXHelper_PermitBudgetExpires(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "__native-helper", dir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.ExtraFiles = []*os.File{ownerReader}
+	launched := time.Now()
 	if err := cmd.Start(); err != nil {
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
@@ -289,9 +290,14 @@ func TestPOSIXHelper_PermitBudgetExpires(t *testing.T) {
 	case <-time.After(scopeStartBudget + 5*time.Second):
 		t.Fatal("helper did not enforce its permit deadline")
 	}
-	elapsed := time.Since(started)
-	if elapsed < scopeStartBudget || elapsed > scopeStartBudget+5*time.Second {
-		t.Fatalf("permit wait elapsed = %s, want %s through %s", elapsed, scopeStartBudget, scopeStartBudget+5*time.Second)
+	exited := time.Now()
+	// The helper arms its budget right after publishing its scope. Launch precedes that moment and the
+	// polled scope observation trails it, so each bounds one side of the budget.
+	if waited := exited.Sub(launched); waited < scopeStartBudget {
+		t.Fatalf("helper exited %s after launch, before its %s permit budget", waited, scopeStartBudget)
+	}
+	if waited := exited.Sub(started); waited > scopeStartBudget+5*time.Second {
+		t.Fatalf("helper exited %s after publishing its scope, want at most %s", waited, scopeStartBudget+5*time.Second)
 	}
 	if err := ownerWriter.Close(); err != nil {
 		t.Fatal(err)
