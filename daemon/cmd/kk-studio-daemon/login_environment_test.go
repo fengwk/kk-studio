@@ -124,7 +124,7 @@ func TestLoginEnvironmentTimeoutTerminatesTree(t *testing.T) {
 	t.Setenv("KK_TEST_PID_FILE", pidFile)
 	setLoginTestProfile(t, `sleep 60 & printf '%s\n' "$!" > "$KK_TEST_PID_FILE"; wait`)
 	_, err := probeLoginEnvironment(context.Background(), loginTestSupervisor(t), bash, time.Second)
-	if err == nil || err.Error() != "Bash login environment: timed out" {
+	if err == nil || err.Error() != "sample Bash login environment: timed out" {
 		t.Fatalf("unexpected timeout diagnostic: %v", err)
 	}
 	data, err := os.ReadFile(pidFile)

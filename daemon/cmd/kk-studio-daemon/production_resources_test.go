@@ -37,7 +37,7 @@ func TestProductionStartupRecoversFromLoginEnvironmentFailure(t *testing.T) {
 	load := func(context.Context, string) ([]string, error) {
 		attempts++
 		if attempts <= 2 {
-			return nil, errors.New("Bash login environment: missing output marker")
+			return nil, errors.New("sample Bash login environment: missing output marker")
 		}
 		return []string{"PATH=" + filepath.Dir(executable)}, nil
 	}

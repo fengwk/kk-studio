@@ -19,7 +19,7 @@ import (
 
 const loginEnvironmentCommand = "__login-environment"
 
-var errLoginEnvironmentCleanup = errors.New("Bash login environment: process tree cleanup could not be confirmed")
+var errLoginEnvironmentCleanup = errors.New("sample Bash login environment: process tree cleanup could not be confirmed")
 
 func loginEnvironmentMain(args []string) int {
 	if len(args) != 1 {
@@ -49,7 +49,7 @@ func loadLoginEnvironment(ctx context.Context, processes native.Supervisor, bash
 func probeLoginEnvironment(ctx context.Context, processes native.Supervisor, bash string, timeout time.Duration) (_ []string, resultErr error) {
 	executable, err := os.Executable()
 	if err != nil {
-		return nil, errors.New("Bash login environment: daemon executable is unavailable")
+		return nil, errors.New("sample Bash login environment: daemon executable is unavailable")
 	}
 	nonce := uuid.New()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -99,25 +99,25 @@ func probeLoginEnvironment(ctx context.Context, processes native.Supervisor, bas
 		return nil, errors.Join(loginEnvironmentProcessError(ctx, "could not wait for Bash"), loginEnvironmentScopeError(err))
 	}
 	if exit.Code == nil {
-		return nil, errors.New("Bash login environment: Bash did not exit normally")
+		return nil, errors.New("sample Bash login environment: Bash did not exit normally")
 	}
 	if *exit.Code != 0 {
-		return nil, fmt.Errorf("Bash login environment: Bash exited with code %d", *exit.Code)
+		return nil, fmt.Errorf("sample Bash login environment: Bash exited with code %d", *exit.Code)
 	}
 	if captured.err != nil {
-		return nil, errors.New("Bash login environment: could not read Bash output")
+		return nil, errors.New("sample Bash login environment: could not read Bash output")
 	}
 	return parseLoginEnvironment(captured.data, loginEnvironmentMarker(nonce))
 }
 
 func loginEnvironmentProcessError(ctx context.Context, message string) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return errors.New("Bash login environment: timed out")
+		return errors.New("sample Bash login environment: timed out")
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("Bash login environment: %w", ctx.Err())
+		return fmt.Errorf("sample Bash login environment: %w", ctx.Err())
 	}
-	return errors.New("Bash login environment: " + message)
+	return errors.New("sample Bash login environment: " + message)
 }
 
 func loginEnvironmentScopeError(err error) error {
@@ -133,11 +133,11 @@ func loginEnvironmentScopeError(err error) error {
 func parseLoginEnvironment(data, marker []byte) ([]string, error) {
 	_, payload, found := bytes.Cut(data, marker)
 	if !found {
-		return nil, errors.New("Bash login environment: missing output marker")
+		return nil, errors.New("sample Bash login environment: missing output marker")
 	}
 	payload, _, found = bytes.Cut(payload, marker)
 	if !found {
-		return nil, errors.New("Bash login environment: missing output marker")
+		return nil, errors.New("sample Bash login environment: missing output marker")
 	}
 	environment := []string{}
 	if len(payload) > 0 {

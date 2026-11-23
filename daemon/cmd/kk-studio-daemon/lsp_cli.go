@@ -82,7 +82,7 @@ func runLSPCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (bo
 func lspLoginEnvironment(ctx context.Context) ([]string, error) {
 	bash, err := config.ResolveBash(nil)
 	if err != nil {
-		return nil, fmt.Errorf("Bash executable is unavailable: %w", err)
+		return nil, fmt.Errorf("default Bash executable is unavailable: %w", err)
 	}
 	processes, err := native.NewSupervisor()
 	if err != nil {
