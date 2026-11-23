@@ -273,6 +273,122 @@ async function selectAgent(page: Page, optionName: string) {
   await page.getByRole('option', { name: optionName, exact: true }).click()
 }
 
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    for (const type of ['INPUT', 'APPROVAL'] as const) {
+      test(`long root ${type} keeps its controls visible (${locale}, ${viewport.width})`, async ({ page }) => {
+        const questionnaire = type === 'INPUT'
+        const chinese = locale === 'zh-CN'
+        const pending = [{
+          toolInvocationId: 'long-root-interaction',
+          type,
+          threadId: THREAD_ID,
+          rootThreadId: THREAD_ID,
+          sessionId: 'long-root-session',
+          owner: { kind: 'CHAT', id: 'long-root-chat', title: 'Report review', link: '/chats/long-root-chat' },
+          toolCallId: 'long-root-call',
+          toolName: questionnaire ? 'ask_user' : 'publish_report',
+          argumentsJson: questionnaire ? JSON.stringify({
+            questions: Array.from({ length: 8 }, (_, i) => ({
+              question: chinese ? `请填写第 ${i + 1} 项复核意见` : `Enter your review for item ${i + 1}`,
+              options: [],
+            })),
+          }) : '',
+          approval: questionnaire ? null : {
+            required: true,
+            reason: Array.from({ length: 90 }, (_, i) => chinese
+              ? `${i + 1}、核对报告是否包含本轮审查的全部结果。`
+              : `${i + 1}. Confirm that the report includes all results from this review.`).join(' '),
+          },
+          queuedSameFileCount: questionnaire ? 0 : 1,
+          createdAt: 1790812800,
+        }]
+        await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, pending })
+        await page.setViewportSize(viewport)
+        await page.goto(`/browser-tests/debug-preview-harness.html?locale=${locale}`)
+
+        const region = page.locator('.thread-root-interactions')
+        const footer = region.locator(questionnaire ? '.interaction-actions-bar' : '.interaction-approval-footer')
+        const lastContent = region.locator(questionnaire ? '.interaction-question-item' : '.interaction-approval-reason').last()
+        await expect(footer.locator(questionnaire ? '.interaction-submit-btn' : '.interaction-allow-btn')).toHaveCount(1)
+        await expect(footer.locator('button')).toHaveCount(2)
+        const geometry = () => footer.evaluate((element) => {
+          const region = element.closest('.thread-root-interactions')!
+          const rect = region.getBoundingClientRect()
+          const controls = [...element.querySelectorAll('input,button')].map((control) => control.getBoundingClientRect())
+          return {
+            visible: controls.every((control) => control.top >= rect.top + region.clientTop - 1
+              && control.bottom <= rect.top + region.clientTop + region.clientHeight + 1
+              && control.left >= rect.left && control.right <= rect.right),
+            noOverflow: region.scrollWidth <= region.clientWidth
+              && document.documentElement.scrollWidth <= window.innerWidth,
+            scrollable: region.scrollHeight > region.clientHeight,
+          }
+        })
+        await expect.poll(geometry).toEqual({ visible: true, noOverflow: true, scrollable: true })
+
+        const evidenceDir = process.env.KK_ROOT_INTERACTION_EVIDENCE_DIR
+        const capture = async (state: string) => {
+          if (evidenceDir) {
+            await page.screenshot({ path: resolve(evidenceDir, `${type}-${locale}-${viewport.width}x${viewport.height}-${state}.png`) })
+          }
+        }
+        const scrollBottom = await region.evaluate((element) =>
+          element.getBoundingClientRect().top + element.clientTop + element.clientHeight)
+        const initialFooter = (await footer.boundingBox())!
+        expect(Math.abs(initialFooter.y + initialFooter.height - scrollBottom)).toBeLessThanOrEqual(1)
+        await capture('initial')
+        await region.evaluate((element) => { element.scrollTop = element.scrollHeight })
+        const contentRect = (await lastContent.boundingBox())!
+        const footerRect = (await footer.boundingBox())!
+        const regionRect = (await region.boundingBox())!
+        expect(contentRect.y).toBeGreaterThanOrEqual(regionRect.y)
+        expect(contentRect.y + contentRect.height).toBeLessThanOrEqual(footerRect.y)
+        await expect.poll(geometry).toEqual({ visible: true, noOverflow: true, scrollable: true })
+        if (!questionnaire) {
+          const lastReasonLine = await region.locator('.interaction-approval-reason[role="note"]').evaluate((element) => {
+            const range = document.createRange()
+            range.selectNodeContents(element)
+            const lines = Array.from(range.getClientRects())
+            return { top: lines.at(-1)!.top, bottom: lines.at(-1)!.bottom }
+          })
+          expect(lastReasonLine.top).toBeGreaterThanOrEqual(regionRect.y)
+          expect(lastReasonLine.bottom).toBeLessThanOrEqual(footerRect.y)
+        }
+        await capture('end')
+
+        if (questionnaire) {
+          // Tab must reveal the next answer even when the sticky bar already covers it.
+          const inputs = region.locator('.interaction-question-item input')
+          await inputs.nth(3).focus()
+          const nextInput = inputs.nth(4)
+          await nextInput.evaluate((input) => {
+            const region = input.closest('.thread-root-interactions')!
+            const footer = region.querySelector('.interaction-actions-bar')!
+            region.scrollTop += input.getBoundingClientRect().bottom - footer.getBoundingClientRect().bottom + 4
+          })
+          expect((await nextInput.boundingBox())!.y).toBeGreaterThan((await footer.boundingBox())!.y)
+          await page.keyboard.press('Tab')
+          await expect(nextInput).toBeFocused()
+          const inputRect = (await nextInput.boundingBox())!
+          expect(inputRect.y + inputRect.height).toBeLessThanOrEqual((await footer.boundingBox())!.y)
+        }
+
+        if (!questionnaire && chinese && viewport.width === 390) {
+          // 滚到下一张长卡时，第一张卡的操作区必须随卡片离开。
+          pending.push({ ...pending[0], toolInvocationId: 'next-root-interaction' })
+          await page.reload()
+          const cards = region.locator('.interaction-feed-item')
+          await expect(cards).toHaveCount(2)
+          await region.evaluate((element) => { element.scrollTop = element.scrollHeight })
+          await expect(cards.first().locator('.interaction-approval-footer')).not.toBeInViewport()
+          await expect(cards.last().locator('.interaction-approval-footer')).toBeInViewport({ ratio: 1 })
+        }
+      })
+    }
+  }
+}
+
 test('owner-free bound thread renders a NOTIFICATION entry as a system card', async ({ page }) => {
   // 测试意图：系统结果通知在真实浏览器里使用独立系统样式，绝不渲染成 user/assistant
   // 对话块，也不进入可编辑队列或草稿（草稿只承载人类输入）；回执只展示来源、Thread 链接
