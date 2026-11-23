@@ -8,7 +8,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
 
-setLocale('zh-CN')
+setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
 /**
  * 「下一次请求预览」标题点击回归的浏览器基座。
