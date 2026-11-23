@@ -29,6 +29,18 @@ export async function readSearchHitText(scope: Locator) {
       gapBeforeMark = markRect.left - lastGlyph.getBoundingClientRect().right
     }
 
+    const suffix = box.querySelector('.search-hit-suffix')
+    const suffixText = suffix && document.createTreeWalker(suffix, NodeFilter.SHOW_TEXT).nextNode()
+    let gapAfterMark: number | null = null
+    if (suffixText?.textContent?.trimStart()) {
+      const text = suffixText.textContent
+      const offset = text.length - text.trimStart().length
+      const nextGlyph = document.createRange()
+      nextGlyph.setStart(suffixText, offset)
+      nextGlyph.setEnd(suffixText, offset + ((text.codePointAt(offset) ?? 0) > 0xffff ? 2 : 1))
+      gapAfterMark = nextGlyph.getBoundingClientRect().left - markRect.right
+    }
+
     // The painted ellipsis can cover the end of a mark whose DOM rectangle still fits.
     let matchVisibleRight = boxRect.right
     if (match.scrollWidth > match.clientWidth) {
@@ -42,6 +54,7 @@ export async function readSearchHitText(scope: Locator) {
       availableWidth: boxRect.width,
       markWidth: markRect.width,
       gapBeforeMark,
+      gapAfterMark,
       markLeft: markRect.left - boxRect.left,
       markRight: markRect.right - boxRect.left,
       visibleLeft: Math.max(boxRect.left, scopeRect.left, matchRect.left) - boxRect.left,

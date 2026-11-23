@@ -10,8 +10,7 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space-collapse: preserve-spaces;
-  text-wrap: nowrap;
+  white-space: pre;
 }
 
 /* Only clipping runs right-to-left; the original text keeps its reading order. */
@@ -41,5 +40,4 @@
 /* The boundary space must not force a hit that just fits to be ellipsized. */
 .search-hit-space {
   text-overflow: clip;
-  white-space: pre;
 }
