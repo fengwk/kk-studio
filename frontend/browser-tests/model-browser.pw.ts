@@ -338,7 +338,10 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(dialog.locator('.group-member-row')).toHaveCount(1)
       await expect(dialog.locator('.group-member-row').nth(0)).toContainText('backup')
 
+      // 有草稿时关闭先确认；放弃修改后才关闭创建弹窗。
       await dialog.getByRole('button', { name: '关闭' }).click()
+      const discard = page.getByRole('alertdialog', { name: '放弃未保存的修改？' })
+      await discard.getByRole('button', { name: '放弃修改', exact: true }).click()
       await expect(page.getByRole('dialog')).toHaveCount(0)
 
       if (viewport.width === 1280) {
