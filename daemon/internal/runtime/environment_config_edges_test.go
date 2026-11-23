@@ -22,7 +22,9 @@ func TestEnvironmentConfigConstructorAndSubmitEdges(t *testing.T) {
 	if _, err := NewEnvironmentConfigRuntime(EnvironmentConfigOptions{Initial: missingPath, Prepare: (&testConfigurationPreparer{}).prepare}); err == nil {
 		t.Fatal("constructor accepted missing cache path")
 	}
-	manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
+	// Hold the worker in Prepare so a cancelled caller cannot also observe a settled result.
+	preparer := &testConfigurationPreparer{release: make(chan struct{})}
+	manager := newTestEnvironmentConfigRuntime(t, initial, preparer.prepare, &testCacheWriter{})
 	if result, err := manager.Submit(context.Background(), 2, nil); err != nil || result.Kind != ConfigFailed || result.Field != "config" {
 		t.Fatalf("nil configuration result = %+v, %v", result, err)
 	}
@@ -34,6 +36,7 @@ func TestEnvironmentConfigConstructorAndSubmitEdges(t *testing.T) {
 	if _, err := manager.Submit(ctx, 1, configurationOf(initial)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled submission error = %v", err)
 	}
+	close(preparer.release)
 	manager.Close()
 }
 
