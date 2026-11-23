@@ -17,7 +17,9 @@ import type {
 import {
   DEEP_PREVIEW,
   DEEP_TITLE,
-  HISTORY_TEXT,
+  HISTORY_MARKDOWN,
+  HISTORY_MERMAID,
+  HISTORY_TABLE,
   LONG_HISTORY_TEXT,
   SHORT_PREVIEW,
   SHORT_TITLE,
@@ -51,8 +53,10 @@ function entry(
 const HISTORY_ENTRIES: HarnessSessionEntryDTO[] = [
   entry('entry-root', 'ROOT', null, null),
   entry('entry-user', 'MESSAGE', 'entry-root', '服务停机流程要怎么落地？'),
-  entry('entry-assistant', 'MESSAGE', 'entry-user', HISTORY_TEXT, 'ASSISTANT'),
-  entry('entry-turn-end', 'TURN_END', 'entry-assistant', null),
+  entry('entry-assistant', 'MESSAGE', 'entry-user', HISTORY_MARKDOWN, 'ASSISTANT'),
+  entry('entry-table', 'MESSAGE', 'entry-assistant', HISTORY_TABLE, 'ASSISTANT'),
+  entry('entry-mermaid', 'MESSAGE', 'entry-table', HISTORY_MERMAID, 'ASSISTANT'),
+  entry('entry-turn-end', 'TURN_END', 'entry-mermaid', null),
   entry('entry-user-2', 'MESSAGE', 'entry-turn-end', '还有别的注意事项吗？'),
   // 长拉丁命中词位于 220 字预览上限之外：搜索预览必须从全文截取。
   entry('entry-assistant-2', 'MESSAGE', 'entry-user-2', LONG_HISTORY_TEXT, 'ASSISTANT'),

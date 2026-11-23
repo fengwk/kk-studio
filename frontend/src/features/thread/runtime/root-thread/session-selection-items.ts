@@ -1,5 +1,5 @@
 import { formatBackendDate } from '@/shared/lib/date-format'
-import { markdownPreview } from './markdown-preview'
+import { markdownPreview } from '@/features/thread/markdown-preview'
 import { translate } from '@/shared/i18n'
 import { formatThreadStatusLabel } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type {

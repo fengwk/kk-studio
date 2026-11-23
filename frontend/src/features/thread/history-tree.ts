@@ -1,3 +1,4 @@
+import { markdownPreview, type PreviewCodeLine } from '@/features/thread/markdown-preview'
 import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import { FORK_NOTICE_TEXT } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
@@ -34,6 +35,8 @@ export interface HistoryTreeRow {
   text: string
   /** `text` 的小写形式，用于搜索匹配。 */
   searchText: string
+  /** 单行全文里仍可定位的代码行范围。 */
+  codeLines: PreviewCodeLine[]
   lane: number
   gutter: boolean[]
   startsLane: boolean
@@ -58,6 +61,8 @@ const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u
 export interface BuildHistoryTreeOptions {
   /** 当前 head Entry id；用于标记路径与当前位置，不改变图形结构。 */
   headEntryId?: string | null
+  mermaidLabel?: string
+  noBodyLabel?: string
 }
 
 /** 按父 Entry 分组的子节点索引；未知或缺失的父引用归到根组。 */
@@ -106,6 +111,8 @@ export function buildHistoryTree(
   const childrenByParent = childrenIndex(entries)
   const ancestry = new Set(activeAncestry(entries, options.headEntryId ?? null))
   const headEntryId = options.headEntryId ?? null
+  const mermaidLabel = options.mermaidLabel ?? translate('shared.mermaidDiagram')
+  const noBodyLabel = options.noBodyLabel ?? translate('ai.chat.history.noBody')
   const rows: HistoryTreeRow[] = []
   const laneById = new Map<string, number>()
   /** lane -> 该列下一个待绘制的 Entry id；null 表示该列当前空闲。 */
@@ -129,13 +136,15 @@ export function buildHistoryTree(
       }
     }
     const parentId = entry.parentEntryId
-    const text = historyEntryText(entry)
+    const codeLines: PreviewCodeLine[] = []
+    const text = markdownPreview(historyEntryVisibleText(entry), { codeLines, mermaidLabel })
     rows.push({
       entry,
       kind: historyEntryKind(entry),
-      preview: text ? truncatePreview(text, PROJECTED_PREVIEW_LIMIT) : translate('ai.chat.history.noBody'),
+      preview: text ? truncatePreview(text, PROJECTED_PREVIEW_LIMIT) : noBodyLabel,
       text,
       searchText: text.toLowerCase(),
+      codeLines,
       lane,
       gutter: active.map((pending) => pending != null),
       startsLane: parentId != null && laneById.get(parentId) !== lane,
@@ -218,17 +227,19 @@ export function historyRowSearchPreview(row: HistoryTreeRow, tokens: string[]): 
       hitEnd = index + token.length
     }
   }
-  return Number.isFinite(hitStart) && hitEnd > PROJECTED_PREVIEW_KEPT
-    ? windowAroundHit(row.text, hitStart)
-    : row.preview
+  if (hitEnd <= PROJECTED_PREVIEW_KEPT) {
+    return row.preview
+  }
+  const codeLine = row.codeLines.find(({ start, end }) => start <= hitStart && hitStart < end)
+  return windowAroundHit(row.text, hitStart, codeLine?.start ?? 0)
 }
 
 /**
  * 从全文命中处前少量上下文开始截取：起点落在拉丁词中间时从该词之后的空格开始，不截半个词；
  * 不从代理对中间切开；结果以 … 开头并按预览上限截断。
  */
-function windowAroundHit(text: string, hitIndex: number): string {
-  let start = hitIndex - HIT_LEAD
+function windowAroundHit(text: string, hitIndex: number, lineStart: number): string {
+  let start = Math.max(lineStart, hitIndex - HIT_LEAD)
   if (/[\uDC00-\uDFFF]/.test(text[start] ?? '')) {
     start -= 1
   } else if (LATIN_WORD_CHAR.test(text[start - 1] ?? '') && LATIN_WORD_CHAR.test(text[start] ?? '')) {
@@ -267,15 +278,11 @@ function historyEntryKind(entry: HarnessSessionEntryDTO): HistoryEntryKind {
   return 'other'
 }
 
-/** 折叠成单行的可见文本；显式 thinking 内容不进入历史树。 */
-function historyEntryText(entry: HarnessSessionEntryDTO): string {
-  return flattenVisibleText(historyEntryVisibleText(entry))
-}
-
 function messageContents(entry: HarnessSessionEntryDTO): Record<string, unknown>[] {
   return getRecordList(asRecord(asRecord(entry.payload).message).contents)
 }
 
+/** 只收集可见正文；显式 thinking 内容不进入历史树。 */
 function historyEntryVisibleText(entry: HarnessSessionEntryDTO): string {
   if (entry.entryType === 'FORK') {
     return FORK_NOTICE_TEXT
@@ -299,10 +306,6 @@ function collectMessageText(contents: Record<string, unknown>[]): string[] {
     }
   }
   return result
-}
-
-function flattenVisibleText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
 }
 
 function truncatePreview(text: string, limit: number): string {

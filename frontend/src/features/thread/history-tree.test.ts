@@ -8,6 +8,7 @@ import {
   isForkBoundary,
   type HistoryTreeRow,
 } from '@/features/thread/history-tree'
+import { translate } from '@/shared/i18n'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
@@ -149,6 +150,7 @@ describe('History tree lane projection', () => {
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([
         'canFork',
+        'codeLines',
         'entry',
         'gutter',
         'isFork',
@@ -242,6 +244,23 @@ describe('History tree search', () => {
     expect(row.preview.endsWith('…')).toBe(true)
     // 搜索使用未截断文本。
     expect(historyRowMatches(row, historySearchTokens('x'.repeat(250)))).toBe(true)
+  })
+
+  // 预览与全文搜索共享可见文本；链接地址和 Mermaid 源码都不能命中。
+  it('searches flattened Markdown instead of its source', () => {
+    const row = searchRow('## **Report**\n| [Docs](https://example.test) |\n| --- |\n| Ready |\n```mermaid\ngraph TD\n```')
+    const diagram = translate('shared.mermaidDiagram')
+    expect(row.preview).toBe(`Report Docs Ready ${diagram}`)
+    expect(historyRowMatches(row, historySearchTokens(`report ready ${diagram}`))).toBe(true)
+    for (const hidden of ['##', '|', 'example.test', 'graph TD']) {
+      expect(historyRowMatches(row, historySearchTokens(hidden))).toBe(false)
+    }
+  })
+
+  // 深命中位于代码行开头时，不将上一行末尾的代码带入窗口。
+  it('starts a deep code hit window no earlier than the matching line', () => {
+    const row = searchRow(`## Report\n\`\`\`sh\n${'x'.repeat(230)} tail\nneedle --flag\n\`\`\``)
+    expect(historyRowSearchPreview(row, ['needle'])).toBe('…needle --flag')
   })
 
   // 测试意图：命中落在预览保留的字符之外时，搜索预览从全文命中处截取，用户能看到为什么这一行匹配。

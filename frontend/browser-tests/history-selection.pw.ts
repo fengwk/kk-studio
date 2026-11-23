@@ -11,6 +11,7 @@ import {
   DEEP_PREVIEW,
   DEEP_PREVIEW_HIT,
   DEEP_TITLE,
+  HISTORY_TABLE_TEXT,
   HISTORY_TEXT,
   LONG_HIT,
   SHORT_HIT,
@@ -21,6 +22,7 @@ const LOCALES = [
   {
     locale: 'zh-CN',
     historyTree: '历史树',
+    mermaidDiagram: 'Mermaid 图表',
     /** 历史树搜索框：ai.chat.history.search。 */
     historySearch: '搜索记录',
     /** 选择面板搜索框：ai.chat.selection.search，与历史树不是同一文案。 */
@@ -32,6 +34,7 @@ const LOCALES = [
   {
     locale: 'en-US',
     historyTree: 'History tree',
+    mermaidDiagram: 'Mermaid diagram',
     historySearch: 'Search records',
     listSearch: 'Search',
     selected: 'Selected',
@@ -82,6 +85,11 @@ for (const copy of LOCALES) {
       await openHarness(page, copy.locale, viewport)
       const region = page.getByRole('region', { name: copy.historyTree })
       await expect(region).toBeVisible()
+      const previews = region.locator('.history-tree-entry-preview')
+      await expect(previews.getByText(HISTORY_TEXT, { exact: true })).toBeVisible()
+      await expect(previews.getByText(HISTORY_TABLE_TEXT, { exact: true })).toBeVisible()
+      await expect(previews.getByText(copy.mermaidDiagram, { exact: true })).toBeVisible()
+      await captureSearchHitShot(region, testInfo, `tree-markdown-preview-${copy.locale}-${size}`)
       await region.getByRole('searchbox', { name: copy.historySearch }).fill(DEEP_HIT)
 
       const row = region.getByRole('button').filter({ hasText: DEEP_HIT }).first()
@@ -111,9 +119,10 @@ for (const copy of LOCALES) {
       const mark = page.locator('mark', { hasText: LONG_HIT })
       const preview = region.locator('.history-tree-entry-preview').filter({ has: mark })
       await expect(preview).toHaveCount(1)
-      await expect(preview).toHaveText(/^…/)
+      await expect(preview).toHaveText(`…${LONG_HIT}: 30`)
       const row = region.getByRole('button').filter({ has: mark })
       await expect(row).toHaveCount(1)
+      await expect(row).toHaveAccessibleName(new RegExp(`${'背景说明'.repeat(54)}背景说…`))
       // 原选中行不匹配新查询时，搜索把选中移到首个命中：这里唯一的命中行先处于选中态。
       await expect(row).toHaveAttribute('aria-pressed', 'true')
 

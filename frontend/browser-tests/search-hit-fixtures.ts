@@ -25,10 +25,15 @@ export const SHORT_TITLE = `${SHORT_HIT}结论`
 export const SHORT_PREVIEW = `${SHORT_HIT}完成，无异常；报告已归档`
 
 /** 历史 Entry 正文：命中词在第 40 个字符处，仍在 220 字预览上限之内。 */
-export const HISTORY_TEXT = `## 结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录${DEEP_HIT}`
+export const HISTORY_TEXT = `结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录${DEEP_HIT}`
 
 /** 长拉丁命中词：位于 220 字预览上限之外，普通预览里根本没有它。 */
 export const LONG_HIT = 'terminationGracePeriodSeconds'
 
 /** 历史 Entry 正文：长命中词在 240 字前文之后，只有从全文截取的预览才看得到它。 */
-export const LONG_HISTORY_TEXT = `${'背景说明'.repeat(60)}默认的 \`${LONG_HIT}\` 是 30 秒，建议调大到 60 秒`
+export const LONG_HISTORY_TEXT = `${'背景说明'.repeat(60)}\n\`\`\`yaml\n${LONG_HIT}: 30\n\`\`\``
+
+export const HISTORY_MARKDOWN = `## **结论**\n${HISTORY_TEXT.slice('结论 '.length)}`
+export const HISTORY_TABLE = '| 阶段 | 状态 |\n| --- | --- |\n| 停机 | 完成 |'
+export const HISTORY_TABLE_TEXT = '阶段 状态 停机 完成'
+export const HISTORY_MERMAID = '```mermaid\ngraph TD; Start-->Stop\n```'

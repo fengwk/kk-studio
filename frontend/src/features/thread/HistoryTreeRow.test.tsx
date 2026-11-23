@@ -2,11 +2,11 @@ import { render, screen } from '@testing-library/react'
 import { createRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { HistoryTreeRowView } from '@/features/thread/HistoryTreeRow'
-import type { HistoryTreeRow } from '@/features/thread/history-tree'
+import { buildHistoryTree, type HistoryTreeRow } from '@/features/thread/history-tree'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /** 预览中命中词位于深处（第 40 个 UTF-16 单元），单行省略会把它挤出可见区。 */
-const DEEP_HIT_PREVIEW = '## 结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录停机耗时'
+const DEEP_HIT_PREVIEW = '结论 服务停机时先停止接收新请求，再等待在途请求完成，最后释放连接池并记录停机耗时'
 /** 命中就在预览开头。 */
 const EARLY_HIT_PREVIEW = '停机耗时统计：服务停机时先停止接收新请求'
 
@@ -21,18 +21,8 @@ function row(preview: string): HistoryTreeRow {
     usageCost: null,
   }
   return {
-    entry,
-    kind: 'assistant',
-    preview,
-    text: preview,
-    searchText: preview.toLowerCase(),
-    lane: 0,
+    ...buildHistoryTree([entry], { headEntryId: entry.entryId })[0]!,
     gutter: [true],
-    startsLane: false,
-    isFork: false,
-    canFork: false,
-    onActivePath: true,
-    isHead: true,
   }
 }
 
@@ -57,7 +47,7 @@ function renderRow(preview: string, tokens: string[]) {
 describe('HistoryTreeRowView', () => {
   // 视觉裁切不能丢失预览正文或读屏文本。
   it('keeps the full preview and accessible label for a deep hit', () => {
-    const { entry, preview } = renderRow(DEEP_HIT_PREVIEW, ['停机耗时'])
+    const { entry, preview } = renderRow(`## **结论**\n${DEEP_HIT_PREVIEW.slice(3)}`, ['停机耗时'])
 
     expect(preview.textContent).toBe(DEEP_HIT_PREVIEW)
     expect(preview.querySelector('.search-hit-prefix')?.textContent).toBe(DEEP_HIT_PREVIEW.slice(0, -4))
