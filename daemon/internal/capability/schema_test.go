@@ -16,7 +16,7 @@ func TestSchemas_DeclareEveryCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"fs.edit", "fs.edit.preview", "fs.find", "fs.grep", "fs.read", "fs.write", "fs.write.preview",
+		"fs.edit", "fs.edit.preview", "fs.find-files", "fs.grep", "fs.read", "fs.write", "fs.write.preview",
 		"lsp.goto-definition", "lsp.java-decompile", "lsp.workspace-symbols", "process.exec", "skill.install",
 	}
 	if len(schemas) != len(want) {

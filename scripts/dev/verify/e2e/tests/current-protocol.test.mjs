@@ -50,7 +50,7 @@ test('heartbeat case rejects heartbeat with unexpected fields after a valid iden
 
 const ids = [
   'fs.read', 'fs.write', 'fs.edit', 'fs.edit.preview', 'fs.write.preview',
-  'process.exec', 'fs.grep', 'fs.find', 'lsp.goto-definition', 'lsp.workspace-symbols',
+  'process.exec', 'fs.grep', 'fs.find-files', 'lsp.goto-definition', 'lsp.workspace-symbols',
   'lsp.java-decompile', 'skill.install',
 ]
 const environment = {

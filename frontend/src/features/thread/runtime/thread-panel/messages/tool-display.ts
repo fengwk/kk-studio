@@ -74,18 +74,15 @@ function formatKnownToolDetail(
       ])
     }
     case 'find': {
-      const pattern = stringField(values.pattern)
+      const glob = stringField(values.glob)
       const path = stringField(values.path)
-      if (!pattern && !path) {
+      if (!glob || !path) {
         return null
       }
-      return withOptions(
-        `${pattern} in ${path || '.'}${fromWorkdirSuffix(values)}`,
-        [
-          ['limit', values.limit],
-          ['timeout_seconds', values.timeout_seconds],
-        ],
-      )
+      return withOptions(`${glob} in ${path}`, [
+        ['limit', values.limit],
+        ['timeout_seconds', values.timeout_seconds],
+      ])
     }
     case 'lsp_goto_definition':
       return withOptions(pathWithWorkdir(values), [

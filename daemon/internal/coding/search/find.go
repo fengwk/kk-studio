@@ -59,6 +59,9 @@ func findWithWalker(ctx context.Context, root, glob string, limit, workers int, 
 	if !resolved.isDir {
 		return findResult{files: []string{filepath.ToSlash(resolved.path)}}, nil
 	}
+	if glob, err = normalizeFileGlob(glob); err != nil {
+		return findResult{}, err
+	}
 	if glob != "" {
 		if _, err = doublestar.Match(glob, "probe"); err != nil {
 			return findResult{}, fmt.Errorf("invalid glob: %w", err)
@@ -304,6 +307,26 @@ func isGitMetadataPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// normalizeFileGlob removes only leading ./ segments from the pattern body, never from path.
+func normalizeFileGlob(pattern string) (string, error) {
+	body := strings.TrimLeft(pattern, "!")
+	if !strings.HasPrefix(body, "./") {
+		return pattern, nil
+	}
+	negation := pattern[:len(pattern)-len(body)]
+	for strings.HasPrefix(body, "./") {
+		body = body[2:]
+	}
+	if body == "" {
+		return "", errors.New("invalid glob: expected a pattern after './'; put the directory in path")
+	}
+	// ./!name refers to a filename, not a newly introduced negation operator.
+	if strings.HasPrefix(body, "!") {
+		body = `\` + body
+	}
+	return negation + body, nil
 }
 
 func globMatch(pattern, rel string) bool {

@@ -62,9 +62,11 @@ Daemon 使用 Go diff 计算变更，保留变更行、上下文和 EOF 缺失�
 
 完整 review 连同结果超过 1 MiB UTF-8 预算时明确拒绝，不截断变更行：预览直接拒绝，提交在写入目标文件之前拒绝，文件保持不变。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
-Daemon 在进程内实现 `find` 与 `grep`，不调用随包或宿主安装的 ripgrep。两项工具都可用 `glob` 限定相对搜索根的路径；grep 的 `pattern` 可包含换行，跨行匹配不另设 `multiline` 开关。检索默认超时 15 秒，可由正数 `timeout_seconds` 覆盖；超时保留已收集的 partial 匹配并显式标记 `search.incomplete`，取消则只返回 `[Search cancelled; results are incomplete.]` 与 `CANCELLED` 事实，不携带已收集的结果。grep 的 `limit` 按匹配数计算；多行匹配返回该匹配展开的行，结果仍受有界输出保护。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告。grep 匹配解码后的文本（非法字节按 U+FFFD 匹配），行号与 read 一致；二进制文件静默跳过，声明无法使用的文件在结果末尾按绝对路径列出，最多 10 个，形如 `[Search incomplete; not searched because the declared text encoding cannot be used: /abs/a, … and N more]`；直接以这样的文件为 `path` 时返回错误。
+Daemon 在进程内实现 `find` 与 `grep`，不调用随包或宿主安装的 ripgrep。两者都要求显式的绝对 `path`；`find` 只接受目录，`grep` 也接受单个文件。`find.glob` 必填，用 `*` 查找所有文件；`grep.glob` 可选。两者使用同一套文件筛选规则：`*.ts` 匹配任意深度的文件名，`src/*.ts` 只匹配搜索根下 `src` 的直属文件，`**/src/*.ts` 也匹配嵌套 `src` 的直属文件。前导 `./` 不改变范围，单独 `./` 是无效筛选。`grep` 直接搜索单个文件时不应用 `glob`。
 
-grep/find 按 Git 仓库边界应用忽略规则：仓库内只使用仓库根到目标文件之间的 `.gitignore` 与该仓库 `.git/info/exclude`；嵌套仓库只使用自身规则；仓库根以上的 `.gitignore` 和全局 Git excludes 不生效。仓库外仅使用搜索根及其以下的 `.gitignore`。支持 `.git` 文件形式的 worktree；隐藏文件会搜索，`.git` 会跳过，符号链接不跟随。忽略路径在结果中被略过；若没有匹配，会提示最多 10 个因忽略规则未搜索的路径。要搜索被忽略目录，可将其本身作为 `path`；直接传入的文件路径会被搜索。
+目录搜索的结果路径相对于 `path`；用 `read` 查看时，先拼回该绝对目录。`grep` 的单文件结果路径是绝对路径。`grep.pattern` 搜索文件内容，可包含换行；跨行匹配不另设 `multiline` 开关。`ignore_case` 只作用于内容，不改变文件 glob。检索默认超时 15 秒，可由正数 `timeout_seconds` 覆盖；超时保留已收集的 partial 匹配并显式标记 `search.incomplete`，取消则只返回 `[Search cancelled; results are incomplete.]` 与 `CANCELLED` 事实，不携带已收集的结果。grep 的 `limit` 按匹配数计算；多行匹配返回该匹配展开的行，结果仍受有界输出保护。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告。grep 匹配解码后的文本（非法字节按 U+FFFD 匹配），行号与 read 一致；二进制文件静默跳过，声明无法使用的文件在结果末尾按绝对路径列出，最多 10 个，形如 `[Search incomplete; not searched because the declared text encoding cannot be used: /abs/a, … and N more]`；直接以这样的文件为 `path` 时返回错误。
+
+grep/find 按 Git 仓库边界应用忽略规则：仓库内只使用仓库根到目标文件之间的 `.gitignore` 与该仓库 `.git/info/exclude`；嵌套仓库只使用自身规则；仓库根以上的 `.gitignore` 和全局 Git excludes 不生效。仓库外仅使用搜索根及其以下的 `.gitignore`。支持 `.git` 文件形式的 worktree；隐藏文件会搜索，`.git` 会跳过，符号链接不跟随。忽略路径在结果中被略过；若没有匹配，会提示最多 10 个因忽略规则未搜索的路径。要搜索被忽略目录，可将其本身作为 `path`；`grep` 也可显式搜索被忽略的单个文件，`.git` 除外。
 
 ## 命令执行
 

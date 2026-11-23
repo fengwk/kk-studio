@@ -1,4 +1,4 @@
-// Package search is the in-process file search used by fs.find and fs.grep. File discovery and
+// Package search is the in-process file search used by fs.find-files and fs.grep. File discovery and
 // content matching are parallel; every externally visible output is path sorted.
 package search
 

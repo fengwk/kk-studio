@@ -198,13 +198,15 @@ describe('tool display', () => {
       'grep {"glob":"x"}',
     )
     expect(formatToolCallSummary('find', JSON.stringify({
-      pattern: '*.ts',
-      path: 'src',
+      glob: '*.ts',
+      path: '/repo/src',
       limit: 3,
       timeout_seconds: 2,
-    })).text).toBe('find *.ts in src [limit=3 timeout_seconds=2]')
-    // pattern/path 均缺失时回退为原始 JSON 文本。
-    expect(formatToolCallSummary('find', JSON.stringify({})).text).toBe('find {}')
+    })).text).toBe('find *.ts in /repo/src [limit=3 timeout_seconds=2]')
+    // 缺少 path 时不推定当前目录；未知字段也保留原样，不视作 glob。
+    expect(formatToolCallSummary('find', '{"glob":"*.ts"}').text).toBe('find {"glob":"*.ts"}')
+    expect(formatToolCallSummary('find', '{"path":"/repo/src","pattern":"*.ts"}').text)
+      .toBe('find {"path":"/repo/src","pattern":"*.ts"}')
   })
 
   it('formats lsp tool summaries', () => {

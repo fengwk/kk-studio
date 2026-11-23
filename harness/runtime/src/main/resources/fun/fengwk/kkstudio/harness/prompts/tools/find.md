@@ -1,19 +1,14 @@
-Find files by glob pattern in an explicit path.
+Find files by glob in an explicit directory. Results are relative to the search directory.
 
 Usage:
-- Use `find` to discover files by name or path pattern, not to search file contents.
-- `path` is required; there is no implicit search root.
-- `.gitignore` handling follows Git. Inside a repository, the `.gitignore` files from the repository root down to each file and the repository's `.git/info/exclude` apply; a nested repository uses only its own rules; `.gitignore` files above the repository root never apply. Outside any repository, only `.gitignore` files at or below `path` apply. Global Git excludes are not used.
-- Ignored files are left out of the results without any notice, so "not found" does not prove a file or text does not exist in an ignored location.
-- Hidden files are included, `.git` is skipped, and symbolic links are not followed.
-- To search an ignored directory, pass that directory as `path`; rules from above it then no longer apply.
-- If no matches are found because ignore rules skipped entries, the result adds a hint such as `[No matches. Not searched because of ignore rules: /repo/node_modules/, /repo/.env.local, … and N more]` (up to 10 absolute paths).
-- Use `grep` after `find` when you need content search inside the discovered scope.
-- `timeout_seconds` is optional and only needed when a broad file discovery may legitimately take longer than expected.
-- Do not search from broad roots such as `/`, `~`, or `$HOME`.
-- `path` must be an absolute path on the target Environment's file system. A relative path is rejected; results and errors are reported as absolute paths, and no directory is ever inferred from cwd, `HOME`, an environment root, or a previous call. On Windows targets use a drive-rooted or UNC path such as `C:/src/project`.
+- `path` must be an absolute directory path on the target Environment, such as `/srv/project` or `C:/src/project`. There is no implicit search root. Avoid broad roots such as `/` or the user's home directory.
+- `glob` matches file paths, not file contents. Pass `*` to match all files. `*.ts` matches file names at any depth under `path`; `src/*.ts` matches only direct files inside its `src`; `**/src/*.ts` also matches direct files inside nested `src` directories. In a path glob, `*` does not cross `/`; `**/` allows zero or more directory levels. A leading `./` does not change the scope, and `./` alone is invalid.
+- `.gitignore` and `.git/info/exclude` apply within their Git repository; nested repositories use their own rules. Outside a repository, only `.gitignore` files at or below `path` apply. Hidden files are included; `.git` and symbolic links encountered during traversal are skipped.
+- Ignored paths never appear as matches. If nothing matches, the result may show up to 10 ignored paths as a hint. To search an ignored directory intentionally, pass the directory itself as `path`.
+- For a follow-up `read`, resolve the returned relative path against the same `path`. Use `grep` instead when you need to match file contents.
+- Narrow the scope first. Set `timeout_seconds` only if the default 15 seconds is not enough for a necessary search.
 
 Examples:
-- `find({ pattern: "*.ts", path: "/srv/project/packages/web/src" })`
-- `find({ pattern: "*.java", path: "/srv/project/services/java/src", limit: 200 })`
-- `find({ pattern: "*.md", path: "C:/src/project/docs", limit: 50 })`
+- `find({ path: "/srv/project", glob: "src/*.ts" })` finds direct TypeScript files in `/srv/project/src`.
+- `find({ path: "/srv/project", glob: "**/src/*.ts" })` also includes direct TypeScript files in folders such as `/srv/project/pkg/src`.
+- `find({ path: "C:/src/project/docs", glob: "*.md", limit: 50 })` finds Markdown files at any depth under `docs`.

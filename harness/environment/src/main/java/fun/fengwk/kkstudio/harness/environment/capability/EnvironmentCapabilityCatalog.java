@@ -58,7 +58,7 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_WRITE_PREVIEW, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofMinutes(5)),
         descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofSeconds(15)),
-        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofSeconds(15)),
+        descriptor(EnvironmentCapabilityIds.FS_FIND_FILES, Duration.ofSeconds(15)),
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofSeconds(180)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofSeconds(180)),
         descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofSeconds(180)),

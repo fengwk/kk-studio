@@ -57,7 +57,7 @@ public final class BuiltinFileToolsTestSupport {
             "find",
             FileTool.Operation.FIND,
             "find.md",
-            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.FS_FIND_FILES,
             ToolSideEffect.READ_ONLY,
             resourceReadGateway));
   }
