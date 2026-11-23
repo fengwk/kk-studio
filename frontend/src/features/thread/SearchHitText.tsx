@@ -9,7 +9,9 @@ interface SearchHitTextProps {
 
 /** Visual clipping never removes text from the DOM. */
 export function SearchHitText({ text, tokens, markClassName }: SearchHitTextProps) {
-  const { prefix, spaceBeforeHit, hit, suffix } = splitSearchHit(text, tokens)
+  // Render on one line (e.g. for Agent descriptions) while preserving spaces at segment boundaries.
+  // Callers set aria-label from the original text, independently of this visual normalization.
+  const { prefix, spaceBeforeHit, hit, suffix } = splitSearchHit(text.replace(/\s+/g, ' '), tokens)
   return (
     <span className="search-hit-text">
       {prefix !== '' ? <span className="search-hit-prefix"><span dir="ltr">{prefix}</span></span> : null}

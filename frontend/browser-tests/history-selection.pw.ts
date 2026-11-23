@@ -204,6 +204,7 @@ for (const copy of LOCALES) {
         expect(subtitle.gapBeforeMark, '命中前的空格在最后一个字与高亮之间可见').toBeGreaterThan(1)
       }
       recordSearchHitMetrics(testInfo, `list-subtitle-deep-hit-${copy.locale}-${size}`, subtitle)
+      expect(subtitle.gapAfterMark, '命中右缘与后文首字之间保留可见空格').toBeGreaterThan(1)
       await captureSearchHitShot(region, testInfo, `list-subtitle-deep-hit-${copy.locale}-${size}`)
     })
 
