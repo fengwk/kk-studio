@@ -41,6 +41,22 @@ export const sharedCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
+  'shared.unsavedChanges.title': {
+    'en-US': 'Discard unsaved changes?',
+    'zh-CN': '放弃未保存的修改？',
+  },
+  'shared.unsavedChanges.description': {
+    'en-US': 'If you close this editor, your unsaved changes will be lost.',
+    'zh-CN': '关闭编辑器后，未保存的修改将丢失。',
+  },
+  'shared.unsavedChanges.keepEditing': {
+    'en-US': 'Keep editing',
+    'zh-CN': '继续编辑',
+  },
+  'shared.unsavedChanges.discard': {
+    'en-US': 'Discard changes',
+    'zh-CN': '放弃修改',
+  },
   'shared.helpAbout': {
     'en-US': 'Help: {{topic}}',
     'zh-CN': '帮助：{{topic}}',
