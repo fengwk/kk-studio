@@ -45,6 +45,34 @@ export function emptyCreateMcpServerForm(): CreateMcpServerFormState {
   }
 }
 
+/**
+ * 新建草稿是否偏离打开时的空表单基线。
+ *
+ * 逐字段比较原值（超时也包括在内）：清空超时仍是用户对草稿的修改。
+ */
+export function hasUnsavedCreateChanges(form: CreateMcpServerFormState): boolean {
+  const baseline = emptyCreateMcpServerForm()
+  return (
+    form.name !== baseline.name ||
+    form.url !== baseline.url ||
+    form.headersText !== baseline.headersText ||
+    form.enabled !== baseline.enabled ||
+    form.timeoutMillis !== baseline.timeoutMillis
+  )
+}
+
+/** 关闭编辑器时比较原始草稿；提交与发现工具的配置归一化不适用于此处。 */
+export function hasUnsavedEditChanges(form: EditMcpServerFormState): boolean {
+  const { loaded } = form
+  return loaded !== null && (
+    form.url !== loaded.url ||
+    form.enabled !== loaded.enabled ||
+    form.timeoutMillis !== loaded.timeoutMillis ||
+    form.headersText !== '' ||
+    form.clearHeaders
+  )
+}
+
 /** 打开编辑器时的占位表单：详情到达前只呈现 loading，并沿用列表摘要里的开关与超时。 */
 export function pendingEditMcpServerForm(server: McpServerSummaryDTO): EditMcpServerFormState {
   return {

@@ -13,12 +13,14 @@ export function ConfirmActionModal({
   error,
   onClose,
   className,
+  cancelLabel,
 }: {
   modal: ConfirmModalState | null
   pending: boolean
   error?: string | null
   onClose: () => void
   className?: string
+  cancelLabel?: string
 }) {
   const { t } = useI18n()
   if (!modal) {
@@ -53,7 +55,7 @@ export function ConfirmActionModal({
           onClick={onClose}
           disabled={pending}
         >
-          {t('shared.cancel')}
+          {cancelLabel ?? t('shared.cancel')}
         </Button>
         <Button
           variant="primary"
