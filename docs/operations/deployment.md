@@ -21,7 +21,8 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
    启用 Worker 的节点使用相同产物与 Plugin 集合。
 4. 检查 `/actuator/health`、UI、预签名上传/下载与关键业务操作。
    需要宿主工具时再安装 Daemon，并在 Studio 确认 Environment `READY`。
-5. 对外开放前完成 TLS、外部认证与 WebSocket 代理配置，见[生产部署与反向代理](#生产部署与反向代理)。
+5. 对外开放前完成 TLS、外部认证与 WebSocket 代理配置，见[生产部署与反向代理](#生产部署与反向代理)；
+   多节点部署还需节点间 HTTPS，见[多节点内部 TLS](#多节点内部-tls)。
 
 ### 构建可运行产物
 
@@ -76,6 +77,8 @@ App 镜像由 [deploy/local/Dockerfile](../../deploy/local/Dockerfile) 构建，
 | user | `kkstudio:kkstudio`，uid/gid `10001`，`USER kkstudio` |
 | process | `java -jar /app/app.jar`，`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0` |
 | health | `curl -fsS http://127.0.0.1:8080/actuator/health`，15s interval、5s timeout、60s start period、6 retries |
+
+`HEALTHCHECK` 假设 App 自身以明文监听 `8080`；启用 `server.ssl` 后需按[多节点内部 TLS](#多节点内部-tls)调整。
 
 builder 接受 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、
 `KK_STUDIO_BUILD_NO_PROXY` 和 `KK_STUDIO_MAVEN_BUILD_OPTS`；这些值只用于 build，不复制进
@@ -524,11 +527,38 @@ tag 不同：
 共享 PostgreSQL 与 S3/MinIO 已在各自容器持久化；App 的媒体转码与上传暂存目录仍是可清理的临时空间，
 不应挂成跨容器重启保留的数据卷。
 
-当同一数据库运行多个 App 时，每个节点必须配置其它节点可达的 `kk-studio.cluster.internal-url` 和相同的
-`kk-studio.cluster.secret`。节点用既有 15 秒心跳续租 `cluster_node` 与 `realtime_subscription`，租约 45 秒过期；
+当同一数据库运行多个 App 时，每个节点必须配置其它节点可达的 `kk-studio.cluster.internal-url`（强制 `https`，
+见[多节点内部 TLS](#多节点内部-tls)）和相同的 `kk-studio.cluster.secret`。节点用既有 15 秒心跳续租
+`cluster_node` 与 `realtime_subscription`，租约 45 秒过期；
 只有某个 Thread 在其它节点存在有效订阅时，该 Thread 的普通 realtime 才写 NOTIFY。正常退出删除本节点订阅，
 异常退出由租约到期收敛；未配置内部 origin/secret 的节点保持单节点模式，不登记订阅，也不发布 realtime NOTIFY。
 节点优雅退出时先停止新 claim 与本地执行准入，按物理句柄在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`（默认 60s）内排空本机执行，再用同一总 deadline 的剩余预算向远端 Daemon 发送 GOAWAY、释放环境路由租约、移交可 reattach 的远端工具并 release 对应 TOOL Work；接手节点不重发 INVOKE，只在 reattach 窗口内等待终态（详见 [Harness Runtime](../modules/harness-runtime.md#processor)），最后反注册节点并清理订阅。总预算默认 `60s + 30s`，仍有物理执行或本地资源时退出证明与 journal 锁保留到 JVM 退出。
+
+### 多节点内部 TLS
+
+节点间流量强制 HTTPS：`kk-studio.cluster.internal-url` 一旦配置就必须是 `https` origin，写成 `http` 或其他
+scheme 时应用启动失败，错误信息指出该配置项与 `https` 要求；`cluster_node` 中登记的非 https origin
+不产生跨节点路由。证书主机名必须覆盖其他节点实际使用的 internal-url 主机，否则内部请求与 WebSocket 转发
+都因主机名不匹配失败。
+
+节点自身提供 https 有两条路径，二者都不改变内部签名与路由语义：
+
+1. 应用终结 TLS：先用 `spring.ssl.bundle.pem.<name>.keystore.certificate` 与
+   `spring.ssl.bundle.pem.<name>.keystore.private-key` 声明证书与私钥，再用 `server.ssl.bundle=<name>`
+   指向该 bundle；此时 App 监听端口只接受 HTTPS。
+2. 代理终结 TLS：每个节点的代理在本机终结 TLS，再通过专用本地链路转发到该节点的 App；不要让解密后的流量跨节点或暴露 App 的明文端口。`internal-url` 指向代理的 HTTPS origin。代理需要支持 WebSocket Upgrade，并保留内部请求的方法、路径、查询和认证头。
+
+发起方向（本节点调用其他节点）的信任由 `kk-studio.cluster.ssl-bundle` 决定：设置时节点间 HTTP 客户端与 IDE
+WebSocket 转发共用该 bundle 的 SSLContext（通常是包含集群 CA 的信任材料，PEM 形式为
+`spring.ssl.bundle.pem.<name>.truststore.certificate`），留空时使用 JVM 默认信任库，指定的 bundle 名不存在时
+启动失败。该 bundle 可与 `server.ssl.bundle` 同名也可不同名：`server.ssl` 只影响本节点监听端口，
+`kk-studio.cluster.ssl-bundle` 只影响本节点发起的内部请求，两个方向必须各自可用；证书不受信或主机名不匹配时
+内部请求直接失败，不改投其他节点，也不回退明文。
+
+镜像自带的 `HEALTHCHECK` 探测 `http://127.0.0.1:8080/actuator/health`，启用 `server.ssl` 后该探测随端口一起失效。
+此时由外部编排覆盖为等价的 HTTPS 探测，例如
+`curl -fsS --cacert /run/secrets/cluster-ca.pem --resolve node-a.example.com:8080:127.0.0.1 https://node-a.example.com:8080/actuator/health`，
+其中主机名取自该节点的证书；选择代理终结 TLS 时 App 容器内仍是明文回环，原探测继续有效。
 
 ### 本机 preview 与 NAS 数据面
 

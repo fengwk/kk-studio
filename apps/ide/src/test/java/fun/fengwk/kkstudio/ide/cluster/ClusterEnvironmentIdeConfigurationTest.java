@@ -4,12 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.BeanCreationException;
+import org.springframework.boot.ssl.DefaultSslBundleRegistry;
+import org.springframework.boot.ssl.NoSuchSslBundleException;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.ObjectMapper;
@@ -37,6 +43,7 @@ import javax.sql.DataSource;
 
 import java.net.http.HttpClient;
 import java.time.Clock;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -70,6 +77,30 @@ class ClusterEnvironmentIdeConfigurationTest {
             assertTrue(context.getBeansOfType(EnvironmentIdeService.class).isEmpty());
           }
         });
+  }
+
+  @Test
+  void unknownSslBundleFailsStartup() {
+    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+      context
+          .getEnvironment()
+          .getPropertySources()
+          .addFirst(
+              new MapPropertySource(
+                  "test", Map.of("kk-studio.cluster.ssl-bundle", "missing-cluster-bundle")));
+      context.registerBean(JdbcClient.class, () -> mock(JdbcClient.class));
+      context.registerBean(Clock.class, Clock::systemUTC);
+      context.registerBean("nodeInstanceId", UUID.class, UUID::randomUUID);
+      context.registerBean(ObjectMapper.class, () -> JsonMapper.builder().build());
+      context.registerBean(SslBundles.class, DefaultSslBundleRegistry::new);
+      context.register(
+          ClusterEnvironmentIdeConfiguration.class, ClusterPresenceConfiguration.class);
+
+      BeanCreationException failure = assertThrows(BeanCreationException.class, context::refresh);
+      NoSuchSslBundleException cause =
+          assertInstanceOf(NoSuchSslBundleException.class, failure.getMostSpecificCause());
+      assertTrue(cause.getMessage().contains("missing-cluster-bundle"));
+    }
   }
 
   @Test

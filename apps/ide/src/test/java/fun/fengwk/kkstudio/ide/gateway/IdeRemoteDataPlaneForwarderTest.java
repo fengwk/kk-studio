@@ -60,46 +60,24 @@ class IdeRemoteDataPlaneForwarderTest {
             + "\r\n"
             + "extra-bytes";
 
-    try (AsynchronousServerSocketChannel server =
-        AsynchronousServerSocketChannel.open().bind(new InetSocketAddress("127.0.0.1", 0))) {
-      InetSocketAddress address = (InetSocketAddress) server.getLocalAddress();
+    IdeRemoteDataPlaneForwarder.HttpResponseHeader head =
+        IdeRemoteDataPlaneForwarder.readHeaderBlock(
+            new ByteArrayInputStream(raw.getBytes(StandardCharsets.ISO_8859_1)), 1024);
 
-      try (AsynchronousSocketChannel client = AsynchronousSocketChannel.open()) {
-        client.connect(address).get();
-        try (AsynchronousSocketChannel accepted = server.accept().get()) {
-          accepted.write(ByteBuffer.wrap(raw.getBytes(StandardCharsets.ISO_8859_1))).get();
-
-          IdeRemoteDataPlaneForwarder.HttpResponseHeader head =
-              IdeRemoteDataPlaneForwarder.readHeaderBlock(client, 1024, 2000);
-
-          assertEquals(101, head.status());
-          assertEquals(List.of("websocket"), head.headers().get("Upgrade"));
-          assertNotNull(head.remainingBytes());
-          assertEquals(
-              "extra-bytes", new String(head.remainingBytes(), StandardCharsets.ISO_8859_1));
-        }
-      }
-    }
+    assertEquals(101, head.status());
+    assertEquals(List.of("websocket"), head.headers().get("Upgrade"));
+    assertNotNull(head.remainingBytes());
+    assertEquals("extra-bytes", new String(head.remainingBytes(), StandardCharsets.ISO_8859_1));
   }
 
   @Test
   void readHeaderBlockThrowsWhenExceedingLimit() throws Exception {
-    byte[] huge = new byte[2000];
-    try (AsynchronousServerSocketChannel server =
-        AsynchronousServerSocketChannel.open().bind(new InetSocketAddress("127.0.0.1", 0))) {
-      InetSocketAddress address = (InetSocketAddress) server.getLocalAddress();
-
-      try (AsynchronousSocketChannel client = AsynchronousSocketChannel.open()) {
-        client.connect(address).get();
-        try (AsynchronousSocketChannel accepted = server.accept().get()) {
-          accepted.write(ByteBuffer.wrap(huge)).get();
-
-          assertThrows(
-              IOException.class,
-              () -> IdeRemoteDataPlaneForwarder.readHeaderBlock(client, 100, 2000));
-        }
-      }
-    }
+    byte[] huge =
+        ("HTTP/1.1 101 Switching Protocols\r\nX-Large: " + "a".repeat(100) + "\r\n\r\n")
+            .getBytes(StandardCharsets.ISO_8859_1);
+    assertThrows(
+        IOException.class,
+        () -> IdeRemoteDataPlaneForwarder.readHeaderBlock(new ByteArrayInputStream(huge), 100));
   }
 
   @Test

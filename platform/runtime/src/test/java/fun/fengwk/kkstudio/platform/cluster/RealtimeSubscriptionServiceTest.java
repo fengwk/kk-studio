@@ -368,7 +368,7 @@ class RealtimeSubscriptionServiceTest {
 
   private static ClusterProperties properties() {
     ClusterProperties properties = new ClusterProperties();
-    properties.setInternalUrl("http://node-a.internal:8080");
+    properties.setInternalUrl("https://node-a.internal:8443");
     properties.setSecret("test-cluster-secret-0123456789abcdef");
     properties.setNodeLease(Duration.ofSeconds(45));
     properties.setHeartbeatInterval(Duration.ofSeconds(15));

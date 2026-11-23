@@ -134,7 +134,7 @@ class RealtimeSubscriptionServiceIntegrationTest extends PostgresSchemaSupport {
 
   private RealtimeSubscriptionService service(UUID localNodeId) {
     ClusterProperties properties = new ClusterProperties();
-    properties.setInternalUrl("http://node-a.internal:8080");
+    properties.setInternalUrl("https://node-a.internal:8443");
     properties.setSecret(SECRET);
     properties.setNodeLease(Duration.ofSeconds(45));
     properties.setHeartbeatInterval(Duration.ofSeconds(15));
@@ -180,7 +180,7 @@ class RealtimeSubscriptionServiceIntegrationTest extends PostgresSchemaSupport {
                 statement_timestamp() + (? * interval '1 millisecond'),
                 statement_timestamp())
             """)
-        .params(nodeInstanceId, "http://" + nodeInstanceId + ".internal:8080", leaseMillis)
+        .params(nodeInstanceId, "https://" + nodeInstanceId + ".internal:8443", leaseMillis)
         .update();
   }
 

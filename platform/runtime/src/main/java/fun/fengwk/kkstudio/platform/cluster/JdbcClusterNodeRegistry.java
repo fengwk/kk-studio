@@ -23,6 +23,9 @@ import java.util.UUID;
  * <p>路由判定完全在数据库现在时进行：只有 {@code status = 'READY'} 且租约未过期的连接行才参与路由；远端 owner 还必须存在未过期的 {@code
  * cluster_node} 注册行且本节点已配置共享秘密。缺失注册、过期注册、本节点缺少秘密或内部地址非法一律返回空，绝不从请求 Host 推断地址。
  *
+ * <p>已登记的 origin 只接受经证书校验的 https：内部 HMAC 不覆盖请求正文，明文 http 下的正文可被中间人读取或改写，因此非 https 的注册行 不产生任何路由。写入方的
+ * {@code internal-url} 由 {@link ClusterProperties} 在属性绑定时校验，注册行与配置因此共用同一条 scheme 规则。
+ *
  * <p>{@code cluster_node} 只承载节点可达 origin 与租约控制元数据，不保存任何环境存活字节；{@link #registerLocalNode} 与 {@link
  * #heartbeatLocalNode} 由本节点生命周期驱动，同一 {@code nodeInstanceId} 单调续约。
  */
@@ -187,6 +190,7 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
         > 0;
   }
 
+  /** 已登记的 origin 只有裸 https origin 才能产生路由；其它 scheme、非法形状与非法 URI 都返回空。 */
   private static Optional<URI> parseOrigin(String raw) {
     URI uri;
     try {
@@ -195,7 +199,7 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
       return Optional.empty();
     }
     String scheme = uri.getScheme();
-    if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+    if (scheme == null || !scheme.equalsIgnoreCase("https")) {
       return Optional.empty();
     }
     if (uri.getHost() == null

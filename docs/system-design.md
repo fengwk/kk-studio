@@ -387,7 +387,9 @@ WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 
 跨节点由 `cluster_node` 注册、单跳内部认证与路由租约协调：节点滚动发布时先停止认领与本地执行准入，按物理句柄在
 同一个总 deadline（默认 `60s + 30s`）内排空本机执行，向 Daemon 发送 GOAWAY 并释放路由租约、移交可 reattach 的
 远端工具，最后反注册；无法证明退出时保留退出日志与目录锁到 JVM 退出。`/ws/events` 的跨节点载荷与 IDE 集群接口
-走内部路径。
+走内部路径。内部路径强制使用经证书校验的 HTTPS，配置的 internal origin 不是 https 时启动失败，登记的非 https
+origin 不产生路由；HMAC 只负责节点身份与防重放，正文完整性与机密性由 TLS 承担，见
+[Platform](modules/platform.md#跨节点内部认证)。
 
 ### 控制面与主机能力
 
@@ -552,7 +554,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 ## 部署与安全条件
 
 应用面向可信单用户，登录鉴权由外部入口承担。默认本地栈监听 `127.0.0.1`；局域网或公网部署必须配置 TLS 与访问
-控制。Daemon 继承启动用户的主机权限，**没有文件系统沙箱**；插件与 Contributor 也是同进程的可信代码。
+控制；多节点部署的节点间流量另由应用自身强制 HTTPS 并校验证书。Daemon 继承启动用户的主机权限，**没有文件系统沙箱**；插件与 Contributor 也是同进程的可信代码。
 
 - HTTP 边界严格校验 UUID、cursor、sealed union 与 JSON 形状，拒绝未知或重复字段及错误类型。
 - 资源访问按业务持有关系授权；UUID、URI 与跳转地址只用于定位。Session 资源接口要求该 Session 持有资源引用；本地文件权限与隔离由所选 Environment 在执行入口落实。

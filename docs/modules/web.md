@@ -222,7 +222,7 @@ UUID 路径和查询参数统一按 canonical 小写文本解析，非规范形�
 无法定位到字段或语法本身损坏时使用固定文案，任何情况都不回显输入。未预期异常不暴露内部消息。
 locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统设计的 HTTP 契约](../system-design.md#http-契约)。
 
-用户认证、TLS 和 ingress 访问控制由部署边界提供。
+用户认证、浏览器入口的 TLS 和 ingress 访问控制由部署边界提供。节点间内部流量不依赖该层：多节点部署强制使用经证书校验的 HTTPS，见 [Platform](platform.md#跨节点内部认证)。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
 Daemon 准入请求同时携带卡片 UUID、进程 UUID 与协议版本，服务端先核对 UUID 与注册凭据所属卡片一致再取得租约；通用 Environment 响应只返回安全投影，不回显 token。
 Plugin auth 请求 no-store，凭据只在数据库中保存，任何响应都不回显。

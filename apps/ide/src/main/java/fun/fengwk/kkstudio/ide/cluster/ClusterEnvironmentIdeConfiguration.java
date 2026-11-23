@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -46,11 +48,17 @@ public class ClusterEnvironmentIdeConfiguration {
   /** 跨节点内部 HTTP 唯一共享客户端；所有调用都必须自行施加有界响应与总超时。 */
   @Bean(destroyMethod = "close")
   @ConditionalOnMissingBean(name = "clusterInternalHttpClient")
-  public HttpClient clusterInternalHttpClient() {
-    return HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(5))
-        .followRedirects(HttpClient.Redirect.NEVER)
-        .build();
+  public HttpClient clusterInternalHttpClient(
+      ClusterProperties properties, ObjectProvider<SslBundles> sslBundles) {
+    HttpClient.Builder builder =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .followRedirects(HttpClient.Redirect.NEVER);
+    String bundleName = properties.getSslBundle();
+    if (bundleName != null && !bundleName.isBlank()) {
+      builder.sslContext(sslBundles.getObject().getBundle(bundleName).createSslContext());
+    }
+    return builder.build();
   }
 
   @Bean
