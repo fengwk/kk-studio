@@ -56,7 +56,7 @@ func probeLoginEnvironment(ctx context.Context, processes native.Supervisor, bas
 	defer cancel()
 	// Git Bash translates PATH when exec'ing a native program. Pass the executable
 	// as an argument, not interpolated shell text (the path may contain spaces).
-	process, err := processes.Start(ctx, native.ProcessSpec{Executable: bash, Args: []string{"-lc", `exec "$1" "$2" "$3"`, "bash", filepath.ToSlash(executable), loginEnvironmentCommand, nonce}, NullStdin: true})
+	process, err := processes.Start(ctx, native.ProcessSpec{Executable: bash, Args: []string{"-lc", `exec "$1" "$2" "$3"`, "bash", filepath.ToSlash(executable), loginEnvironmentCommand, nonce}})
 	if err != nil {
 		return nil, errors.Join(loginEnvironmentProcessError(ctx, "could not start Bash"), loginEnvironmentScopeError(err))
 	}
@@ -69,6 +69,10 @@ func probeLoginEnvironment(ctx context.Context, processes native.Supervisor, bas
 			}
 		}
 	}()
+	// A login profile must see EOF if it tries to read stdin.
+	if err := process.Stdin().Close(); err != nil {
+		return nil, loginEnvironmentProcessError(ctx, "could not close Bash stdin")
+	}
 	// Drain both pipes before Wait, which closes them. Ignore stderr entirely;
 	// none of the profile's output can enter an error or a log.
 	type output struct {

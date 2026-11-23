@@ -24,7 +24,7 @@ func publishServers(t *testing.T, facade *Facade, servers []config.LSPServerConf
 	return prepared.Publish()
 }
 
-// The pool uses its generation's immutable environment for each launch, not an overlay.
+// The pool overlays its generation's immutable environment on each server launch.
 func TestFacadeLaunchUsesLoginEnvironment(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -59,8 +59,8 @@ func TestFacadeLaunchUsesLoginEnvironment(t *testing.T) {
 	supervisor.mu.Lock()
 	spec := supervisor.lastSpec
 	supervisor.mu.Unlock()
-	if !spec.ReplaceEnv || !slices.Equal(spec.Env, []string{"KK_LOGIN_GENERATION=one"}) {
-		t.Fatal("launch did not use the captured environment as a replacement")
+	if !slices.Equal(spec.Env, []string{"KK_LOGIN_GENERATION=one"}) {
+		t.Fatal("launch did not use the captured environment as an overlay")
 	}
 }
 

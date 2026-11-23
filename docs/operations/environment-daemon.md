@@ -243,10 +243,12 @@ Studio 保存的完整卡片配置：
   `daemon.json` 保留配置中的原始字符串，Daemon 在准备配置时解析实际路径。
   Daemon 只用自身 PATH 解析这个 Bash；命令仍每次以该 Bash 的非交互登录 shell（`bash -lc`）执行。
   启动和每次应用配置时，Daemon 还会用该 Bash 运行登录 shell 采样一次登录环境，LSP 可执行文件发现、
-  `read` header 的 `lsp:` 支持判定与语言服务器进程都用这份快照。采样失败时启动或该次配置应用失败，
-  原因见 Daemon 日志，不回退到 Daemon 自身环境。要让工具可见，请在 Daemon 运行用户实际加载的登录配置
-  （如 `~/.bash_profile` 或 `~/.profile`）中设置 PATH。修改登录配置后，下一次命令会重新加载它；重启
-  Daemon 可刷新 LSP 使用的快照。
+  `read` header 的 `lsp:` 支持判定与语言服务器进程都用这份快照。启动时采样失败只在 Daemon 本地日志记录
+  原因，Daemon 照常启动，但 LSP 保持不可用，直到一次配置应用成功重新采样；应用配置时采样失败会让这次应用
+  失败，Studio 把卡片显示为应用失败（`VALIDATION_FAILED`），原因只写本地日志，Daemon 继续使用此前已应用的
+  快照。两种情况下都只按采样结果查找，不回退到 Daemon 自身环境。要让工具可见，请在 Daemon 运行用户实际
+  加载的登录配置（如 `~/.bash_profile` 或 `~/.profile`）中设置 PATH。修改登录配置后，下一次命令会重新加载
+  它；重新保存卡片或重启 Daemon 会刷新 LSP 使用的快照。
 - `lsp` 可选；整个字段省略或 `null` 表示禁用 LSP。一旦声明就必须至少有一个 server，空表非法。server id 匹配
   `[A-Za-z0-9_.-]+` 且至多 256 字符。每个 server 的 `command` 与 `extensions` 都必须是非空字符串数组；每个后缀须带前导点且不含路径分隔符；
   每个列表项至多 4096 字符。Studio 卡片、控制协议与 Daemon 在输入边界统一校验。`rootMarkers` / `firstMatchMarkers` 可选，
@@ -356,8 +358,8 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 }
 ```
 
-`command` 是程序与参数数组，不是 shell 字符串。它必须能在 Daemon 采样的登录环境中解析，语言服务器
-进程也以该环境启动。修改登录配置后，重启 Daemon 可刷新这份快照。
+`command` 是程序与参数数组，不是 shell 字符串。它必须能在 Daemon 采样的登录环境中解析，查找不回退到
+Daemon 自身环境。启动语言服务器时，采样到的变量覆盖 Daemon 环境中的同名变量，其他变量保持继承。修改登录配置后，重新保存卡片或重启 Daemon 可刷新这份快照。
 首元素直接写成绝对路径仍然最稳妥。Windows 若使用 npm 的 `.cmd` 入口，最稳妥的是直接
 配置 Node 绝对路径和已安装服务器的 JS 入口：
 
@@ -584,7 +586,7 @@ Unix 若只剩 `.work/previous-lib` 而 `lib/` 缺失，先按上文重试更新
 | `服务启动失败` / `start-limit-hit` | 查看服务状态与本次启动日志，先处理退出原因；覆盖安装会清除旧失败计数，无需放宽启动限流 |
 | 服务存活但未 READY | 核对 studioUrl、token、网络与代理；Linux 看 journal，macOS 看卡片日志，Windows 用前台复现 |
 | 配置状态显示“应用失败” | 按错误中的字段与规则修正卡片配置后重新保存；恢复网络可达性不能替代配置修正 |
-| LSP 显示未安装或查询失败 | 检查卡片 `lsp` JSON、登录环境中的程序路径（改登录配置后需重启 Daemon）、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
+| LSP 显示未安装或查询失败 | 检查卡片 `lsp` JSON、登录环境中的程序路径（改登录配置后重新保存卡片或重启 Daemon）、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
 | WebSocket close code 1010 | 终止浏览器侧 WebSocket（`/ws/events` 与 IDE 视图）的代理层启用 `permessage-deflate`（Daemon 与 Studio 之间的 WSS 不协商压缩扩展） |
 
 Unix 安装失败先按输出的阶段和下一步处理。服务状态和日志可能含敏感信息，分享前请去除 token、安装

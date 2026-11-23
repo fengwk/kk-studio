@@ -12,14 +12,7 @@ type ProcessSpec struct {
 	Executable string
 	Args       []string
 	Directory  string
-	// Env is filtered, deduplicated, and then applied as an overlay on the daemon
-	// environment unless ReplaceEnv makes it the complete environment instead.
-	Env []string
-	// NullStdin connects the process to the null device, so it reads end-of-file
-	// immediately and never consumes the daemon's own standard input.
-	NullStdin bool
-	// ReplaceEnv makes Env the complete environment instead of an overlay.
-	ReplaceEnv bool
+	Env        []string
 }
 
 // ProcessExit is the direct process exit status; nil fields mean the status is unknown.

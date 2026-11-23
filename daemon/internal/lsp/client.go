@@ -80,7 +80,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 	if len(server.Command) == 0 {
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, executable), Converged: true, Cause: errors.New("empty command")}
 	}
-	process, err := processes.Start(ctx, native.ProcessSpec{Executable: executable, Args: append([]string(nil), server.Command[1:]...), Directory: root, Env: environment, ReplaceEnv: environment != nil})
+	process, err := processes.Start(ctx, native.ProcessSpec{Executable: executable, Args: append([]string(nil), server.Command[1:]...), Directory: root, Env: environment})
 	if err != nil {
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, executable), Converged: !errors.Is(err, native.ErrScopeNotConverged), Cause: err}
 	}

@@ -61,15 +61,11 @@ func (r productionRuntime) run(ctx context.Context, initial config.DaemonConfig,
 	loadLogin := func(ctx context.Context, bash string) ([]string, error) {
 		return loadLoginEnvironment(ctx, processes, bash)
 	}
-	environment, err := prepareLoginEnvironment(ctx, &initial, loadLogin)
+	lspFacade, cleanupLSP, err := startLanguageServers(ctx, &initial, processes, loadLogin, &runErr)
 	if err != nil {
 		if errors.Is(err, context.Canceled) && !errors.Is(err, errLoginEnvironmentCleanup) {
 			return nil
 		}
-		return productionFailure("initial Bash login environment is unavailable", err)
-	}
-	lspFacade, cleanupLSP, err := startLanguageServers(initial, environment, processes, &runErr)
-	if err != nil {
 		return err
 	}
 	defer cleanupLSP()
@@ -149,9 +145,22 @@ func startNetworks(initial config.DaemonConfig, runErr *error) (*networkRuntimeS
 	}, nil
 }
 
-func startLanguageServers(initial config.DaemonConfig, environment []string, processes native.Supervisor, runErr *error) (*lsp.Facade, func(), error) {
+func startLanguageServers(ctx context.Context, initial *config.DaemonConfig, processes native.Supervisor, load loginEnvironmentLoader, runErr *error) (*lsp.Facade, func(), error) {
+	environment, err := prepareLoginEnvironment(ctx, initial, load)
+	servers := initial.LSP
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			if errors.Is(err, errLoginEnvironmentCleanup) {
+				return nil, nil, productionFailure("initial Bash login environment is unavailable", err)
+			}
+			return nil, nil, err
+		}
+		slog.Error("initial Bash login environment is unavailable; LSP disabled until configuration is applied", "error", err)
+		// An empty PATH alone would still allow absolute executable paths.
+		servers = nil
+	}
 	lspFacade := lsp.NewFacade(processes, lsp.PoolOptions{})
-	initialLSP, err := lspFacade.Prepare(initial.LSP, environment)
+	initialLSP, err := lspFacade.Prepare(servers, environment)
 	if err != nil {
 		return nil, nil, productionFailure("initial language-server configuration is invalid", err)
 	}

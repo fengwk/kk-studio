@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,7 +11,76 @@ import (
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/lsp"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
+	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	daemonruntime "github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
+
+// A broken profile must not block startup, even when the cache has an absolute LSP command.
+func TestProductionStartupRecoversFromLoginEnvironmentFailure(t *testing.T) {
+	ctx := context.Background()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "")
+	dir := filepath.Join(t.TempDir(), "daemon")
+	if err := native.EnsurePrivateDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	initial := config.DaemonConfig{
+		EnvironmentID: e2eEnvironmentID, ConfigPath: filepath.Join(dir, "daemon.json"), DataDir: dir,
+		StudioURL: "https://studio.example", BashExecutableSetting: &executable,
+		LSP: []config.LSPServerConfig{{ID: "cached", Command: []string{executable}, Extensions: []string{".cached"}}},
+	}
+	attempts := 0
+	load := func(context.Context, string) ([]string, error) {
+		attempts++
+		if attempts <= 2 {
+			return nil, errors.New("Bash login environment: missing output marker")
+		}
+		return []string{"PATH=" + filepath.Dir(executable)}, nil
+	}
+	var runErr error
+	facade, cleanupLSP, err := startLanguageServers(ctx, &initial, nil, load, &runErr)
+	if err != nil {
+		t.Fatalf("startup did not tolerate a failed login sample: %v", err)
+	}
+	defer func() {
+		cleanupLSP()
+		if runErr != nil {
+			t.Error(runErr)
+		}
+	}()
+	if facade.Support("test.cached").Available || len(initial.LSP) != 1 {
+		t.Fatal("startup must disable LSP without discarding cached declarations")
+	}
+	networks, cleanupNetworks, err := startNetworks(initial, &runErr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupNetworks()
+	manager, err := startEnvironmentConfig(initial, facade, networks, load)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	snapshot := &protocol.DaemonConfiguration{
+		StudioUrl: initial.StudioURL, BashExecutable: &executable,
+		Lsp: &protocol.LspConfiguration{Servers: []*protocol.LspServer{{Id: "sampled", Command: []string{filepath.Base(executable)}, Extensions: []string{".sampled"}}}},
+	}
+	result, err := manager.Submit(ctx, 1, snapshot)
+	if err != nil || result.Kind != daemonruntime.ConfigFailed || result.Code != "VALIDATION_FAILED" {
+		t.Fatalf("failed sample was not reported as a configuration failure: %v, %v", result.Kind, err)
+	}
+	if facade.Support("test.sampled").Available {
+		t.Fatal("failed application enabled LSP")
+	}
+	result, err = manager.Submit(ctx, 2, snapshot)
+	if err != nil || result.Kind != daemonruntime.ConfigApplied || !facade.Support("test.sampled").Available {
+		t.Fatalf("successful re-sample did not enable LSP through the sampled PATH: %v, %v", result.Kind, err)
+	}
+}
 
 // Prepares resource candidates only when their applied configuration changes.
 func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {

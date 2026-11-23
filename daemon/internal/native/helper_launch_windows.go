@@ -23,11 +23,7 @@ type windowsHelperPipes struct {
 	inputFile    *os.File
 	outputFile   *os.File
 	errorFile    *os.File
-	// childHandles are inherited by the helper and closed once it has started.
 	childHandles []windows.Handle
-	// supervisorHandles are inherited by the helper but stay open here, because the
-	// supervisor owns them for the whole command lifetime.
-	supervisorHandles []windows.Handle
 }
 
 func createWindowsHelperPipes() (*windowsHelperPipes, error) {
@@ -112,47 +108,6 @@ func windowsPipeWithAPI(parentWrites bool, api windowsPipeAPI) (*os.File, window
 	return file, child, nil
 }
 
-// useNullStdin replaces the command-input pipe with the null device, so the supervised
-// command reads end-of-file instead of waiting for input the daemon never writes.
-func (p *windowsHelperPipes) useNullStdin() error {
-	file, err := openNullStdin()
-	if err != nil {
-		return err
-	}
-	handle := windows.Handle(file.Fd())
-	if err := windows.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
-		_ = file.Close()
-		return err
-	}
-	pipeHandle := p.commandInput
-	_ = p.inputFile.Close()
-	if err := windows.CloseHandle(pipeHandle); err != nil {
-		_ = file.Close()
-		return err
-	}
-	p.inputFile, p.commandInput = file, handle
-	p.childHandles = dropWindowsHandle(p.childHandles, pipeHandle)
-	p.supervisorHandles = append(p.supervisorHandles, handle)
-	return nil
-}
-
-func dropWindowsHandle(handles []windows.Handle, target windows.Handle) []windows.Handle {
-	kept := handles[:0]
-	for _, handle := range handles {
-		if handle != target {
-			kept = append(kept, handle)
-		}
-	}
-	return kept
-}
-
-// handlesForHelper returns every handle the helper inherits when it is created.
-func (p *windowsHelperPipes) handlesForHelper() []windows.Handle {
-	handles := make([]windows.Handle, 0, len(p.childHandles)+len(p.supervisorHandles))
-	handles = append(handles, p.childHandles...)
-	return append(handles, p.supervisorHandles...)
-}
-
 func (p *windowsHelperPipes) closeChildHandles() error {
 	var failures []error
 	open := make([]windows.Handle, 0, len(p.childHandles))
@@ -206,8 +161,7 @@ func startWindowsHelper(stateDir string, pipes *windowsHelperPipes, env []string
 		return windows.ProcessInformation{}, err
 	}
 	defer attributes.Delete()
-	inherited := pipes.handlesForHelper()
-	if err := attributes.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&inherited[0]), uintptr(len(inherited))*unsafe.Sizeof(inherited[0])); err != nil {
+	if err := attributes.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&pipes.childHandles[0]), uintptr(len(pipes.childHandles))*unsafe.Sizeof(pipes.childHandles[0])); err != nil {
 		return windows.ProcessInformation{}, err
 	}
 	var startup windows.StartupInfoEx
@@ -221,33 +175,6 @@ func startWindowsHelper(stateDir string, pipes *windowsHelperPipes, env []string
 		return windows.ProcessInformation{}, fmt.Errorf("cannot create the process scope helper: %w", err)
 	}
 	return information, nil
-}
-
-// helperEnvironment returns the environment the scope helper inherits and passes on to
-// the command. Env is an overlay on the daemon environment by default and the whole
-// environment in replacement mode; both are filtered identically. Replacement mode keeps
-// SystemRoot because process creation depends on it.
-func helperEnvironment(spec ProcessSpec) []string {
-	base := os.Environ()
-	if spec.ReplaceEnv {
-		base = nil
-	}
-	env := mergeWindowsEnvironment(base, spec.Env)
-	if spec.ReplaceEnv && !environmentHasKey(env, "SystemRoot") {
-		if systemRoot := os.Getenv("SystemRoot"); systemRoot != "" {
-			env = mergeWindowsEnvironment(env, []string{"SystemRoot=" + systemRoot})
-		}
-	}
-	return env
-}
-
-func environmentHasKey(entries []string, key string) bool {
-	for _, entry := range entries {
-		if name, _, ok := strings.Cut(entry, "="); ok && strings.EqualFold(name, key) {
-			return true
-		}
-	}
-	return false
 }
 
 func mergeWindowsEnvironment(base, overrides []string) []string {
