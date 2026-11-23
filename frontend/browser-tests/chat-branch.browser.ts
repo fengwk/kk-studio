@@ -39,10 +39,13 @@ const MARKDOWN_PREVIEW = [
   '## 发布前必读',
   '**必须**先跑 `verify`，细节见 [运行手册](https://example.test/runbook)',
   '- 列表项不要跳过',
+  '| 检查 | 状态 |',
+  '| --- | --- |',
+  '| 构建 | 通过 |',
   '> 引用结论照旧',
 ].join('\n')
 /** 折成单行后用于展示和搜索的预览文字。 */
-const PREVIEW_TEXT = '发布前必读 必须先跑 verify，细节见 运行手册 列表项不要跳过 引用结论照旧'
+const PREVIEW_TEXT = '发布前必读 必须先跑 verify，细节见 运行手册 列表项不要跳过 检查 状态 构建 通过 引用结论照旧'
 
 /** 可选截图输出目录：给出 `KK_BROWSER_SHOTS_DIR` 时把验收截图同时复制出去。 */
 const SHOTS_DIR = process.env.KK_BROWSER_SHOTS_DIR
