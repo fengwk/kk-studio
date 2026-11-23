@@ -12,7 +12,7 @@ import (
 
 // Verify launch exit and convergence error reporting.
 func TestProtocol_LaunchFailureStates(t *testing.T) {
-	_, emptyErr := Launch(context.Background(), ServerConfig{ID: "empty"}, t.TempDir(), "", nil)
+	_, emptyErr := Launch(context.Background(), ServerConfig{ID: "empty"}, t.TempDir(), "", nil, nil)
 	var emptyBootstrap *LspBootstrapError
 	if !errors.As(emptyErr, &emptyBootstrap) || !emptyBootstrap.Converged || emptyBootstrap.Error() != "LSP server 'empty' cannot be started: " {
 		t.Fatalf("empty command error = %#v", emptyErr)
@@ -25,7 +25,7 @@ func TestProtocol_LaunchFailureStates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			supervisor := &fakeSupervisor{startErr: tc.cause}
-			_, err := Launch(context.Background(), ServerConfig{ID: "broken", Command: []string{"jdtls"}}, t.TempDir(), "/resolved/path/jdtls", supervisor)
+			_, err := Launch(context.Background(), ServerConfig{ID: "broken", Command: []string{"jdtls"}}, t.TempDir(), "/resolved/path/jdtls", supervisor, nil)
 			var bootstrap *LspBootstrapError
 			if !errors.As(err, &bootstrap) || bootstrap.Converged != tc.converged || !errors.Is(err, tc.cause) || bootstrap.Error() != "LSP server 'broken' cannot be started: /resolved/path/jdtls" {
 				t.Fatalf("launch error = %#v", err)
@@ -33,7 +33,7 @@ func TestProtocol_LaunchFailureStates(t *testing.T) {
 		})
 	}
 	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: intPointer(7)}}
-	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	var bootstrap *LspBootstrapError
 	if !errors.As(err, &bootstrap) || !bootstrap.Converged || bootstrap.Error() != "LSP server 'dead' exited before initialization (exit code 7)" {
 		t.Fatalf("early exit error = %#v", err)
@@ -43,7 +43,7 @@ func TestProtocol_LaunchFailureStates(t *testing.T) {
 // Checks initialize timeout cleanup for a server that never replies.
 func TestProtocol_InitializeTimeout(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "initialize"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "slow", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "slow", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestProtocol_InitializeTimeout(t *testing.T) {
 // Reports a server crash only after its managed stop converges.
 func TestProtocol_Crash(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestProtocol_Crash(t *testing.T) {
 // Cancels a sent request without confirming process exit.
 func TestProtocol_RequestCancellation(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func waitForFakeRequest(t *testing.T, process *fakeProcess, want string) {
 // Redact server details but mark a response as completed.
 func TestProtocol_ServerErrorCompletesRequest(t *testing.T) {
 	supervisor := &fakeSupervisor{errorMethod: "test/error"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestProtocol_ServerErrorCompletesRequest(t *testing.T) {
 func TestProtocol_LaunchWaitFailure(t *testing.T) {
 	waitErr := errors.New("supervisor wait failed")
 	supervisor := &fakeSupervisor{waitErr: waitErr}
-	_, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	_, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	var bootstrap *LspBootstrapError
 	if !errors.As(err, &bootstrap) || bootstrap.Error() != "LSP server 'fake' failed to start" || !errors.Is(err, waitErr) || bootstrap.Converged {
 		t.Fatalf("launch error = %#v", err)
@@ -198,7 +198,7 @@ func TestProtocol_LaunchWaitFailure(t *testing.T) {
 func TestProtocol_LaunchCleanupFailure(t *testing.T) {
 	cleanupErr := errors.New("termination did not converge")
 	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: intPointer(9)}, terminateErr: cleanupErr}
-	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	var bootstrap *LspBootstrapError
 	var aggregate *LspAggregateError
 	if !errors.As(err, &bootstrap) || bootstrap.Converged || !errors.As(err, &aggregate) || aggregate.Error() != "LSP launch failed and cleanup failed" || len(aggregate.Errors) != 2 || !errors.Is(err, cleanupErr) || bootstrap.Error() != "LSP server 'dead' exited before initialization (exit code 9)" {
@@ -208,7 +208,7 @@ func TestProtocol_LaunchCleanupFailure(t *testing.T) {
 
 // Rejects already-cancelled and already-expired requests before sending JSON-RPC.
 func TestProtocol_PreAbortedRequest(t *testing.T) {
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", &fakeSupervisor{})
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", &fakeSupervisor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestProtocol_PreAbortedRequest(t *testing.T) {
 // Verifies definition and workspace-symbol requests require advertised capabilities.
 func TestProtocol_CapabilityRequired(t *testing.T) {
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "plain", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "plain", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

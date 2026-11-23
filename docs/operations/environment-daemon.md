@@ -240,11 +240,15 @@ Studio 保存的完整卡片配置：
   Protobuf 控制流，IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。
 - `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值必须单行：不能是空白、
   含控制字符、带首尾空白或超过 4096 字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
-  `daemon.json` 与运行快照保存的仍是配置里写下的字符串，真正的路径解析发生在执行时。
-  命令通过非交互的登录 shell（`bash -lc`）执行。宿主登录配置可以修改 PATH 等环境变量，因此命令看到的
-  环境可能与 Daemon 进程不同。Daemon 用自身的 PATH 查找 `bashExecutable` 和 LSP 服务器命令，两者可用
-  不代表 `bash` 工具也能找到同一程序。要让工具在命令中可见，请在 Daemon 运行用户实际加载的登录配置
-  （如 `~/.bash_profile` 或 `~/.profile`）中设置 PATH。
+  `daemon.json` 保留配置中的原始字符串，Daemon 在准备配置时解析实际路径。
+  Daemon 只用自身 PATH 解析这个 Bash；命令仍每次以该 Bash 的非交互登录 shell（`bash -lc`）执行。
+  启动和每次应用配置时，Daemon 还会用该 Bash 运行登录 shell 采样一次登录环境，LSP 可执行文件发现、
+  `read` header 的 `lsp:` 支持判定与语言服务器进程都用这份快照。启动时采样失败只在 Daemon 本地日志记录
+  原因，Daemon 照常启动，但 LSP 保持不可用，直到一次配置应用成功重新采样；应用配置时采样失败会让这次应用
+  失败，Studio 把卡片显示为应用失败（`VALIDATION_FAILED`），原因只写本地日志，Daemon 继续使用此前已应用的
+  快照。两种情况下都只按采样结果查找，不回退到 Daemon 自身环境。要让工具可见，请在 Daemon 运行用户实际
+  加载的登录配置（如 `~/.bash_profile` 或 `~/.profile`）中设置 PATH。修改登录配置后，下一次命令会重新加载
+  它；重新保存卡片或重启 Daemon 会刷新 LSP 使用的快照。
 - `lsp` 可选；整个字段省略或 `null` 表示禁用 LSP。一旦声明就必须至少有一个 server，空表非法。server id 匹配
   `[A-Za-z0-9_.-]+` 且至多 256 字符。每个 server 的 `command` 与 `extensions` 都必须是非空字符串数组；每个后缀须带前导点且不含路径分隔符；
   每个列表项至多 4096 字符。Studio 卡片、控制协议与 Daemon 在输入边界统一校验。`rootMarkers` / `firstMatchMarkers` 可选，
@@ -314,7 +318,11 @@ Daemon CLI 提供固定 TypeScript profile（仅已验证的 Linux/amd64），�
 /path/to/kk-studio-daemon --lsp-config typescript-language-server-4.3.4_typescript-5.8.3 "$HOME/.local/share/kk-studio/lsp"
 ```
 
-安装需要 Node.js 18+、npm 和网络访问；包版本来自随 Daemon 固定的 lockfile，npm 不运行安装脚本。安装目录由调用者提供，已存在材料不会覆盖。npm 子进程使用临时的 HOME、XDG、缓存与用户 npm 配置，不修改其他进程环境或全局环境变量。最后一条命令输出可复制到 `daemonConfig.lsp` 的 `servers` 节点中的配置段。若你已用其他方式安装服务器，也可以继续直接声明其命令。
+安装需要 Node.js 18+、npm 和网络访问；包版本来自随 Daemon 固定的 lockfile，npm 不运行安装脚本。
+`--install-lsp` 与 `--lsp-config` 不读取卡片配置，各自在调用时用默认 Bash 采样一次当前用户的登录环境，
+并用其中的 PATH 查找 npm 与 Node.js，因此 Node.js 和 npm 需放在该用户登录时实际生效的配置里。安装目录由
+调用者提供，已存在材料不会覆盖。npm 子进程以这份登录环境为基线，改用临时的 HOME、XDG、缓存与用户 npm
+配置，不修改其他进程环境或全局环境变量。最后一条命令输出可复制到 `daemonConfig.lsp` 的 `servers` 节点中的配置段。若你已用其他方式安装服务器，也可以继续直接声明其命令。
 
 对应 `servers`：
 
@@ -332,10 +340,10 @@ Daemon CLI 提供固定 TypeScript profile（仅已验证的 Linux/amd64），�
 ```
 
 Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径。`command` 首元素支持 `~/`、`$HOME/`
-和 `${HOME}/` 前缀，均相对于 **Daemon 运行用户的主目录**解析；后续参数保持字面值，不解析变量。
-不带路径的命令名按服务进程的 PATH 查找。应用配置时只确认首元素当时能解析到可执行文件，找不到
-上报 `VALIDATION_FAILED`；被接受的快照与 `daemon.json` 保存的仍是配置里写下的命令，`~/`、`$HOME/`
-和 `${HOME}/` 原样保留，主目录与 PATH 的解析发生在启动语言服务器时：
+和 `${HOME}/` 前缀，均按 Bash 登录环境中的 HOME 解析；后续参数保持字面值，不解析变量。
+不带路径的命令名按同一登录环境中的 PATH 查找（Windows 同时使用 PATHEXT）。应用配置时验证首元素能解析
+到可执行文件，找不到上报 `VALIDATION_FAILED`；被接受的快照与 `daemon.json` 保存原始命令，
+`~/`、`$HOME/` 和 `${HOME}/` 不会被替换：
 
 ```json
 {
@@ -350,8 +358,9 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 }
 ```
 
-`command` 是程序与参数数组，不是 shell 字符串。它必须能在**服务进程**中解析，服务 PATH 可能
-不同于交互终端，推荐把首元素写成绝对路径。Windows 若使用 npm 的 `.cmd` 入口，最稳妥的是直接
+`command` 是程序与参数数组，不是 shell 字符串。它必须能在 Daemon 采样的登录环境中解析，查找不回退到
+Daemon 自身环境。启动语言服务器时，采样到的变量覆盖 Daemon 环境中的同名变量，其他变量保持继承。修改登录配置后，重新保存卡片或重启 Daemon 可刷新这份快照。
+首元素直接写成绝对路径仍然最稳妥。Windows 若使用 npm 的 `.cmd` 入口，最稳妥的是直接
 配置 Node 绝对路径和已安装服务器的 JS 入口：
 
 ```json
@@ -577,7 +586,7 @@ Unix 若只剩 `.work/previous-lib` 而 `lib/` 缺失，先按上文重试更新
 | `服务启动失败` / `start-limit-hit` | 查看服务状态与本次启动日志，先处理退出原因；覆盖安装会清除旧失败计数，无需放宽启动限流 |
 | 服务存活但未 READY | 核对 studioUrl、token、网络与代理；Linux 看 journal，macOS 看卡片日志，Windows 用前台复现 |
 | 配置状态显示“应用失败” | 按错误中的字段与规则修正卡片配置后重新保存；恢复网络可达性不能替代配置修正 |
-| LSP 显示未安装或查询失败 | 检查卡片 `lsp` JSON、服务进程可见的程序路径、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
+| LSP 显示未安装或查询失败 | 检查卡片 `lsp` JSON、登录环境中的程序路径（改登录配置后重新保存卡片或重启 Daemon）、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
 | WebSocket close code 1010 | 终止浏览器侧 WebSocket（`/ws/events` 与 IDE 视图）的代理层启用 `permessage-deflate`（Daemon 与 Studio 之间的 WSS 不协商压缩扩展） |
 
 Unix 安装失败先按输出的阶段和下一步处理。服务状态和日志可能含敏感信息，分享前请去除 token、安装

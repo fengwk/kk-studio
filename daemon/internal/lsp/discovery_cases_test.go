@@ -27,6 +27,22 @@ func TestDiscovery_ExtensionCases(t *testing.T) {
 	}
 }
 
+// A native environment observed from Git Bash uses case-insensitive keys and a
+// Windows path list, even when the caller's PATH uses a different delimiter.
+func TestResolverUsesNativeWindowsLoginPath(t *testing.T) {
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "login-tool.exe")
+	if err := os.WriteFile(tool, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	options := resolverOptionsForEnvironment([]string{`Path=C:\missing;` + dir, "Pathext=.EXE"}, true)
+	resolved, ok := NewExecutableResolver(options).Resolve("login-tool")
+	want, err := filepath.EvalSymlinks(tool)
+	if err != nil || !ok || resolved != want {
+		t.Fatal("case-insensitive Windows environment lookup did not resolve the login tool")
+	}
+}
+
 // Verifies the shallowest marker inside a git worktree wins over nested module markers.
 func TestDiscovery_ShallowestRootMarkerInGitWorktree(t *testing.T) {
 	base := t.TempDir()

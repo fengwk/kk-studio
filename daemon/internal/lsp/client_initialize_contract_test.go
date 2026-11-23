@@ -12,7 +12,7 @@ func TestProtocol_InitializeContract(t *testing.T) {
 	paramsCh := make(chan json.RawMessage, 1)
 	events := make(chan fakeRequest, 16)
 	supervisor := &fakeSupervisor{initializeParams: paramsCh, events: events}
-	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, t.TempDir(), "/jdtls", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, t.TempDir(), "/jdtls", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

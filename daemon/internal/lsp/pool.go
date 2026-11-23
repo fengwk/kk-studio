@@ -249,7 +249,7 @@ func (p *Pool) confirmAfterAbandonedBoot(b *boot, onExit func()) {
 }
 
 func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root, executable string, b *boot) {
-	client, err := Launch(ctx, server, root, executable, p.processes)
+	client, err := Launch(ctx, server, root, executable, p.processes, p.discovery.environment)
 	if err == nil {
 		client.shutdownGrace = p.options.ShutdownGrace
 		b.client = client

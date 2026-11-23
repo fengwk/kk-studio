@@ -317,11 +317,7 @@ func (r *EnvironmentConfigRuntime) apply(request *configRequest) ConfigApplyResu
 		}
 		return ConfigApplyResult{Kind: ConfigFatal, Message: "Studio configuration version is older than the daemon cache"}
 	}
-	if initialized && bytes.Equal(request.content, acceptedBytes) {
-		candidate := current
-		candidate.ConfigVersion = request.version
-		return r.persistAndPublish(request, current, candidate, nil, false)
-	}
+	// Even a version-only application can observe a changed Bash login environment.
 	candidate, err := config.BuildEnvironmentConfig(current, request.version, request.wire)
 	if err != nil {
 		return r.failed(request.version, err)
@@ -347,10 +343,10 @@ func (r *EnvironmentConfigRuntime) apply(request *configRequest) ConfigApplyResu
 		return r.failed(request.version, &config.EnvironmentConfigError{Code: "VALIDATION_FAILED"})
 	}
 	candidate = cloneDaemonConfig(prepared.Config())
-	return r.persistAndPublish(request, previous, candidate, prepared, true)
+	return r.persistAndPublish(request, previous, candidate, prepared)
 }
 
-func (r *EnvironmentConfigRuntime) persistAndPublish(request *configRequest, previous, candidate config.DaemonConfig, prepared PreparedConfiguration, publishResources bool) ConfigApplyResult {
+func (r *EnvironmentConfigRuntime) persistAndPublish(request *configRequest, previous, candidate config.DaemonConfig, prepared PreparedConfiguration) ConfigApplyResult {
 	r.mu.Lock()
 	closed := r.closed
 	r.mu.Unlock()
@@ -381,16 +377,12 @@ func (r *EnvironmentConfigRuntime) persistAndPublish(request *configRequest, pre
 		r.abort(previous, candidate, prepared)
 		return ConfigApplyResult{Kind: ConfigFatal, Message: "configuration runtime is closed"}
 	}
-	var cleanup func() error
-	if publishResources {
-		var publishErr error
-		cleanup, publishErr = prepared.Publish()
-		if publishErr != nil {
-			r.mu.Unlock()
-			r.report(publishErr)
-			r.abort(previous, candidate, prepared)
-			return ConfigApplyResult{Kind: ConfigFatal, Message: "prepared environment resources could not be published"}
-		}
+	cleanup, publishErr := prepared.Publish()
+	if publishErr != nil {
+		r.mu.Unlock()
+		r.report(publishErr)
+		r.abort(previous, candidate, prepared)
+		return ConfigApplyResult{Kind: ConfigFatal, Message: "prepared environment resources could not be published"}
 	}
 	r.current = cloneDaemonConfig(candidate)
 	r.acceptedBytes = append([]byte(nil), request.content...)

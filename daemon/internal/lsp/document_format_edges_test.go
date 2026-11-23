@@ -43,7 +43,7 @@ func TestDocument_JavaDecompileFailures(t *testing.T) {
 	}
 
 	supervisor := &fakeSupervisor{emptyMethod: "java/classFileContents"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, t.TempDir(), "jdtls", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, t.TempDir(), "jdtls", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ func TestDocument_DefinitionDispatchAndConcurrentSync(t *testing.T) {
 	}
 	events := make(chan fakeRequest, 16)
 	supervisor := &fakeSupervisor{blockMethod: "textDocument/definition", events: events}
-	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

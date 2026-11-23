@@ -37,6 +37,10 @@ var typescriptPackageLock []byte
 type TypeScriptLibrary struct {
 	Directory string
 	NPM       string
+	// Environment is the Bash login environment the caller resolved once per configuration
+	// preparation. It selects npm and is the base of the isolated npm environment; an empty
+	// environment never falls back to the Daemon process environment.
+	Environment []string
 }
 
 // Install publishes the fixed TypeScript profile without replacing an installed version.
@@ -84,7 +88,8 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", errors.New("installed TypeScript LSP profile cannot be inspected")
 	}
-	if _, err := exec.LookPath(l.NPM); err != nil {
+	npm, ok := NewExecutableResolver(ResolverOptionsForEnvironment(l.Environment)).Resolve(l.NPM)
+	if !ok {
 		return "", errors.New("TypeScript LSP installation requires npm")
 	}
 	stage, err := os.MkdirTemp(root, ".typescript-staging-")
@@ -111,9 +116,9 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 	if err := os.WriteFile(npmConfig, nil, 0600); err != nil {
 		return "", errors.New("temporary TypeScript LSP npm configuration cannot be created")
 	}
-	cmd := exec.CommandContext(ctx, l.NPM, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--no-progress", "--cache="+cacheDir, "--userconfig="+npmConfig, "--logs-max=0")
+	cmd := exec.CommandContext(ctx, npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--no-progress", "--cache="+cacheDir, "--userconfig="+npmConfig, "--logs-max=0")
 	cmd.Dir = stage
-	cmd.Env = isolatedNPMEnvironment(stage)
+	cmd.Env = isolatedNPMEnvironment(l.Environment, stage)
 	if err := cmd.Run(); err != nil {
 		return "", errors.New("TypeScript LSP dependencies could not be installed from the pinned lockfile")
 	}
@@ -137,7 +142,8 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 
 // TypeScriptServerConfig returns the configured-server declaration for an already installed
 // profile. The caller adds it to its Environment's LSP declarations; no session is shared.
-func TypeScriptServerConfig(libraryDirectory string) (config.LSPServerConfig, error) {
+// The login environment selects and version-checks Node.js.
+func TypeScriptServerConfig(libraryDirectory string, environment []string) (config.LSPServerConfig, error) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		return config.LSPServerConfig{}, errors.New("TypeScript LSP profile is verified only on linux/amd64")
 	}
@@ -156,7 +162,7 @@ func TypeScriptServerConfig(libraryDirectory string) (config.LSPServerConfig, er
 	if err := validateTypeScriptInstall(profileDir); err != nil {
 		return config.LSPServerConfig{}, err
 	}
-	node, err := verifiedNodeExecutable()
+	node, err := verifiedNodeExecutable(environment)
 	if err != nil {
 		return config.LSPServerConfig{}, err
 	}
@@ -170,9 +176,9 @@ func TypeScriptServerConfig(libraryDirectory string) (config.LSPServerConfig, er
 	}, nil
 }
 
-func isolatedNPMEnvironment(stage string) []string {
+func isolatedNPMEnvironment(environment []string, stage string) []string {
 	var env []string
-	for _, item := range os.Environ() {
+	for _, item := range environment {
 		key, _, _ := strings.Cut(item, "=")
 		switch strings.ToUpper(key) {
 		case "HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "NPM_CONFIG_USERCONFIG":
@@ -188,14 +194,16 @@ func isolatedNPMEnvironment(stage string) []string {
 	)
 }
 
-func verifiedNodeExecutable() (string, error) {
-	node, err := exec.LookPath("node")
-	if err != nil {
+func verifiedNodeExecutable(environment []string) (string, error) {
+	node, ok := NewExecutableResolver(ResolverOptionsForEnvironment(environment)).Resolve("node")
+	if !ok {
 		return "", errors.New("TypeScript LSP requires Node.js 18 or later")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, node, "--version").Output()
+	probe := exec.CommandContext(ctx, node, "--version")
+	probe.Env = environment
+	output, err := probe.Output()
 	if err != nil {
 		return "", errors.New("TypeScript LSP requires Node.js 18 or later")
 	}
@@ -205,11 +213,7 @@ func verifiedNodeExecutable() (string, error) {
 	if err != nil || major < 18 {
 		return "", errors.New("TypeScript LSP requires Node.js 18 or later")
 	}
-	absolute, err := filepath.Abs(node)
-	if err != nil {
-		return "", errors.New("TypeScript LSP Node.js executable cannot be resolved")
-	}
-	return absolute, nil
+	return node, nil
 }
 
 func validateTypeScriptInstall(directory string) error {

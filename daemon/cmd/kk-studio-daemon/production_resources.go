@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
@@ -103,25 +105,53 @@ func (s *networkRuntimeStore) close() error {
 	return previous.runtime.Close(context.Background())
 }
 
-func prepareProductionEnvironment(lspFacade *lsp.Facade, networks *networkRuntimeStore) runtime.ConfigurationPreparer {
-	return func(_ context.Context, candidate config.DaemonConfig, previous *config.DaemonConfig) (runtime.PreparedConfiguration, error) {
-		resolvedBash, err := config.ResolveBash(candidate.BashExecutable)
+type loginEnvironmentLoader func(context.Context, string) ([]string, error)
+
+func prepareLoginEnvironment(ctx context.Context, candidate *config.DaemonConfig, load loginEnvironmentLoader) ([]string, error) {
+	setting := candidate.BashExecutableSetting
+	if setting == nil {
+		setting = candidate.BashExecutable
+	}
+	resolvedBash, err := config.ResolveBash(setting)
+	if err != nil {
+		return nil, fmt.Errorf("configured Bash executable is unavailable: %w", err)
+	}
+	environment, err := load(ctx, resolvedBash)
+	if err != nil {
+		return nil, err
+	}
+	candidate.BashExecutable = &resolvedBash
+	candidate.LoginEnvironmentDigest = sha256.Sum256([]byte(strings.Join(environment, "\x00")))
+	return environment, nil
+}
+
+func prepareProductionEnvironment(lspFacade *lsp.Facade, networks *networkRuntimeStore, load loginEnvironmentLoader) runtime.ConfigurationPreparer {
+	return func(ctx context.Context, candidate config.DaemonConfig, previous *config.DaemonConfig) (runtime.PreparedConfiguration, error) {
+		environment, err := prepareLoginEnvironment(ctx, &candidate, load)
 		if err != nil {
-			return nil, fmt.Errorf("configured Bash executable is unavailable: %w", err)
+			return nil, err
 		}
-		candidate.BashExecutable = &resolvedBash
+		resolver := lsp.NewExecutableResolver(lsp.ResolverOptionsForEnvironment(environment))
+		for _, server := range candidate.LSP {
+			if len(server.Command) == 0 {
+				return nil, &config.EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.ID + ".command"}
+			}
+			if _, ok := resolver.Resolve(server.Command[0]); !ok {
+				return nil, &config.EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.ID + ".command"}
+			}
+		}
 		policy, err := proxyPolicy(candidate)
 		if err != nil {
 			return nil, fmt.Errorf("configured proxy is invalid: %w", err)
 		}
 		networkChanged := previous == nil || !sameProxy(previous.ProxyURL, candidate.ProxyURL)
-		lspChanged := previous == nil || !reflect.DeepEqual(previous.LSP, candidate.LSP)
+		lspChanged := previous == nil || !reflect.DeepEqual(previous.BashExecutable, candidate.BashExecutable) || previous.LoginEnvironmentDigest != candidate.LoginEnvironmentDigest || !reflect.DeepEqual(previous.LSP, candidate.LSP)
 		prepared := &preparedEnvironment{config: candidate, networks: networks}
 		if networkChanged {
 			prepared.network = transport.NewNetworkRuntime(policy)
 		}
 		if lspChanged {
-			prepared.lsp, err = lspFacade.Prepare(candidate.LSP)
+			prepared.lsp, err = lspFacade.Prepare(candidate.LSP, environment)
 			if err != nil {
 				if cleanupErr := networks.retireCandidate(prepared.network); cleanupErr != nil {
 					return nil, errors.Join(err, fmt.Errorf("network candidate cleanup failed: %w", cleanupErr))

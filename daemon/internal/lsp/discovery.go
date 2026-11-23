@@ -30,6 +30,34 @@ type ResolverOptions struct {
 	PathSet, PathExtSet, HomeSet bool
 }
 
+// ResolverOptionsForEnvironment binds lookup to the sampled environment, even
+// when the login profile unsets a variable present in the daemon environment.
+func ResolverOptionsForEnvironment(environment []string) ResolverOptions {
+	return resolverOptionsForEnvironment(environment, runtime.GOOS == "windows")
+}
+
+func resolverOptionsForEnvironment(environment []string, windows bool) ResolverOptions {
+	options := ResolverOptions{Windows: windows, PathSet: true, PathExtSet: true, HomeSet: true}
+	for _, entry := range environment {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if windows {
+			key = strings.ToUpper(key)
+		}
+		switch key {
+		case "PATH":
+			options.Path = value
+		case "PATHEXT":
+			options.PathExt = value
+		case "HOME":
+			options.Home = value
+		}
+	}
+	return options
+}
+
 // ExecutableResolver resolves configured commands without launching them.
 type ExecutableResolver struct{ options ResolverOptions }
 
@@ -145,10 +173,11 @@ func (r *ExecutableResolver) executable(path string) (string, bool) {
 
 // Discovery owns ordered server declarations and lazy executable resolution.
 type Discovery struct {
-	servers    []ServerConfig
-	resolver   *ExecutableResolver
-	mu         sync.Mutex
-	executable map[string]resolution
+	servers     []ServerConfig
+	environment []string
+	resolver    *ExecutableResolver
+	mu          sync.Mutex
+	executable  map[string]resolution
 }
 type resolution struct {
 	path string

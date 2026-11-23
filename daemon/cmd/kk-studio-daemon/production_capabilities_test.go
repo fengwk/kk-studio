@@ -256,7 +256,7 @@ func newProductionRuntimeUnderTest(t *testing.T) *productionRuntimeUnderTest {
 		}
 	})
 	facade := lsp.NewFacade(supervisor, lsp.PoolOptions{})
-	prepared, err := facade.Prepare(nil)
+	prepared, err := facade.Prepare(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

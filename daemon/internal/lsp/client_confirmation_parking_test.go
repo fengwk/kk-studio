@@ -9,7 +9,7 @@ import (
 // Verifies only a request the server never answered waits for the process to stop before completing.
 func TestProtocol_ConfirmationParking(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

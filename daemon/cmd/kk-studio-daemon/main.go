@@ -108,6 +108,8 @@ func runInternalCommand(args []string) (int, bool) {
 		return native.HelperMain(args[1:]), true
 	case "__lock-helper":
 		return native.LockHelperMain(args[1:]), true
+	case loginEnvironmentCommand:
+		return loginEnvironmentMain(args[1:]), true
 	default:
 		return 0, false
 	}

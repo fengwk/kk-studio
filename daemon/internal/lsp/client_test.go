@@ -45,10 +45,12 @@ type fakeSupervisor struct {
 	waitErr          error
 	oversizedMethod  string
 	oversizedStarts  int
+	lastSpec         native.ProcessSpec
 }
 
-func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
+func (s *fakeSupervisor) Start(_ context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
 	s.mu.Lock()
+	s.lastSpec = spec
 	s.starts++
 	startErr, earlyExit := s.startErr, s.earlyExit
 	if startErr != nil {
@@ -281,7 +283,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	}
 	supervisor := &fakeSupervisor{}
 	server := ServerConfig{ID: "go", Command: []string{"fake"}}
-	client, err := Launch(context.Background(), server, dir, "/fake", supervisor)
+	client, err := Launch(context.Background(), server, dir, "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +324,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 // Verifies timeout returns promptly and sends a cancellation notification.
 func TestClient_RequestTimeoutSendsCancel(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

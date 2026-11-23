@@ -302,7 +302,7 @@ func TestSubprocessSupervisor_LSPLifecycle(t *testing.T) {
 		}
 	})
 	supervisor := &execHelperSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "helper", Command: []string{os.Args[0], "-test.run=^TestLSPSubprocessHelper$"}}, t.TempDir(), os.Args[0], supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "helper", Command: []string{os.Args[0], "-test.run=^TestLSPSubprocessHelper$"}}, t.TempDir(), os.Args[0], supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestSubprocessSupervisor_LSPLifecycle(t *testing.T) {
 func TestSubprocessSupervisor_FailedSpawnSettles(t *testing.T) {
 	supervisor := &execHelperSupervisor{}
 	missing := os.TempDir() + string(os.PathSeparator) + "missing-lsp-helper-executable"
-	_, err := Launch(context.Background(), ServerConfig{ID: "missing", Command: []string{missing}}, t.TempDir(), missing, supervisor)
+	_, err := Launch(context.Background(), ServerConfig{ID: "missing", Command: []string{missing}}, t.TempDir(), missing, supervisor, nil)
 	var bootstrap *LspBootstrapError
 	if !errors.As(err, &bootstrap) || !bootstrap.Converged || !strings.Contains(bootstrap.Error(), "cannot be started") {
 		t.Fatalf("failed spawn error = %#v", err)

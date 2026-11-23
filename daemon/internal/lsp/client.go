@@ -76,11 +76,11 @@ func (s *stdio) Close() error {
 }
 
 // Launch starts a server through native.Supervisor and rejects immediate process exit.
-func Launch(ctx context.Context, server ServerConfig, root, executable string, processes native.Supervisor) (*Client, error) {
+func Launch(ctx context.Context, server ServerConfig, root, executable string, processes native.Supervisor, environment []string) (*Client, error) {
 	if len(server.Command) == 0 {
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, executable), Converged: true, Cause: errors.New("empty command")}
 	}
-	process, err := processes.Start(ctx, native.ProcessSpec{Executable: executable, Args: append([]string(nil), server.Command[1:]...), Directory: root})
+	process, err := processes.Start(ctx, native.ProcessSpec{Executable: executable, Args: append([]string(nil), server.Command[1:]...), Directory: root, Env: environment})
 	if err != nil {
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, executable), Converged: !errors.Is(err, native.ErrScopeNotConverged), Cause: err}
 	}

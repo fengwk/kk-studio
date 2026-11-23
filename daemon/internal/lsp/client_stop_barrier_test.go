@@ -13,7 +13,7 @@ import (
 func TestProtocol_StopExitBarrier(t *testing.T) {
 	gate := make(chan struct{})
 	supervisor := &fakeSupervisor{blockMethod: "slow/request", terminateGate: gate}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestProtocol_StopExitBarrier(t *testing.T) {
 func TestProtocol_ExitWaitsForStop(t *testing.T) {
 	gate := make(chan struct{})
 	supervisor := &fakeSupervisor{blockMethod: "slow/request", terminateGate: gate}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestProtocol_StopFailureNoRetry(t *testing.T) {
 	gate := make(chan struct{})
 	terminateErr := errors.New("termination unavailable")
 	supervisor := &fakeSupervisor{blockMethod: "slow/request", terminateGate: gate, terminateErr: terminateErr}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestProtocol_StopDoesNotSelfWait(t *testing.T) {
 	exitSeen := make(chan struct{}, 1)
 	allowExit := make(chan struct{})
 	supervisor := &fakeSupervisor{blockMethod: "slow/request", exitBlocks: true, exitSeen: exitSeen, allowProcessExit: allowExit}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

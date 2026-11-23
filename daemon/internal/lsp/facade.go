@@ -106,11 +106,12 @@ type PreparedGeneration struct {
 	once       sync.Once
 }
 
-func (f *Facade) Prepare(servers []config.LSPServerConfig) (*PreparedGeneration, error) {
-	d, err := NewDiscovery(servers, ResolverOptions{})
+func (f *Facade) Prepare(servers []config.LSPServerConfig, environment []string) (*PreparedGeneration, error) {
+	d, err := NewDiscovery(servers, ResolverOptionsForEnvironment(environment))
 	if err != nil {
 		return nil, err
 	}
+	d.environment = append([]string{}, environment...)
 	var service *Service
 	if len(servers) > 0 {
 		service = NewService(d, f.processes, f.options)

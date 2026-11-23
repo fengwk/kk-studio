@@ -26,13 +26,8 @@ import (
 const e2eEnvironmentID = "123e4567-e89b-42d3-a456-426614174000"
 
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "__native-helper":
-			os.Exit(native.HelperMain(os.Args[2:]))
-		case "__lock-helper":
-			os.Exit(native.LockHelperMain(os.Args[2:]))
-		}
+	if code, handled := runInternalCommand(os.Args[1:]); handled {
+		os.Exit(code)
 	}
 	os.Exit(m.Run())
 }

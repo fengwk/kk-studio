@@ -23,7 +23,7 @@ func TestProtocol_WirePayloadContracts(t *testing.T) {
 	}
 	events := make(chan fakeRequest, 32)
 	supervisor := &fakeSupervisor{events: events}
-	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, root, "/jdtls", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, root, "/jdtls", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

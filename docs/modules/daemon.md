@@ -26,6 +26,12 @@ Studio 是卡片配置的权威，本地 JSON 是最后接受配置的缓存。�
 
 Go 能力实现位于 [`internal/coding`](../../daemon/internal/coding/)、[`internal/lsp`](../../daemon/internal/lsp/) 与 [`internal/skill`](../../daemon/internal/skill/)。文件读写与编辑、查找与检索、命令执行及 LSP 查询均在 Daemon 侧执行。检索由 Go 实现，不依赖外部 ripgrep。文件写入与编辑在提交前先计算完整 review；review 超出传输预算时整次调用在写入前被拒绝，不会留下已改文件却无法送达审批内容的状态。命令执行在进入原生监管器或输出存储之前失败时报告未执行事实，已进入执行后的失败才声明副作用可能发生。能力 Schema 的源是 harness 的 Java classpath 资源，`internal/capability/schemas` 是生成副本；同步脚本比较去掉尾部空白后的文本，Java 一致性测试再按字节校验。完整模型可见说明见 [内置工具](builtin-tools.md)。
 
+命令使用配置的 Bash 以非交互登录 shell 执行；Daemon 只用自身 PATH 解析该 Bash，并在启动与每次应用配置时
+运行登录 shell 采样一次登录环境。LSP 可执行文件发现、`read` header 的 `lsp:` 支持判定与语言服务器启动都用
+这份登录环境，查找不回退到 Daemon 环境；语言服务器子进程的环境是 Daemon 进程环境叠加采样变量。启动时采样
+失败只记录本地日志并照常启动，LSP 在下次成功应用配置前不可用；应用配置时采样失败上报为该次配置应用失败。
+修改登录配置后，下一次命令会重新加载它；重新保存卡片或重启 Daemon 可刷新 LSP 使用的快照。
+
 ### 原生进程监管
 
 子进程由 [`internal/native`](../../daemon/internal/native/) 的平台监管器管理。POSIX 使用独立 session 与受控 helper 收敛进程范围；Windows 使用 Job Object。工作目录不是文件系统沙箱：进程以 Daemon 运行用户的操作系统权限访问文件。宿主必须提供 Bash 及需要的语言服务器。
