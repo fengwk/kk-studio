@@ -89,8 +89,8 @@ func TestEnvironmentConfigCacheKeepsServerSnapshotIdentity(t *testing.T) {
 	}
 }
 
-// A missing language server is still reported as a field validation failure.
-func TestEnvironmentConfigSnapshotRejectsMissingLSPExecutable(t *testing.T) {
+// A preparation failure preserves the current configuration and reports the affected field.
+func TestEnvironmentConfigReportsPreparationValidationFailure(t *testing.T) {
 	initial := initialRuntimeConfig()
 	snapshot := &protocol.DaemonConfiguration{
 		StudioUrl: "https://studio.example",
@@ -98,7 +98,10 @@ func TestEnvironmentConfigSnapshotRejectsMissingLSPExecutable(t *testing.T) {
 			Id: "jdtls", Command: []string{filepath.Join(t.TempDir(), "missing-jdtls")}, Extensions: []string{".java"},
 		}}},
 	}
-	manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
+	prepare := func(context.Context, config.DaemonConfig, *config.DaemonConfig) (PreparedConfiguration, error) {
+		return nil, &config.EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers.jdtls.command"}
+	}
+	manager := newTestEnvironmentConfigRuntime(t, initial, prepare, &testCacheWriter{})
 	defer manager.Close()
 	result, err := manager.Submit(context.Background(), 2, snapshot)
 	if err != nil {

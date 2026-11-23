@@ -15,7 +15,7 @@ func TestDocumentSyncVersionsAndLanguageID(t *testing.T) {
 		t.Fatal(err)
 	}
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "custom", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "custom", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestDocument_UnchangedContentSendsNoNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestProtocol_JavaDecompile(t *testing.T) {
 		t.Fatal(err)
 	}
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "java", Command: []string{"/opt/jdtls/bin/jdtls"}}, root, "/opt/jdtls/bin/jdtls", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "java", Command: []string{"/opt/jdtls/bin/jdtls"}}, root, "/opt/jdtls/bin/jdtls", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

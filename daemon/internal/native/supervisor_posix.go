@@ -164,9 +164,16 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	cmd := exec.Command(executable, "__native-helper", dir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.ExtraFiles = []*os.File{ownerReader}
-	cmd.Env = mergeEnvironment(os.Environ(), spec.Env)
-	stdinReader, stdin, err := api.pipe()
-	if err != nil {
+	cmd.Env = helperEnvironment(spec)
+	var stdin, stdinReader *os.File
+	if spec.NullStdin {
+		nullStdin, err := openNullStdin()
+		if err != nil {
+			cleanupStart(ownerReader, ownerWriter)
+			return nil, err
+		}
+		stdin, stdinReader = nullStdin, nullStdin
+	} else if stdinReader, stdin, err = api.pipe(); err != nil {
 		cleanupStart(ownerReader, ownerWriter)
 		return nil, err
 	}
@@ -189,10 +196,13 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		cleanupStart(stdinReader, stdin, stdout, stdoutWriter, stderr, stderrWriter, ownerReader, ownerWriter)
 		return nil, fmt.Errorf("cannot start process scope helper: %w", err)
 	}
-	_ = stdinReader.Close()
 	_ = stdoutWriter.Close()
 	_ = stderrWriter.Close()
 	_ = ownerReader.Close()
+	if !spec.NullStdin {
+		// A null stdin stays open: it is the managed stream the command was handed.
+		_ = stdinReader.Close()
+	}
 	p := &posixProcess{
 		supervisor:      s,
 		cmd:             cmd,

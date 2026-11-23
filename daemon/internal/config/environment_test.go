@@ -135,17 +135,6 @@ func TestBuildEnvironmentConfigKeepsConfiguredLSPCommand(t *testing.T) {
 			}
 		})
 	}
-	// Validation still requires the configured server to resolve at its home-relative location.
-	if err := os.Remove(executable); err != nil {
-		t.Fatal(err)
-	}
-	input := validEnvironmentConfig(t)
-	input.Lsp.Servers = []*protocol.LspServer{{Id: "jdtls", Command: []string{"~/.local/share/nvim/mason/bin/" + name}, Extensions: []string{".java"}}}
-	_, err := BuildEnvironmentConfig(DaemonConfig{}, 1, input)
-	var validation *EnvironmentConfigError
-	if !errors.As(err, &validation) || validation.Field != "lsp.servers.jdtls.command" || validation.Code != "VALIDATION_FAILED" {
-		t.Fatalf("missing home-relative server validation = %v", err)
-	}
 }
 
 // ADAPT rejects invalid candidates before returning any publishable configuration.
@@ -163,9 +152,6 @@ func TestBuildEnvironmentConfigRejectsInvalidCandidateFields(t *testing.T) {
 			missing := filepath.Join(t.TempDir(), "missing-bash")
 			c.BashExecutable = &missing
 		}, field: "bashExecutable"},
-		{name: "unresolvable LSP executable", mutate: func(c *protocol.DaemonConfiguration) {
-			c.Lsp.Servers[0].Command[0] = filepath.Join(t.TempDir(), "missing")
-		}, field: "lsp.servers.typescript.command"},
 		{name: "duplicate LSP", mutate: func(c *protocol.DaemonConfiguration) { c.Lsp.Servers = append(c.Lsp.Servers, c.Lsp.Servers[0]) }, field: "lsp.servers"},
 		{name: "unsafe extension", mutate: func(c *protocol.DaemonConfiguration) { c.Lsp.Servers[0].Extensions = []string{"../secret"} }, field: "lsp.servers.typescript.extensions"},
 		{name: "unsafe root marker", mutate: func(c *protocol.DaemonConfiguration) { c.Lsp.Servers[0].RootMarkers = []string{"../secret"} }, field: "lsp.servers.typescript.markers"},

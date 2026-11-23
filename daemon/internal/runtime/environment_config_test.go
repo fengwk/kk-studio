@@ -81,8 +81,8 @@ func TestEnvironmentConfigTreatsEmptyLSPRepresentationsAsSameContent(t *testing.
 	})
 }
 
-// Persists a version-only change without preparing or publishing a new resource generation.
-func TestEnvironmentConfigSameContentOnlyAdvancesVersion(t *testing.T) {
+// A newer version with the same content still prepares resources; replays do not.
+func TestEnvironmentConfigSameContentPreparesEachNewVersion(t *testing.T) {
 	initial := initialRuntimeConfig()
 	preparer, cache := &testConfigurationPreparer{}, &testCacheWriter{}
 	manager := newTestEnvironmentConfigRuntime(t, initial, preparer.prepare, cache)
@@ -98,7 +98,7 @@ func TestEnvironmentConfigSameContentOnlyAdvancesVersion(t *testing.T) {
 	cache.mu.Lock()
 	writes := len(cache.writes)
 	cache.mu.Unlock()
-	if prepareCalls != 1 || writes != 2 || manager.Current().ConfigVersion != 2 {
+	if prepareCalls != 2 || writes != 2 || manager.Current().ConfigVersion != 2 {
 		t.Fatalf("prepares=%d writes=%d currentVersion=%d", prepareCalls, writes, manager.Current().ConfigVersion)
 	}
 	if result, err := manager.Submit(context.Background(), 2, configurationOf(initial)); err != nil || result.Kind != ConfigConfirmed {

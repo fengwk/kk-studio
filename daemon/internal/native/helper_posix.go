@@ -19,6 +19,17 @@ import (
 	"time"
 )
 
+// helperEnvironment returns the environment the scope helper inherits and passes on to
+// the command. Env is an overlay on the daemon environment by default and the whole
+// environment in replacement mode; both are filtered identically.
+func helperEnvironment(spec ProcessSpec) []string {
+	base := os.Environ()
+	if spec.ReplaceEnv {
+		base = nil
+	}
+	return mergeEnvironment(base, spec.Env)
+}
+
 func mergeEnvironment(base, overrides []string) []string {
 	values := make(map[string]string, len(base)+len(overrides))
 	for _, entry := range append(append([]string(nil), base...), overrides...) {

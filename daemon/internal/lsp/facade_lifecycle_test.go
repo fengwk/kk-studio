@@ -10,7 +10,7 @@ import (
 // Keeps an acquired generation alive until its calls release it.
 func TestFacade_GenerationSwap(t *testing.T) {
 	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
-	prepared, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing"}, Extensions: []string{".go"}}})
+	prepared, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing"}, Extensions: []string{".go"}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestFacade_GenerationSwap(t *testing.T) {
 	}
 	old := facade.current
 	_, release := old.acquire()
-	disabled, err := facade.Prepare(nil)
+	disabled, err := facade.Prepare(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestFacade_GenerationSwap(t *testing.T) {
 // Verifies publish swaps subsequent generation acquisitions while an old lease stays alive.
 func TestFacade_PublishRoutesGenerations(t *testing.T) {
 	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
-	first, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing-go"}, Extensions: []string{".go"}}})
+	first, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing-go"}, Extensions: []string{".go"}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestFacade_PublishRoutesGenerations(t *testing.T) {
 	if oldLease != old.service || oldLease == nil {
 		t.Fatal("old generation did not provide its service")
 	}
-	second, err := facade.Prepare([]config.LSPServerConfig{{ID: "java", Command: []string{"missing-java"}, Extensions: []string{".java"}}})
+	second, err := facade.Prepare([]config.LSPServerConfig{{ID: "java", Command: []string{"missing-java"}, Extensions: []string{".java"}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestFacade_PreparedGenerationLifecycle(t *testing.T) {
 	if err := publishServers(t, facade, []config.LSPServerConfig{{ID: "same", Command: []string{"a"}}, {ID: "same", Command: []string{"b"}}}); err == nil || err.Error() != "duplicate lsp server id: same" {
 		t.Fatalf("duplicate configuration error = %v", err)
 	}
-	prepared, err := facade.Prepare(nil)
+	prepared, err := facade.Prepare(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

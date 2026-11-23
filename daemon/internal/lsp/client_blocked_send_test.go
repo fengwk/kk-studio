@@ -17,7 +17,7 @@ func TestClient_BlockedWriteCancellationAndStop(t *testing.T) {
 		events:        events,
 		terminateGate: terminateGate,
 	}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

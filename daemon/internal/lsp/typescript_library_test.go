@@ -19,7 +19,13 @@ import (
 
 func fakeNPM(t *testing.T, fail bool) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "npm")
+	return fakeNPMInDirectory(t, t.TempDir(), fail)
+}
+
+// fakeNPMInDirectory places the fake installer in a directory the caller can put on a PATH.
+func fakeNPMInDirectory(t *testing.T, directory string, fail bool) string {
+	t.Helper()
+	path := filepath.Join(directory, "npm")
 	body := "#!/bin/sh\nset -eu\n"
 	if fail {
 		body += "exit 1\n"
@@ -55,7 +61,7 @@ func TestTypeScriptLibrary_ConcurrentInstallAndResolveProfile(t *testing.T) {
 			_ = os.Unsetenv("TS_INSTALL_COUNTER")
 		}
 	}()
-	library := TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}
+	library := TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false), Environment: os.Environ()}
 	var wg sync.WaitGroup
 	paths := make([]string, 2)
 	errs := make([]error, 2)
@@ -87,7 +93,7 @@ func TestTypeScriptLibrary_ConcurrentInstallAndResolveProfile(t *testing.T) {
 	if err != nil || string(invocations) != "x" {
 		t.Fatalf("npm invocations = %q, error = %v; want one execution", invocations, err)
 	}
-	profile, err := TypeScriptServerConfig(root)
+	profile, err := TypeScriptServerConfig(root, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +129,7 @@ func TestTypeScriptLibrary_FailedInstallDoesNotPublish(t *testing.T) {
 			} else {
 				npm = fakeNPMWrongVersion(t)
 			}
-			if _, err := (TypeScriptLibrary{Directory: root, NPM: npm}).Install(context.Background()); err == nil {
+			if _, err := (TypeScriptLibrary{Directory: root, NPM: npm, Environment: os.Environ()}).Install(context.Background()); err == nil {
 				t.Fatal("expected install failure")
 			}
 			if _, err := os.Lstat(filepath.Join(root, typescriptProfileID)); !errors.Is(err, os.ErrNotExist) {
@@ -194,42 +200,113 @@ func TestTypeScriptLibrary_RejectsInvalidSetupAndCancelledLockWait(t *testing.T)
 
 func TestTypeScriptServerConfig_RequiresInstalledMaterialAndNode(t *testing.T) {
 	requireLinuxTSProfile(t)
-	if _, err := TypeScriptServerConfig("relative"); err == nil {
+	if _, err := TypeScriptServerConfig("relative", nil); err == nil {
 		t.Fatal("relative library directory was accepted")
 	}
-	if _, err := TypeScriptServerConfig(filepath.Join(t.TempDir(), "missing")); err == nil {
+	if _, err := TypeScriptServerConfig(filepath.Join(t.TempDir(), "missing"), nil); err == nil {
 		t.Fatal("missing library directory was accepted")
 	}
 	root := t.TempDir()
-	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}).Install(context.Background()); err != nil {
+	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false), Environment: os.Environ()}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	oldPath, wasSet := os.LookupEnv("PATH")
-	t.Cleanup(func() {
-		if wasSet {
-			_ = os.Setenv("PATH", oldPath)
-		} else {
-			_ = os.Unsetenv("PATH")
-		}
-	})
-	if err := os.Setenv("PATH", t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := TypeScriptServerConfig(root); err == nil || !strings.Contains(err.Error(), "Node.js 18 or later") {
-		t.Fatalf("missing Node.js error = %v", err)
+	// The login environment is authoritative; the Daemon environment is not a fallback.
+	nodeDir := t.TempDir()
+	writeFakeNode(t, nodeDir, "v22.0.0")
+	t.Setenv("PATH", nodeDir)
+	if _, err := TypeScriptServerConfig(root, nil); err == nil || !strings.Contains(err.Error(), "Node.js 18 or later") {
+		t.Fatalf("empty login environment error = %v", err)
 	}
 	for _, version := range []string{"v17.9.0", "node-version"} {
-		nodeDir := t.TempDir()
-		node := filepath.Join(nodeDir, "node")
-		if err := os.WriteFile(node, []byte("#!/bin/sh\nprintf '%s\\n' '"+version+"'\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Setenv("PATH", nodeDir); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := TypeScriptServerConfig(root); err == nil || !strings.Contains(err.Error(), "Node.js 18 or later") {
+		versionDir := t.TempDir()
+		writeFakeNode(t, versionDir, version)
+		if _, err := TypeScriptServerConfig(root, []string{"PATH=" + versionDir}); err == nil || !strings.Contains(err.Error(), "Node.js 18 or later") {
 			t.Fatalf("Node.js %q error = %v", version, err)
 		}
+	}
+}
+
+// npm is selected by the login environment alone; the Daemon PATH is never consulted.
+func TestTypeScriptLibrary_UsesLoginEnvironmentToFindNPM(t *testing.T) {
+	requireLinuxTSProfile(t)
+	loginBin := t.TempDir()
+	fakeNPMInDirectory(t, loginBin, false)
+	systemPath := os.Getenv("PATH")
+	// The Daemon PATH holds a decoy npm that cannot install anything.
+	daemonBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(daemonBin, "npm"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", daemonBin)
+	environment := []string{
+		"PATH=" + loginBin + string(os.PathListSeparator) + systemPath,
+		"HOME=/login/home",
+	}
+	root := t.TempDir()
+	installed, err := (TypeScriptLibrary{Directory: root, NPM: "npm", Environment: environment}).Install(context.Background())
+	if err != nil {
+		t.Fatalf("login-environment install: %v", err)
+	}
+	if installed != filepath.Join(root, typescriptProfileID) {
+		t.Fatalf("installed profile = %q", installed)
+	}
+	// An empty environment must not fall back to the Daemon PATH that does provide npm.
+	if _, err := (TypeScriptLibrary{Directory: t.TempDir(), NPM: "npm"}).Install(context.Background()); err == nil || !strings.Contains(err.Error(), "requires npm") {
+		t.Fatalf("empty environment install error = %v", err)
+	}
+}
+
+// Node.js is resolved and version-checked inside the login environment.
+func TestTypeScriptServerConfig_ResolvesNodeInLoginEnvironment(t *testing.T) {
+	requireLinuxTSProfile(t)
+	root := t.TempDir()
+	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false), Environment: os.Environ()}).Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	nodeDir := t.TempDir()
+	node := filepath.Join(nodeDir, "node")
+	// The probe reports a usable version only when the login environment reached it.
+	probe := "#!/bin/sh\n[ \"${KK_LOGIN_MARKER:-}\" = ready ] || exit 1\nprintf 'v22.0.0\\n'\n"
+	if err := os.WriteFile(node, []byte(probe), 0700); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := TypeScriptServerConfig(root, []string{"PATH=" + nodeDir, "KK_LOGIN_MARKER=ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Command[0] != resolved {
+		t.Fatalf("Node.js executable = %q, want %q", profile.Command[0], resolved)
+	}
+	if _, err := TypeScriptServerConfig(root, []string{"PATH=" + nodeDir}); err == nil {
+		t.Fatal("Node.js was probed without the login environment")
+	}
+}
+
+// The isolated npm environment redirects npm state without discarding the login environment.
+func TestIsolatedNPMEnvironmentStartsFromLoginEnvironment(t *testing.T) {
+	stage := t.TempDir()
+	got := isolatedNPMEnvironment([]string{
+		"PATH=/login/bin",
+		"KK_LOGIN_MARKER=ready",
+		"HOME=/login/home",
+		"XDG_CONFIG_HOME=/login/config",
+		"XDG_CACHE_HOME=/login/cache",
+		"NPM_CONFIG_USERCONFIG=/login/npmrc",
+	}, stage)
+	want := []string{
+		"PATH=/login/bin",
+		"KK_LOGIN_MARKER=ready",
+		"HOME=" + filepath.Join(stage, ".npm-home"),
+		"XDG_CONFIG_HOME=" + filepath.Join(stage, ".npm-home", ".config"),
+		"XDG_CACHE_HOME=" + filepath.Join(stage, ".npm-home", ".cache"),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("isolated npm environment = %q, want %q", got, want)
 	}
 }
 
@@ -245,7 +322,7 @@ func TestTypeScriptLibrary_RejectsIncompleteAndCorruptInstalledProfiles(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPMIncomplete(t, tc.includeBinary, tc.includeEntrypoint)}).Install(context.Background()); err == nil {
+			if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPMIncomplete(t, tc.includeBinary, tc.includeEntrypoint), Environment: os.Environ()}).Install(context.Background()); err == nil {
 				t.Fatal("incomplete package material was published")
 			}
 			if _, err := os.Lstat(filepath.Join(root, typescriptProfileID)); !errors.Is(err, os.ErrNotExist) {
@@ -255,7 +332,7 @@ func TestTypeScriptLibrary_RejectsIncompleteAndCorruptInstalledProfiles(t *testi
 	}
 
 	root := t.TempDir()
-	profile, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}).Install(context.Background())
+	profile, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false), Environment: os.Environ()}).Install(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +340,7 @@ func TestTypeScriptLibrary_RejectsIncompleteAndCorruptInstalledProfiles(t *testi
 	if err := os.WriteFile(packagePath, []byte(`{"version":"5.8.4"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}).Install(context.Background()); err == nil {
+	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false), Environment: os.Environ()}).Install(context.Background()); err == nil {
 		t.Fatal("corrupt installed version was overwritten")
 	}
 	data, err := os.ReadFile(packagePath)
@@ -308,7 +385,7 @@ func TestTypeScriptLibrary_RejectsProfileSymlink(t *testing.T) {
 	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}).Install(context.Background()); err == nil {
 		t.Fatal("symlinked profile target was accepted")
 	}
-	if _, err := TypeScriptServerConfig(root); err == nil {
+	if _, err := TypeScriptServerConfig(root, nil); err == nil {
 		t.Fatal("symlinked profile target was configured")
 	}
 	info, err := os.Lstat(target)
@@ -353,10 +430,10 @@ func fakeNPMWrongVersion(t *testing.T) string {
 func TestTypeScriptProfile_TwoWorkspaceSessionsStayIsolated(t *testing.T) {
 	requireLinuxTSProfile(t)
 	root := t.TempDir()
-	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}).Install(context.Background()); err != nil {
+	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false), Environment: os.Environ()}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := TypeScriptServerConfig(root)
+	profile, err := TypeScriptServerConfig(root, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +443,7 @@ func TestTypeScriptProfile_TwoWorkspaceSessionsStayIsolated(t *testing.T) {
 	defer secondEnvironment.Close()
 	declaration := config.LSPServerConfig{ID: profile.ID, Command: profile.Command, Extensions: profile.Extensions, RootMarkers: profile.RootMarkers, FirstMatchMarkers: profile.FirstMatchMarkers}
 	for _, facade := range []*Facade{firstEnvironment, secondEnvironment} {
-		prepared, err := facade.Prepare([]config.LSPServerConfig{declaration})
+		prepared, err := facade.Prepare([]config.LSPServerConfig{declaration}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -422,13 +499,13 @@ func TestTypeScriptProfile_RealInstallQueryAndExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	libraryDir := t.TempDir()
-	if _, err := (TypeScriptLibrary{Directory: libraryDir}).Install(ctx); err != nil {
+	if _, err := (TypeScriptLibrary{Directory: libraryDir, Environment: os.Environ()}).Install(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(libraryDir, typescriptProfileID, ".npm-cache")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("npm cache escaped staging directory: %v", err)
 	}
-	profile, err := TypeScriptServerConfig(libraryDir)
+	profile, err := TypeScriptServerConfig(libraryDir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +529,7 @@ func TestTypeScriptProfile_RealInstallQueryAndExit(t *testing.T) {
 			}
 		}
 	}()
-	prepared, err := facade.Prepare([]config.LSPServerConfig{profile})
+	prepared, err := facade.Prepare([]config.LSPServerConfig{profile}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,6 +610,15 @@ func requireLinuxTSProfile(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("TypeScript LSP profile is verified only on linux/amd64")
+	}
+}
+
+// writeFakeNode installs a Node.js stand-in that reports the given version.
+func writeFakeNode(t *testing.T, directory, version string) {
+	t.Helper()
+	body := "#!/bin/sh\nprintf '%s\\n' '" + version + "'\n"
+	if err := os.WriteFile(filepath.Join(directory, "node"), []byte(body), 0700); err != nil {
+		t.Fatal(err)
 	}
 }
 

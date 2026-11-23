@@ -13,7 +13,7 @@ func TestClient_StopShutdownParametersAndGraceWait(t *testing.T) {
 	exitSeen := make(chan struct{}, 1)
 	allowExit := make(chan struct{})
 	supervisor := &fakeSupervisor{shutdownParams: shutdownParams, exitBlocks: true, exitSeen: exitSeen, allowProcessExit: allowExit}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestClient_StopShutdownParametersAndGraceWait(t *testing.T) {
 func TestClient_StopWithoutGraceSkipsShutdown(t *testing.T) {
 	shutdownParams := make(chan json.RawMessage, 1)
 	supervisor := &fakeSupervisor{shutdownParams: shutdownParams}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

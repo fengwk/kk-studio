@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -16,11 +17,51 @@ import (
 // publishServers installs one configuration generation through the production entrypoints.
 func publishServers(t *testing.T, facade *Facade, servers []config.LSPServerConfig) error {
 	t.Helper()
-	prepared, err := facade.Prepare(servers)
+	prepared, err := facade.Prepare(servers, nil)
 	if err != nil {
 		return err
 	}
 	return prepared.Publish()
+}
+
+// The pool uses its generation's immutable environment for each launch, not an overlay.
+func TestFacadeLaunchUsesLoginEnvironment(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	source := filepath.Join(workspace, "source.go")
+	if err := os.WriteFile(source, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := &fakeSupervisor{}
+	facade := NewFacade(supervisor, PoolOptions{})
+	defer facade.Close()
+	environment := []string{"KK_LOGIN_GENERATION=one"}
+	prepared, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}, environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment[0] = "KK_LOGIN_GENERATION=two"
+	if err := prepared.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	service, release := facade.currentService()
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	lease, err := service.Pool.LeaseWithExit(ctx, source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	supervisor.mu.Lock()
+	spec := supervisor.lastSpec
+	supervisor.mu.Unlock()
+	if !spec.ReplaceEnv || !slices.Equal(spec.Env, []string{"KK_LOGIN_GENERATION=one"}) {
+		t.Fatal("launch did not use the captured environment as a replacement")
+	}
 }
 
 // Ensures argument rejection precedes any server launch and confirms exit once.

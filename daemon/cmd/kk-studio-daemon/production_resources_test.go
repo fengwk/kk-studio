@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,6 +21,11 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 	server := config.LSPServerConfig{ID: "text", Command: []string{executable}, Extensions: []string{".txt"}}
 	proxyA, proxyB := "http://127.0.0.1:8081", "http://127.0.0.1:8082"
 	previous := config.DaemonConfig{BashExecutable: &executable, ProxyURL: &proxyA, LSP: []config.LSPServerConfig{server}}
+	environment := []string{"KK_SAMPLE=initial"}
+	load := func(context.Context, string) ([]string, error) { return environment, nil }
+	if _, err := prepareLoginEnvironment(context.Background(), &previous, load); err != nil {
+		t.Fatal(err)
+	}
 	candidate := cloneProductionConfig(previous)
 	facade := lsp.NewFacade(nil, lsp.PoolOptions{})
 	initialNetwork := networkForTest(t, proxyA)
@@ -29,7 +35,7 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 			t.Errorf("close network store: %v", err)
 		}
 	}()
-	prepare := prepareProductionEnvironment(facade, networks)
+	prepare := prepareProductionEnvironment(facade, networks, load)
 
 	prepared, err := prepare(context.Background(), candidate, &previous)
 	if err != nil {
@@ -40,8 +46,8 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 		t.Fatalf("unchanged resource candidates = network %t, LSP %t", noChange.network != nil, noChange.lsp != nil)
 	}
 
-	bash, err := config.ResolveBash(nil)
-	if err != nil {
+	bash := filepath.Join(t.TempDir(), filepath.Base(executable))
+	if err := os.WriteFile(bash, []byte("fixture"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	bashOnly := cloneProductionConfig(previous)
@@ -51,9 +57,26 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 		t.Fatal(err)
 	}
 	bashChange := prepared.(*preparedEnvironment)
-	if bashChange.network != nil || bashChange.lsp != nil {
+	if bashChange.network != nil || bashChange.lsp == nil {
 		t.Fatalf("bash-only candidates = network %t, LSP %t", bashChange.network != nil, bashChange.lsp != nil)
 	}
+
+	if err := bashChange.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	environment = []string{"KK_SAMPLE=changed"}
+	prepared, err = prepare(context.Background(), candidate, &previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envChange := prepared.(*preparedEnvironment)
+	if envChange.network != nil || envChange.lsp == nil {
+		t.Fatal("login environment change did not rebuild only LSP")
+	}
+	if err := envChange.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	environment = []string{"KK_SAMPLE=initial"}
 
 	candidate.ProxyURL = &proxyB
 	prepared, err = prepare(context.Background(), candidate, &previous)

@@ -118,9 +118,8 @@ func buildSnapshotLSP(input *protocol.LspConfiguration) ([]LSPServerConfig, erro
 	return lsp, nil
 }
 
-// snapshotLSPServer validates one declared server and confirms its executable resolves. The
-// configured command is kept verbatim so the applied snapshot, the private cache and the server's
-// raw snapshot stay identical; LSP discovery expands the home prefix at use.
+// snapshotLSPServer validates the declaration. Executable validation is done
+// during preparation, once the Bash login environment is available.
 func snapshotLSPServer(server *protocol.LspServer) (LSPServerConfig, error) {
 	fields := lspServerFields{id: server.GetId(), command: cloneStrings(server.Command), extensions: server.Extensions, rootMarkers: server.RootMarkers, firstMatchMarkers: server.FirstMatchMarkers}
 	fields.normalize()
@@ -135,9 +134,6 @@ func snapshotLSPServer(server *protocol.LspServer) (LSPServerConfig, error) {
 		case lspServerInvalidLists, lspServerOK:
 		}
 		return LSPServerConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: field(suffix)}
-	}
-	if _, err := ResolveExecutable(fields.command[0]); err != nil {
-		return LSPServerConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: field(".command")}
 	}
 	return LSPServerConfig{ID: fields.id, Command: fields.command, Extensions: fields.extensions, RootMarkers: fields.rootMarkers, FirstMatchMarkers: fields.firstMatchMarkers}, nil
 }

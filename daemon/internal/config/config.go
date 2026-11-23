@@ -11,9 +11,11 @@ type DaemonConfig struct {
 	GatewayURL            string
 	BashExecutable        *string
 	BashExecutableSetting *string
-	LSP                   []LSPServerConfig
-	ProxyURL              *string
-	DistributionDir       string
+	// LoginEnvironmentDigest tracks the runtime sample without retaining it in the configuration.
+	LoginEnvironmentDigest [32]byte
+	LSP                    []LSPServerConfig
+	ProxyURL               *string
+	DistributionDir        string
 }
 
 // LSPServerConfig contains one configured language server and its discovery rules.

@@ -12,7 +12,7 @@ import (
 // Verifies an unexpected JSON-RPC disconnect terminates its supervised process.
 func TestClient_TransportFailureTerminatesProcess(t *testing.T) {
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestClient_TransportFailureTerminatesProcess(t *testing.T) {
 // Terminates a process when the JSON-RPC connection disconnects without a codec error.
 func TestClient_TransportCloseTerminatesProcess(t *testing.T) {
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestClient_TransportCloseTerminatesProcess(t *testing.T) {
 // Preserves both transport and process-cleanup failures.
 func TestClient_TransportCleanupFailureIsAggregated(t *testing.T) {
 	supervisor := &fakeSupervisor{}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestClient_TransportCleanupFailureIsAggregated(t *testing.T) {
 // Preserve the exact banner-limit error through the client transport.
 func TestClient_BannerLimitErrorIsReported(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "initialize"}
-	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

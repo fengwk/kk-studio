@@ -20,7 +20,7 @@ func TestDocument_NotificationSequenceAndContent(t *testing.T) {
 	}
 	events := make(chan fakeRequest, 16)
 	supervisor := &fakeSupervisor{events: events}
-	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestDocument_DeletedOverlayClosesAndReopens(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	events := make(chan fakeRequest, 16)
-	client, err := Launch(ctx, ServerConfig{ID: "go", Command: []string{"fake"}}, root, "/fake", &fakeSupervisor{events: events})
+	client, err := Launch(ctx, ServerConfig{ID: "go", Command: []string{"fake"}}, root, "/fake", &fakeSupervisor{events: events}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestDocument_QueriesRefreshOpenOverlays(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			events := make(chan fakeRequest, 16)
-			client, err := Launch(ctx, ServerConfig{ID: "go", Command: []string{"fake"}}, root, "/fake", &fakeSupervisor{events: events})
+			client, err := Launch(ctx, ServerConfig{ID: "go", Command: []string{"fake"}}, root, "/fake", &fakeSupervisor{events: events}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

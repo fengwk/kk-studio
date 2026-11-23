@@ -58,7 +58,17 @@ func (r productionRuntime) run(ctx context.Context, initial config.DaemonConfig,
 		return productionFailure("native descendant tracking is unavailable", errors.New("supervisor does not implement descendant tracking"))
 	}
 	instanceID := uuid.New()
-	lspFacade, cleanupLSP, err := startLanguageServers(initial, processes, &runErr)
+	loadLogin := func(ctx context.Context, bash string) ([]string, error) {
+		return loadLoginEnvironment(ctx, processes, bash)
+	}
+	environment, err := prepareLoginEnvironment(ctx, &initial, loadLogin)
+	if err != nil {
+		if errors.Is(err, context.Canceled) && !errors.Is(err, errLoginEnvironmentCleanup) {
+			return nil
+		}
+		return productionFailure("initial Bash login environment is unavailable", err)
+	}
+	lspFacade, cleanupLSP, err := startLanguageServers(initial, environment, processes, &runErr)
 	if err != nil {
 		return err
 	}
@@ -68,7 +78,7 @@ func (r productionRuntime) run(ctx context.Context, initial config.DaemonConfig,
 		return err
 	}
 	defer cleanupIDE()
-	environmentConfig, err := startEnvironmentConfig(initial, lspFacade, networks)
+	environmentConfig, err := startEnvironmentConfig(initial, lspFacade, networks, loadLogin)
 	if err != nil {
 		return err
 	}
@@ -139,9 +149,9 @@ func startNetworks(initial config.DaemonConfig, runErr *error) (*networkRuntimeS
 	}, nil
 }
 
-func startLanguageServers(initial config.DaemonConfig, processes native.Supervisor, runErr *error) (*lsp.Facade, func(), error) {
+func startLanguageServers(initial config.DaemonConfig, environment []string, processes native.Supervisor, runErr *error) (*lsp.Facade, func(), error) {
 	lspFacade := lsp.NewFacade(processes, lsp.PoolOptions{})
-	initialLSP, err := lspFacade.Prepare(initial.LSP)
+	initialLSP, err := lspFacade.Prepare(initial.LSP, environment)
 	if err != nil {
 		return nil, nil, productionFailure("initial language-server configuration is invalid", err)
 	}
@@ -172,12 +182,12 @@ func startIDEService(initial config.DaemonConfig, processes native.Supervisor, t
 	}, nil
 }
 
-func startEnvironmentConfig(initial config.DaemonConfig, lspFacade *lsp.Facade, networks *networkRuntimeStore) (*daemonruntime.EnvironmentConfigRuntime, error) {
+func startEnvironmentConfig(initial config.DaemonConfig, lspFacade *lsp.Facade, networks *networkRuntimeStore, load loginEnvironmentLoader) (*daemonruntime.EnvironmentConfigRuntime, error) {
 	status := daemonruntime.NewStatusTracker()
 	environmentConfig, err := daemonruntime.NewEnvironmentConfigRuntime(daemonruntime.EnvironmentConfigOptions{
 		Initial: initial,
 		Status:  status,
-		Prepare: prepareProductionEnvironment(lspFacade, networks),
+		Prepare: prepareProductionEnvironment(lspFacade, networks, load),
 		Report:  func(err error) { slog.Error("environment configuration could not be applied", "error", err) },
 	})
 	if err != nil {

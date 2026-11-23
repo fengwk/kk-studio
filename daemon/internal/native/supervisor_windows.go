@@ -177,7 +177,14 @@ func startWindowsHelperProcess(stateDir string, spec ProcessSpec) (*windowsHelpe
 		_ = removeStateDir(stateDir)
 		return nil, windows.ProcessInformation{}, err
 	}
-	helperEnv := mergeWindowsEnvironment(os.Environ(), spec.Env)
+	if spec.NullStdin {
+		if err := pipes.useNullStdin(); err != nil {
+			pipes.close()
+			_ = removeStateDir(stateDir)
+			return nil, windows.ProcessInformation{}, err
+		}
+	}
+	helperEnv := helperEnvironment(spec)
 	helperEnv = mergeWindowsEnvironment(helperEnv, []string{windowsStdinHandleEnv + "=" + strconv.FormatUint(uint64(pipes.commandInput), 10)})
 	helper, err := startWindowsHelper(stateDir, pipes, helperEnv)
 	if err != nil {
