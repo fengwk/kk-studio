@@ -12,14 +12,17 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// Capability roots and grep text arguments are preflighted.
+// Capability roots and search arguments are preflighted.
 func TestSearchCapabilityRejectsInvalidRootsAndNUL(t *testing.T) {
-	for _, capability := range []string{"fs.find", "fs.grep"} {
-		result := invokeCoding(t, Provider{}, capability, map[string]any{
-			"path": "relative", "pattern": "x",
+	for _, test := range []struct{ capability, field string }{
+		{"fs.find-files", "glob"},
+		{"fs.grep", "pattern"},
+	} {
+		result := invokeCoding(t, Provider{}, test.capability, map[string]any{
+			"path": "relative", test.field: "x",
 		}, nil)
 		if !result.Error || !strings.Contains(result.Contents[0].Text, "absolute path") {
-			t.Errorf("%s relative root result=%#v", capability, result)
+			t.Errorf("%s relative root result=%#v", test.capability, result)
 		}
 	}
 
@@ -27,8 +30,8 @@ func TestSearchCapabilityRejectsInvalidRootsAndNUL(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.find", map[string]any{
-		"path": file, "pattern": "*",
+	result := invokeCoding(t, Provider{}, "fs.find-files", map[string]any{
+		"path": file, "glob": "*",
 	}, nil)
 	if !result.Error || !strings.Contains(result.Contents[0].Text, "path must be a directory") {
 		t.Fatalf("find file root result=%#v", result)
@@ -36,17 +39,18 @@ func TestSearchCapabilityRejectsInvalidRootsAndNUL(t *testing.T) {
 
 	root := t.TempDir()
 	for _, test := range []struct {
-		name string
-		args map[string]any
-		want string
+		name, capability string
+		args             map[string]any
+		want             string
 	}{
-		{"pattern", map[string]any{"path": root, "pattern": "\x00"}, "pattern must not contain NUL"},
-		{"glob", map[string]any{"path": root, "pattern": "x", "glob": "\x00"}, "glob must not contain NUL"},
+		{"find glob", "fs.find-files", map[string]any{"path": root, "glob": "\x00"}, "glob must not contain NUL"},
+		{"grep pattern", "fs.grep", map[string]any{"path": root, "pattern": "\x00"}, "pattern must not contain NUL"},
+		{"grep glob", "fs.grep", map[string]any{"path": root, "pattern": "x", "glob": "\x00"}, "glob must not contain NUL"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result := invokeCoding(t, Provider{}, "fs.grep", test.args, nil)
+			result := invokeCoding(t, Provider{}, test.capability, test.args, nil)
 			if !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
-				t.Fatalf("grep result=%#v want %q", result, test.want)
+				t.Fatalf("result=%#v want %q", result, test.want)
 			}
 		})
 	}

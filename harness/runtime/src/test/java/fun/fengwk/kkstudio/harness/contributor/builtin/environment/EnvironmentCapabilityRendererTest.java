@@ -198,23 +198,23 @@ class EnvironmentCapabilityRendererTest {
   }
 
   /**
-   * 验证 FS_FIND 动作渲染：path 为空时渲染为 "find files matching " + pattern， path 存在时渲染为 "find " + pattern + "
-   * under " + path，且省略 limit、timeout_seconds 等参数。
+   * 验证 find 动作渲染：path 为空时渲染为 "find files matching " + glob，path 存在时渲染为 "find " + glob + " under " +
+   * path，且省略 limit、timeout_seconds 等参数。
    */
   @Test
-  void fsFindRendersPatternAndDistinguishesPath() {
+  void fsFindRendersGlobAndDistinguishesPath() {
     EnvironmentCapabilityRenderer renderer =
-        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND);
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND_FILES);
 
     // 无 path
     assertEquals(
         Optional.of("find files matching *.ts"),
-        renderer.render(request("fs_find", "{\"pattern\":\"*.ts\"}")));
+        renderer.render(request("fs_find", "{\"glob\":\"*.ts\"}")));
 
     // 有 path
     assertEquals(
         Optional.of("find *.ts under src"),
-        renderer.render(request("fs_find", "{\"pattern\":\"*.ts\",\"path\":\"src\"}")));
+        renderer.render(request("fs_find", "{\"glob\":\"*.ts\",\"path\":\"src\"}")));
 
     // 包含执行控制参数
     assertEquals(
@@ -222,7 +222,7 @@ class EnvironmentCapabilityRendererTest {
         renderer.render(
             request(
                 "fs_find",
-                "{\"pattern\":\"*.ts\",\"path\":\"src\",\"limit\":200,\"timeout_seconds\":10}")));
+                "{\"glob\":\"*.ts\",\"path\":\"src\",\"limit\":200,\"timeout_seconds\":10}")));
   }
 
   /**
@@ -304,11 +304,11 @@ class EnvironmentCapabilityRendererTest {
         grep.render(request("fs_grep", "{\"pattern\":\"TODO\",\"workdir\":\"/tmp\"}")));
 
     EnvironmentCapabilityRenderer find =
-        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND);
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND_FILES);
     assertEquals(
         Optional.of("find *.ts under src"),
         find.render(
-            request("fs_find", "{\"pattern\":\"*.ts\",\"path\":\"src\",\"workdir\":\"/tmp\"}")));
+            request("fs_find", "{\"glob\":\"*.ts\",\"path\":\"src\",\"workdir\":\"/tmp\"}")));
 
     EnvironmentCapabilityRenderer gotoDef =
         EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION);
@@ -368,14 +368,14 @@ class EnvironmentCapabilityRendererTest {
                 "fs_grep", "{\"pattern\":\"err\",\"literal\":true,\"path\":\"logs\"}", "prod")));
 
     EnvironmentCapabilityRenderer findRenderer =
-        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND);
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND_FILES);
     assertEquals(
         Optional.of("find files matching *.xml in environment staging"),
-        findRenderer.render(request("fs_find", "{\"pattern\":\"*.xml\"}", "staging")));
+        findRenderer.render(request("fs_find", "{\"glob\":\"*.xml\"}", "staging")));
     assertEquals(
         Optional.of("find *.xml under config in environment staging"),
         findRenderer.render(
-            request("fs_find", "{\"pattern\":\"*.xml\",\"path\":\"config\"}", "staging")));
+            request("fs_find", "{\"glob\":\"*.xml\",\"path\":\"config\"}", "staging")));
   }
 
   /** 验证当核心字段缺失、为 null、为空白字符串或为非文本类型时，所有环境能力渲染器均安全回退返回 Optional.empty()。 */
@@ -424,12 +424,15 @@ class EnvironmentCapabilityRendererTest {
     assertEquals(Optional.empty(), grep.render(request("fs_grep", "{\"pattern\":\"  \"}")));
     assertEquals(Optional.empty(), grep.render(request("fs_grep", "{\"pattern\":true}")));
 
-    // FS_FIND: 缺失 pattern
+    // find: 缺失 glob
     EnvironmentCapabilityRenderer find =
-        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND);
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND_FILES);
     assertEquals(Optional.empty(), find.render(request("fs_find", "{}")));
     assertEquals(Optional.empty(), find.render(request("fs_find", "{\"path\":\"src\"}")));
-    assertEquals(Optional.empty(), find.render(request("fs_find", "{\"pattern\":\"  \"}")));
+    assertEquals(Optional.empty(), find.render(request("fs_find", "{\"glob\":\"  \"}")));
+    assertEquals(
+        Optional.empty(),
+        find.render(request("fs_find", "{\"path\":\"/repo\",\"pattern\":\"*.ts\"}")));
 
     // LSP_GOTO_DEFINITION: 缺失 path
     EnvironmentCapabilityRenderer gotoDef =

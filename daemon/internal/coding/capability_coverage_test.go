@@ -84,7 +84,7 @@ func TestSearchCapabilitiesRejectLimitsAndReturnEmptyMessages(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"find-empty", findCapability, map[string]any{"path": root, "pattern": "*.missing"}, "No files found matching pattern"},
+		{"find-empty", findCapability, map[string]any{"path": root, "glob": "*.missing"}, "No files matched the glob"},
 		{"grep-empty", grepCapability, map[string]any{"path": root, "pattern": "missing", "literal": true}, "No matches found"},
 	} {
 		result, err := executor.call(context.Background(), capabilityCall(t, executor.name, executor.args), runtime.CapabilityContext{})
@@ -95,11 +95,12 @@ func TestSearchCapabilitiesRejectLimitsAndReturnEmptyMessages(t *testing.T) {
 	for _, executor := range []struct {
 		name string
 		call func(context.Context, runtime.CapabilityCall, runtime.CapabilityContext) (runtime.CapabilityResult, error)
+		key  string
 	}{
-		{"find", findCapability},
-		{"grep", grepCapability},
+		{"find", findCapability, "glob"},
+		{"grep", grepCapability, "pattern"},
 	} {
-		result, err := executor.call(context.Background(), capabilityCall(t, executor.name, map[string]any{"path": root, "pattern": "x", "limit": maxSearchLimit + 1}), runtime.CapabilityContext{})
+		result, err := executor.call(context.Background(), capabilityCall(t, executor.name, map[string]any{"path": root, executor.key: "x", "limit": maxSearchLimit + 1}), runtime.CapabilityContext{})
 		if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "limit must be between 1 and 100000") {
 			t.Fatalf("%s result=%#v err=%v", executor.name, result, err)
 		}

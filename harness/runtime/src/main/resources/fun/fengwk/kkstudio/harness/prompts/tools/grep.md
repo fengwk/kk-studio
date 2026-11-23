@@ -1,26 +1,16 @@
-Search file contents and return matching lines.
+Search file contents and return each matching line with its path and line number.
 
 Usage:
-- Use `grep` for repository content search.
-- Always pass an explicit `path`.
-- Prefer narrowing the path or pattern before increasing `timeout_seconds`. The default timeout is usually sufficient, and explicitly setting a timeout is not recommended unless a broader scan is truly necessary.
-- Treat `grep` results as candidate locations, not editing context. After `grep`, use `read` with targeted `offset`/`limit` to inspect enough surrounding code before editing.
-- `.gitignore` handling follows Git. Inside a repository, the `.gitignore` files from the repository root down to each file and the repository's `.git/info/exclude` apply; a nested repository uses only its own rules; `.gitignore` files above the repository root never apply. Outside any repository, only `.gitignore` files at or below `path` apply. Global Git excludes are not used.
-- Ignored files are left out of the results without any notice, so "not found" does not prove a file or text does not exist in an ignored location.
-- Hidden files are included, `.git` is skipped, and symbolic links are not followed.
-- To search an ignored directory, pass that directory as `path`; rules from above it then no longer apply. A file passed directly as `path` is always searched.
-- If no matches are found because ignore rules skipped entries, the result adds a hint such as `[No matches. Not searched because of ignore rules: /repo/node_modules/, /repo/.env.local, … and N more]` (up to 10 absolute paths).
-- When `path` is a single binary file, `grep` returns a clear error instead of binary output.
-- `grep` matches decoded text, so BOM-marked and declared files (for example UTF-16 or GBK) match the characters you see in `read`, bytes the encoding cannot decode match as U+FFFD (�), and reported line numbers equal `read`'s. Binary files are skipped silently. Files whose declared encoding cannot be used are skipped and listed at the end, such as `[Search incomplete; not searched because the declared text encoding cannot be used: /repo/notes.txt, … and 2 more]` (up to 10 absolute paths).
-- `pattern` is a regular expression by default; use `literal=true` for exact text.
-- `glob` uses the same glob rules as `find` and cannot re-include ignored files.
-- A pattern that contains an actual newline, a `\\n` escape, or `(?s)` with `.` can match across lines.
-- Do not search from broad roots such as `/`, `~`, or `$HOME`.
-- `path` must be an absolute path on the target Environment's file system. A relative path is rejected; results and errors are reported as absolute paths, and no directory is ever inferred from cwd, `HOME`, an environment root, or a previous call. On Windows targets use a drive-rooted or UNC path such as `C:/src/project`.
+- `path` must be an absolute directory or file path on the target Environment. There is no implicit search root. Avoid broad roots such as `/` or the user's home directory.
+- `pattern` searches content as a regular expression by default. Use `literal=true` for exact text and `ignore_case=true` to ignore case in the content, not in `glob`. For cross-line matches, use a newline in `pattern` or, in regex mode, a `\n` escape or `(?s)` with `.`. There is no separate `multiline` argument.
+- Optional `glob` filters files in a directory search using the same rules as `find.glob`: `*.ts` matches at any depth, `src/*.ts` starts at `path`, and `**/src/*.ts` includes nested `src` directories. A leading `./` does not change the scope, and `./` alone is invalid. When `path` names a single file, `glob` is not used.
+- `.gitignore` and `.git/info/exclude` apply within their Git repository; nested repositories use their own rules. Outside a repository, only `.gitignore` files at or below `path` apply. Hidden files are included; `.git` and symbolic links encountered during traversal are skipped.
+- `glob` cannot re-include ignored files. If nothing matches, the result may show up to 10 ignored paths as a hint. To search an ignored directory intentionally, pass the directory itself as `path`.
+- Directory searches return paths relative to `path`; single-file searches report an absolute path. Treat matches as candidate locations. For editing context, resolve the path if needed and call `read` near the returned line number.
+- Matching uses decoded text and the same line numbers as `read`. A directory search skips binary files and reports files whose declared encoding cannot be used. A direct search of such a file returns an error.
+- Narrow the path, file glob, or content pattern first. Set `timeout_seconds` only if the default 15 seconds is not enough for a necessary search.
 
 Examples:
-- `grep({ pattern: "createDemoDirectory", path: "/srv/project/packages/web/src", literal: true })`
-- `grep({ pattern: "create.*Directory", path: "/srv/project/services/api/src", ignore_case: true })`
-- `grep({ pattern: "TODO", path: "/srv/project/src", glob: "**/*.ts", timeout_seconds: 120 })`
-- `grep({ pattern: "start\\nend", path: "C:/src/project/src" })`
-- `grep({ pattern: "TODO", path: "C:/src/project/src", glob: "**/*.ts" })`
+- `grep({ path: "/srv/project", pattern: "TODO", literal: true, glob: "src/*.ts" })` searches files directly inside `/srv/project/src`.
+- `grep({ path: "/srv/project", pattern: "TODO", literal: true, glob: "**/src/*.ts" })` also searches direct files in folders such as `/srv/project/pkg/src`.
+- `grep({ path: "C:/src/project/src", pattern: "start\\nend" })` matches across two lines using a regular expression.

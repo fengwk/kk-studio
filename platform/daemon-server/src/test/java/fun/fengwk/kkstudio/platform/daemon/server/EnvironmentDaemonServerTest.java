@@ -2188,7 +2188,8 @@ class EnvironmentDaemonServerTest {
             case "fs.write", "fs.write.preview" -> ",\"content\":\"text\"";
             case "fs.edit",
                 "fs.edit.preview" -> ",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"new\"}]";
-            case "fs.find", "fs.grep" -> ",\"pattern\":\"text\"";
+            case "fs.find-files" -> ",\"glob\":\"*.ts\"";
+            case "fs.grep" -> ",\"pattern\":\"text\"";
             case "lsp.goto-definition" -> ",\"line\":1";
             case "lsp.workspace-symbols" -> ",\"query\":\"Symbol\"";
             case "lsp.java-decompile" -> ",\"target\":\"jdt://contents/library/Foo.class\"";

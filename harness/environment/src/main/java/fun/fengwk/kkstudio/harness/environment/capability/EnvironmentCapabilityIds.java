@@ -17,7 +17,11 @@ public final class EnvironmentCapabilityIds {
   public static final EnvironmentCapabilityId PROCESS_EXEC =
       new EnvironmentCapabilityId("process.exec");
   public static final EnvironmentCapabilityId FS_GREP = new EnvironmentCapabilityId("fs.grep");
-  public static final EnvironmentCapabilityId FS_FIND = new EnvironmentCapabilityId("fs.find");
+
+  /** 搜索需显式提供 glob；能力身份区分参数契约，防止端点错配时忽略筛选。 */
+  public static final EnvironmentCapabilityId FS_FIND_FILES =
+      new EnvironmentCapabilityId("fs.find-files");
+
   public static final EnvironmentCapabilityId LSP_GOTO_DEFINITION =
       new EnvironmentCapabilityId("lsp.goto-definition");
   public static final EnvironmentCapabilityId LSP_WORKSPACE_SYMBOLS =
