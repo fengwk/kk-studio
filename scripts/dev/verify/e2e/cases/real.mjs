@@ -1733,7 +1733,7 @@ registerCase({
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${safeDiagnosticJson(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', safeDiagnosticJson(readInvocation))
       assertExactFields(readInvocation, [
-        'id', 'threadId', 'turnStartEntryId', 'assistantEntryId', 'callIndex', 'status',
+        'id', 'threadId', 'childThreadId', 'turnStartEntryId', 'assistantEntryId', 'callIndex', 'status',
         'attempt', 'toolCallId', 'queuedBehindToolCallId', 'toolName', 'rendererKey',
         'environmentId', 'requiredEnvironmentId', 'requiredEnvironmentName',
         'environmentWaitFreshnessAt', 'waitingForEnvironment', 'argumentsJson', 'approval',
@@ -1742,6 +1742,11 @@ registerCase({
       assert(
         readInvocation.toolName === 'read',
         `WAITING read invocation must identify the read tool by name: ${safeDiagnosticJson(readInvocation)}`,
+      )
+      // 只有 task 调用会投影 durable Join 子 Thread；read 调用显式序列化为 null。
+      assert(
+        readInvocation.childThreadId === null,
+        `read invocation must not project a child thread: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         readInvocation.environmentId === ctx.vars.daemonEnvironment.id,
