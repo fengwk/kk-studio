@@ -128,6 +128,29 @@ test('docs check rejects unrelated SQL files next to the fixed documents', () =>
   }
 })
 
+test('docs check rejects built HTML and cache directories in the prototype source', () => {
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const prototype = path.join(mirrorRoot, 'docs/workspace-prototype')
+    writeFileSync(path.join(prototype, 'generated.html'), '<!doctype html>\n')
+    mkdirSync(path.join(prototype, '.vite'))
+    assert.throws(
+      () => execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+        cwd: mirrorRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+      (error) => {
+        const stderr = error.stderr || ''
+        return stderr.includes('unexpected docs file: docs/workspace-prototype/generated.html') &&
+          stderr.includes('unexpected docs directory: docs/workspace-prototype/.vite')
+      },
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
 test('docs check fails when harness module docs path is reintroduced', () => {
   // Test intent: ensure docs check rejects any docs directory or file under any harness module,
   // verifying that relative paths are reported and real repository is not mutated.

@@ -1,0 +1,62 @@
+.x-picker-trigger {
+  box-sizing: border-box;
+  min-width: 0;
+  text-align: left;
+}
+.x-picker-trigger.x-placeholder .ui-select-value { color: var(--fg-muted); }
+.x-picker-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.x-picker-icon { width: 16px; height: 16px; flex: 0 0 16px; color: var(--fg-muted); }
+.x-picker-panel {
+  --x-picker-bg: var(--surface-overlay, var(--surface));
+  --x-picker-hover: var(--surface-hover, var(--surface-2));
+  --x-picker-text: var(--fg, var(--fg-1));
+  --x-picker-muted: var(--fg-muted, var(--fg-3));
+  position: fixed;
+  z-index: var(--z-dropdown, 60);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: var(--radius-md, 10px);
+  background: var(--x-picker-bg);
+  color: var(--x-picker-text);
+  box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / 18%));
+}
+.x-picker-panel.x-picker-up { transform-origin: bottom; }
+.x-date-panel { width: 296px; padding: 12px 12px 8px; }
+.x-date-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.x-date-title { color: var(--x-picker-text); font-size: var(--font-size-sm, 14px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.x-date-nav {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--x-picker-muted); cursor: pointer;
+}
+.x-date-nav:hover { background: var(--x-picker-hover); color: var(--x-picker-text); }
+.x-date-nav svg { width: 16px; height: 16px; }
+.x-date-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; }
+.x-date-row { display: contents; }
+.x-date-week { display: grid; place-items: center; height: 28px; color: var(--x-picker-muted); font-size: var(--font-size-xs, 12px); }
+.x-date-day {
+  position: relative; display: grid; place-items: center; width: 36px; height: 36px; margin: 0 auto;
+  border-radius: 50%; color: var(--x-picker-text); font-size: var(--font-size-sm, 14px);
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.x-date-day:hover, .x-date-day.x-active { background: var(--x-picker-hover); }
+.x-date-day.x-outside { color: var(--x-picker-muted); }
+.x-date-day.x-today { color: var(--accent, var(--accent-text)); font-weight: 600; }
+.x-date-day.x-today::after { position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; border-radius: 50%; background: currentColor; content: ''; transform: translateX(-50%); }
+.x-date-day[aria-selected='true'] { background: var(--accent, var(--accent-text)); color: var(--on-accent, white); font-weight: 600; }
+.x-date-day[aria-disabled='true'] { opacity: .4; text-decoration: line-through; cursor: not-allowed; }
+.x-date-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border, var(--line)); }
+.x-date-link { min-height: 32px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--accent, var(--accent-text)); cursor: pointer; font: inherit; font-size: var(--font-size-sm, 14px); font-weight: 600; }
+.x-date-link:hover:not(:disabled) { background: var(--x-picker-hover); }
+.x-date-link:disabled { color: var(--x-picker-muted); cursor: not-allowed; }
+.x-time-panel { width: 176px; padding: 8px; }
+.x-time-columns { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); align-items: stretch; gap: 2px; height: 224px; }
+.x-time-column { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.x-time-separator { display: grid; place-items: center; color: var(--x-picker-muted); }
+.x-time-option { display: grid; place-items: center; min-height: 32px; border-radius: var(--radius-sm, 6px); color: var(--x-picker-text); cursor: pointer; font-variant-numeric: tabular-nums; }
+.x-time-option:hover, .x-time-option.x-active { background: var(--x-picker-hover); }
+.x-time-option[aria-selected='true'] { background: var(--accent-soft); color: var(--accent, var(--accent-text)); font-weight: 600; }
+.x-time-option[aria-disabled='true'] { opacity: .4; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .x-picker-panel, .x-picker-panel * { scroll-behavior: auto; } }

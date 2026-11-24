@@ -1,0 +1,166 @@
+#x-settings-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-inline-size: 100vw;
+  container-type: inline-size;
+}
+
+.x-settings-shell {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.x-settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 12px;
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.x-settings-back {
+  align-self: flex-start;
+}
+
+.x-settings-navigation {
+  display: grid;
+  gap: 14px;
+}
+
+.x-settings-nav-group {
+  display: grid;
+  gap: 2px;
+}
+
+.x-settings-nav-group p {
+  margin: 0 0 3px;
+  padding-inline: 10px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.x-settings-nav-group button,
+.x-settings-mobile-menu select {
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.x-settings-nav-group button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.x-settings-nav-group button:hover,
+.x-settings-mobile-menu select:hover {
+  background: var(--stage-dot);
+}
+
+.x-settings-nav-group button[aria-current='page'] {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.x-settings-nav-group button[aria-current='page']:hover {
+  background: var(--accent-soft-hover);
+}
+
+.x-settings-mobile-menu {
+  display: none;
+}
+
+.x-settings-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.x-settings-content .screen-body {
+  overflow: visible;
+}
+
+.x-settings-facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.x-settings-facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.x-settings-facts dt {
+  color: var(--fg-muted);
+}
+
+.x-settings-facts dd {
+  margin: 0;
+}
+
+@container (max-width: 640px) {
+  .x-settings-shell {
+    grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
+  }
+
+  .x-settings-sidebar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    padding-block: var(--space-2);
+  }
+
+  .x-settings-back.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .x-settings-navigation {
+    display: none;
+  }
+
+  .x-settings-mobile-menu {
+    display: block;
+    position: relative;
+  }
+
+  .x-settings-mobile-menu select {
+    appearance: none;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 32px 8px 10px;
+    border: 0;
+    background: var(--surface-raised);
+  }
+
+  .x-settings-mobile-menu svg {
+    position: absolute;
+    inset-inline-end: 10px;
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .x-settings-content .screen-body {
+    padding: 16px 12px 24px;
+  }
+}

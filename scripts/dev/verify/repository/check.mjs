@@ -41,11 +41,28 @@ const moduleDocuments = [
 const documentPaths = [
   'docs/README.md',
   'docs/system-design.md',
+  'docs/workspace-design.md',
+  'docs/workspace-harness.md',
+  'docs/workspace-interactions.md',
+  'docs/workspace-ui.md',
+  'docs/workspace-delivery.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
   'docs/operations/development-and-testing.md',
   'docs/operations/environment-daemon.md',
 ]
+
+const prototypeRoot = 'docs/workspace-prototype'
+const prototypeFiles = ['index.html', 'build-preview.mjs', 'tsconfig.json', 'vite.config.mjs']
+const prototypeSourceDirectories = ['canvas', 'mock', 'presentation', 'settings', 'workspace']
+const prototypeSourceFile = /^(?:[\w-]+\/)?[\w.-]+\.(?:[cm]?js|css|tsx?|webp)$/u
+
+function isPrototypeSource(relativePath) {
+  if (!relativePath.startsWith(`${prototypeRoot}/`)) return false
+  const source = relativePath.slice(prototypeRoot.length + 1)
+  if (!prototypeSourceFile.test(source)) return false
+  return !source.includes('/') || prototypeSourceDirectories.includes(source.split('/')[0])
+}
 
 const navigationTargets = documentPaths.filter((relativePath) => relativePath !== 'docs/README.md')
 const markdownSurfaces = [
@@ -231,8 +248,11 @@ function looksLikeCheckablePath(value) {
 }
 
 function checkFixedLayout() {
-  const expected = new Set(documentPaths)
-  const expectedDirectories = new Set(['docs', 'docs/modules', 'docs/operations'])
+  const expected = new Set([...documentPaths, ...prototypeFiles.map((name) => `${prototypeRoot}/${name}`)])
+  const expectedDirectories = new Set([
+    'docs', 'docs/modules', 'docs/operations', prototypeRoot,
+    ...prototypeSourceDirectories.map((name) => `${prototypeRoot}/${name}`),
+  ])
   const actual = new Set(
     walkFiles(docsRoot).map((absolutePath) => relativeFromRoot(absolutePath)),
   )
@@ -245,7 +265,7 @@ function checkFixedLayout() {
     }
   }
   for (const relativePath of actual) {
-    if (!expected.has(relativePath)) {
+    if (!expected.has(relativePath) && !isPrototypeSource(relativePath)) {
       addError(`unexpected docs file: ${relativePath}`)
     }
   }

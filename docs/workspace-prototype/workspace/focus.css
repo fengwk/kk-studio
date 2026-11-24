@@ -1,0 +1,63 @@
+/* The preview shares one focus outline across the HTML shell and product controls. */
+:root[data-scheme] {
+  --x-focus: var(--border);
+  --focus: var(--x-focus);
+  --focus-ring: var(--x-focus);
+}
+
+/* Give editable controls a visible surface even when they have no focus. */
+html[data-scheme] .field :is(input, textarea):not([type='checkbox'], [type='radio']),
+html[data-scheme] :is(.ui-combo:not(.ui-combo-tool), .interaction-approval-deny-reason input),
+.x-sched-form .x-picker-trigger {
+  background: var(--surface-raised);
+}
+html[data-scheme] :is(.ui-combo, .ui-select-trigger):hover:not(:disabled) {
+  background: var(--x-control-hover);
+}
+html[data-scheme] :is(.ui-combo, .ui-select-trigger)[aria-expanded='true'] {
+  background: var(--surface-active);
+}
+
+/* Keep validation borders; focus never adds another colored border or glow. */
+html[data-scheme] body :is(.field input, .field textarea, .field select, .form-group input,
+  .form-group textarea, .form-group select, .settings-input, .ui-combo, .ui-select-trigger,
+  .ui-tag-input, .searchbox, .x-search, .thread-dock, .interaction-approval-deny-reason input):not(:where(
+    [type='checkbox'], [type='radio'], [type='range'], [data-invalid='true'], [aria-invalid='true'],
+    [data-invalid] *, .form-group.is-error *
+  )) {
+  border-color: transparent !important;
+}
+
+/* The field or its visible wrapper owns focus, never both. Plain buttons ring only for keyboard focus. */
+html[data-scheme] body :is(a[href], button, input, select, textarea, summary, [tabindex], [contenteditable='true']):focus-visible:not(:where(
+  .screen, .modal-card, .search input, .searchbox input, .ui-tag-input-field,
+  .ui-checkbox-input, .switch input, .ui-native-select, .composer-editor
+)),
+html[data-scheme] body :is(input, select, textarea, [contenteditable='true']):focus:not(:where(
+  [type='checkbox'], [type='radio'], [type='range'], .search input, .searchbox input,
+  .ui-tag-input-field, .ui-native-select, .composer-editor
+)),
+html[data-scheme] body :is(.ui-combo, .ui-select-trigger, .thread-composer-control):is(:focus, [aria-expanded='true']),
+html[data-scheme] body :is(.search, .searchbox, .ui-tag-input):has(input:focus),
+html[data-scheme] body .thread-dock:has(.composer-editor:focus),
+html[data-scheme] body .switch:has(input:focus-visible),
+html[data-scheme] body .ui-checkbox-input:focus-visible + .ui-checkbox-box {
+  /* Override component-local rings without changing their layout or hit area. */
+  outline: 1px solid var(--x-focus) !important;
+  outline-offset: var(--x-focus-offset, 1px) !important;
+  box-shadow: none !important;
+}
+
+html[data-scheme] body :is(.search input, .searchbox input, .ui-tag-input-field, .ui-checkbox-input, .switch input, .composer-editor):focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.x-app :is(.x-row, .x-trow-main, .x-menu-item, .x-divider, .x-side-resize, [role='tab']),
+.ui-select-menu .ui-select-option {
+  --x-focus-offset: -1px;
+}
+
+@media (forced-colors: active) {
+  :root[data-scheme] { --x-focus: Highlight; }
+}

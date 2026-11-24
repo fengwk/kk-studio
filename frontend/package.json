@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:prototype": "vite --config vite.workspace-prototype.config.mjs",
+    "build:prototype": "node ../docs/workspace-prototype/build-preview.mjs",
+    "typecheck:prototype": "tsc -p ../docs/workspace-prototype/tsconfig.json",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "typecheck:test": "tsc -p tsconfig.test.json",
