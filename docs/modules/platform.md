@@ -1,9 +1,9 @@
 # Platform 模块
 
 `platform-runtime` 组合领域端口与外部设施，为 Web 提供 Catalog、Interaction、Storage、
-Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实时配置解析和执行网关；
+Environment、Settings 和 Harness 用例。它负责跨资源事务、实时配置解析和执行网关；
 执行状态机见 [Harness Runtime](harness-runtime.md)。
-[Canvas](canvas.md)、[Chat](chat.md)、[Project](project.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
+[Canvas](canvas.md)、[Chat](chat.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
 平台需要应用参与的地方由平台定义 SPI、应用实现（见[命令接受、产品归属与派发](#命令接受产品归属与派发)）。
 构建期 Plugin 的纯 SPI、凭据与资源端口契约独立在 [Platform Plugin API](platform-plugin-api.md)。
 
@@ -43,11 +43,11 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [harness/builtin/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/realtime) | Builtin 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
 | [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 实时事件传输：PostgreSQL 通道与订阅注册、严格帧编解码、跨节点 payload 回拉与有界缓冲 |
 | [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：四个 LISTEN channel 协议、Thread version 的权威 cursor、payload 解析与 resync |
-| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas、Project 与 Environment 生产方组合 |
+| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas 与 Environment 生产方组合 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、结果观察与按 Thread 停止 |
-| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
+| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Environment CRUD、注册令牌、路由租约与宿主信息 |
@@ -94,7 +94,7 @@ Thread version 的注册与分发复用 `platform.notification` 的
 [`HarnessInvalidationSource`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessInvalidationSource.java)：
 Thread 快照按 Thread ID 定点失效，执行树与交互按真实执行根定点失效；空/畸形 payload 与重连全量 resync。提示始终有损，权威事实回读数据库。
 `platform.notification` 的 `SubscriptionFanOut`、`VersionNotificationHub` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和
-分发语义；channel、payload 与事件类型由各生产方定义，Canvas、Project 与 Environment 的失效源也组合它们，不经过 Harness 契约。
+分发语义；channel、payload 与事件类型由各生产方定义，Canvas 与 Environment 的失效源也组合它们，不经过 Harness 契约。
 
 ### 事务边界与锁序
 
@@ -173,8 +173,7 @@ Entry 叶子优先逐层删除，Session 单独删除。
 ### Work 的 claim / lease / wake
 
 `durable_work` 以 `(target_type, target_id)` 为主键，含 `available_at`、`wake_version`、
-`lease_token`、`lease_until` 和 `required_environment_id`。Harness、Project 与 Canvas
-共用 [`DurableWorkStore`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkStore.java)
+`lease_token`、`lease_until` 和 `required_environment_id`。Harness 与 Canvas 共用 [`DurableWorkStore`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkStore.java)
 的 SQL，按 target type 过滤；变为可领取时在事务内向 `durable_work` 通知目标类型。
 `WorkStore.request` 要求已锁 owning Thread：插入时使用数据库时间和版本 1；冲突时取较早 available_at、
 递增 wake_version 且保留租约。`WorkStore.reschedule` 使用数据库时间加非负整毫秒延迟，清空租约并保留
@@ -271,11 +270,10 @@ subscriber 独立围栏保证关闭后不再回调，用户回调在全局锁外
 Harness 只读取调用和 Work 事实，在分页之前完成分组；平台环境服务用数据库时间判断
 READY 租约并补齐名称，过滤在线环境后继续扫描候选，确保跨页不拆分同一分组。
 分组用最早调用的 `(createdAt, id)` 排序，与人工等待做 keyset 归并；`total` 是
-同一根过滤条件下的完整可见待处理数，不是当前页长度。产品归属按根解析为 `CHAT`、`ISSUE_AGENT`，
-或控制器/插件发起、没有产品页面的独立任务 `AGENT_TASK`（带 Agent 名与根 Thread 名，只在交互中心处理）；
-其余无法解析归属的根不暴露。
+同一根过滤条件下的完整可见待处理数，不是当前页长度。产品归属按根解析为 `CHAT`，或控制器/插件发起、没有产品页面的独立任务 `AGENT_TASK`
+（带 Agent 名与根 Thread 名，只在交互中心处理）；其余无法解析归属的根不暴露。
 
-owner 附带 Chat/Issue 标题、根 Thread 名称和 Agent 名；查询内缓存产品与根读取，
+owner 附带 Chat 标题、根 Thread 名称和 Agent 名；查询内缓存产品与根读取，
 显示名称不参与路由或身份判断。工具快照还独立批量读取当前 Work 的
 `requiredEnvironmentId`、`requiredEnvironmentName`、`waitingForEnvironment` 和
 `environmentWaitFreshnessAt`，不从聚合卡片反推调用。名称沿 Work 冻结身份读取环境目录，
@@ -315,7 +313,7 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
 `config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
 能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
-Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查，Project 检查未归档项目的工作流阶段。Chat 只按名称软引用 Agent，
+Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查。Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
 Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`）或 PUT 的必填
@@ -434,27 +432,24 @@ headers 作为整体秘密：创建时省略即无 header，只接受 `SET`；�
 ## 命令接受、产品归属与派发
 
 [`HarnessCommandAcceptanceOrchestrator`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestrator.java)
-在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session，Issue agent 会话一律拒绝）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。新 fork 的事务内 preflight 接收实际复制的历史条目，以便为新 Session 保留资源引用，不暴露存储句柄。接受锁由归属实现提供（Chat 对 `chat` 行取 KEY SHARE，Project 按 `Project SHARE -> Issue UPDATE` 锁定产品层级）；深删除使用 owner 排他锁，再由 Harness 按 Tree → Session → Thread 锁定删除闭包并复核，平台在同一物理事务中删除归属行、释放 Blob 引用。
+在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。新 fork 的事务内 preflight 接收实际复制的历史条目，以便为新 Session 保留资源引用，不暴露存储句柄。接受锁由归属实现提供（Chat 对 `chat` 行取 KEY SHARE）；深删除使用 owner 排他锁，再由 Harness 按 Tree → Session → Thread 锁定删除闭包并复核，平台在同一物理事务中删除归属行、释放 Blob 引用。
 
 平台对产品归属的全部感知收敛在 [`SessionOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/SessionOwnership.java) SPI。每个实现以不透明 `{kind, id}` 身份工作，声明是否允许分叉、是否允许经通用命令接口直写，并提供接受、交互与删除的产品锁和写钩子：
 
 - Chat：[`ChatSessionOwnership`](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/ChatSessionOwnership.java) 由 [Chat](chat.md) 模块实现，`chat_session` 直接持有 Session；接受锁 `chat` KEY SHARE，允许分叉与通用命令。
-- Project：`project_issue_agent_thread` 维护 `(issueId, agentName) -> thread/session` 稳定绑定；接受与交互锁 `Project SHARE -> Issue UPDATE`，不允许分叉或通用命令直写，删除 Session 前先删绑定行。
 
 `findOwner(rootThreadId, rootSessionId)` 返回展示用 `{kind, id, title, link}`；交互查询只按真实执行根调用各实现，多个实现同时认领同一根时失败关闭。命令接受、Session 查询、深删除与交互待办/查询都只调用该 SPI，不按产品类型分支；未知或重复的 kind 在进入 Runtime 前拒绝。
-Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品；Project 检查未归档项目的工作流阶段。
+Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品。
 
-Issue+Agent 的命令由 Issue 业务工作流拥有，SPI 声明通用命令直写为禁止，公共 batch 端点据此拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` 与末尾任务输入。`issue_transition` 根据调用 Thread 的稳定绑定定位活动 Run，在业务锁内校验阶段与身份，并验证当前路径上 assistant 所属的 Turn 起点严格晚于 Run 起点。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
-Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
+
+Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner 或产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
 ## Model 与 Tool 执行
 
 `DatabaseAgentTurnContextResolver` 每个 live turn 只租用一次工具目录，解析 Agent、Environment、工具、Skill、
 subagent 与 system instruction，形成与模型无关的 `AgentTurnContext`。`DatabaseTurnResolver` 只在这份快照上规划 Model、Variant、
-模型组、压缩、缓存与输出预算；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
-Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT`、业务工具与身份上下文都在接受 Run 时
-显式提交或冻结到 Run 上下文。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
+模型组、压缩、缓存与输出预算；它不判断 Thread 属于哪个 Chat，也不据此覆写 Environment 或注入工具；工具与身份上下文由 Agent 配置和执行请求明确提供。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
 本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
@@ -511,7 +506,7 @@ ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览
 Storage 不 import Harness，存储设施与执行资源边界各自装配。
 
 `storage_blob` 按 ACTIVE 内容的 `(sha256, size_bytes)` 去重；
-upload、Session、Canvas 和 Issue Evidence 通过各自 owner 边持有引用。
+upload、Session 与 Canvas 通过各自 owner 边持有引用。
 retain/release 加入调用方事务；引用减至零时切为 DELETING，后台清理 preview、original 和行。
 `storage/persistence` 的实体仓库直接持有 `JdbcClient`，SQL、行映射与条件 CAS 全部内联；
 `storage/service` 是具体的生命周期服务，不存在单实现接口或 `service/impl` 层，只有两个窄缝是接口：
@@ -744,7 +739,7 @@ OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与�
 
 [`ConfigSyncController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync/http/ConfigSyncController.java)
 挂在 `/api/platform/config-sync`：`GET` 返回清单，`POST /export`、`POST /check-import`、`POST /import` 承担选择导出、
-只读预检查与确认执行；响应由 `ConfigSyncNoStoreFilter` 统一设置 `no-store`。DTO 位于
+只读预检查与确认执行；`/api/**` 响应统一设置 `Cache-Control: no-store`。DTO 位于
 [`platform/configsync/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync/dto/)，
 跳过项的 `kind` 是配置集合枚举（未知顶层类别为 null，原始类别名保留在 `name`）。
 
@@ -828,7 +823,7 @@ Daemon；浏览器的网络策略独立。
 节点证书与内部信任另外使用 Spring Boot 自身的 `server.ssl.bundle` 与 `spring.ssl.bundle.*`，它们不在上表范围内，
 配置方式见[部署与运行](../operations/deployment.md#多节点内部-tls)。
 
-应用模块各自拥有部署参数：`kk-studio.project.reconcile` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
+应用模块各自拥有部署参数：`kk-studio.canvas.function.runtime`
 属于 [Canvas](canvas.md#部署参数)。
 
 网关与传输层参数由核心常量持有，不设外部配置前缀：
@@ -860,4 +855,4 @@ Harness 的定向入口：
 真实设施测试基座、执行命令和覆盖率入口见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、
-[Schema](schema.md)、[Harness Runtime](harness-runtime.md)、[Canvas](canvas.md)、[Project](project.md)、[IDE](ide.md)。
+[Schema](schema.md)、[Harness Runtime](harness-runtime.md)、[Canvas](canvas.md)、[IDE](ide.md)。

@@ -16,7 +16,6 @@ import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Enumeration;
 import java.util.Map;
@@ -61,7 +60,7 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
     HttpResponse<String> response =
         HttpClient.newHttpClient()
             .send(
-                HttpRequest.newBuilder(
+                adminRequest(
                         URI.create("http://127.0.0.1:" + port + "/api/platform/settings/schema"))
                     .GET()
                     .build(),

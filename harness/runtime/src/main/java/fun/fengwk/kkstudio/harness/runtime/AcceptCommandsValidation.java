@@ -29,12 +29,8 @@ import java.util.List;
  */
 final class AcceptCommandsValidation {
 
-  /** SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT，每类至多一次、全部在消息之前。 */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
-      List.of(
-          ThreadCommandType.SET_AGENT,
-          ThreadCommandType.SET_EXECUTION,
-          ThreadCommandType.SET_ENVIRONMENT);
+      List.of(ThreadCommandType.SET_EXECUTION, ThreadCommandType.SET_ENVIRONMENT);
 
   private AcceptCommandsValidation() {}
 
@@ -73,9 +69,9 @@ final class AcceptCommandsValidation {
   /**
    * 与 target 无关的 batch shape 校验：统一 spawn 在写入任何行之前复用同一组规则，避免复制第二套或伪造 accept target。
    *
-   * <p>SET_* 必须以固定顺序（SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT）、至多一次且全部出现在消息之前。 创建类
-   * target（NEW_SESSION / NEW_THREAD）要求<b>恰有一条</b>末尾 user-like 输入；THREAD target 允许 settings-only
-   * batch（0 条 user-like），最多一条 user-like 且必须位于末尾。非法 batch 是请求校验错误，抛 {@link DomainException} 而非业务冲突。
+   * <p>SET_* 每类至多一次且全部出现在消息之前。创建类 target（NEW_SESSION / NEW_THREAD）要求<b>恰有一条</b>末尾 user-like
+   * 输入；THREAD target 允许 settings-only batch（0 条 user-like），最多一条 user-like 且必须位于末尾。非法 batch
+   * 是请求校验错误，抛 {@link DomainException} 而非业务冲突。
    *
    * @param targetLabel 用于错误消息的来源标签
    */

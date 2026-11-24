@@ -79,7 +79,7 @@ class HarnessHttpDtoContractTest {
     assertTrue(HarnessCommandTargetDTO.class.isSealed());
     assertTrue(HarnessUserMessageContentDTO.class.isSealed());
     assertEquals(
-        Set.of("USER_MESSAGE", "SET_AGENT", "SET_EXECUTION", "SET_ENVIRONMENT"),
+        Set.of("USER_MESSAGE", "SET_EXECUTION", "SET_ENVIRONMENT"),
         subtypes(HarnessCommandCreateDTO.class));
     assertEquals(
         Set.of("NEW_SESSION", "NEW_THREAD", "NEW_FORKED_SESSION"),

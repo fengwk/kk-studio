@@ -20,6 +20,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/compose-stack.sh"
+source "$SCRIPT_DIR/lib/studio-auth.sh"
 # Compose 与运行时资产属于 deploy/；本脚本只做宿主生命周期编排。
 COMPOSE_FILE="$REPO_ROOT/deploy/distributed/compose.yaml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
@@ -103,21 +104,24 @@ wait_http() {
 environment_status() {
   local app_url=$1
   local env_name=$2
-  curl -fsS "$app_url/api/platform/environments" 2>/dev/null | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$env_name"
+  e2e_studio_get "$3" "$app_url/api/platform/environments" 2>/dev/null | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$env_name"
 }
 
 wait_environment_ready() {
   local app_url=$1
   local env_name=$2
   local node_label=$3
-  stack_wait_environment \
-    "$app_url" \
-    "$env_name" \
-    "$SCRIPT_DIR/lib/json-probe.mjs" \
-    "node $node_label environment $env_name" \
-    "${DISTRIBUTED_WAIT_ATTEMPTS:-120}" \
-    1
-  step "node $node_label environment $env_name READY"
+  local cookie attempt status
+  cookie=$(e2e_studio_login "$app_url")
+  for attempt in $(seq 1 "${DISTRIBUTED_WAIT_ATTEMPTS:-120}"); do
+    status=$(environment_status "$app_url" "$env_name" "$cookie" || true)
+    if [ "$status" = READY ]; then
+      step "node $node_label environment $env_name READY"
+      return
+    fi
+    sleep 1
+  done
+  die "node $node_label environment $env_name not READY (last status='$status')"
 }
 
 cmd_up() {
@@ -155,7 +159,7 @@ cmd_up() {
 cmd_status() {
   stack_require_docker
   "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}' || true
-  local label url env_name status
+  local label url env_name status cookie
   for label in a b; do
     if [ "$label" = "a" ]; then
       url=$APP_A_URL
@@ -165,7 +169,8 @@ cmd_status() {
       env_name=$DISTRIBUTED_ENV_B_NAME
     fi
     if curl -fsS "$url/actuator/health" >/dev/null 2>&1; then
-      status=$(environment_status "$url" "$env_name")
+      cookie=$(e2e_studio_login "$url")
+      status=$(environment_status "$url" "$env_name" "$cookie")
       printf '%s health=UP environment=%s=%s\n' "$url" "$env_name" "$status"
     else
       printf '%s health=DOWN\n' "$url"

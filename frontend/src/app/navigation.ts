@@ -1,4 +1,4 @@
-import { Bot, FolderKanban, Grid2X2, Inbox, Settings } from 'lucide-react'
+import { Bot, Grid2X2, Inbox, Settings } from 'lucide-react'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 
 /**
@@ -21,14 +21,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     labelKey: 'ai.nav.interactions',
     ariaKey: 'ai.nav.interactionsAria',
     icon: Inbox,
-  },
-  {
-    id: 'projects',
-    groupId: 'projects',
-    to: '/projects',
-    labelKey: 'platform.nav.projects',
-    ariaKey: 'platform.nav.projectsAria',
-    icon: FolderKanban,
   },
   {
     id: 'canvas',

@@ -32,7 +32,7 @@ export interface PaneInteractionContext {
 /**
  * 侧边交互面板：子代理树、重命名、Agent 选择、快捷键、历史树与 Session/Thread 选择。
  *
- * 宿主显式关闭的入口（只读宿主禁用切换 Agent / 分支）不渲染面板本体，与命令可用性一致。
+ * 绑定 Thread 时不渲染 Agent 选择面板；宿主禁用的入口也不渲染。
  */
 export function renderPaneInteraction({
   pane,
@@ -55,7 +55,7 @@ export function renderPaneInteraction({
     return renderRename(pane, t)
   }
   if (pane.interaction === 'agent') {
-    if (capabilities?.allowSwitchAgent === false) {
+    if (boundThreadId != null) {
       return null
     }
     return (

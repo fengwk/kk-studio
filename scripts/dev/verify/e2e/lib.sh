@@ -103,6 +103,9 @@ export KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET"
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+source "$SCRIPT_DIR/lib/studio-auth.sh"
+E2E_STUDIO_COOKIE=''
+
 source "$REPO_ROOT/scripts/dev/lib/e2e-credentials.sh"
 
 run_maven() {
@@ -291,11 +294,12 @@ start_backend() {
   local pid=$!
   echo "$pid" >"$WORK_DIR/backend.pid"
   wait_http_process \
-    "$BACKEND_URL/api/platform/agents" \
+    "$BACKEND_URL/actuator/health" \
     backend \
     "$pid" \
     "$WORK_DIR/backend.log" \
     120
+  E2E_STUDIO_COOKIE=$(e2e_studio_login "$BACKEND_URL")
 }
 
 start_frontend() {
@@ -319,7 +323,7 @@ start_frontend() {
   pid=$(cat "$WORK_DIR/frontend.pid")
   wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
   # 额外确认代理已打到当前 backend 契约（结构化 config）
-  curl -fsS "$FRONTEND_URL/api/platform/models" \
+  e2e_studio_get "$E2E_STUDIO_COOKIE" "$FRONTEND_URL/api/platform/models" \
     | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-print
 }
 
@@ -354,7 +358,7 @@ start_daemon() {
   local _ env_status=""
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
   for _ in $(seq 1 180); do
-    env_status=$(curl -fsS "$BACKEND_URL/api/platform/environments" \
+    env_status=$(e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/environments" \
       | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
       2>/dev/null || true)
     if [ "$env_status" = "READY" ]; then
@@ -392,12 +396,13 @@ ensure_stack() {
     package_backend "$java_home"
   fi
 
-  if ! curl -fsS "$BACKEND_URL/api/platform/agents" >/dev/null 2>&1; then
+  if ! curl -fsS "$BACKEND_URL/actuator/health" >/dev/null 2>&1; then
     start_backend "$java_home"
   else
     step "Reusing backend $BACKEND_URL"
+    E2E_STUDIO_COOKIE=$(e2e_studio_login "$BACKEND_URL")
     # Reused processes must expose the current structured model contract.
-    if ! curl -fsS "$BACKEND_URL/api/platform/models" \
+    if ! e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/models" \
       | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-check 2>/dev/null; then
       step "Backend contract stale (missing model.config); rebuilding and restarting"
       package_backend "$java_home"
@@ -409,7 +414,7 @@ ensure_stack() {
     start_frontend
   else
     step "Reusing frontend $FRONTEND_URL"
-    if ! curl -fsS "$FRONTEND_URL/api/platform/models" \
+    if ! e2e_studio_get "$E2E_STUDIO_COOKIE" "$FRONTEND_URL/api/platform/models" \
       | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-check 2>/dev/null; then
       step "Frontend proxy contract stale; restarting frontend with API_PROXY_TARGET"
       start_frontend
@@ -417,7 +422,7 @@ ensure_stack() {
   fi
 
   if [ "$with_daemon" = "true" ]; then
-    env_status=$(curl -fsS "$BACKEND_URL/api/platform/environments" \
+    env_status=$(e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/environments" \
       | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
       2>/dev/null || true)
     if [ "$env_status" != "READY" ]; then

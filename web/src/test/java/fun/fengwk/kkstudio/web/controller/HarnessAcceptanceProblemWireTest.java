@@ -96,14 +96,14 @@ class HarnessAcceptanceProblemWireTest {
     when(owner.kind()).thenReturn("CHAT");
     when(owner.allowsDirectCommands()).thenReturn(true);
     when(owner.ownsSession(any(), any())).thenReturn(true);
-    SessionOwnership issueAgentOwner = mock(SessionOwnership.class);
-    when(issueAgentOwner.kind()).thenReturn("ISSUE_AGENT");
+    SessionOwnership customOwner = mock(SessionOwnership.class);
+    when(customOwner.kind()).thenReturn("CUSTOM");
     uploads = mock(StorageUploadService.class);
     ModelImageCountLimitResolver imageLimitResolver = mock(ModelImageCountLimitResolver.class);
     when(imageLimitResolver.resolve(any())).thenReturn(null);
     HarnessCommandAcceptanceOrchestrator acceptance =
         new HarnessCommandAcceptanceOrchestrator(
-            List.of(owner, issueAgentOwner),
+            List.of(owner, customOwner),
             provider,
             uploads,
             mock(SessionBlobRefManager.class),
@@ -163,7 +163,7 @@ class HarnessAcceptanceProblemWireTest {
                     "execution":{"driver":"fake","settings":{}}},
                     "yoloEnabled":false},
                     "commands":[
-                    {"type":"SET_AGENT","idempotencyKey":"%s","agentName":"assistant"},
+                    {"type":"SET_ENVIRONMENT","idempotencyKey":"%s","environmentName":"assistant"},
                     {"type":"USER_MESSAGE","idempotencyKey":"%s",
                     "contents":[{"type":"TEXT","text":"hello"}]}]}
                     """
@@ -220,7 +220,7 @@ class HarnessAcceptanceProblemWireTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value("Unknown or ambiguous session owner kind: PROJECT"));
-    postFork("ISSUE_AGENT", root.rootEntry().id())
+    postFork("CUSTOM", root.rootEntry().id())
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("DIRECT_COMMANDS_NOT_ALLOWED"))

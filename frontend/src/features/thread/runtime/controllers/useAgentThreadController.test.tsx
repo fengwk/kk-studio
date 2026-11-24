@@ -435,7 +435,7 @@ describe('useAgentThreadController', () => {
     const base = branchDraftFromThread(currentThread)
     const draft: BranchDraft = {
       ...base,
-      agentName: 'coder',
+      execution: createBuiltinExecution('MiniMax', 'thinking'),
       yoloEnabled: true,
     }
     const { result } = renderHook(
@@ -468,7 +468,7 @@ describe('useAgentThreadController', () => {
     expect(batchArg).not.toHaveProperty('owner')
     expect(batchArg).not.toHaveProperty('target')
     const types = batchArg.commands.map((command) => command.type)
-    expect(types).toContain('SET_AGENT')
+    expect(types).toContain('SET_EXECUTION')
     // YOLO 是 Thread 直接控制面，绝不进入 message batch。
     expect(types).not.toContain('SET_YOLO')
     expect(types[types.length - 1]).toBe('USER_MESSAGE')
@@ -574,7 +574,7 @@ describe('useAgentThreadController', () => {
     const settingsPlan = buildMessageBatchPlan({
       thread: currentThread,
       effectiveBase: base,
-      draft: { ...base, agentName: 'coder' },
+      draft: { ...base, execution: createBuiltinExecution('MiniMax', 'thinking') },
       parts: [createTextPart('hello')],
       createCommandId: () => 'settings-id',
     })
@@ -670,7 +670,7 @@ describe('useAgentThreadController', () => {
     // 复用原始 batch（保持相同 command id），而不是新建一个仅含 USER_MESSAGE 的 batch。
     const currentThread = threadFixture()
     const baseA = branchDraftFromThread(currentThread)
-    const draftB = { ...baseA, agentName: 'coder' }
+    const draftB = { ...baseA, execution: createBuiltinExecution('MiniMax', 'thinking') }
     let projectionApplied = false
     const buildBatch = (parts: ComposerPart[]) =>
       buildMessageBatchPlan({
@@ -705,14 +705,14 @@ describe('useAgentThreadController', () => {
     })
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
     const firstBatch = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]?.[1]
-    expect(firstBatch?.commands).toHaveLength(2) // SET_AGENT + USER_MESSAGE
+    expect(firstBatch?.commands).toHaveLength(2) // SET_EXECUTION + USER_MESSAGE
 
     await act(async () => {
       await result.current.submitMessage()
     })
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
     const secondBatch = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]?.[1]
-    // 精确回放：必须复用同一个 batch 对象（SET_AGENT + USER_MESSAGE），不能退化为只含消息的 batch。
+    // 精确回放：必须复用同一个 batch 对象（SET_EXECUTION + USER_MESSAGE），不能退化为只含消息的 batch。
     expect(secondBatch).toBe(firstBatch)
     expect(secondBatch?.commands).toHaveLength(2)
   })

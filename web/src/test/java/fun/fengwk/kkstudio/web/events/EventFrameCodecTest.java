@@ -36,7 +36,6 @@ class EventFrameCodecTest {
   private static final UUID CANVAS = new UUID(0L, 2L);
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
-  private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
   private static final ResourceKey THREAD_TREE_KEY =
       new ResourceKey(ResourceKind.THREAD_TREE, THREAD);
   private static final ResourceKey INTERACTIONS_KEY =
@@ -82,8 +81,8 @@ class EventFrameCodecTest {
                 + "\"}}"));
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(
-            EventFrameCodec.SubscriptionType.SUBSCRIBE, PROJECTS_KEY),
-        CODEC.decode("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
+            EventFrameCodec.SubscriptionType.SUBSCRIBE, ENVIRONMENTS_KEY),
+        CODEC.decode("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
     // 执行树按真实根 id 订阅；交互与 Environment 是无 id 的全局资源。
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(
@@ -99,8 +98,8 @@ class EventFrameCodecTest {
                 + THREAD
                 + "\"}}"));
     assertEquals(
-        new EventFrameCodec.RefreshFrame(PROJECTS_KEY),
-        CODEC.decode("{\"type\":\"refresh\",\"resource\":{\"kind\":\"projects\"}}"));
+        new EventFrameCodec.RefreshFrame(ENVIRONMENTS_KEY),
+        CODEC.decode("{\"type\":\"refresh\",\"resource\":{\"kind\":\"environments\"}}"));
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(
             EventFrameCodec.SubscriptionType.SUBSCRIBE, INTERACTIONS_KEY),
@@ -241,7 +240,7 @@ class EventFrameCodecTest {
                 prefix + "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\",\"extra\":true}}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode(prefix + "{\"kind\":\"projects\",\"id\":\"" + THREAD + "\"}}"));
+        () -> CODEC.decode(prefix + "{\"kind\":\"environments\",\"id\":\"" + THREAD + "\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(prefix + "{\"kind\":\"interactions\",\"id\":\"" + THREAD + "\"}}"));
@@ -287,8 +286,8 @@ class EventFrameCodecTest {
             + "\"},\"cursor\":\"0\"}",
         CODEC.subscribed(THREAD_KEY, 7L));
     assertEquals(
-        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
-        CODEC.subscribed(PROJECTS_KEY, 0L));
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"environments\"},\"cursor\":\"0\"}",
+        CODEC.subscribed(ENVIRONMENTS_KEY, 0L));
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
             + THREAD
@@ -301,7 +300,7 @@ class EventFrameCodecTest {
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"environments\"},\"cursor\":\"0\"}",
         CODEC.subscribed(ENVIRONMENTS_KEY, 0L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_KEY, -1L));
-    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(PROJECTS_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(ENVIRONMENTS_KEY, 1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_TREE_KEY, 1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(INTERACTIONS_KEY, 1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(ENVIRONMENTS_KEY, 1L));
@@ -338,13 +337,6 @@ class EventFrameCodecTest {
             + new RealtimeEventJsonCodec().encode(delta)
             + "}",
         CODEC.event(THREAD_KEY, new Signal.Realtime(delta)));
-
-    UUID projectId = new UUID(0L, 8L);
-    assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"projects\"},\"name\":\"changed\",\"data\":{\"projectId\":\""
-            + projectId
-            + "\"}}",
-        CODEC.event(PROJECTS_KEY, new Signal.ProjectChanged(projectId)));
 
     // 提示型资源：执行树/Environment 的 data 为空对象（标识只在 resource），交互携带真实执行根。
     assertEquals(
@@ -388,7 +380,7 @@ class EventFrameCodecTest {
   void hintSignalsRequireTheirOwnResourceKind() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.event(PROJECTS_KEY, new Signal.ThreadTreeChanged()));
+        () -> CODEC.event(ENVIRONMENTS_KEY, new Signal.ThreadTreeChanged()));
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.event(THREAD_TREE_KEY, new Signal.EnvironmentChanged()));
@@ -427,7 +419,7 @@ class EventFrameCodecTest {
     assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(THREAD_KEY, -1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(THREAD_TREE_KEY, 1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(CANVAS_KEY, 1L));
-    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(PROJECTS_KEY, null));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(ENVIRONMENTS_KEY, null));
   }
 
   @Test

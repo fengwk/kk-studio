@@ -3,7 +3,7 @@
  *
  * client -> server（JSON 文本）：
  * - Thread subscribe 可附带 afterEntryId（canonical UUID；无 head 时省略）。
- * - {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
+ * - {"type":"subscribe","resource":{"kind":"interactions"|"environments"}}
  * - {"type":"unsubscribe","resource":{...}}
  * - {"type":"refresh","resource":{"kind":"thread"|"thread-tree","id":"<UUID>"}}（已订阅资源的强制快照）
  * - {"type":"ide-use","browserSessionId":"<UUID>","revision":"<positive decimal>",
@@ -38,7 +38,7 @@
  * resource 精确只有 kind+id 且 id 必须是 canonical UUID（小写十六进制）；
  * 全局 projects/interactions/environments resource 不带 id；
  * resource/name 组合必须合法（thread 仅 snapshot|realtime，canvas 仅 revision，
- * projects|interactions|environments 仅 changed，thread-tree 仅 snapshot|changed）；canvas revision
+ * interactions|environments 仅 changed，thread-tree 仅 snapshot|changed）；canvas revision
  * 与其 durable cursor 必须是 canonical 非负十进制字符串且完全相等；Thread 与提示型资源的
  * ack cursor 恒为 '0'，提示型事件及 snapshot/realtime 事件不携带 cursor；realtime data 必须是非数组 JSON
  * 对象且不得携带 cursor。connected 的两个身份与 heartbeatIntervalMillis（不超过
@@ -78,7 +78,6 @@ type ApplicationEventResourceKind =
   | 'thread'
   | 'canvas'
   | 'thread-tree'
-  | 'projects'
   | 'interactions'
   | 'environments'
 
@@ -86,7 +85,6 @@ export type ApplicationEventResource =
   | { kind: 'thread'; id: string }
   | { kind: 'canvas'; id: string }
   | { kind: 'thread-tree'; id: string }
-  | { kind: 'projects' }
   | { kind: 'interactions' }
   | { kind: 'environments' }
 
@@ -181,13 +179,6 @@ type ApplicationEventCanvasRevisionEvent = {
   cursor: ApplicationEventCursor
 }
 
-type ApplicationEventProjectChangedEvent = {
-  type: 'event'
-  resource: ApplicationEventResource & { kind: 'projects' }
-  name: 'changed'
-  data: { projectId: string }
-}
-
 /** thread-tree 的提示型 changed 事件：根 id 已在 resource 上，data 恒为空对象且绝不携带 cursor。 */
 type ApplicationEventTreeSnapshotEvent = {
   type: 'event'
@@ -240,7 +231,6 @@ export type ApplicationEventServerMessage =
   | ApplicationEventThreadSnapshotEvent
   | ApplicationEventThreadRealtimeEvent
   | ApplicationEventCanvasRevisionEvent
-  | ApplicationEventProjectChangedEvent
   | ApplicationEventTreeSnapshotEvent
   | ApplicationEventTreeChangedEvent
   | ApplicationEventInteractionsChangedEvent
@@ -451,8 +441,6 @@ function decodeEventData(
       return decodeThreadEvent(parsed, resource, name)
     case 'canvas':
       return decodeCanvasRevisionEvent(parsed, resource)
-    case 'projects':
-      return decodeProjectChangedEvent(parsed, resource)
     case 'thread-tree':
       if (name === 'snapshot') {
         return decodeTreeSnapshotEvent(parsed, resource)
@@ -734,17 +722,6 @@ function decodeCanvasRevisionEvent(
   return { type: 'event', resource, name: 'revision', data: { revision }, cursor: revision }
 }
 
-function decodeProjectChangedEvent(
-  parsed: Record<string, unknown>,
-  resource: ApplicationEventResource & { kind: 'projects' },
-): ApplicationEventServerMessage | null {
-  const projectId = parseSingleUuidField(parsed.data, 'projectId')
-  if (projectId == null) {
-    return null
-  }
-  return { type: 'event', resource, name: 'changed', data: { projectId } }
-}
-
 /** thread-tree 的提示型事件：根 id 在 resource 上，data 恒为空对象且绝不携带 cursor。 */
 function decodeTreeSnapshotEvent(
   parsed: Record<string, unknown>,
@@ -840,7 +817,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return null
   }
-  if (value.kind === 'projects' || value.kind === 'interactions' || value.kind === 'environments') {
+  if (value.kind === 'interactions' || value.kind === 'environments') {
     return hasExactFields(value, ['kind']) ? { kind: value.kind } : null
   }
   if (
@@ -856,7 +833,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
 /** 提示型资源没有持久游标：ack 恒为 '0'，事件绝不携带 cursor。 */
 function isHintResourceKind(kind: ApplicationEventResourceKind): boolean {
   return (
-    kind === 'projects' || kind === 'thread-tree' || kind === 'interactions' || kind === 'environments'
+    kind === 'thread-tree' || kind === 'interactions' || kind === 'environments'
   )
 }
 

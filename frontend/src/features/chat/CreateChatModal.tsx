@@ -150,7 +150,7 @@ export function CreateChatModal({
           <div className="form-group">
             <div className="create-chat-yolo-row">
               <div className="create-chat-yolo-text">
-                <FieldLabel>{t('projects.yolo')}</FieldLabel>
+                <FieldLabel>{t('ai.chat.yolo')}</FieldLabel>
                 <span id={yoloDescriptionId} className="create-chat-yolo-description">
                   {t('ai.chat.yoloDescription')}
                 </span>
@@ -158,7 +158,7 @@ export function CreateChatModal({
               <Switch
                 checked={yoloEnabled}
                 onChange={onYoloChange}
-                label={t('projects.yolo')}
+                label={t('ai.chat.yolo')}
                 aria-describedby={yoloDescriptionId}
                 disabled={pending}
               />

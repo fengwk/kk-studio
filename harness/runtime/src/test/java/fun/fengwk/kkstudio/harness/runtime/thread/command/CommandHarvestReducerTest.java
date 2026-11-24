@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -52,8 +51,8 @@ class CommandHarvestReducerTest {
             BASE,
             List.of(
                 queued(id(1L), 1L, new UserMessageCommandPayload(user("hello"))),
-                queued(id(2L), 2L, new SetAgentCommandPayload("agent-a")),
-                queued(id(3L), 3L, new SetAgentCommandPayload("agent-b")),
+                queued(id(2L), 2L, new SetEnvironmentCommandPayload("agent-a")),
+                queued(id(3L), 3L, new SetEnvironmentCommandPayload("agent-b")),
                 queued(
                     id(4L),
                     4L,
@@ -64,7 +63,7 @@ class CommandHarvestReducerTest {
                 queued(id(6L), 6L, new SetEnvironmentCommandPayload("local")),
                 queued(id(8L), 8L, new CustomMessageCommandPayload(user("instruction")))));
 
-    assertEquals(new BranchSettings("agent-b", opus, "local"), result);
+    assertEquals(new BranchSettings("coding", opus, "local"), result);
   }
 
   /** 测试意图：设置命令按顺序生效；重复设置、消息命令不影响最终快照。 */
@@ -76,13 +75,13 @@ class CommandHarvestReducerTest {
             BASE,
             List.of(
                 // no-op：与 BASE 相同。
-                queued(id(1L), 1L, new SetAgentCommandPayload("coding")),
-                queued(id(2L), 2L, new SetAgentCommandPayload("reviewer")),
+                queued(id(1L), 1L, new SetEnvironmentCommandPayload("coding")),
+                queued(id(2L), 2L, new SetEnvironmentCommandPayload("reviewer")),
                 queued(id(3L), 3L, new SetExecutionCommandPayload(BASE.execution())),
                 queued(id(4L), 4L, new SetEnvironmentCommandPayload("local")),
                 // 消息不改变设置。
                 queued(id(5L), 5L, new CustomMessageCommandPayload(user("custom")))));
-    assertEquals(BASE.withAgentName("reviewer").withEnvironmentName("local"), result);
+    assertEquals(BASE.withEnvironmentName("local"), result);
   }
 
   /** 测试意图：SET_ENVIRONMENT 的显式 null 是「解除环境选择」，必须真实写回 settings 而不是被当作 no-op。 */
@@ -119,6 +118,7 @@ class CommandHarvestReducerTest {
                 queued(id(2L), 2L, new SetExecutionCommandPayload(replacement)),
                 queued(id(3L), 3L, new CustomMessageCommandPayload(user("custom")))));
 
+    assertNull(result.environmentName());
     assertEquals("coding", result.agentName());
     assertEquals(replacement, result.execution());
   }
@@ -127,15 +127,15 @@ class CommandHarvestReducerTest {
   void rejectsWrongThreadNonQueuedAndNonMonotonicCommands() {
     assertThrows(NullPointerException.class, () -> reduce(null, BASE, List.of()));
 
-    ThreadCommand foreign = queued(id(1L), 1L, new SetAgentCommandPayload("coding"), id(8L));
+    ThreadCommand foreign = queued(id(1L), 1L, new SetEnvironmentCommandPayload("coding"), id(8L));
     ThreadCommand applied = applied(id(2L), 2L);
     ThreadCommand cancelled =
         new ThreadCommand(
             id(7L),
             3L,
-            new SetAgentCommandPayload("coding"),
+            new SetEnvironmentCommandPayload("coding"),
             id(3L),
-            ThreadCommandPayloadJsonCodec.requestHash(new SetAgentCommandPayload("coding")),
+            ThreadCommandPayloadJsonCodec.requestHash(new SetEnvironmentCommandPayload("coding")),
             null,
             id(3L),
             CREATED.plusSeconds(1),
@@ -150,8 +150,8 @@ class CommandHarvestReducerTest {
                 id(7L),
                 BASE,
                 List.of(
-                    queued(id(4L), 2L, new SetAgentCommandPayload("coding")),
-                    queued(id(5L), 1L, new SetAgentCommandPayload("other")))));
+                    queued(id(4L), 2L, new SetEnvironmentCommandPayload("coding")),
+                    queued(id(5L), 1L, new SetEnvironmentCommandPayload("other")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -159,8 +159,8 @@ class CommandHarvestReducerTest {
                 id(7L),
                 BASE,
                 List.of(
-                    queued(id(6L), 1L, new SetAgentCommandPayload("coding")),
-                    queued(id(7L), 1L, new SetAgentCommandPayload("other")))));
+                    queued(id(6L), 1L, new SetEnvironmentCommandPayload("coding")),
+                    queued(id(7L), 1L, new SetEnvironmentCommandPayload("other")))));
   }
 
   @Test
@@ -189,7 +189,7 @@ class CommandHarvestReducerTest {
   }
 
   private static ThreadCommand applied(UUID id, long sequence) {
-    ThreadCommandPayload payload = new SetAgentCommandPayload("coding");
+    ThreadCommandPayload payload = new SetEnvironmentCommandPayload("coding");
     return new ThreadCommand(
         id(7L),
         sequence,

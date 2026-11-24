@@ -1,6 +1,5 @@
 import { aiExtension } from '@/app/ai-console/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
-import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'
 import type {
   ApplicationContributions,
@@ -82,6 +81,5 @@ function appendUnique<T extends { id: string }>(
 export const applicationContributions = composeApplicationContributions([
   aiExtension,
   canvasExtension,
-  projectsExtension,
   settingsExtension,
 ])

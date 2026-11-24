@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -832,8 +831,7 @@ class ProviderRequestPreviewServiceTest {
   }
 
   private enum ThreadCommandKind {
-    SET_EXECUTION,
-    SET_AGENT
+    SET_EXECUTION
   }
 
   private static NewThreadCommand setting(ThreadCommandKind kind) {
@@ -841,7 +839,6 @@ class ProviderRequestPreviewServiceTest {
       case SET_EXECUTION -> new NewThreadCommand(
           new SetExecutionCommandPayload(BuiltinExecution.of(new ModelSelection("model", "v1"))),
           id(201L));
-      case SET_AGENT -> new NewThreadCommand(new SetAgentCommandPayload("agent"), id(202L));
     };
   }
 

@@ -480,7 +480,6 @@ describe('PaneTarget durable-local FSM', () => {
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     for (const command of [
-      { type: 'SET_AGENT', idempotencyKey: 'c1', agentName: 'assistant' },
       {
         type: 'SET_EXECUTION',
         idempotencyKey: 'c1',
@@ -531,7 +530,7 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'SET_AGENT', idempotencyKey: 'c1', agentName: ' ' }],
+      commands: [{ type: 'SET_EXECUTION', idempotencyKey: 'c1', execution: null }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
@@ -625,7 +624,7 @@ describe('PaneTarget durable-local FSM', () => {
       owner,
       request: {
         ...validRequest,
-        owner: { kind: 'ISSUE_AGENT', id: 'issue-1:coder' },
+        owner: { kind: 'CHAT', id: 'chat-other' },
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
@@ -684,12 +683,12 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'SET_AGENT', idempotencyKey: '', agentName: 'assistant' }],
+      commands: [{ type: 'SET_EXECUTION', idempotencyKey: '', execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } } }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'SET_AGENT', agentName: 'assistant' }],
+      commands: [{ type: 'SET_EXECUTION', execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } } }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({ composerParts: [{}] })
@@ -927,9 +926,9 @@ describe('PaneTarget durable-local FSM', () => {
         execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
       },
       {
-        type: 'SET_AGENT',
-        idempotencyKey: 'cmd-agent-1',
-        agentName: 'assistant',
+        type: 'SET_EXECUTION',
+        idempotencyKey: 'cmd-execution-1',
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
         unknownKey: true,
       },
       {
@@ -1014,7 +1013,7 @@ describe('PaneTarget durable-local FSM', () => {
       saveBoundPendingMessage(threadId, cursorFree, storage)
       expect(loadBoundPendingMessage(threadId, storage)?.request).toEqual(cursorFree.request)
       for (const commands of [
-        [{ type: 'SET_AGENT', idempotencyKey: 'agent-key', agentName: 'assistant' }, command],
+        [{ type: 'SET_EXECUTION', idempotencyKey: 'execution-key', execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } } }, command],
         [command, { ...command, idempotencyKey: 'second-key' }],
       ]) {
         expect(isBoundPendingMessageValue({

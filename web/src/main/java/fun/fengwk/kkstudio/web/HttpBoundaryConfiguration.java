@@ -8,6 +8,7 @@ import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.InitBinder;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
@@ -25,6 +26,7 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 
 import java.beans.PropertyEditorSupport;
@@ -140,6 +142,11 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
         converters.set(i, new JacksonJsonHttpMessageConverter(strictHttpMapper(mapper)));
       }
     }
+  }
+
+  @Override
+  public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
+    resolvers.add(new StudioPrincipalArgumentResolver());
   }
 
   @Override

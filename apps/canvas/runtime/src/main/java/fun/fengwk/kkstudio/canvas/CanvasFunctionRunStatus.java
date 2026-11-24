@@ -22,5 +22,10 @@ public enum CanvasFunctionRunStatus {
    *
    * <p>保留本次 pin 与冻结计划，只能由人工核查事实后解除：继续查询原任务或确认失败/取消，不得当作新请求重新提交。
    */
-  UNKNOWN
+  UNKNOWN;
+
+  /** 正在推进或仍需核查外部结果，不能删除。 */
+  public boolean isUnsettled() {
+    return this == READY || this == RUNNING || this == UNKNOWN;
+  }
 }

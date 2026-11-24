@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -125,8 +124,8 @@ class HarnessRuntimeAcceptInitialTest {
         commands);
   }
 
-  private static NewThreadCommand setAgent(UUID idempotencyKey) {
-    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
+  private static NewThreadCommand setEnvironment(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload("local"), idempotencyKey);
   }
 
   /** 同身份重放在写入之前返回；重命名后也不能被名称索引误拒绝。 */
@@ -284,7 +283,7 @@ class HarnessRuntimeAcceptInitialTest {
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewRootSession(
                 TestIds.id(101), TestIds.id(102), settings(), false),
-            List.of(setAgent(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a")));
+            List.of(setEnvironment(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a")));
     AcceptedCommands first = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
     // 同一 Thread 上再接受第二批（THREAD target，cursor: head=root, next=3）。
     runtime.acceptCommands(
@@ -297,7 +296,7 @@ class HarnessRuntimeAcceptInitialTest {
 
     AcceptedCommands replay = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
-    // 只返回原始初始命令（SET_AGENT + user），顺序为请求顺序、sequence 从 1 连续、状态为当前 QUEUED，第二批不混入。
+    // 只返回原始初始命令（SET_ENVIRONMENT + user），顺序为请求顺序、sequence 从 1 连续、状态为当前 QUEUED，第二批不混入。
     assertEquals(
         List.of(TestIds.id(9), TestIds.id(1)),
         replay.acceptedCommands().stream().map(ThreadCommand::idempotencyKey).toList());
@@ -352,7 +351,7 @@ class HarnessRuntimeAcceptInitialTest {
   @Test
   void initialReplayRejectsCorruptedDurableCommands() {
     List<NewThreadCommand> requests =
-        List.of(setAgent(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hello"));
+        List.of(setEnvironment(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hello"));
 
     AcceptCommandsCommand partial = newSession(TestIds.id(160), TestIds.id(161), requests);
     seedInitialThread(partial, List.of(durable(TestIds.id(161), 1, requests.getFirst())));
@@ -464,12 +463,12 @@ class HarnessRuntimeAcceptInitialTest {
    */
   @Test
   void initialBatchShapeRulesAreEnforced() {
-    // 合法：SET_AGENT 前缀 + 单条 user message。
+    // 合法：SET_ENVIRONMENT 前缀 + 单条 user message。
     runtime.acceptCommands(
         newSession(
             TestIds.id(110),
             TestIds.id(111),
-            List.of(setAgent(TestIds.id(2)), userMessageCommand(TestIds.id(1), "hello"))),
+            List.of(setEnvironment(TestIds.id(2)), userMessageCommand(TestIds.id(1), "hello"))),
         AcceptancePreflight.IDENTITY);
 
     // 非法（请求校验错误，而非业务冲突）：没有 user-like message。
@@ -477,7 +476,8 @@ class HarnessRuntimeAcceptInitialTest {
         DomainException.class,
         () ->
             runtime.acceptCommands(
-                newSession(TestIds.id(112), TestIds.id(113), List.of(setAgent(TestIds.id(3)))),
+                newSession(
+                    TestIds.id(112), TestIds.id(113), List.of(setEnvironment(TestIds.id(3)))),
                 AcceptancePreflight.IDENTITY));
 
     // 非法（IAE）：SET_* 出现在消息之后（user-like 必须恰好一条且结尾）。
@@ -488,7 +488,8 @@ class HarnessRuntimeAcceptInitialTest {
                 newSession(
                     TestIds.id(114),
                     TestIds.id(115),
-                    List.of(userMessageCommand(TestIds.id(4), "hello"), setAgent(TestIds.id(5)))),
+                    List.of(
+                        userMessageCommand(TestIds.id(4), "hello"), setEnvironment(TestIds.id(5)))),
                 AcceptancePreflight.IDENTITY));
 
     // 合法：单条运行时 reminder（USER CUSTOM_MESSAGE）本身就是合法的末尾 USER 消息。
@@ -515,11 +516,9 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
   }
 
-  /**
-   * SET_* 前缀固定顺序必须是 SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT：用正反请求证明该顺序（正向通过 / 反向 IAE）。
-   */
+  /** SET_* 前缀固定顺序必须是 SET_EXECUTION -&gt; SET_ENVIRONMENT：用正反请求证明该顺序（正向通过 / 反向 IAE）。 */
   @Test
-  void setPrefixOrderRequiresAgentBeforeExecutionBeforeEnvironment() {
+  void setPrefixOrderRequiresExecutionBeforeEnvironment() {
     // 合法：全前缀 + 单条 user message。
     AcceptedCommands result =
         runtime.acceptCommands(
@@ -527,7 +526,6 @@ class HarnessRuntimeAcceptInitialTest {
                 TestIds.id(120),
                 TestIds.id(121),
                 List.of(
-                    setAgent(TestIds.id(2)),
                     new NewThreadCommand(
                         new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")),
                         TestIds.id(3)),
@@ -535,21 +533,6 @@ class HarnessRuntimeAcceptInitialTest {
                     userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
-    // 非法：SET_AGENT 出现在 SET_EXECUTION 之后（顺序不变量拒绝）。
-    assertThrows(
-        DomainException.class,
-        () ->
-            runtime.acceptCommands(
-                newSession(
-                    TestIds.id(122),
-                    TestIds.id(123),
-                    List.of(
-                        new NewThreadCommand(
-                            new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")),
-                            TestIds.id(2)),
-                        setAgent(TestIds.id(1)),
-                        userMessageCommand(TestIds.id(3), "hi"))),
-                AcceptancePreflight.IDENTITY));
     // 非法：SET_ENVIRONMENT 出现在 SET_EXECUTION 之前（顺序不变量拒绝）。
     assertThrows(
         DomainException.class,
@@ -575,8 +558,8 @@ class HarnessRuntimeAcceptInitialTest {
                     TestIds.id(124),
                     TestIds.id(125),
                     List.of(
-                        setAgent(TestIds.id(1)),
-                        setAgent(TestIds.id(2)),
+                        setEnvironment(TestIds.id(1)),
+                        setEnvironment(TestIds.id(2)),
                         userMessageCommand(TestIds.id(3), "hi"))),
                 AcceptancePreflight.IDENTITY));
     assertThrows(

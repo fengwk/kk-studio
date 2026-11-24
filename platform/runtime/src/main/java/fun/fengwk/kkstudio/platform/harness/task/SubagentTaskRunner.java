@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -201,9 +200,9 @@ public class SubagentTaskRunner implements SubagentRunner {
   /**
    * 把委派翻译成 Agent 任务：新建时一次性携带 root settings、父关系与源 prompt；续接既有子 Thread 时只校验永久父关系后追加命令，忙碌子线程照常入队。
    *
-   * <p>续接只追加 SET_AGENT + SET_EXECUTION + CUSTOM_MESSAGE；环境由执行根持有，新建与续接均不向子 Thread 写入环境。 SET_*
-   * 前缀按固定顺序发出，batch 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或执行根环境无关；因此同一次调用在任何重试 /
-   * 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
+   * <p>续接只追加 SET_EXECUTION + CUSTOM_MESSAGE；环境由执行根持有，新建与续接均不向子 Thread 写入环境。 SET_* 前缀按固定顺序发出，batch
+   * 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或执行根环境无关；因此同一次调用在任何重试 / 并发顺序下都产生同一份命令指纹，Runtime
+   * 能精确识别为重放而不是「另一份委派」。
    */
   private static AgentTaskRequest task(
       HarnessRuntime runtime,
@@ -244,7 +243,6 @@ public class SubagentTaskRunner implements SubagentRunner {
     ThreadSnapshot child = requireChild(runtime, parent, childThreadId);
     List<ThreadCommandPayload> payloads =
         List.of(
-            new SetAgentCommandPayload(settings.agentName()),
             new SetExecutionCommandPayload(settings.execution()),
             new CustomMessageCommandPayload(AgentMessage.user(request.prompt())));
     List<NewThreadCommand> commands = new ArrayList<>(payloads.size());
@@ -282,6 +280,9 @@ public class SubagentTaskRunner implements SubagentRunner {
     }
     if (!Objects.equals(request.parentThreadId(), child.thread().parentThreadId())) {
       throw reject(INVALID_RESUME_THREAD_MESSAGE);
+    }
+    if (!request.subagentType().equals(child.entryState().baseSettings().agentName())) {
+      throw reject("subagent thread agent does not match the requested subagent type");
     }
   }
 

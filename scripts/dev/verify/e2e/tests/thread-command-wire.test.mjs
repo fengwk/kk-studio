@@ -101,10 +101,10 @@ test('pure THREAD message omits both cursor fields from the owner-free wire body
 })
 
 test('cursor-bound THREAD batch without cursor is not silently completed by the helper', async () => {
-  // 测试意图：SET batch 缺少 cursor 时 helper 不得合成字段，服务端 400 必须原样冒泡。
+  // 测试意图：SET_EXECUTION batch 缺少 cursor 时 helper 不得合成字段，服务端 400 必须原样冒泡。
   const threadId = cid()
   const commands = [
-    { type: 'SET_AGENT', idempotencyKey: cid(), agentName: 'coder' },
+    { type: 'SET_EXECUTION', idempotencyKey: cid(), execution: { driver: 'builtin', settings: { modelName: 'model' } } },
     userMessageCommand('mixed', cid()),
   ]
   const ctx = {

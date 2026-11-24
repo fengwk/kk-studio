@@ -6,7 +6,6 @@ import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMap
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.idText;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newSessionTarget;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.request;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setAgent;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setEnvironment;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setExecution;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.threadBatch;
@@ -33,17 +32,18 @@ class HarnessRuntimeRequestMapperBatchTest {
   @Test
   void requiresAtMostOneTrailingUserLikeAndOrderedSetPrefixOnExistingThreads() {
     // 既有 Thread 的 batch 使用单调 SET_* 前缀；user-like 至多一条且必须以它收尾。
-    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
+    HarnessCommandCreateDTO execution = setExecution("execution", executionSelection());
     assertThrows(
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(userCommand("user"), agent)));
+                THREAD_ID, threadBatch(userCommand("user"), execution)));
     // 纯设置批次在既有 Thread 上合法：只允许 SET_*，不含任何 user-like 输入。
     AcceptCommandsCommand settingsOnly =
-        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, threadBatch(agent));
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+            THREAD_ID, threadBatch(execution));
     assertEquals(
-        List.of(ThreadCommandType.SET_AGENT),
+        List.of(ThreadCommandType.SET_EXECUTION),
         settingsOnly.commands().stream().map(command -> command.payload().type()).toList());
     assertThrows(
         DomainException.class,
@@ -51,19 +51,19 @@ class HarnessRuntimeRequestMapperBatchTest {
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(userCommand("one"), userCommand("two"))));
 
-    HarnessCommandCreateDTO duplicateAgent = setAgent("duplicate-agent", "other-assistant");
+    HarnessCommandCreateDTO duplicateExecution =
+        setExecution("duplicate-execution", executionSelection());
     assertThrows(
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(agent, duplicateAgent, userCommand("user"))));
+                THREAD_ID, threadBatch(execution, duplicateExecution, userCommand("user"))));
 
-    HarnessCommandCreateDTO execution = setExecution("execution", executionSelection());
     assertThrows(
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(execution, agent, userCommand("user"))));
+                THREAD_ID, threadBatch(execution, userCommand("user"), userCommand("tail"))));
 
     HarnessThreadCommandBatchDTO empty = threadBatch(userCommand("unused"));
     empty.setCommands(List.of());
@@ -75,35 +75,31 @@ class HarnessRuntimeRequestMapperBatchTest {
   /** 纯设置批次（0 条 user-like）只在既有 Thread 上被接受，且保持固定 SET_* 顺序；创建型 target 仍要求末尾 user-like 输入。 */
   @Test
   void acceptsSettingsOnlyBatchOnExistingThreadButNotOnCreationTargets() {
-    HarnessCommandCreateDTO agent = setAgent("settings-agent", "coder");
     HarnessCommandCreateDTO execution = setExecution("settings-execution", executionSelection());
     HarnessCommandCreateDTO environment = setEnvironment("settings-environment", null);
 
     AcceptCommandsCommand mapped =
         HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-            THREAD_ID, threadBatch(agent, execution, environment));
+            THREAD_ID, threadBatch(execution, environment));
     assertEquals(
-        List.of(
-            ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_EXECUTION,
-            ThreadCommandType.SET_ENVIRONMENT),
+        List.of(ThreadCommandType.SET_EXECUTION, ThreadCommandType.SET_ENVIRONMENT),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
 
     assertThrows(
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(newSessionTarget(), agent, execution)));
+                request(newSessionTarget(), execution, environment)));
   }
 
   /** 既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
   @Test
   void mapsThreadBatchCursorAndRequiresCommands() {
-    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
+    HarnessCommandCreateDTO execution = setExecution("execution", executionSelection());
     AcceptCommandsTarget.Thread target =
         (AcceptCommandsTarget.Thread)
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                    THREAD_ID, threadBatch(agent, userCommand("user")))
+                    THREAD_ID, threadBatch(execution, userCommand("user")))
                 .target();
     assertEquals(idText(3), target.expectedHeadEntryId().toString());
     assertEquals(4L, target.expectedNextCommandSequence());
@@ -129,16 +125,16 @@ class HarnessRuntimeRequestMapperBatchTest {
     assertNull(target.expectedHeadEntryId());
     assertNull(target.expectedNextCommandSequence());
 
-    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
+    HarnessCommandCreateDTO execution = setExecution("execution", executionSelection());
     HarnessThreadCommandBatchDTO mixedWithoutCursor = new HarnessThreadCommandBatchDTO();
-    mixedWithoutCursor.setCommands(List.of(agent, userCommand("mixed")));
+    mixedWithoutCursor.setCommands(List.of(execution, userCommand("mixed")));
     assertThrows(
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, mixedWithoutCursor));
     HarnessThreadCommandBatchDTO settingsWithoutCursor = new HarnessThreadCommandBatchDTO();
-    settingsWithoutCursor.setCommands(List.of(agent));
+    settingsWithoutCursor.setCommands(List.of(execution));
     assertThrows(
         DomainException.class,
         () ->

@@ -144,7 +144,6 @@ interface ThreadCommandOptions {
   allowNewSession?: boolean
   readOnly?: boolean
   canBranchFromRoot?: boolean
-  allowSwitchAgent?: boolean
   allowBranching?: boolean
   /** IDE 入口只在 Chat 持久宿主内提供；Provider 外不展示空命令。 */
   ideAvailable?: boolean
@@ -192,7 +191,7 @@ export function threadCommandsForTarget(
       && options.canBranchFromRoot === false
 
     const agentDisabled =
-      options.allowSwitchAgent === false
+      target.kind === 'BOUND_THREAD'
       && item.id === 'agent'
 
     const branchingDisabled =

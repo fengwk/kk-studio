@@ -44,23 +44,4 @@ describe('queryKeys', () => {
     expect(queryKeys.mcpServers.detail('fs')).toEqual(['mcp-servers', 'detail', 'fs'])
   })
 
-  it('builds deterministic query keys for Projects', () => {
-    // 测试意图：验证 Projects 模块实际使用的查询键保持确定性。
-    expect(queryKeys.projects.all).toEqual(['projects'])
-    expect(queryKeys.projects.lists()).toEqual(['projects', 'list'])
-    expect(queryKeys.projects.list(false)).toEqual(['projects', 'list', false])
-    expect(queryKeys.projects.list(true)).toEqual(['projects', 'list', true])
-    expect(queryKeys.projects.detail('proj-1')).toEqual(['projects', 'detail', 'proj-1'])
-    expect(queryKeys.projects.snapshot('proj-1')).toEqual(['projects', 'snapshot', 'proj-1'])
-    expect(queryKeys.projects.issues('proj-1')).toEqual(['projects', 'issue', 'proj-1'])
-    expect(queryKeys.projects.issue('proj-1', 'issue-1')).toEqual(['projects', 'issue', 'proj-1', 'issue-1'])
-    // 测试意图：证据查询键落在 issue 层级下，由项目定向失效通过前缀一并覆盖，不需要单独的失效分支或全量兜底。
-    expect(queryKeys.projects.evidence('proj-1', 'issue-1')).toEqual([
-      'projects',
-      'issue',
-      'proj-1',
-      'issue-1',
-      'evidence',
-    ])
-  })
 })

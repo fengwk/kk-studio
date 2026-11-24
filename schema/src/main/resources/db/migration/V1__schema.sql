@@ -157,7 +157,49 @@ comment on column storage_object_cleanup.next_attempt_at is 'Next sweep deadline
 
 comment on index idx_storage_object_cleanup_due is 'Storage Maintenance tombstone scan: due keys in next_attempt_at order.';
 
--- 2. Platform kernel storage: environments, Harness protocol and session blobs
+-- 2. Platform kernel storage: accounts, environments, Harness protocol and session blobs
+
+create table studio_user (
+    id uuid primary key,
+    username varchar(32) not null unique,
+    password_hash varchar(256) not null,
+    profile jsonb not null default '{}'::jsonb,
+    role varchar(16) not null,
+    disabled_at timestamptz(3),
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint ck_studio_user_username check (username ~ '^[a-z0-9][a-z0-9._-]{0,31}$'),
+    constraint ck_studio_user_profile check (jsonb_typeof(profile) = 'object'),
+    constraint ck_studio_user_role check (role in ('ADMIN', 'USER'))
+);
+
+create table login_session (
+    token_hash bytea primary key,
+    user_id uuid not null references studio_user(id) on delete cascade,
+    created_at timestamptz(3) not null default current_timestamp,
+    expires_at timestamptz(3) not null
+);
+create index idx_login_session_user on login_session(user_id);
+
+comment on table studio_user is 'Studio account credentials, profile and authorization state.';
+comment on column studio_user.id is 'Application-allocated account UUID.';
+comment on column studio_user.username is 'Unique account username (lowercase letters, digits, dots, underscores or hyphens).';
+comment on column studio_user.password_hash is 'Spring Security encoded password hash.';
+comment on column studio_user.profile is 'Account profile JSON object.';
+comment on column studio_user.role is 'Account role: ADMIN or USER.';
+comment on column studio_user.disabled_at is 'Account disable time; NULL means enabled.';
+comment on column studio_user.created_at is 'Row creation time (timestamptz, millisecond precision).';
+comment on column studio_user.updated_at is 'Application-managed last write time (timestamptz, millisecond precision).';
+comment on table login_session is 'Hashed bearer-token sessions associated with Studio accounts.';
+comment on column login_session.token_hash is 'Hash of the session bearer token; plaintext tokens are not persisted.';
+comment on column login_session.user_id is 'Owning Studio account UUID; sessions are removed with the account.';
+comment on column login_session.created_at is 'Session creation time (timestamptz, millisecond precision).';
+comment on column login_session.expires_at is 'Session expiration time.';
+comment on index idx_login_session_user is 'Lookup sessions by owning account.';
+
+-- Precomputed Spring Security PBKDF2 hash for the built-in kkstudio bootstrap credential.
+insert into studio_user(id, username, password_hash, role)
+values ('00000000-0000-0000-0000-000000000001', 'kkstudio', '{pbkdf2}473d0449576a25f739f57765f5b5d4ddd346ec503ad602aeab8da49810d4c61f460d54a08e070b1552a60ccab0285830', 'ADMIN');
 
 create table environment (
     id                  uuid          primary key,
@@ -407,7 +449,7 @@ create table harness_thread (
         parent_thread_id is null or parent_thread_id <> id
     ),
     constraint ck_harness_thread_kind check (
-        kind in ('USER', 'SUBAGENT', 'COMPACTION', 'CONTROLLER_TASK', 'PLUGIN_TASK')
+        kind in ('USER', 'SUBAGENT', 'COMPACTION', 'PLUGIN_TASK')
     ),
     constraint ck_harness_thread_constraints check (
         jsonb_typeof(constraints) = 'object'
@@ -435,7 +477,7 @@ comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREA
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
 comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
-comment on column harness_thread.kind is '不可变 Thread 用途：USER / SUBAGENT / COMPACTION / CONTROLLER_TASK / PLUGIN_TASK';
+comment on column harness_thread.kind is '不可变 Thread 用途：USER / SUBAGENT / COMPACTION / PLUGIN_TASK';
 comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
@@ -503,7 +545,6 @@ create table harness_thread_command (
         command_type in (
             'USER_MESSAGE',
             'CUSTOM_MESSAGE',
-            'SET_AGENT',
             'SET_EXECUTION',
             'SET_ENVIRONMENT',
             'NOTIFICATION'
@@ -569,6 +610,7 @@ create table harness_tool_invocation (
         status in (
             'WAITING_APPROVAL',
             'WAITING_INPUT',
+            'WAITING_CHILD',
             'READY',
             'RUNNING',
             'SUCCEEDED',
@@ -585,7 +627,7 @@ create table harness_tool_invocation (
     )
 );
 
-comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (thread_id, turn_start_entry_id, assistant_entry_id, call_index) 对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
+comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (thread_id, turn_start_entry_id, assistant_entry_id, call_index) 对齐；WAITING_INPUT 等待人输入，WAITING_CHILD 等待已接受 task 的 Join，batch apply 后行被物理删除';
 comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
 comment on column harness_tool_invocation.thread_id is '公共归属 ThreadId；工具能力从该 Thread 的 turn_start_entry_id 冻结快照读取，不依赖 ModelInvocation';
 comment on column harness_tool_invocation.turn_start_entry_id is '公共归属 TurnStart；必须属于 thread_id 且是 assistant_entry_id 所在分支的 open turn';
@@ -593,7 +635,7 @@ comment on column harness_tool_invocation.assistant_entry_id is '携带对应 To
 comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
-comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL 与 WAITING_INPUT）';
+comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL、WAITING_INPUT 与 WAITING_CHILD）';
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
@@ -604,7 +646,7 @@ comment on column harness_tool_invocation.input_receipt is '交互回执（JSON 
 
 create index idx_harness_tool_invocation_thread_nonterminal
     on harness_tool_invocation (thread_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_CHILD', 'READY', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 
@@ -1089,6 +1131,7 @@ comment on column plugin_configuration.values_json is '按插件 Schema 归一�
 
 create table plugin_credential (
     plugin_id           varchar(64)    primary key,
+    generation          uuid           not null default gen_random_uuid(),
     payload_json        text           not null,
     region              varchar(64),
     expires_at          timestamptz(3),
@@ -1515,250 +1558,3 @@ comment on column chat_session.chat_id is '所属 Chat（RESTRICT FK）';
 comment on column chat_session.created_at is '关联建立时间（毫秒精度）';
 
 create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
-
-create table project (
-    id uuid primary key,
-    title varchar(256) not null check (btrim(title) <> '' and title = btrim(title)),
-    description text not null default '' check (octet_length(description) <= 65536),
-    workflow jsonb not null check (
-        jsonb_typeof(workflow) = 'object'
-        and coalesce(jsonb_typeof(workflow -> 'states'), '') = 'array'
-    ),
-    yolo_enabled boolean not null default true,
-    next_issue_number bigint not null default 1 check (next_issue_number >= 1),
-    version bigint not null default 0 check (version >= 0),
-    archived_at timestamptz(3),
-    created_at timestamptz(3) not null default current_timestamp,
-    updated_at timestamptz(3) not null default current_timestamp
-);
-
-comment on table project is 'Project 核心实体：项目资料、YOLO 策略、工作流 JSON 与 Issue 编号单调分配器';
-comment on column project.id is '项目 UUID 主键（应用生成）';
-comment on column project.title is '展示标题（非空白且无环绕空白，<= 256 字符）';
-comment on column project.description is '自洽目标、约束与验收规范描述（最大 64 KiB）';
-comment on column project.workflow is '严格工作流配置（JSON object 且携带 states array）；state 成员关系由应用校验';
-comment on column project.yolo_enabled is 'Project 下 Issue 运行的 YOLO 策略：跳过普通工具审批预检，不影响身份校验与资源授权';
-comment on column project.next_issue_number is '项目内单调递增 Issue 编号分配器，>= 1';
-comment on column project.version is '乐观锁版本号，>= 0';
-comment on column project.archived_at is '归档时间戳，为空表示活跃';
-
-create index idx_project_updated on project (updated_at, id);
-
-create table project_issue (
-    id uuid primary key,
-    project_id uuid not null references project (id) on delete restrict,
-    number bigint not null check (number >= 1),
-    title varchar(256) not null check (btrim(title) <> ''),
-    description text not null default '' check (octet_length(description) <= 1048576),
-    state varchar(64) not null check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
-    blocked_from_state varchar(64) check (
-        blocked_from_state is null or blocked_from_state ~ '^[A-Z][A-Z0-9_]{0,63}$'
-    ),
-    block_reason text,
-    pause_reason varchar(16),
-    pause_detail text,
-    next_run_ordinal bigint not null default 1 check (next_run_ordinal >= 1),
-    next_activity_sequence bigint not null default 1 check (next_activity_sequence >= 1),
-    version bigint not null default 0 check (version >= 0),
-    created_at timestamptz(3) not null default current_timestamp,
-    updated_at timestamptz(3) not null default current_timestamp,
-    unique (project_id, number),
-    check (
-        (pause_reason is null and pause_detail is null)
-        or (pause_reason is not null and pause_reason in ('USER', 'ERROR')
-            and pause_detail is not null and btrim(pause_detail) <> '')
-    )
-);
-
-comment on table project_issue is 'Issue 核心实体：工作流 state、阻塞恢复点、控制暂停与编号/序号分配器';
-comment on column project_issue.id is 'Issue UUID 主键（应用生成）';
-comment on column project_issue.project_id is '归属项目 UUID（RESTRICT）';
-comment on column project_issue.number is '项目内单调递增编号，>= 1';
-comment on column project_issue.state is 'Workflow-scoped natural code; the DB only checks the charset, membership in project.workflow is application-validated';
-comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标；是否与 state 配对由应用维护';
-comment on column project_issue.block_reason is 'BLOCKED 的原因；是否与 state 配对由应用维护';
-comment on column project_issue.pause_reason is '控制暂停原因：USER / ERROR（与 pause_detail 成对）';
-comment on column project_issue.pause_detail is '控制暂停详情（非空白，且与 pause_reason 成对）';
-comment on column project_issue.next_run_ordinal is '下一个 Run ordinal 分配器，>= 1';
-comment on column project_issue.next_activity_sequence is '下一个 Activity sequence 分配器，>= 1';
-comment on column project_issue.version is '乐观锁行版本，>= 0';
-
-create index idx_project_issue_board on project_issue (project_id, state, number);
-
-create table project_issue_agent_thread (
-    issue_id uuid not null,
-    agent_name varchar(64) not null,
-    session_id uuid not null,
-    thread_id uuid not null,
-    created_at timestamptz(3) not null default current_timestamp,
-    constraint pk_project_issue_agent_thread primary key (issue_id, agent_name),
-    constraint uk_project_issue_agent_thread_thread unique (thread_id),
-    constraint uk_project_issue_agent_thread_issue unique (issue_id, thread_id),
-    constraint fk_project_issue_agent_thread_issue foreign key (issue_id)
-        references project_issue (id) on delete restrict,
-    constraint fk_project_issue_agent_thread_agent foreign key (agent_name)
-        references agent (name) on delete restrict,
-    constraint fk_project_issue_agent_thread_thread foreign key (session_id, thread_id)
-        references harness_thread (session_id, id) on delete restrict
-);
-
-comment on table project_issue_agent_thread is 'Issue+Agent 稳定 Thread 归属：Session 与 Thread 由复合外键保证一致';
-
-create index idx_project_issue_agent_thread_session
-    on project_issue_agent_thread (session_id);
-
-create table project_issue_stage_budget (
-    issue_id uuid not null,
-    state varchar(64) not null,
-    max_runs integer not null,
-    budget_after_ordinal bigint not null default 0,
-    created_at timestamptz(3) not null default current_timestamp,
-    updated_at timestamptz(3) not null default current_timestamp,
-    constraint pk_project_issue_stage_budget primary key (issue_id, state),
-    constraint fk_project_issue_stage_budget_issue foreign key (issue_id)
-        references project_issue (id) on delete restrict,
-    constraint ck_project_issue_stage_budget_state check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
-    constraint ck_project_issue_stage_budget_max_runs check (max_runs > 0),
-    constraint ck_project_issue_stage_budget_after_ordinal check (budget_after_ordinal >= 0)
-);
-
-comment on table project_issue_stage_budget is 'Issue 工作阶段额度：每 Issue+state 一份，max_runs 为正，budget_after_ordinal 是重置高水位';
-comment on column project_issue_stage_budget.state is '工作阶段 state；哪些阶段可建预算行由应用维护';
-comment on column project_issue_stage_budget.max_runs is '本阶段允许的 Run 数上限（正整数）';
-comment on column project_issue_stage_budget.budget_after_ordinal is 'Reset high-water mark; consumed = this Issue+state Runs with a greater ordinal, all statuses, never filtered by Agent';
-
-create table project_issue_run (
-    id uuid primary key,
-    issue_id uuid not null,
-    ordinal bigint not null check (ordinal >= 1),
-    state varchar(64) not null check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
-    session_id uuid not null,
-    thread_id uuid not null,
-    status varchar(16) not null,
-    start_entry_id uuid not null,
-    end_entry_id uuid,
-    final_answer_entry_id uuid,
-    next_state varchar(64),
-    observed_activity_sequence bigint not null default 0 check (observed_activity_sequence >= 0),
-    remaining_execution_ms bigint not null check (remaining_execution_ms >= 0),
-    active_since timestamptz(3),
-    error text,
-    version bigint not null default 0 check (version >= 0),
-    started_at timestamptz(3) not null default current_timestamp,
-    ended_at timestamptz(3),
-    constraint uk_project_issue_run_issue_ordinal unique (issue_id, ordinal),
-    constraint uk_project_issue_run_id_issue unique (id, issue_id),
-    constraint fk_project_issue_run_stage_budget foreign key (issue_id, state)
-        references project_issue_stage_budget (issue_id, state) on delete restrict,
-    constraint fk_project_issue_run_agent_thread foreign key (issue_id, thread_id)
-        references project_issue_agent_thread (issue_id, thread_id) on delete restrict,
-    constraint fk_project_issue_run_thread_session foreign key (session_id, thread_id)
-        references harness_thread (session_id, id) on delete restrict,
-    constraint ck_project_issue_run_status check (
-        status in ('RUNNING', 'WAITING', 'COMPLETED', 'FAILED', 'CANCELLED')
-    ),
-    constraint ck_project_issue_run_next_state check (
-        next_state is null or next_state ~ '^[A-Z][A-Z0-9_]{0,63}$'
-    )
-);
-
-comment on table project_issue_run is 'Issue 运行实体：冻结的 Issue/state/Session/Thread 坐标、剩余执行预算与终态收尾';
-comment on column project_issue_run.id is 'Run UUID 主键（应用生成）';
-comment on column project_issue_run.issue_id is '归属 Issue UUID';
-comment on column project_issue_run.ordinal is 'Issue 内单调运行编号，>= 1';
-comment on column project_issue_run.state is '运行时冻结的工作阶段 state（必须已有阶段预算）';
-comment on column project_issue_run.session_id is '冻结的 Agent 私有 Harness Session';
-comment on column project_issue_run.thread_id is '冻结的 Issue+Agent 工作 Thread（必须已绑定且属于该 Session）';
-comment on column project_issue_run.status is '状态：RUNNING, WAITING, COMPLETED, FAILED, CANCELLED';
-comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（应用保证属于本 Session）';
-comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（应用保证终态非空、活跃为空）';
-comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（应用保证属于本 Session）';
-comment on column project_issue_run.next_state is 'Accepted handoff target; only a successful Run close commits it to Issue.state; 合法性由应用维护';
-comment on column project_issue_run.observed_activity_sequence is 'Delivery cursor in the Issue activity stream, not an Entry boundary';
-comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；何时必须为正由应用维护';
-comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点；与 status 的关联由应用维护';
-comment on column project_issue_run.error is 'FAILED 的失败原因；结果未定时由应用明确说明结果未知，COMPLETED 时的形状由应用维护';
-comment on column project_issue_run.version is '乐观锁行版本，>= 0';
-comment on column project_issue_run.started_at is 'Run 创建时间（毫秒精度）';
-comment on column project_issue_run.ended_at is '终态时间（毫秒精度）；与 status 的关联由应用维护';
-
-create unique index uk_project_issue_run_active on project_issue_run (issue_id)
-    where status in ('RUNNING', 'WAITING');
-create index idx_project_issue_run_budget on project_issue_run (issue_id, state, ordinal);
-create index idx_project_issue_run_session on project_issue_run (session_id, thread_id);
-
-create table project_issue_activity (
-    issue_id uuid not null,
-    sequence bigint not null check (sequence >= 1),
-    kind varchar(24) not null,
-    actor_type varchar(16) not null check (actor_type in ('HUMAN', 'AGENT', 'SYSTEM')),
-    actor_agent_name varchar(64),
-    run_id uuid,
-    body text,
-    data jsonb not null default '{}'::jsonb check (jsonb_typeof(data) = 'object'),
-    idempotency_key varchar(128) not null check (btrim(idempotency_key) <> ''),
-    request_hash char(64) not null check (request_hash ~ '^[0-9a-f]{64}$'),
-    created_at timestamptz(3) not null default current_timestamp,
-    constraint pk_project_issue_activity primary key (issue_id, sequence),
-    constraint uk_project_issue_activity_request unique (issue_id, idempotency_key),
-    constraint fk_project_issue_activity_issue foreign key (issue_id)
-        references project_issue (id) on delete restrict,
-    constraint fk_project_issue_activity_agent foreign key (actor_agent_name)
-        references agent (name) on delete restrict,
-    constraint fk_project_issue_activity_run foreign key (run_id, issue_id)
-        references project_issue_run (id, issue_id) on delete restrict,
-    check (
-        (actor_type = 'AGENT' and actor_agent_name is not null)
-        or (actor_type in ('HUMAN', 'SYSTEM') and actor_agent_name is null)
-    ),
-    check (kind in ('COMMENT', 'RUN', 'INSTRUCTION', 'SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL')),
-    check (body is null or octet_length(body) <= 1048576)
-);
-
-comment on table project_issue_activity is 'Issue 有序幂等事实流：评论、Run 呈现、指示、规格/状态变更与控制事件';
-comment on column project_issue_activity.issue_id is '关联 Issue UUID（复合主键）';
-comment on column project_issue_activity.sequence is 'Issue 内单调递增序号，>= 1，同时是投递位置';
-comment on column project_issue_activity.kind is '类型：COMMENT, RUN, INSTRUCTION, SPEC_CHANGE, STATE_CHANGE, CONTROL';
-comment on column project_issue_activity.actor_type is '操作者类型：HUMAN, AGENT, SYSTEM';
-comment on column project_issue_activity.actor_agent_name is '操作者 Agent 身份（AGENT 必填，HUMAN/SYSTEM 必须为空）';
-comment on column project_issue_activity.run_id is '相关 Run（应用保证属于同一 Issue；kind 与 run_id 的关联由应用维护）';
-comment on column project_issue_activity.body is '文本正文（最大 1 MiB）；是否允许由 kind 决定，应用维护';
-comment on column project_issue_activity.data is '事件 typed data（JSON object）；是否为空对象由 kind 决定，应用维护';
-comment on column project_issue_activity.idempotency_key is '同 Issue 幂等键（非空白），重放同一动作不产生新记录';
-comment on column project_issue_activity.request_hash is '请求正文的 SHA-256（64 位小写十六进制）';
-
-create unique index uk_project_activity_run on project_issue_activity (issue_id, run_id)
-    where kind = 'RUN';
-create index idx_project_activity_run on project_issue_activity (run_id) where run_id is not null;
-
-create table project_issue_evidence (
-    issue_id uuid not null,
-    blob_id uuid not null,
-    actor_agent_name varchar(64),
-    run_id uuid,
-    name varchar(512) not null check (btrim(name) <> '' and name = btrim(name)),
-    created_at timestamptz(3) not null default current_timestamp,
-    constraint pk_project_issue_evidence primary key (issue_id, blob_id),
-    constraint fk_project_issue_evidence_issue foreign key (issue_id)
-        references project_issue (id) on delete restrict,
-    constraint fk_project_issue_evidence_blob foreign key (blob_id)
-        references storage_blob (id) on delete restrict,
-    constraint fk_project_issue_evidence_agent foreign key (actor_agent_name)
-        references agent (name) on delete restrict,
-    constraint fk_project_issue_evidence_run foreign key (run_id, issue_id)
-        references project_issue_run (id, issue_id) on delete restrict,
-    constraint ck_project_issue_evidence_author check (run_id is null or actor_agent_name is not null)
-);
-
-create index idx_project_issue_evidence_blob
-    on project_issue_evidence (blob_id);
-
-comment on table project_issue_evidence is 'Explicit published Blob references independent of Session lifetime; application retains/releases once';
-comment on column project_issue_evidence.issue_id is '所属 Issue UUID（复合主键）';
-comment on column project_issue_evidence.blob_id is '已发布 Blob UUID（复合主键，RESTRICT FK，ACTIVE 行）';
-comment on column project_issue_evidence.actor_agent_name is '发布者 Agent 身份（作者归属，RESTRICT FK，可空）';
-comment on column project_issue_evidence.run_id is '来源 Run（同 Issue 复合 FK，可空）；非空时必须同时给出 actor_agent_name';
-comment on column project_issue_evidence.name is '权威展示名（varchar(512)，非空且无首尾空白）：人工上传取自上传行，执行者发布由服务端从规范 URI 派生，不接受客户端可伪造文件名';
-comment on column project_issue_evidence.created_at is '发布时间戳（毫秒精度）';
-
-comment on index idx_project_issue_evidence_blob is '按 blob 反向枚举引用它的 Issue（对账与深删除）';

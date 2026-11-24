@@ -100,7 +100,7 @@ describe('extractQueuedCustomMessages', () => {
     const commands: HarnessThreadCommandDTO[] = [
       createCommand({ sequence: '1', type: 'USER_MESSAGE' }),
       createCommand({ sequence: '2', type: 'NOTIFICATION' }),
-      createCommand({ sequence: '3', type: 'SET_AGENT' }),
+      createCommand({ sequence: '3', type: 'SET_EXECUTION' }),
       createCommand({ sequence: '4', type: 'CUSTOM_MESSAGE' }),
     ]
 

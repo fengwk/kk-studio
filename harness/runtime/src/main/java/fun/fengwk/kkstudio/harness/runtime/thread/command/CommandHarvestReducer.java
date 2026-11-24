@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -58,7 +57,6 @@ public final class CommandHarvestReducer {
         case UserMessageCommandPayload ignored -> {}
         case CustomMessageCommandPayload ignored -> {}
         case NotificationCommandPayload ignored -> {}
-        case SetAgentCommandPayload value -> settings = settings.withAgentName(value.agentName());
         case SetExecutionCommandPayload value -> settings =
             settings.withExecution(value.execution());
         case SetEnvironmentCommandPayload value -> settings =

@@ -48,7 +48,7 @@ describe('useInteractionsController', () => {
     threadId: 'th-2',
     rootThreadId: 'th-2',
     sessionId: 'sess-2',
-    owner: { kind: 'ISSUE_AGENT', id: 'iss-1:developer', title: 'Issue', link: '/projects/p1?issue=iss-1' },
+    owner: { kind: 'CHAT', id: 'chat-1', title: 'Chat', link: '/chats/chat-1' },
     toolCallId: 'call-2',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',

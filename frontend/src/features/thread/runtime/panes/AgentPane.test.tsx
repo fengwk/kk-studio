@@ -3044,43 +3044,6 @@ describe('AgentPane orchestration', () => {
     modelPane.unmount()
   })
 
-  it('isolates ISSUE_AGENT owner storage and routing from independent thread pane without crosstalk', async () => {
-    // 测试意图：验证当 owner 为 ISSUE_AGENT 时，其生命周期与无 owner 的子线程路由或 CHAT owner 完全隔离，
-    // 不会向 CHAT 存储命名空间写入 target，也不会调用 chat 专有服务，两套架构 owner 语义不混淆。
-    const issueOwner: AgentRuntimeOwnerDTO = {
-      kind: 'ISSUE_AGENT',
-      id: 'issue-42:architect',
-    }
-    const issueThreadId = '00000000-0000-0000-0000-000000000042'
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(issueThreadId, { name: 'Architect Thread' })),
-    )
-
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <TestAgentPane
-            owner={issueOwner}
-            paneId="pane-issue"
-            agents={agents}
-            initialTarget={{ kind: 'BOUND_THREAD', threadId: issueThreadId }}
-            focused
-          />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
-
-    // Composer 挂载即证明面板就绪，同时断言没有任何
-    // CHAT 命名空间的读写（owner 语义不串台）。
-    await screen.findByLabelText('给 AI 发送消息')
-
-    expect(loadSessionsMock).not.toHaveBeenCalled()
-    expect(localStorage.getItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-issue')).toBeNull()
-  })
 })
 
 function threadFixture(
@@ -3827,9 +3790,9 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       const { result } = renderOwnerlessController()
       await waitFor(() => expect(result.current.activeDraft).not.toBeNull())
 
-      // 1. 切换 Agent 无需 owner
+      // 1. 绑定 Thread 不允许通过 pane 切换 Agent
       act(() => result.current.selectAgent('assistant'))
-      expect(result.current.error).toBeNull()
+      expect(result.current.error).toBe('当前模式不支持切换 Agent')
 
       // 2. 重命名无需 owner：打开面板后提交走真实 PUT
       act(() => {
@@ -3957,9 +3920,8 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       ))
     })
 
-    it('applies the same owner-free bound interaction for CHAT, ISSUE_AGENT and absent owners', async () => {
-      // 测试意图：矩阵级验证——既有 Thread 的能力与 owner 类型无关：三种 owner 状态下
-      // 预览都只受草稿就绪度限制、settings 都暴露，owner 概念只保留给容器创建。
+    it('applies the same owner-free bound interaction for CHAT and absent owners', async () => {
+      // 测试意图：验证既有 Thread 的能力与 owner 状态无关，预览只受草稿就绪度限制且 settings 始终暴露。
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
       // 1. CHAT owner
@@ -3979,24 +3941,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       await waitFor(() => expect(chatResult.current.activeDraft).not.toBeNull())
       expect(chatResult.current.composer.settings).toBeDefined()
 
-      // 2. ISSUE_AGENT owner：与 CHAT 完全相同的既有 Thread 行为
-      const { result: issueResult } = renderHook(
-        () =>
-          useRootControlProbe({
-            owner: { kind: 'ISSUE_AGENT', id: 'issue-99:coder' },
-            paneId: 'p-issue',
-            initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
-            agents,
-            environments: [],
-            defaults: {},
-            focused: false,
-          }),
-        { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
-      )
-      await waitFor(() => expect(issueResult.current.activeDraft).not.toBeNull())
-      expect(issueResult.current.composer.settings).toBeDefined()
-
-      // 3. 无 owner：同样开放 settings，只有容器导航仍被拒绝
+      // 2. 无 owner：同样开放 settings，只有容器导航仍被拒绝
       const { result: nullResult } = renderHook(
         () =>
           useRootControlProbe({
@@ -4437,16 +4382,10 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
     }
 
     // 两类入口均需先验证完整预设；拒绝选择不得清空正文、附件或关闭选择面板。
-    it.each(['blank', 'bound'])('preserves draft and interaction on invalid agent selection in %s mode', async (mode) => {
+    it('preserves draft and interaction on invalid agent selection in blank mode', async () => {
       vi.mocked(agentService.listAgents).mockResolvedValue([agents[0]!, coderAgent, brokenAgent])
       vi.mocked(agentService.listModels).mockResolvedValue([models[0]!, claudeModel])
 
-      if (mode === 'bound') {
-        localStorage.setItem(
-          `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
-          JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-        )
-      }
       const hook = renderController({ agents: [agents[0]!, coderAgent, brokenAgent] })
       await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
       const initialDraft = { ...hook.result.current.activeDraft! }
@@ -4503,8 +4442,8 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       )
     })
 
-    it('atomically follows target agent model in bound mode, sending SET_AGENT+SET_EXECUTION+USER_MESSAGE on submit', async () => {
-      // 发送必须把 Agent 与模型设置放在同一消息批次，不能只更新 UI 标签。
+    it('keeps bound execution immutable when selecting an Agent', async () => {
+      // 绑定 Thread 的执行配置由 Thread 自身管理，pane 选择 Agent 不得改写它。
       vi.mocked(agentService.listAgents).mockResolvedValue([agents[0]!, coderAgent])
       vi.mocked(agentService.listModels).mockResolvedValue([models[0]!, claudeModel])
 
@@ -4515,38 +4454,13 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       const hook = renderController({ agents: [agents[0]!, coderAgent] })
       await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
 
+      const initialDraft = { ...hook.result.current.activeDraft! }
       act(() => {
         hook.result.current.selectAgent('coder')
       })
-      expect(hook.result.current.activeDraft?.agentName).toBe('coder')
-      expect(hook.result.current.activeDraft?.execution).toEqual(
-        createBuiltinExecution('Claude', 'fast'),
-      )
-
-      await act(async () => {
-        hook.result.current.composer.onSubmit(
-          [createTextPart('bound message')],
-          [createTextPart('bound message')],
-        )
-      })
-
-      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
-      const [boundThreadId, batchRequest] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
-      expect(boundThreadId).toBe(THREAD_ID)
-      // owner-free：请求体只有 CAS 游标与命令
-      expect(batchRequest).not.toHaveProperty('owner')
-      expect(batchRequest).not.toHaveProperty('target')
-      expect(batchRequest.expectedHeadEntryId).toBe('head-1')
-      expect(batchRequest.expectedNextCommandSequence).toBe('1')
-      expect(batchRequest.commands.map((c) => c.type)).toEqual([
-        'SET_AGENT',
-        'SET_EXECUTION',
-        'USER_MESSAGE',
-      ])
-      expect(batchRequest.commands[0]).toMatchObject({ agentName: 'coder' })
-      expect(batchRequest.commands[1]).toMatchObject({
-        execution: createBuiltinExecution('Claude', 'fast'),
-      })
+      expect(hook.result.current.activeDraft).toEqual(initialDraft)
+      expect(hook.result.current.error).toBe('当前模式不支持切换 Agent')
+      expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
       expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     })
   })

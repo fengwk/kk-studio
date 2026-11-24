@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { applicationContributions } from '@/app/application-contributions'
 import { aiExtension } from '@/app/ai-console/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
-import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'
 
 describe('AI extension composition', () => {
@@ -35,10 +34,6 @@ describe('AI extension composition', () => {
     expect(settingsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['settings.page', 'settings'],
     ])
-    expect(projectsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
-      ['projects.home', 'projects'],
-      ['projects.detail', 'projects/:projectId'],
-    ])
     expect(applicationContributions.pages.map((page) => page.id)).toEqual([
       'ai.chats',
       'ai.chat-workspace',
@@ -51,16 +46,11 @@ describe('AI extension composition', () => {
       'ai.mcp-servers',
       'canvas.home',
       'canvas.editor',
-      'projects.home',
-      'projects.detail',
       'settings.page',
     ])
     expect(applicationContributions.dialogs.map((dialog) => dialog.id)).toEqual(
       aiExtension.dialogs!.map((dialog) => dialog.id),
     )
-    expect(applicationContributions.overlays.map((overlay) => overlay.id)).toEqual([
-      'projects.invalidation',
-    ])
     expect(applicationContributions.toolRenderers.get('task')?.component).toBe(
       aiExtension.toolRenderers?.[0].component,
     )

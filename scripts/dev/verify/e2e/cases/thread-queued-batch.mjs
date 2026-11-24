@@ -7,7 +7,7 @@
  */
 import { createServer } from 'node:http'
 
-import { assert, cid, sleep } from '../lib/http.mjs'
+import { assert, cid, sleep, studioAuthHeaders } from '../lib/http.mjs'
 import {
   applicationEventUrl,
   assertExactKeys,
@@ -157,7 +157,7 @@ registerCase({
 
       const initialSnapshot = await getThreadSnapshot(ctx, threadId)
       initialHeadEntryId = initialSnapshot.thread.headEntryId
-      socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+      socket = new WebSocket(applicationEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
       socketListener = (event) => {
         try {
           socketFrames.push(JSON.parse(String(event.data)))

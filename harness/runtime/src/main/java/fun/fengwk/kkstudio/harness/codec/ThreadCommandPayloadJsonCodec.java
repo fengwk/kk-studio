@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.command.CommandValueValidation;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
@@ -51,7 +50,6 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static final Set<String> USER_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
-  private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_EXECUTION_FIELDS = orderedSet("execution");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
   private static final Set<String> NOTIFICATION_FIELDS =
@@ -115,7 +113,6 @@ public final class ThreadCommandPayloadJsonCodec {
     return switch (type) {
       case USER_MESSAGE -> decodeUserMessage(root);
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
-      case SET_AGENT -> decodeSetAgent(root);
       case SET_EXECUTION -> decodeSetExecution(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
       case NOTIFICATION -> decodeNotification(root);
@@ -151,7 +148,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case CustomMessageCommandPayload value -> NODES
           .objectNode()
           .set("message", MESSAGE_CODEC.encodeNode(value.message()));
-      case SetAgentCommandPayload value -> NODES.objectNode().put("agentName", value.agentName());
       case SetExecutionCommandPayload value -> NODES
           .objectNode()
           .set("execution", ExecutionSelectionJsonCodec.encode(value.execution()));
@@ -188,12 +184,6 @@ public final class ThreadCommandPayloadJsonCodec {
     ObjectNode node = object(value, "CUSTOM_MESSAGE");
     requireFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
-  }
-
-  private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {
-    ObjectNode node = object(value, "SET_AGENT");
-    requireFields(node, SET_AGENT_FIELDS, "SET_AGENT");
-    return new SetAgentCommandPayload(canonicalText(node, "agentName", "SET_AGENT"));
   }
 
   private static SetExecutionCommandPayload decodeSetExecution(JsonNode value) {

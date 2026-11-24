@@ -23,6 +23,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
@@ -38,6 +42,7 @@ class InteractionControllerTest {
 
   private static final UUID THREAD = new UUID(0L, 101);
   private static final UUID INVOCATION = new UUID(0L, 100);
+  private static final UUID ACTOR = new UUID(0L, 1);
   private static final UUID SUBMISSION = new UUID(0L, 102);
 
   private InteractionQueryService queryService;
@@ -50,6 +55,7 @@ class InteractionControllerTest {
     interactionService = mock(InteractionService.class);
     mvc =
         MockMvcBuilders.standaloneSetup(new InteractionController(queryService, interactionService))
+            .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
             .build();
   }
 
@@ -132,7 +138,8 @@ class InteractionControllerTest {
         new ToolInputAcceptance(
             THREAD,
             INVOCATION,
-            new ToolInputReceipt(SUBMISSION, "alice", Instant.parse("2026-03-01T10:00:00Z")),
+            new ToolInputReceipt(
+                SUBMISSION, ACTOR.toString(), Instant.parse("2026-03-01T10:00:00Z")),
             false);
     when(interactionService.submitInput(any())).thenReturn(acceptance);
 
@@ -147,12 +154,14 @@ class InteractionControllerTest {
                     {"type":"ANSWER","submissionId":"%s","answers":[["optionA","optionB"],["optionC"]]}
                     """
                         .formatted(SUBMISSION))
-                .principal(() -> "  alice  "))
+                .requestAttr(
+                    StudioBrowserSession.PRINCIPAL_ATTRIBUTE,
+                    new StudioPrincipal(ACTOR, "alice", StudioRole.USER)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.threadId").value(THREAD.toString()))
         .andExpect(jsonPath("$.toolInvocationId").value(INVOCATION.toString()))
         .andExpect(jsonPath("$.submissionId").value(SUBMISSION.toString()))
-        .andExpect(jsonPath("$.actor").value("alice"))
+        .andExpect(jsonPath("$.actor").value(ACTOR.toString()))
         .andExpect(jsonPath("$.materialized").value(false));
 
     ArgumentCaptor<ToolInputSubmissionCommand> captor =
@@ -162,21 +171,21 @@ class InteractionControllerTest {
     assertEquals(THREAD, command.threadId());
     assertEquals(INVOCATION, command.toolInvocationId());
     assertEquals(SUBMISSION, command.submissionId());
-    assertEquals("alice", command.actor());
+    assertEquals(ACTOR.toString(), command.actor());
     assertFalse(command.declined());
     assertEquals(List.of(List.of("optionA", "optionB"), List.of("optionC")), command.answers());
   }
 
   @Test
-  void declinesWithoutAnswersFallBackToLocalOperator() throws Exception {
-    // 没有认证主体时使用固定的本地操作者；拒答不携带任何答案。
+  void declinesWithoutAnswersStillUseAuthenticatedActor() throws Exception {
+    // 拒答不携带任何答案，但仍记录当前用户 ID。
     when(interactionService.submitInput(any()))
         .thenReturn(
             new ToolInputAcceptance(
                 THREAD,
                 INVOCATION,
                 new ToolInputReceipt(
-                    SUBMISSION, "local-user", Instant.parse("2026-03-01T10:00:00Z")),
+                    SUBMISSION, ACTOR.toString(), Instant.parse("2026-03-01T10:00:00Z")),
                 true));
 
     mvc.perform(
@@ -189,9 +198,12 @@ class InteractionControllerTest {
                     """
                     {"type":"DECLINE","submissionId":"%s"}
                     """
-                        .formatted(SUBMISSION)))
+                        .formatted(SUBMISSION))
+                .requestAttr(
+                    StudioBrowserSession.PRINCIPAL_ATTRIBUTE,
+                    new StudioPrincipal(ACTOR, "alice", StudioRole.USER)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.actor").value("local-user"))
+        .andExpect(jsonPath("$.actor").value(ACTOR.toString()))
         .andExpect(jsonPath("$.materialized").value(true));
 
     ArgumentCaptor<ToolInputSubmissionCommand> captor =
@@ -200,6 +212,6 @@ class InteractionControllerTest {
     ToolInputSubmissionCommand command = captor.getValue();
     assertTrue(command.declined());
     assertEquals(List.of(), command.answers());
-    assertEquals("local-user", command.actor());
+    assertEquals(ACTOR.toString(), command.actor());
   }
 }

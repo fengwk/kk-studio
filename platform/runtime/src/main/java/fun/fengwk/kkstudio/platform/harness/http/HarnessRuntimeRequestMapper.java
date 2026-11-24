@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
@@ -292,8 +291,6 @@ public final class HarnessRuntimeRequestMapper {
             switch (dto) {
               case HarnessCommandCreateDTO.UserMessageDTO command -> new UserMessageCommandPayload(
                   new AgentMessage(AgentMessageRole.USER, toUserMessageContents(command)));
-              case HarnessCommandCreateDTO.SetAgentDTO command -> new SetAgentCommandPayload(
-                  requireText(command.agentName(), "command.agentName"));
               case HarnessCommandCreateDTO.SetExecutionDTO
               command -> new SetExecutionCommandPayload(
                   toExecutionSelection(requireNonNull(command.execution(), "command.execution")));
@@ -322,8 +319,8 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /**
-   * 产品 HTTP 命令批的 shape admission：SET_* 必须按固定顺序（SET_AGENT -&gt; SET_EXECUTION -&gt;
-   * SET_ENVIRONMENT）出现，每种至多一次且位于消息之前；user-like 输入（USER_MESSAGE）至多一条且必须位于末尾。
+   * 产品 HTTP 命令批的 shape admission：SET_EXECUTION 与 SET_ENVIRONMENT 按固定顺序出现，各至多一次且位于消息之前；user-like
+   * 输入（USER_MESSAGE）至多一条且必须位于末尾。
    *
    * <p>创建型 target（NEW_SESSION / NEW_THREAD）要求恰有一条 user-like 输入；既有 Thread 允许纯设置批次（0 条
    * user-like），额外保证由 Core 在应用边界完成。
@@ -331,10 +328,7 @@ public final class HarnessRuntimeRequestMapper {
   private static void validateHttpCommandShape(
       List<NewThreadCommand> commands, boolean requireUserLike) {
     List<ThreadCommandType> prefixOrder =
-        List.of(
-            ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_EXECUTION,
-            ThreadCommandType.SET_ENVIRONMENT);
+        List.of(ThreadCommandType.SET_EXECUTION, ThreadCommandType.SET_ENVIRONMENT);
     int lastSetOrder = -1;
     int userLikeCount = 0;
     for (int i = 0; i < commands.size(); i++) {
@@ -351,7 +345,7 @@ public final class HarnessRuntimeRequestMapper {
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
         throw DomainException.validation(
-            "request", "HTTP commands must use SET_AGENT, SET_EXECUTION, SET_ENVIRONMENT order");
+            "request", "HTTP commands must use SET_EXECUTION, SET_ENVIRONMENT order");
       }
       lastSetOrder = order;
     }

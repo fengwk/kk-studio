@@ -17,8 +17,6 @@ const QUESTIONNAIRE_INTERACTION_ID = 'int-questionnaire'
 const APPROVAL_ROOT_ID = 'f0000000-0000-0000-0000-00000000f001'
 const QUESTIONNAIRE_ROOT_ID = 'f0000000-0000-0000-0000-00000000f002'
 const ENVIRONMENT_ROOT_ID = 'f0000000-0000-0000-0000-00000000f003'
-const ISSUE_ID = 'b0000000-0000-0000-0000-000000000042'
-const PROJECT_ID = 'a0000000-0000-0000-0000-000000000001'
 const targetWritesByPage = new WeakMap<Page, string[]>()
 const LONG_OPTION_LABEL = '先备份再迁移并在完成后立即校验一致性'
 const LONG_REASON =
@@ -79,8 +77,8 @@ function buildItems(): InteractionDTO[] {
       threadId: 'thread-questionnaire',
       rootThreadId: QUESTIONNAIRE_ROOT_ID,
       sessionId: 'session-questionnaire',
-      owner: { kind: 'ISSUE_AGENT', id: `${ISSUE_ID}:architect`, title: '迁移策略',
-        link: `/projects/${PROJECT_ID}?issue=${ISSUE_ID}` },
+      owner: { kind: 'CHAT', id: 'chat-interactions', title: '迁移策略',
+        link: '/chats/chat-interactions' },
       toolCallId: 'call-questionnaire',
       toolName: 'ask_user',
       argumentsJson: JSON.stringify({
@@ -229,30 +227,6 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
               actor: 'user',
               acceptedAt: 1791194400000,
               materialized: true,
-          },
-        })
-        return
-      }
-
-      if (requestPath === `/api/project/issues/${ISSUE_ID}` && method === 'GET') {
-        await route.fulfill({
-          json: {
-              issue: {
-                id: ISSUE_ID,
-                projectId: PROJECT_ID,
-                number: '42',
-                title: 'Pending interactions',
-                description: '',
-                state: 'IN_PROGRESS',
-                version: '1',
-                createdAt: Date.UTC(2026, 9, 5, 9, 58),
-                updatedAt: Date.UTC(2026, 9, 5, 9, 58),
-              },
-              activities: [],
-              nextActivityCursor: null,
-              runs: [],
-              stageBudgets: [],
-              agentThreads: [],
           },
         })
         return
@@ -484,17 +458,17 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     expect(submissions).toEqual([])
   })
 
-  test('issue source opens its execution root without submitting questionnaire input', async ({ page }) => {
+  test('questionnaire source opens its execution root without submitting questionnaire input', async ({ page }) => {
     const approvals: RecordedRequest[] = []
     const submissions: RecordedRequest[] = []
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
     const source = page.locator('.interactions-session-group').nth(1)
-      .getByRole('button', { name: 'Issue · 迁移策略' })
-    await expect(source).toContainText('Issue · 迁移策略')
+      .getByRole('button', { name: '对话 · 迁移策略' })
+    await expect(source).toContainText('对话 · 迁移策略')
     await source.click()
-    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}\\?issue=${ISSUE_ID}&thread=${QUESTIONNAIRE_ROOT_ID}$`))
+    await expect(page).toHaveURL(new RegExp(`/chats/chat-interactions\\?thread=${QUESTIONNAIRE_ROOT_ID}$`))
     expect(approvals).toEqual([])
     expect(submissions).toEqual([])
   })
@@ -514,7 +488,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     // 只移除本卡，其余待处理项与目标 thread 均不受影响。
     await expect(toolName).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Issue · 迁移策略' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '对话 · 迁移策略' })).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
@@ -536,7 +510,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await page.locator('.interaction-feed-item').first().locator('.interaction-deny-btn').click()
 
     await expect(page.locator('.interaction-approval-tool-name')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Issue · 迁移策略' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '对话 · 迁移策略' })).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(

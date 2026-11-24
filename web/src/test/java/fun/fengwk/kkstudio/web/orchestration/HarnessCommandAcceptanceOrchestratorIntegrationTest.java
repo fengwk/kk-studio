@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -139,7 +139,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
                     initial.thread().nextCommandSequence()),
                 List.of(
                     new NewThreadCommand(
-                        new SetAgentCommandPayload("default-assistant"), UUID.randomUUID()),
+                        new SetEnvironmentCommandPayload("default-assistant"), UUID.randomUUID()),
                     new NewThreadCommand(
                         new UserMessageCommandPayload(
                             new AgentMessage(
@@ -149,7 +149,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(sessionId, continued.thread().sessionId());
     assertEquals(2, continued.acceptedCommands().size());
     assertInstanceOf(
-        SetAgentCommandPayload.class, continued.acceptedCommands().getFirst().payload());
+        SetEnvironmentCommandPayload.class, continued.acceptedCommands().getFirst().payload());
     assertInstanceOf(
         UserMessageCommandPayload.class, continued.acceptedCommands().getLast().payload());
     assertEquals(3, count("harness_thread_command", "thread_id", threadId));
@@ -419,7 +419,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   private static BranchSettings settings() {
     return new BranchSettings(
         "default-assistant",
-        BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
+        BuiltinExecution.of(ModelSelection.model("acceptance-stub", "default")),
         null);
   }
 

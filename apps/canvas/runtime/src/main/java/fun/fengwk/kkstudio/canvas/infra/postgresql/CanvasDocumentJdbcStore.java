@@ -44,6 +44,10 @@ public class CanvasDocumentJdbcStore {
         .update();
   }
 
+  int deleteById(UUID id) {
+    return jdbc.sql("delete from canvas_document where id = :id").param("id", id).update();
+  }
+
   public Optional<CanvasDocumentDO> findById(UUID id) {
     return jdbc.sql("select " + COLUMNS + " from canvas_document where id = :id")
         .param("id", id)

@@ -41,7 +41,7 @@ import java.util.UUID;
 /**
  * 根归属一致性：查询与提交/审批对同一点代来源必须解析出同一真实执行根。
  *
- * <p>本测试刻意让查询与写入共享同一 Runtime stub 与 owner stub：同一点代来源只有一个根，查询据此投影 owner、写入据此加产品锁，谁都不能自行发明根。
+ * <p>本测试刻意让查询与写入共享同一 Runtime stub 与 owner stub：同一点代来源只有一个根，查询据此投影 owner、写入据此加归属锁，谁都不能自行发明根。
  */
 class InteractionRootAttributionConsistencyTest {
 
@@ -74,18 +74,18 @@ class InteractionRootAttributionConsistencyTest {
     interactionService = new InteractionService(List.of(sessionOwnership), runtimes);
   }
 
-  /** 测试意图：同一后代来源的根归属在查询与提交间一致——查询按根的 Issue 绑定投影 owner，提交按同一根的绑定加产品锁，两个入口对同一后代各调用一次同源根解析。 */
+  /** 测试意图：同一后代来源的根归属在查询与提交间一致——查询按根的 owner 绑定投影归属，提交按同一根的绑定加归属锁，两个入口对同一后代各调用一次同源根解析。 */
   @Test
   void queryAndSubmitResolveSameDescendantRootAttribution() {
     UUID childThreadId = id(100);
     UUID rootThreadId = id(101);
     UUID rootSessionId = id(400);
-    UUID issueId = id(200);
+    UUID ownerId = id(200);
 
     when(runtime.findRootThreadId(childThreadId)).thenReturn(Optional.of(rootThreadId));
     when(sessionOwnership.findOwner(rootThreadId, rootSessionId))
         .thenReturn(
-            Optional.of(new SessionOwnerDisplay("ISSUE_AGENT", issueId.toString(), "issue", null)));
+            Optional.of(new SessionOwnerDisplay("CUSTOM", ownerId.toString(), "owner", null)));
 
     // 查询：后代行先按根定位，再经根快照取得根 Session，最后按根 Thread 绑定解析 owner。
     ThreadState rootThread = mock(ThreadState.class);
@@ -116,11 +116,11 @@ class InteractionRootAttributionConsistencyTest {
     InteractionDTO.Input dto = assertInstanceOf(InteractionDTO.Input.class, page.getItems().get(0));
     assertEquals(childThreadId.toString(), dto.threadId());
     assertEquals(rootThreadId.toString(), dto.rootThreadId());
-    assertEquals(issueId.toString(), dto.owner().getId());
-    assertEquals("ISSUE_AGENT", dto.owner().getKind());
-    assertEquals("issue", dto.owner().getTitle());
+    assertEquals(ownerId.toString(), dto.owner().getId());
+    assertEquals("CUSTOM", dto.owner().getKind());
+    assertEquals("owner", dto.owner().getTitle());
 
-    // 提交：同一点代来源的产品锁同样按根解析；产品锁前只做无锁的 Session 归属读。
+    // 提交：同一点代来源的归属锁同样按根解析；归属锁前只做无锁的 Session 归属读。
     when(runtime.findThreadSessionId(rootThreadId)).thenReturn(Optional.of(rootSessionId));
     ToolInputSubmissionCommand command =
         new ToolInputSubmissionCommand(
@@ -130,7 +130,7 @@ class InteractionRootAttributionConsistencyTest {
 
     interactionService.submitInput(command);
 
-    // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加产品锁。
+    // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加归属锁。
     verify(runtime, times(2)).findRootThreadId(childThreadId);
     verify(sessionOwnership).findOwner(rootThreadId, rootSessionId);
     verify(sessionOwnership).lockForInteraction(rootThreadId, rootSessionId);

@@ -297,8 +297,8 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 安全边界上应用 queued 的全部 standalone 设置（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）：从整段 queued snapshot
-   * 按原序 提取这些命令，归约成完整 {@link BranchSettings} 快照并 append 一个 {@link SettingsPayload} Entry，标记命令
+   * 安全边界上应用 queued 的全部 standalone 设置（SET_MODEL / SET_ENVIRONMENT）：从整段 queued snapshot 按原序
+   * 提取这些命令，归约成完整 {@link BranchSettings} 快照并 append 一个 {@link SettingsPayload} Entry，标记命令
    * applied（指向该 SETTINGS Entry）后推进 head。绝不打开 / 关闭 Turn、绝不发起 Driver generation，也绝不 resume STOPPED
    * Thread——只有显式新输入才会 恢复 RUNNABLE。
    *
