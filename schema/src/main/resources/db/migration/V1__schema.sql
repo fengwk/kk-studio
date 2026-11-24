@@ -1601,6 +1601,13 @@ create table workspace_folder (
     name         varchar(256)  not null,
     name_key     text          not null,
     position     integer       not null,
+    create_request_hash text,
+    created_tree_version bigint,
+    constraint ck_workspace_folder_create check (
+        (create_request_hash is null and created_tree_version is null) or
+        (create_request_hash is not null and created_tree_version is not null
+            and create_request_hash ~ '^[0-9a-f]{64}$' and created_tree_version > 0)
+    ),
     constraint uk_workspace_folder_id unique (workspace_id, id),
     constraint fk_workspace_folder_parent foreign key (workspace_id, parent_id)
         references workspace_folder (workspace_id, id) on delete restrict,
@@ -1619,6 +1626,8 @@ comment on column workspace_folder.parent_id is '同一空间的父目录；为�
 comment on column workspace_folder.name is '去除首尾空白后的目录名称';
 comment on column workspace_folder.name_key is '同级忽略大小写的目录名称键';
 comment on column workspace_folder.position is '同级目录中从零开始的顺序';
+comment on column workspace_folder.create_request_hash is '独立创建目录的原始请求摘要；空间自带的目录为空';
+comment on column workspace_folder.created_tree_version is '独立创建目录首次提交返回的树版本；重放不改变它';
 
 create table workspace_resource (
     id           uuid        primary key,

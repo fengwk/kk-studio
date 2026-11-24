@@ -102,6 +102,78 @@ class WorkspacePostgresIntegrationTest {
     }
   }
 
+  /** Cycle and stale moves leave both sequences unchanged; a valid move compacts both sides. */
+  @Test
+  void folderMoveChecksTopologyAndVersionBeforeReordering() {
+    try (var context = serviceContext()) {
+      var spaces = context.getBean(ChatSpaceService.class);
+      var folders = context.getBean(FolderService.class);
+      var owner = testUser(context, "folder-owner");
+      var space = create(spaces, owner, "Folders").id();
+      var jdbc = context.getBean(JdbcClient.class);
+      var root =
+          jdbc.sql("select id from workspace_folder where workspace_id = :space")
+              .param("space", space)
+              .query(UUID.class)
+              .single();
+      var key = UUID.randomUUID();
+      var createChild = new FolderService.Create(root, "Child", 0);
+      var child = folders.create(owner, space, key, createChild);
+      var sibling =
+          folders.create(
+              owner, space, UUID.randomUUID(), new FolderService.Create(root, "Sibling", 1));
+      var otherRoot =
+          folders.create(
+              owner, space, UUID.randomUUID(), new FolderService.Create(null, "Other", 2));
+      assertEquals(3, folders.rename(owner, space, child.id(), "Renamed"));
+      assertEquals(child, folders.create(owner, space, key, createChild));
+      assertEquals(
+          "IDEMPOTENCY_KEY_REUSED",
+          assertThrows(
+                  DomainException.class,
+                  () ->
+                      folders.create(
+                          owner, space, key, new FolderService.Create(root, "Different", 0)))
+              .reason());
+      assertEquals(
+          "INVALID_FOLDER",
+          assertThrows(
+                  DomainException.class,
+                  () -> folders.move(owner, space, root, child.id(), null, 3))
+              .reason());
+      assertEquals(
+          DomainErrorCode.VERSION_CONFLICT,
+          assertThrows(
+                  DomainException.class,
+                  () -> folders.move(owner, space, child.id(), otherRoot.id(), null, 2))
+              .code());
+      assertEquals(4, folders.move(owner, space, child.id(), otherRoot.id(), null, 3));
+      assertEquals(
+          0,
+          jdbc.sql("select position from workspace_folder where id = :id")
+              .param("id", sibling.id())
+              .query(Integer.class)
+              .single());
+      assertEquals(
+          otherRoot.id(),
+          jdbc.sql("select parent_id from workspace_folder where id = :id")
+              .param("id", child.id())
+              .query(UUID.class)
+              .single());
+      assertEquals(
+          "FOLDER_NOT_EMPTY",
+          assertThrows(DomainException.class, () -> folders.delete(owner, space, root, 4))
+              .reason());
+      assertEquals(5, folders.delete(owner, space, sibling.id(), 4));
+      assertEquals(6, folders.delete(owner, space, root, 5));
+      assertEquals(7, folders.delete(owner, space, child.id(), 6));
+      assertEquals(
+          "LAST_ROOT_FOLDER",
+          assertThrows(DomainException.class, () -> folders.delete(owner, space, otherRoot.id(), 7))
+              .reason());
+    }
+  }
+
   private static String archive(
       ChatSpaceService service, StudioPrincipal owner, UUID id, CyclicBarrier barrier)
       throws Exception {
@@ -141,7 +213,7 @@ class WorkspacePostgresIntegrationTest {
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     var context = new AnnotationConfigApplicationContext();
-    context.register(TransactionConfig.class, ChatSpaceService.class);
+    context.register(TransactionConfig.class, ChatSpaceService.class, FolderService.class);
     context.registerBean(JdbcClient.class, () -> JdbcClient.create(dataSource));
     context.registerBean(
         JdbcTransactionManager.class, () -> new JdbcTransactionManager(dataSource));
