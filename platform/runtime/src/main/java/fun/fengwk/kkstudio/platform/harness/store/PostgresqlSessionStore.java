@@ -56,10 +56,10 @@ final class PostgresqlSessionStore implements SessionStore {
   @Override
   public Optional<Session> lockForKeyShare(UUID id) {
     tx.checkOpen();
-    // 已持有的行锁重复获取不改变加锁顺序，直接允许幂等重锁而无需检查 rank。
-    if (!tx.isLocked(LockKey.session(id))) {
-      tx.requireCanLockRank(LockRank.SESSION);
+    if (tx.isLocked(LockKey.session(id))) {
+      return find(id);
     }
+    tx.requireCanLockRank(LockRank.SESSION);
     Optional<Session> session =
         tx.queryOne(
             "select * from harness_session where id = ? for key share",
@@ -72,15 +72,21 @@ final class PostgresqlSessionStore implements SessionStore {
   @Override
   public Optional<Session> lockForUpdate(UUID id) {
     tx.checkOpen();
-    if (!tx.isLocked(LockKey.session(id))) {
-      tx.requireCanLockRank(LockRank.SESSION);
+    LockKey exclusive = new LockKey(LockRank.SESSION, "session-update:" + id, null);
+    if (tx.isLocked(exclusive)) {
+      return find(id);
     }
+    tx.requireCanLock(exclusive);
     Optional<Session> session =
         tx.queryOne(
             "select * from harness_session where id = ? for update",
             PostgresqlHarnessRows.SESSION,
             id);
-    session.ifPresent(ignored -> tx.lockResource(LockKey.session(id)));
+    session.ifPresent(
+        ignored -> {
+          tx.lockResource(exclusive);
+          tx.lockResource(LockKey.session(id));
+        });
     return session;
   }
 

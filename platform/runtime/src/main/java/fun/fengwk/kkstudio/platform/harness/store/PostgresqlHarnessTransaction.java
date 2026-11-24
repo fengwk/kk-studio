@@ -126,10 +126,20 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
       Supplier<UUID> idGenerator,
       Object storeToken,
       Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage> driverWorkFactory) {
+    this(jdbc, idGenerator, storeToken, driverWorkFactory, null);
+  }
+
+  PostgresqlHarnessTransaction(
+      JdbcTemplate jdbc,
+      Supplier<UUID> idGenerator,
+      Object storeToken,
+      Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage> driverWorkFactory,
+      PostgresqlHarnessLocks sharedLocks) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.storeToken = Objects.requireNonNull(storeToken, "storeToken");
-    this.locks = new PostgresqlHarnessLocks(this);
+    this.locks = sharedLocks == null ? new PostgresqlHarnessLocks(this) : sharedLocks;
+    this.locks.bind(this);
     this.driverWorkStorage =
         Objects.requireNonNull(driverWorkFactory.apply(this), "driverWorkStorage");
   }

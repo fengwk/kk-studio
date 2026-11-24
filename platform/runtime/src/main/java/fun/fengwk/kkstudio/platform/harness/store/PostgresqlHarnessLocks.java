@@ -17,7 +17,7 @@ import java.util.UUID;
 /** PostgreSQL 事务内锁阶梯、幂等加锁与同阶排序防御。 */
 final class PostgresqlHarnessLocks {
 
-  private final PostgresqlHarnessTransaction tx;
+  private PostgresqlHarnessTransaction tx;
 
   /** 当前事务已成功获取锁的实体资源标识集合，用于支持加锁幂等并防范重入。 */
   private final Set<LockKey> locked = new HashSet<>();
@@ -40,7 +40,11 @@ final class PostgresqlHarnessLocks {
   private WorkTarget highestWorkTarget;
 
   PostgresqlHarnessLocks(PostgresqlHarnessTransaction tx) {
-    this.tx = tx;
+    bind(tx);
+  }
+
+  void bind(PostgresqlHarnessTransaction transaction) {
+    this.tx = transaction;
   }
 
   boolean isLocked(LockKey key) {

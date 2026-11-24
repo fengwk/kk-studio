@@ -37,6 +37,10 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
   private final Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage>
       driverWorkFactory;
   private final Object transactionSource = new Object();
+  private final LockLedgerKey lockLedgerKey;
+
+  private record LockLedgerKey(DataSource dataSource) {}
+
   private final ThreadLocal<Boolean> active = new ThreadLocal<>();
   private final ThreadLocal<List<Runnable>> afterCommitActions = new ThreadLocal<>();
 
@@ -47,6 +51,7 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
       Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage> driverWorkFactory) {
     DataSource requiredDataSource = Objects.requireNonNull(dataSource, "dataSource");
     this.jdbc = new JdbcTemplate(requiredDataSource);
+    this.lockLedgerKey = new LockLedgerKey(requiredDataSource);
     this.transactions =
         new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
     this.transactions.setName("harness-store");
@@ -90,9 +95,39 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
       result =
           transactions.execute(
               status -> {
+                PostgresqlHarnessLocks lockLedger = null;
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                  lockLedger =
+                      (PostgresqlHarnessLocks)
+                          TransactionSynchronizationManager.getResource(lockLedgerKey);
+                  if (lockLedger == null) {
+                    lockLedger = new PostgresqlHarnessLocks(null);
+                    TransactionSynchronizationManager.bindResource(lockLedgerKey, lockLedger);
+                    PostgresqlHarnessLocks ledger = lockLedger;
+                    TransactionSynchronizationManager.registerSynchronization(
+                        new TransactionSynchronization() {
+                          @Override
+                          public void suspend() {
+                            TransactionSynchronizationManager.unbindResourceIfPossible(
+                                lockLedgerKey);
+                          }
+
+                          @Override
+                          public void resume() {
+                            TransactionSynchronizationManager.bindResource(lockLedgerKey, ledger);
+                          }
+
+                          @Override
+                          public void afterCompletion(int status) {
+                            TransactionSynchronizationManager.unbindResourceIfPossible(
+                                lockLedgerKey);
+                          }
+                        });
+                  }
+                }
                 PostgresqlHarnessTransaction transaction =
                     new PostgresqlHarnessTransaction(
-                        jdbc, idGenerator, transactionSource, driverWorkFactory);
+                        jdbc, idGenerator, transactionSource, driverWorkFactory, lockLedger);
                 try {
                   T value = callback.apply(transaction);
                   transaction.rethrowDatabaseFailure();
@@ -103,6 +138,9 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
                   return value;
                 } finally {
                   transaction.close();
+                  if (lockLedger != null) {
+                    lockLedger.bind(null);
+                  }
                 }
               });
     } finally {
