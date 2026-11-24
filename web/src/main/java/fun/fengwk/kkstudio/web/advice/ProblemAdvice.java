@@ -201,6 +201,7 @@ public class ProblemAdvice {
           .value();
       case UPSTREAM_FAILED -> HttpStatus.BAD_GATEWAY.value();
       case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED.value();
+      case FORBIDDEN -> HttpStatus.FORBIDDEN.value();
       case INTERNAL -> HttpStatus.INTERNAL_SERVER_ERROR.value();
     };
   }

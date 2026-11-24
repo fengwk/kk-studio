@@ -2,6 +2,34 @@
 -- All ids are application-allocated UUIDs; timestamps use millisecond precision timestamptz(3).
 -- Tables are grouped by owning module; blob content lives only in object storage.
 
+-- Studio accounts
+
+create table studio_user (
+    id uuid primary key,
+    username varchar(32) not null unique,
+    password_hash varchar(256) not null,
+    profile jsonb not null default '{}'::jsonb,
+    role varchar(16) not null,
+    disabled_at timestamptz(3),
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint ck_studio_user_username check (username ~ '^[a-z0-9][a-z0-9._-]{0,31}$'),
+    constraint ck_studio_user_profile check (jsonb_typeof(profile) = 'object'),
+    constraint ck_studio_user_role check (role in ('ADMIN', 'USER'))
+);
+
+create table login_session (
+    token_hash bytea primary key,
+    user_id uuid not null references studio_user(id) on delete cascade,
+    created_at timestamptz(3) not null default current_timestamp,
+    expires_at timestamptz(3) not null
+);
+create index idx_login_session_user on login_session(user_id);
+
+-- Precomputed Spring Security PBKDF2 hash for the built-in kkstudio bootstrap credential.
+insert into studio_user(id, username, password_hash, role)
+values ('00000000-0000-0000-0000-000000000001', 'kkstudio', '{pbkdf2}473d0449576a25f739f57765f5b5d4ddd346ec503ad602aeab8da49810d4c61f460d54a08e070b1552a60ccab0285830', 'ADMIN');
+
 -- 1. Shared foundation: global blob storage
 
 create table storage_blob (

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -39,6 +40,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
+import fun.fengwk.kkstudio.platform.account.StudioAccountService;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
@@ -57,6 +62,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -107,6 +114,7 @@ class ApplicationEventWebSocketHandlerTest {
   private WebSocketSession springSession;
   private SentRecorder recorder;
   private AtomicLong nowNanos;
+  private StudioAccountService accounts;
   private ScheduledExecutorService heartbeatScheduler;
   private ScheduledExecutorService snapshotScheduler;
 
@@ -174,6 +182,9 @@ class ApplicationEventWebSocketHandlerTest {
       heartbeatScheduler.shutdownNow();
     }
     heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
+    accounts = mock(StudioAccountService.class);
+    var principal = new StudioPrincipal(EVENT_NODE, "event-admin", StudioRole.ADMIN);
+    when(accounts.authenticate("test-session")).thenReturn(Optional.of(principal));
     handler =
         new ApplicationEventWebSocketHandler(
             hub,
@@ -183,7 +194,8 @@ class ApplicationEventWebSocketHandlerTest {
             EVENT_NODE,
             browserUseRegistry,
             heartbeatScheduler,
-            nowNanos::get);
+            nowNanos::get,
+            accounts);
     recorder = new SentRecorder();
     Session jettySession = mock(Session.class);
     doAnswer(
@@ -216,7 +228,52 @@ class ApplicationEventWebSocketHandlerTest {
     springSession =
         mock(WebSocketSession.class, withSettings().extraInterfaces(NativeWebSocketSession.class));
     when(springSession.getId()).thenReturn("session-1");
+    when(springSession.getAttributes())
+        .thenReturn(
+            Map.of(
+                StudioBrowserSession.PRINCIPAL_ATTRIBUTE,
+                principal,
+                StudioAccountHandshakeInterceptor.TOKEN_ATTRIBUTE,
+                "test-session"));
     when(((NativeWebSocketSession) springSession).getNativeSession()).thenReturn(jettySession);
+  }
+
+  @Test
+  void periodicAuthenticationClosesRevokedSessionWithoutClientTraffic() throws Exception {
+    handler.afterConnectionEstablished(springSession);
+    when(accounts.authenticate("test-session")).thenReturn(Optional.empty());
+    nowNanos.addAndGet(TimeUnit.SECONDS.toNanos(60));
+    handler.heartbeatTick();
+    assertTrue(recorder.sent.getFirst().contains("NOT_AUTHENTICATED"));
+    recorder.complete(0);
+    var nativeSession = (Session) ((NativeWebSocketSession) springSession).getNativeSession();
+    verify(nativeSession).close(eq(4001), eq("NOT_AUTHENTICATED"), any(Callback.class));
+  }
+
+  @Test
+  void demotedAccountLosesOnlyAdministratorSubscriptions() throws Exception {
+    Runnable releaseProjects = mock(Runnable.class);
+    Runnable releaseEnvironments = mock(Runnable.class);
+    when(projectChangeSource.subscribe(any(), any())).thenReturn(releaseProjects);
+    when(environmentChangeSource.subscribe(any(), any())).thenReturn(releaseEnvironments);
+    handler.afterConnectionEstablished(springSession);
+    var projects = textMessage("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}");
+    handler.handleTextMessage(springSession, projects);
+    recorder.complete(0);
+    handler.handleTextMessage(
+        springSession,
+        textMessage("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
+    recorder.complete(1);
+
+    when(accounts.authenticate("test-session"))
+        .thenReturn(Optional.of(new StudioPrincipal(EVENT_NODE, "event-admin", StudioRole.USER)));
+    nowNanos.addAndGet(TimeUnit.SECONDS.toNanos(60));
+    handler.heartbeatTick();
+    verify(releaseProjects).run();
+    verify(releaseEnvironments, never()).run();
+    recorder.complete(2);
+    handler.handleTextMessage(springSession, projects);
+    assertTrue(recorder.sent.get(3).contains("ADMIN_REQUIRED"));
   }
 
   @Test

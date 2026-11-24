@@ -110,7 +110,7 @@ class StorageDaemonResourceTicketIntegrationTest extends WebPostgresTestSupport 
         mapper.writeValueAsString(
             Map.of("name", "read-image-daemon", "daemonConfig", Map.of("studioUrl", studio)));
     var create =
-        HttpRequest.newBuilder(URI.create(studio + "/api/platform/environments"))
+        adminRequest(URI.create(studio + "/api/platform/environments"))
             .timeout(Duration.ofSeconds(15))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(registration))

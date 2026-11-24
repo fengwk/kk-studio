@@ -17,7 +17,12 @@ import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry.Acceptance;
+import fun.fengwk.kkstudio.platform.account.StudioAccountService;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
+import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.ClientFrame;
@@ -58,6 +63,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
 
   static final long PING_INTERVAL_MILLIS = 15_000L;
   static final long HEARTBEAT_CHECK_INTERVAL_MILLIS = 1_000L;
+  private static final long AUTHENTICATION_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(59);
+  static final int LOGIN_REQUIRED_CLOSE_CODE = 4001;
   static final long PONG_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(45);
 
   private final ApplicationEventHub hub;
@@ -68,6 +75,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   private final ScheduledExecutorService heartbeatScheduler;
   private final LongSupplier nanoClock;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
+  private final StudioAccountService accounts;
   private final ScheduledFuture<?> heartbeatTask;
   private final ScheduledFuture<?> pingTask;
 
@@ -78,8 +86,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       Supplier<ApplicationEventSettings> settingsProvider,
       @Qualifier("nodeInstanceId") UUID eventNodeId,
       IdeBrowserUseRegistry browserUseRegistry,
-      @Qualifier("applicationEventHeartbeatScheduler")
-          ScheduledExecutorService heartbeatScheduler) {
+      @Qualifier("applicationEventHeartbeatScheduler") ScheduledExecutorService heartbeatScheduler,
+      StudioAccountService accounts) {
     this(
         hub,
         codec,
@@ -87,7 +95,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         eventNodeId,
         browserUseRegistry,
         heartbeatScheduler,
-        System::nanoTime);
+        System::nanoTime,
+        accounts);
   }
 
   ApplicationEventWebSocketHandler(
@@ -97,13 +106,15 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       UUID eventNodeId,
       IdeBrowserUseRegistry browserUseRegistry,
       ScheduledExecutorService heartbeatScheduler,
-      LongSupplier nanoClock) {
+      LongSupplier nanoClock,
+      StudioAccountService accounts) {
     this.hub = Objects.requireNonNull(hub, "hub");
     this.codec = Objects.requireNonNull(codec, "codec");
     this.eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
     this.browserUseRegistry = Objects.requireNonNull(browserUseRegistry, "browserUseRegistry");
     this.settingsProvider = Objects.requireNonNull(settingsProvider, "settingsProvider");
     this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    this.accounts = Objects.requireNonNull(accounts, "accounts");
     this.heartbeatScheduler = Objects.requireNonNull(heartbeatScheduler, "heartbeatScheduler");
     this.heartbeatTask =
         heartbeatScheduler.scheduleAtFixedRate(
@@ -123,9 +134,17 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       UUID eventNodeId,
       IdeBrowserUseRegistry browserUseRegistry,
       ScheduledExecutorService heartbeatScheduler,
-      LongSupplier nanoClock) {
+      LongSupplier nanoClock,
+      StudioAccountService accounts) {
     this(
-        hub, codec, () -> settings, eventNodeId, browserUseRegistry, heartbeatScheduler, nanoClock);
+        hub,
+        codec,
+        () -> settings,
+        eventNodeId,
+        browserUseRegistry,
+        heartbeatScheduler,
+        nanoClock,
+        accounts);
   }
 
   @Override
@@ -140,6 +159,14 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             settings.maxBytes(),
             settings.sendTimeoutMillis(),
             heartbeatScheduler);
+    String token =
+        (String) session.getAttributes().get(StudioAccountHandshakeInterceptor.TOKEN_ATTRIBUTE);
+    StudioPrincipal principal =
+        (StudioPrincipal) session.getAttributes().get(StudioBrowserSession.PRINCIPAL_ATTRIBUTE);
+    if (token == null || principal == null) {
+      sender.close(StatusCode.POLICY_VIOLATION, "authentication required");
+      return;
+    }
     ConnectionIdentity identity = new ConnectionIdentity(eventNodeId, UUID.randomUUID());
     long generation = browserUseRegistry.register(identity);
     ConnectionState state =
@@ -151,6 +178,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             generation,
             settings.heartbeatIntervalMillis(),
             sender,
+            token,
+            principal,
+            accounts,
             nanoClock.getAsLong());
     ConnectionState previous = connections.putIfAbsent(session.getId(), state);
     if (previous != null) {
@@ -167,7 +197,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   protected void handleTextMessage(WebSocketSession session, TextMessage message) {
     ConnectionState state = connections.get(session.getId());
     if (state != null) {
-      state.handle(message.getPayload());
+      state.handle(message.getPayload(), nanoClock.getAsLong());
     }
   }
 
@@ -210,9 +240,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     }
   }
 
-  private void heartbeatTick() {
+  void heartbeatTick() {
     long nowNanos = nanoClock.getAsLong();
     for (ConnectionState state : connections.values()) {
+      state.authenticationTick(nowNanos);
       state.heartbeat(nowNanos);
     }
   }
@@ -260,6 +291,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final long generation;
     private final long heartbeatIntervalMillis;
     private final AsyncTextSender sender;
+    private final String token;
+    private StudioPrincipal principal;
+    private final StudioAccountService accounts;
+    private long lastAuthenticationCheckNanos;
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
 
     /**
@@ -281,6 +316,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         long generation,
         long heartbeatIntervalMillis,
         AsyncTextSender sender,
+        String token,
+        StudioPrincipal principal,
+        StudioAccountService accounts,
         long nowNanos) {
       this.hub = hub;
       this.codec = codec;
@@ -289,6 +327,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       this.generation = generation;
       this.heartbeatIntervalMillis = heartbeatIntervalMillis;
       this.sender = sender;
+      this.token = token;
+      this.principal = principal;
+      this.accounts = accounts;
+      this.lastAuthenticationCheckNanos = nowNanos;
       this.lastPongNanos = nowNanos;
       this.lastHeartbeatNanos = nowNanos;
     }
@@ -310,7 +352,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       return closed;
     }
 
-    private void handle(String payload) {
+    private void handle(String payload, long nowNanos) {
       if (closed) {
         return;
       }
@@ -327,7 +369,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       switch (frame) {
         case SubscriptionFrame subscription -> {
           if (subscription.type() == EventFrameCodec.SubscriptionType.SUBSCRIBE) {
-            subscribe(subscription.resource(), subscription.afterEntryId());
+            subscribe(subscription.resource(), subscription.afterEntryId(), nowNanos);
           } else {
             unsubscribe(subscription.resource());
           }
@@ -337,10 +379,17 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    private void subscribe(ResourceKey resource, UUID afterEntryId) {
+    private void subscribe(ResourceKey resource, UUID afterEntryId, long nowNanos) {
       synchronized (closeLock) {
         if (closed) {
           return; // 连接已关闭：不再登记新订阅
+        }
+        if (!recheckAuthentication(nowNanos)) {
+          return;
+        }
+        if (principal.role() != StudioRole.ADMIN && adminOnly(resource.kind())) {
+          enqueueResourceError("ADMIN_REQUIRED", "Administrator required", resource);
+          return;
         }
         if (subscriptions.containsKey(resource)) {
           return; // 重复 subscribe 幂等
@@ -599,6 +648,35 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
+    private void authenticationTick(long nowNanos) {
+      synchronized (closeLock) {
+        if (!closed && nowNanos - lastAuthenticationCheckNanos >= AUTHENTICATION_INTERVAL_NANOS) {
+          recheckAuthentication(nowNanos);
+        }
+      }
+    }
+
+    private static boolean adminOnly(ResourceKind kind) {
+      return kind == ResourceKind.PROJECTS || kind == ResourceKind.INTERACTIONS;
+    }
+
+    private boolean recheckAuthentication(long nowNanos) {
+      StudioPrincipal current = accounts.authenticate(token).orElse(null);
+      if (current == null || !current.userId().equals(principal.userId())) {
+        fail("NOT_AUTHENTICATED", "Login required", LOGIN_REQUIRED_CLOSE_CODE);
+        return false;
+      }
+      if (principal.role() == StudioRole.ADMIN && current.role() != StudioRole.ADMIN) {
+        subscriptions.keySet().stream()
+            .filter(key -> adminOnly(key.kind()))
+            .toList()
+            .forEach(this::unsubscribe);
+      }
+      principal = current;
+      lastAuthenticationCheckNanos = nowNanos;
+      return true;
+    }
+
     private void pong(long nowNanos) {
       synchronized (closeLock) {
         if (!closed) {
@@ -609,7 +687,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
 
     /** 发送 error 帧并在其出队后关闭连接；立即撤销本代际的订阅与使用证明。 */
     private void fail(String code, String message, int closeCode) {
-      sender.fail(codec.error(code, message), closeCode);
+      sender.fail(codec.error(code, message), closeCode, code);
       close();
     }
 
