@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getCase } from '../run-matrix.mjs'
+import { setStudioCookie } from '../lib/http.mjs'
 
 const identity = {
   type: 'connected',
@@ -12,10 +13,19 @@ const identity = {
 // 执行真实 case，仅替换物理 WS；首帧与 heartbeat 使用生产形状。
 async function heartbeat(t, frames) {
   const original = globalThis.WebSocket
+  const originalFetch = globalThis.fetch
+  setStudioCookie('http://127.0.0.1:18081', 'session=test')
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: async () => ({ heartbeatIntervalMillis: '20000' }),
+  })
   globalThis.WebSocket = class extends EventTarget {
     static OPEN = 1
     readyState = 1
-    constructor(url) {
+    constructor(url, options) {
+      assert.deepEqual(options, { headers: { Cookie: 'session=test', Origin: 'http://127.0.0.1:18081' } })
       super()
       assert.equal(new URL(url).pathname, '/ws/events')
       queueMicrotask(() => {
@@ -32,6 +42,7 @@ async function heartbeat(t, frames) {
     })
   } finally {
     globalThis.WebSocket = original
+    globalThis.fetch = originalFetch
   }
 }
 

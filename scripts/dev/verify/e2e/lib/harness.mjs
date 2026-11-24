@@ -3,6 +3,7 @@ import {
   cid,
   HttpError,
   sleep,
+  studioAuthHeaders,
 } from './http.mjs'
 
 /**
@@ -1171,7 +1172,9 @@ async function waitForModelDeltaAfterEventSubscribed(
 
   const deadline = Date.now() + timeoutMs
   const controller = new AbortController()
-  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl), {
+    headers: studioAuthHeaders(ctx.baseUrl),
+  })
   try {
     await waitForSocketOpen(socket, deadline, controller.signal)
     socket.send(JSON.stringify({

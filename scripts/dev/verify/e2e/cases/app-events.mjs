@@ -1,4 +1,4 @@
-import { assert, cid, sleep } from '../lib/http.mjs'
+import { assert, cid, sleep, studioAuthHeaders } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -10,7 +10,7 @@ registerCase({
   title: '应用事件 WebSocket 周期 heartbeat 保活',
   docs: '原生 WebSocket 直连 /ws/events，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId 与十进制正整数字符串 heartbeatIntervalMillis，再等待严格 {type:"heartbeat"} 且连接保持打开',
   async run(ctx) {
-    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
     const startedAt = Date.now()
     try {
       const frame = await waitForHeartbeat(socket, 25_000)
@@ -43,7 +43,7 @@ registerCase({
   title: 'Project 全局失效事件',
   docs: '订阅无 synthetic id 的 projects 全局资源；数据库提交后的 Project 创建发 changed(projectId)',
   async run(ctx) {
-    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
     const frames = []
     let project
     const collect = (event) => {

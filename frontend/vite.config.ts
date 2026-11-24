@@ -22,13 +22,11 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
-        changeOrigin: true,
+        changeOrigin: false,
       },
       '/ws': {
         target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
-        changeOrigin: true,
-        // 本地 dev 代理必须把 WS Origin 改为 backend target，否则 Spring 同源校验返回 403。
-        rewriteWsOrigin: true,
+        changeOrigin: false,
         ws: true,
       },
       '/ide': {

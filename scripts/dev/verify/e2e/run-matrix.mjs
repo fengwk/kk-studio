@@ -30,7 +30,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { httpJson, listResults } from './lib/http.mjs'
+import { httpJson, listResults, loginStudio } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
@@ -514,6 +514,9 @@ async function main(argv) {
     console.error('No cases selected')
     return 2
   }
+
+  await loginStudio(args.baseUrl)
+  if (args.distributed && selected.length) await loginStudio(args.baseUrlB)
 
   await verifyProviderExecutionBoundary(args)
 
