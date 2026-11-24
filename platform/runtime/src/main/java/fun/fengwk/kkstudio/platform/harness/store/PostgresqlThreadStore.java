@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
+import org.springframework.jdbc.support.SqlArrayValue;
+
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
@@ -19,7 +21,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /** Thread 聚合的 PostgreSQL 实现。 */
 final class PostgresqlThreadStore implements ThreadStore {
@@ -178,15 +179,19 @@ final class PostgresqlThreadStore implements ThreadStore {
     return tx.queryList(
         """
         with requested(root_id) as (
-            select distinct unnest(string_to_array(?::text, ',')::uuid[])
+            select distinct unnest(?::uuid[])
         ), tree as (
-            select t.*
+            select t.id, t.root_thread_id, t.execution_control, t.updated_at
             from harness_thread t
             join requested r on r.root_id = t.root_thread_id
         ), tools as (
-            select t.root_thread_id, i.* from tree t join harness_tool_invocation i on i.thread_id = t.id
+            select t.root_thread_id, i.id, i.status
+            from tree t join harness_tool_invocation i on i.thread_id = t.id
+            where i.status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_CHILD', 'READY', 'RUNNING')
         ), models as (
-            select t.root_thread_id, m.* from tree t join builtin_model_invocation m on m.thread_id = t.id
+            select t.root_thread_id, m.id, m.status
+            from tree t join builtin_model_invocation m on m.thread_id = t.id
+            where m.status in ('READY', 'RUNNING')
         ), targets as (
             select root_thread_id, 'THREAD' as kind, id from tree
             union all select root_thread_id, 'TOOL', id from tools
@@ -203,6 +208,9 @@ final class PostgresqlThreadStore implements ThreadStore {
             left join environment_connection ec on ec.environment_id = w.required_environment_id
                 and ec.status = 'READY' and ec.lease_until > statement_timestamp()
             group by t.root_thread_id
+        ), activity as (
+            select root_thread_id, max(updated_at) as last_activity_at
+            from tree group by root_thread_id
         ), facts as (
             select t.root_thread_id,
                    exists (select 1 from tools i where i.root_thread_id = t.root_thread_id
@@ -217,17 +225,14 @@ final class PostgresqlThreadStore implements ThreadStore {
                                and j.superseded_by_invocation_id is null)
                        or exists (select 1 from tree member join harness_execution_exit x on x.thread_id = member.id
                            where member.root_thread_id = t.root_thread_id and x.state = 'UNCONFIRMED') as blocked,
-                   t.execution_control = 'STOPPED' as stopped,
-                   greatest((select max(member.updated_at) from tree member where member.root_thread_id = t.root_thread_id),
-                       (select max(i.updated_at) from tools i where i.root_thread_id = t.root_thread_id),
-                       (select max(m.updated_at) from models m where m.root_thread_id = t.root_thread_id)) as activity
+                   t.execution_control = 'STOPPED' as stopped
             from tree t left join work w on w.root_thread_id = t.id
             where t.id = t.root_thread_id
         )
         select f.root_thread_id, f.waiting_human, f.has_work, f.blocked, f.stopped,
                case when e.entry_type = 'TURN_END' then e.payload ->> 'outcome' end as outcome,
-               f.activity
-        from facts f
+               a.last_activity_at
+        from facts f join activity a on a.root_thread_id = f.root_thread_id
         join harness_thread root on root.id = f.root_thread_id
         join harness_entry e on e.id = root.head_entry_id
         order by f.root_thread_id
@@ -242,8 +247,8 @@ final class PostgresqlThreadStore implements ThreadStore {
                 rs.getString("outcome") == null
                     ? null
                     : TurnEndOutcome.valueOf(rs.getString("outcome")),
-                rs.getTimestamp("activity").toInstant()),
-        rootThreadIds.stream().map(UUID::toString).collect(Collectors.joining(",")));
+                rs.getTimestamp("last_activity_at").toInstant()),
+        new SqlArrayValue("uuid", rootThreadIds.toArray(UUID[]::new)));
   }
 
   @Override

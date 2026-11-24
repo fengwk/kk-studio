@@ -14,7 +14,7 @@ import java.util.UUID;
  * @param blocked 任一节点有等待就绪环境或未到期的 Work、未结算 Join 或未确认退出
  * @param stopped 执行根的持久化执行控制为 STOPPED
  * @param headOutcome 执行根实际 head 为 TURN_END 时的 outcome，否则为空
- * @param lastActivityAt 树内 Thread、模型调用或工具调用最近一次持久变更的时间
+ * @param lastActivityAt 树内 Thread 行的最大 {@code updated_at}（包括子执行）。推进 head 时会写入该时间；仅更新调用行的进度不计入。
  */
 public record ExecutionRootFacts(
     UUID rootThreadId,
