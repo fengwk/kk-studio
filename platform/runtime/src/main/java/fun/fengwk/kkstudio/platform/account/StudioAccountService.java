@@ -1,10 +1,14 @@
 package fun.fengwk.kkstudio.platform.account;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.account.dto.StudioAccountDTO;
+import fun.fengwk.kkstudio.platform.account.dto.StudioUserDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -18,7 +22,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class StudioAccountService {
-  public record Login(String token, AccountView user) {}
+  public record Login(String token, StudioAccountDTO user) {}
 
   private static final Pattern USERNAME = Pattern.compile("^[a-z0-9][a-z0-9._-]{0,31}$");
   private final StudioAccountRepository repository;
@@ -31,7 +35,10 @@ public class StudioAccountService {
   }
 
   @Transactional
-  public Login login(String username, String password) {
+  public Login login(@Nullable String username, @Nullable String password) {
+    if (!StringUtils.hasText(username) || !StringUtils.hasText(password)) {
+      throw invalidCredentials();
+    }
     var candidate = repository.byUsername(username).orElse(null);
     boolean valid =
         passwords.matches(
@@ -53,7 +60,8 @@ public class StudioAccountService {
     repository.session(hash(encodedToken.getBytes(StandardCharsets.UTF_8)), user.id());
     return new Login(
         encodedToken,
-        new AccountView(user.id(), user.username(), user.role(), repository.profile(user.id())));
+        new StudioAccountDTO(
+            user.id(), user.username(), user.role(), repository.profile(user.id())));
   }
 
   @Transactional(readOnly = true)
@@ -67,10 +75,11 @@ public class StudioAccountService {
   }
 
   @Transactional(readOnly = true)
-  public AccountView me(StudioPrincipal principal) {
+  public StudioAccountDTO me(StudioPrincipal principal) {
     var user =
         repository.byId(principal.userId()).orElseThrow(() -> DomainException.notFound("user"));
-    return new AccountView(user.id(), user.username(), user.role(), repository.profile(user.id()));
+    return new StudioAccountDTO(
+        user.id(), user.username(), user.role(), repository.profile(user.id()));
   }
 
   @Transactional
@@ -89,7 +98,7 @@ public class StudioAccountService {
       throw DomainException.unauthorized("NOT_AUTHENTICATED", "Login required");
     }
     if (!passwords.matches(currentPassword, user.passwordHash())) {
-      throw DomainException.validationReason("WRONG_PASSWORD", "当前密码错误");
+      throw DomainException.validationReason("WRONG_PASSWORD", "Current password is incorrect");
     }
     repository.save(
         user.id(), user.username(), passwords.encode(newPassword), user.role(), user.enabled());
@@ -97,51 +106,55 @@ public class StudioAccountService {
   }
 
   @Transactional(readOnly = true)
-  public List<UserView> list(StudioPrincipal principal) {
-    requireAdmin(principal);
+  public List<StudioUserDTO> list() {
     return repository.list().stream().map(this::view).toList();
   }
 
   @Transactional
-  public UserView create(
-      StudioPrincipal principal, String username, String password, StudioRole role) {
-    requireAdmin(principal);
-    repository.lockAdminMutations();
+  public StudioUserDTO create(
+      @Nullable String username, @Nullable String password, @Nullable StudioRole role) {
     validateUsername(username);
     validatePassword(password);
-    validateRole(role);
+    if (role == null) {
+      throw DomainException.validationReason("INVALID_ARGUMENT", "Role is required");
+    }
+    repository.lockAdminMutations();
     try {
       repository.create(UUID.randomUUID(), username, passwords.encode(password), role);
     } catch (DuplicateKeyException ex) {
-      throw DomainException.conflict("USERNAME_EXISTS", "用户名已存在");
+      throw DomainException.conflict("USERNAME_EXISTS", "Username already exists");
     }
     return view(repository.byUsername(username).orElseThrow());
   }
 
   @Transactional
-  public UserView update(
-      StudioPrincipal principal,
+  public StudioUserDTO update(
       UUID id,
-      String username,
-      StudioRole role,
-      String password,
-      Boolean enabled) {
-    requireAdmin(principal);
+      @Nullable String username,
+      @Nullable StudioRole role,
+      @Nullable String password,
+      @Nullable Boolean enabled) {
+    if (username == null && role == null && password == null && enabled == null) {
+      throw DomainException.validationReason(
+          "INVALID_ARGUMENT", "At least one user change is required");
+    }
+    if (username != null) {
+      validateUsername(username);
+    }
+    if (password != null) {
+      validatePassword(password);
+    }
     repository.lockAdminMutations();
     var old = repository.lockById(id).orElseThrow(() -> DomainException.notFound("user"));
-    validateUsername(username == null ? old.username() : username);
     boolean removesAdmin =
         old.enabled()
             && old.role() == StudioRole.ADMIN
             && (role == StudioRole.USER || Boolean.FALSE.equals(enabled));
     if (removesAdmin && repository.countEnabledAdmins() <= 1) {
-      throw DomainException.conflict("LAST_ADMIN", "至少需要一名启用的管理员");
+      throw DomainException.conflict(
+          "LAST_ADMIN", "At least one enabled administrator is required");
     }
-    String hash = null;
-    if (password != null) {
-      validatePassword(password);
-      hash = passwords.encode(password);
-    }
+    String hash = password == null ? null : passwords.encode(password);
     try {
       repository.save(
           id,
@@ -150,7 +163,7 @@ public class StudioAccountService {
           role == null ? old.role() : role,
           enabled == null ? old.enabled() : enabled);
     } catch (DuplicateKeyException ex) {
-      throw DomainException.conflict("USERNAME_EXISTS", "用户名已存在");
+      throw DomainException.conflict("USERNAME_EXISTS", "Username already exists");
     }
     if (hash != null || Boolean.FALSE.equals(enabled)) {
       repository.deleteSessions(id);
@@ -158,35 +171,24 @@ public class StudioAccountService {
     return view(repository.byId(id).orElseThrow());
   }
 
-  private UserView view(StudioAccountRepository.User u) {
-    return new UserView(u.id(), u.username(), u.role(), u.enabled(), u.createdAt());
-  }
-
-  private static void requireAdmin(StudioPrincipal p) {
-    if (p.role() != StudioRole.ADMIN) {
-      throw DomainException.forbidden("ADMIN_REQUIRED", "需要管理员权限");
-    }
+  private StudioUserDTO view(StudioAccountRepository.User u) {
+    return new StudioUserDTO(u.id(), u.username(), u.role(), u.enabled(), u.createdAt());
   }
 
   private static DomainException invalidCredentials() {
-    return DomainException.unauthorized("INVALID_CREDENTIALS", "用户名或密码错误");
+    return DomainException.unauthorized("INVALID_CREDENTIALS", "Invalid username or password");
   }
 
-  private static void validateRole(StudioRole role) {
-    if (role == null) {
-      throw DomainException.validation("role", "角色无效");
-    }
-  }
-
-  private static void validateUsername(String value) {
+  private static void validateUsername(@Nullable String value) {
     if (value == null || !USERNAME.matcher(value).matches()) {
-      throw DomainException.validationReason("INVALID_ARGUMENT", "用户名格式无效");
+      throw DomainException.validationReason("INVALID_ARGUMENT", "Invalid username");
     }
   }
 
-  private static void validatePassword(String value) {
-    if (value == null || value.length() < 8 || value.length() > 128) {
-      throw DomainException.validationReason("INVALID_ARGUMENT", "密码长度必须为 8–128 个字符");
+  private static void validatePassword(@Nullable String value) {
+    if (value == null || value.isBlank() || value.length() < 8 || value.length() > 128) {
+      throw DomainException.validationReason(
+          "INVALID_ARGUMENT", "Password must contain 8 to 128 characters and cannot be blank");
     }
   }
 

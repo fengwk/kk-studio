@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -85,7 +86,8 @@ class ProblemAdviceTest {
     DomainException conflict = DomainException.conflict("STALE_COMMAND_CURSOR", "stale cursor");
     var wrapped =
         advice.responseStatus(
-            new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict));
+            new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict),
+            new MockHttpServletRequest());
     assertEquals("STALE_COMMAND_CURSOR", wrapped.getBody().get("reason"));
   }
 
@@ -153,7 +155,8 @@ class ProblemAdviceTest {
         advice
             .unreadable(
                 new HttpMessageNotReadableException(
-                    "Failed", new IllegalStateException("secret"), null))
+                    "Failed", new IllegalStateException("secret"), null),
+                new MockHttpServletRequest())
             .getBody();
     assertEquals("validation", ordinary.get("code"));
     assertEquals("Failed to read request", ordinary.get("detail"));
@@ -171,7 +174,9 @@ class ProblemAdviceTest {
 
   private void assertCategory(int status, String code) {
     var response =
-        advice.responseStatus(new ResponseStatusException(HttpStatusCode.valueOf(status)));
+        advice.responseStatus(
+            new ResponseStatusException(HttpStatusCode.valueOf(status)),
+            new MockHttpServletRequest());
     assertEquals(status, response.getStatusCode().value());
     assertEquals(code, response.getBody().get("code"));
     if (status == 409) {

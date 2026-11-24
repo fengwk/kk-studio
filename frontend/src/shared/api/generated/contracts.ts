@@ -6,14 +6,6 @@
  * 漂移门禁：TsContractArtifactTest（mvn verify 覆盖）
  */
 
-/** Java：fun.fengwk.kkstudio.platform.account.AccountView */
-export interface AccountView {
-  id: string
-  username: string
-  role: StudioRole
-  profile: unknown
-}
-
 /** Java：fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO */
 export interface AddIssueEvidenceRequestDTO {
   uploadId: string
@@ -683,6 +675,13 @@ export interface CreateProjectRequestDTO {
   title: string
   description?: string | null
   yoloEnabled?: boolean | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.account.dto.CreateStudioUserRequestDTO */
+export interface CreateStudioUserRequestDTO {
+  username: string
+  password: string
+  role: StudioRole
 }
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO */
@@ -2704,31 +2703,24 @@ export const STORAGE_URL_METHOD_VALUES: readonly StorageUrlMethod[] = [
   'GET',
 ]
 
-/** Java：fun.fengwk.kkstudio.web.StudioAccountController.CreateUserRequest */
-export interface StudioAccountControllerCreateUserRequest {
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioAccountDTO */
+export interface StudioAccountDTO {
+  id: string
   username: string
-  password: string
   role: StudioRole
+  profile: unknown
 }
 
-/** Java：fun.fengwk.kkstudio.web.StudioAccountController.LoginRequest */
-export interface StudioAccountControllerLoginRequest {
-  username: string
-  password: string
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioLoginRequestDTO */
+export interface StudioLoginRequestDTO {
+  username?: string | null
+  password?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.web.StudioAccountController.PasswordRequest */
-export interface StudioAccountControllerPasswordRequest {
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioPasswordRequestDTO */
+export interface StudioPasswordRequestDTO {
   currentPassword: string
   newPassword: string
-}
-
-/** Java：fun.fengwk.kkstudio.web.StudioAccountController.UpdateUserRequest */
-export interface StudioAccountControllerUpdateUserRequest {
-  username?: string | null
-  role?: StudioRole | null
-  password?: string | null
-  enabled?: boolean | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.account.StudioRole */
@@ -2740,6 +2732,15 @@ export const STUDIO_ROLE_VALUES: readonly StudioRole[] = [
   'ADMIN',
   'USER',
 ]
+
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioUserDTO */
+export interface StudioUserDTO {
+  id: string
+  username: string
+  role: StudioRole
+  enabled: boolean
+  createdAt: number
+}
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO */
 export interface SystemSettingsAdvancedDTO {
@@ -3093,13 +3094,12 @@ export interface UpdateProjectYoloRequestDTO {
   yoloEnabled: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.platform.account.UserView */
-export interface UserView {
-  id: string
-  username: string
-  role: StudioRole
-  enabled: boolean
-  createdAt: number
+/** Java：fun.fengwk.kkstudio.platform.account.dto.UpdateStudioUserRequestDTO */
+export interface UpdateStudioUserRequestDTO {
+  username?: string | null
+  role?: StudioRole | null
+  password?: string | null
+  enabled?: boolean | null
 }
 
 export interface ApiRoutes {
@@ -3161,7 +3161,7 @@ export interface ApiRoutes {
     response: void
   }
   'GET /api/auth/me': {
-    response: AccountView
+    response: StudioAccountDTO
   }
   'GET /api/canvas/canvases': {
     response: CanvasDocumentDTO[]
@@ -3351,16 +3351,16 @@ export interface ApiRoutes {
     response: ProjectSnapshotDTO
   }
   'GET /api/users': {
-    response: UserView[]
+    response: StudioUserDTO[]
   }
   'PATCH /api/users/{id}': {
     path: { id: string }
-    body: StudioAccountControllerUpdateUserRequest
-    response: UserView
+    body: UpdateStudioUserRequestDTO
+    response: StudioUserDTO
   }
   'POST /api/auth/login': {
-    body: StudioAccountControllerLoginRequest
-    response: AccountView
+    body?: StudioLoginRequestDTO
+    response: StudioAccountDTO
   }
   'POST /api/auth/logout': {
     response: void
@@ -3646,11 +3646,11 @@ export interface ApiRoutes {
     response: ProjectDTO
   }
   'POST /api/users': {
-    body: StudioAccountControllerCreateUserRequest
-    response: UserView
+    body: CreateStudioUserRequestDTO
+    response: StudioUserDTO
   }
   'PUT /api/auth/password': {
-    body: StudioAccountControllerPasswordRequest
+    body: StudioPasswordRequestDTO
     response: void
   }
   'PUT /api/chat/chats/{chatId}': {

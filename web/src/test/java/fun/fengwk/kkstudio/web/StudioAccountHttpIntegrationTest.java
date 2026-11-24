@@ -59,6 +59,74 @@ class StudioAccountHttpIntegrationTest extends WebPostgresTestSupport {
   }
 
   @Test
+  void incompleteOrBlankLoginIsAlwaysUnauthorized() throws Exception {
+    for (String body :
+        new String[] {
+          "",
+          "null",
+          "{}",
+          "{\"username\":null,\"password\":\"password-123\"}",
+          "{\"username\":\" \",\"password\":\"password-123\"}",
+          "{\"username\":\"kkstudio\",\"password\":null}",
+          "{\"username\":\"kkstudio\",\"password\":\" \"}"
+        }) {
+      mvc.perform(
+              post("/api/auth/login").with(origin()).contentType("application/json").content(body))
+          .andExpect(status().isUnauthorized())
+          .andExpect(jsonPath("$.reason").value("INVALID_CREDENTIALS"));
+    }
+  }
+
+  @Test
+  void invalidUserBodiesHaveStableValidationReason() throws Exception {
+    var admin = login(ADMIN, PASSWORD).getResponse().getCookie("studio_session");
+    for (String body :
+        new String[] {
+          "",
+          "null",
+          "{}",
+          "{\"username\":\"valid-user\",\"password\":\"password-123\"}",
+          "{\"username\":\"Invalid\",\"password\":\"password-123\",\"role\":\"USER\"}",
+          "{\"username\":\"valid-user\",\"password\":\"short\",\"role\":\"USER\"}",
+          "{\"username\":\"valid-user\",\"password\":\"password-123\",\"role\":\"OWNER\"}"
+        }) {
+      mvc.perform(
+              post("/api/users")
+                  .with(origin())
+                  .cookie(admin)
+                  .contentType("application/json")
+                  .content(body))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.reason").value("INVALID_ARGUMENT"));
+    }
+    var id =
+        mapper
+            .readTree(createUser(admin, "patch-user", "USER").getResponse().getContentAsString())
+            .get("id")
+            .asText();
+    for (String body :
+        new String[] {
+          "",
+          "null",
+          "{}",
+          "{\"username\":\"\"}",
+          "{\"password\":\"short\"}",
+          "{\"role\":\"OWNER\"}",
+          "{\"enabled\":\"false\"}",
+          "{\"username\":null,\"enabled\":true}"
+        }) {
+      mvc.perform(
+              patch("/api/users/{id}", id)
+                  .with(origin())
+                  .cookie(admin)
+                  .contentType("application/json")
+                  .content(body))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.reason").value("INVALID_ARGUMENT"));
+    }
+  }
+
+  @Test
   void loginFailureDisabledExpiredPasswordAndLogoutLifecycle() throws Exception {
     mvc.perform(get("/api/auth/me"))
         .andExpect(status().isUnauthorized())

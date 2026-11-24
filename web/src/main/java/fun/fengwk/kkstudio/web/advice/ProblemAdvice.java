@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.advice;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -11,8 +12,10 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.HandlerMapping;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JacksonException.Reference;
 import tools.jackson.databind.exc.IgnoredPropertyException;
@@ -20,6 +23,7 @@ import tools.jackson.databind.exc.UnrecognizedPropertyException;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.account.http.StudioAccountController;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 
@@ -63,8 +67,9 @@ public class ProblemAdvice {
   }
 
   @ExceptionHandler(ResponseStatusException.class)
-  public ResponseEntity<Map<String, Object>> responseStatus(ResponseStatusException error) {
-    String reason = null;
+  public ResponseEntity<Map<String, Object>> responseStatus(
+      ResponseStatusException error, HttpServletRequest request) {
+    String reason = error.getStatusCode().value() == 400 ? accountValidationReason(request) : null;
     if (error.getCause() instanceof DomainException domain
         && domain.code() == DomainErrorCode.CONFLICT) {
       reason = domain.reason();
@@ -99,8 +104,17 @@ public class ProblemAdvice {
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
-  public ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException error) {
-    return framework(400, requestBodyDetail(error), null);
+  public ResponseEntity<Map<String, Object>> unreadable(
+      HttpMessageNotReadableException error, HttpServletRequest request) {
+    return framework(400, requestBodyDetail(error), accountValidationReason(request));
+  }
+
+  private static String accountValidationReason(HttpServletRequest request) {
+    return request.getAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE)
+                instanceof HandlerMethod handler
+            && handler.getBeanType() == StudioAccountController.class
+        ? "INVALID_ARGUMENT"
+        : null;
   }
 
   /** 响应体不暴露 5xx 细节，因此必须在这里记录原始异常，否则服务端故障无迹可查。 */
