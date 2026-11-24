@@ -1574,6 +1574,8 @@ create table chat_space (
     default_yolo_enabled   boolean       not null default false,
     version                bigint        not null default 0,
     tree_version           bigint        not null default 0,
+    create_request_hash    text          not null,
+    constraint ck_chat_space_create_hash check (create_request_hash ~ '^[0-9a-f]{64}$'),
     constraint uk_chat_space_owner_title unique (owner_user_id, title_key),
     constraint ck_chat_space_versions check (version >= 0 and tree_version >= 0),
     constraint ck_chat_space_title check (title <> '' and title_key <> '')
@@ -1590,6 +1592,7 @@ comment on column chat_space.default_environment_id is '默认环境，环境删
 comment on column chat_space.default_yolo_enabled is '新建会话默认权限';
 comment on column chat_space.version is '空间配置版本，不因目录结构变化递增';
 comment on column chat_space.tree_version is '目录结构版本，结构写在空间行锁内递增';
+comment on column chat_space.create_request_hash is '原始创建参数的 SHA-256；配置变化不影响创建重放';
 
 create table workspace_folder (
     id           uuid          primary key,
