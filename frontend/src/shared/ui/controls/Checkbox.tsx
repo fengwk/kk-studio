@@ -61,6 +61,7 @@ export function Checkbox({
         }}
         type="checkbox"
         className="ui-checkbox-input"
+        data-ui-focus="proxy"
         checked={checked}
         aria-checked={indeterminate && !checked ? 'mixed' : checked}
         aria-invalid={invalid || undefined}
@@ -69,7 +70,7 @@ export function Checkbox({
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
       />
-      <span className="ui-checkbox-box" aria-hidden="true">
+      <span className="ui-checkbox-box" data-ui-focus="indicator" aria-hidden="true">
         {checked ? <Check className="ui-checkbox-check" /> : null}
         {!checked && indeterminate ? <Minus className="ui-checkbox-check" /> : null}
       </span>

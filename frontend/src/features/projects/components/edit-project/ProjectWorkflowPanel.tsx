@@ -76,7 +76,7 @@ export function ProjectWorkflowPanel({
         )}
         {constraintsError && (
           <Button
-            variant="ghost"
+            variant="secondary"
             disabled={isPending || constraintsFetching}
             onClick={onRefetchConstraints}
           >

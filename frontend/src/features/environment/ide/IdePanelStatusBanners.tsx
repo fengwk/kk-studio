@@ -129,7 +129,7 @@ export function IdePanelStatusBanners({
         <div className="ide-panel-recovery-banner" role="status" data-testid="ide-view-detached">
           <span>{t('ai.ide.viewOwnedByOther')}</span>
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             onClick={() => {
               if (selectedEnvironmentId != null) {
@@ -146,7 +146,7 @@ export function IdePanelStatusBanners({
         <div className="ide-panel-recovery-banner" role="alert" data-testid="ide-view-gone">
           <span>{t('ai.ide.viewGone')}</span>
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             onClick={() => {
               if (selectedEnvironmentId != null) {
@@ -170,7 +170,7 @@ export function IdePanelStatusBanners({
         <div className="ide-panel-error-banner" role="alert" data-testid="ide-error-banner">
           <span>{claimError === 'IDE_CLOSING' ? t('ai.ide.cleanupPending') : claimError || t('ai.ide.error')}</span>
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             onClick={() => {
               if (selectedEnvironmentId != null) {
@@ -187,7 +187,7 @@ export function IdePanelStatusBanners({
         <div className="ide-panel-error-banner" role="alert" data-testid="ide-close-error">
           <span>{commandMessage(selectedView.closeError, 'ai.ide.error')}</span>
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             onClick={() => onDismissCloseError(selectedView.viewId)}
           >

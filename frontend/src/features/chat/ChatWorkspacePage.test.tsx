@@ -936,7 +936,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.keyboard('{Enter}')
     expect(harnessService.listSessionThreads).toHaveBeenCalledTimes(1)
     if (action === 'close') {
-      await user.click(dialog.querySelector<HTMLButtonElement>('.modal-footer .ghost-btn')!)
+      await user.click(dialog.querySelector<HTMLButtonElement>('.modal-footer .btn-secondary')!)
     } else {
       const destination = screen.getAllByLabelText('给 AI 发送消息')[2]!
       destination.textContent = 'new destination input'

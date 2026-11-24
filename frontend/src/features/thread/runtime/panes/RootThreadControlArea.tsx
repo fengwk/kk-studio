@@ -173,7 +173,7 @@ export function RootInteractionList() {
         <div className="thread-root-interactions-state is-error" role="alert">
           <span>{t('ai.interaction.loadFailed')}</span>
           <Button
-            variant="ghost"
+            variant="secondary"
             disabled={isLoading}
             onClick={() => void refresh()}
           >
@@ -191,7 +191,7 @@ export function RootInteractionList() {
       ))}
       {hasMore ? (
         <Button
-          variant="ghost"
+          variant="secondary"
           className="thread-root-interactions-more"
           disabled={isFetchingMore}
           onClick={() => void loadMore()}

@@ -75,8 +75,7 @@
   --accent-soft-hover: color-mix(in srgb, var(--palette-green-400) 25%, transparent);
   --accent-deep: var(--palette-green-900);
   --focus: var(--border);
-  --ui-focus-offset: 1px;
-  --focus-ring: var(--border);
+  --focus-offset: 1px;
 
   /* Status */
   --success: var(--palette-green-400);
@@ -145,23 +144,22 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Focus follows the visible control, never its hidden or nested input. */
-:where(.searchbox input, .ui-tag-input-field, .ui-checkbox-input, .composer-editor, .ui-native-select):focus {
+/* Composite controls delegate the ring to a visible wrapper or indicator. */
+:where([data-ui-focus='none'], [data-ui-focus='delegate'], [data-ui-focus='proxy']):focus {
   outline: none;
 }
 
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible:not(:where(.searchbox input, .ui-tag-input-field, .ui-checkbox-input, .composer-editor, .ui-native-select, .modal-card)),
-:where(input:not([type='checkbox'], [type='radio'], [type='range'], .searchbox input, .ui-tag-input-field, .ui-native-select), textarea, select, [data-ui-focus='control']):focus,
-:where(.ui-select-trigger, .thread-composer-control):is(:focus, [aria-expanded='true']),
-:where(.searchbox, .ui-tag-input):has(input:focus),
-:where(.thread-dock):has(.composer-editor:focus),
-:where(.ui-checkbox-input:focus-visible + .ui-checkbox-box) {
+:where(a[href], button, input, select, textarea, summary, [tabindex], [contenteditable='true']):focus-visible:not(:where([data-ui-focus='none'], [data-ui-focus='delegate'], [data-ui-focus='proxy'])),
+:where(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, select):focus:not(:where([data-ui-focus='none'], [data-ui-focus='delegate'], [data-ui-focus='proxy'])),
+:where([data-ui-focus='control']):is(:focus, [aria-expanded='true']),
+:where([data-ui-focus='within']):has(:where([data-ui-focus='delegate']):focus),
+:where([data-ui-focus='proxy']:focus-visible + [data-ui-focus='indicator']) {
   outline: 1px solid var(--focus);
-  outline-offset: var(--ui-focus-offset);
+  outline-offset: var(--focus-offset);
 }
 
-:where([data-ui-focus='row'], .ui-select-option, .ui-tab):focus-visible {
-  --ui-focus-offset: -1px;
+:where([data-ui-focus='row']) {
+  --focus-offset: -1px;
 }
 
 @media (forced-colors: active) {

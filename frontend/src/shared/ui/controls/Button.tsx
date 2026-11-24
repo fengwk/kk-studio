@@ -2,15 +2,14 @@ import './Button.css'
 import type { ButtonHTMLAttributes } from 'react'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 
-/** 设计系统按钮变体：对应既有的三类按钮视觉。 */
-type ButtonVariant = 'primary' | 'ghost' | 'inline'
+/** 设计系统按钮变体：主操作与次要操作。 */
+type ButtonVariant = 'primary' | 'secondary'
 /** 普通控件 32px；紧凑控件 28px（卡片动作、工具条等）。 */
 type ButtonSize = 'normal' | 'compact'
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary: 'btn-primary',
-  ghost: 'ghost-btn',
-  inline: 'ghost-btn',
+  secondary: 'btn-secondary',
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

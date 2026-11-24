@@ -32,6 +32,7 @@ export function ComposerControlSettingsButtons({
         <button
           type="button"
           className="thread-composer-control thread-composer-permission-control"
+          data-ui-focus="control"
           aria-label={t('ai.runtime.composer.permission')}
           aria-haspopup="listbox"
           aria-expanded={menu === 'permission'}
@@ -44,6 +45,7 @@ export function ComposerControlSettingsButtons({
         <button
           type="button"
           className="thread-composer-control thread-composer-environment-control"
+          data-ui-focus="control"
           title={environmentLabel}
           aria-label={t('ai.runtime.composer.environment')}
           aria-haspopup="listbox"
@@ -68,6 +70,7 @@ export function ComposerControlSettingsButtons({
         <button
           type="button"
           className="thread-composer-control thread-composer-model-control"
+          data-ui-focus="control"
           title={modelLabel}
           aria-label={t('ai.runtime.composer.modelVariant')}
           aria-haspopup="listbox"

@@ -70,7 +70,7 @@ export function ChatCard({
           </Button>
           {onEdit ? (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               aria-label={`${t('ai.catalog.action.edit')} ${label}`}
               onClick={onEdit}
@@ -81,7 +81,7 @@ export function ChatCard({
           ) : null}
           {onDelete ? (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               danger
               aria-label={`${t('ai.catalog.action.delete')} ${label}`}

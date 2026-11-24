@@ -72,7 +72,7 @@ export function TextActionDialog({
           </label>
         </div>
         <div className="modal-footer">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {t('projects.cancel')}
           </Button>
           <Button type="submit" danger={danger} disabled={isBlocked}>
@@ -134,7 +134,7 @@ export function ResetBudgetDialog({
           </label>
         </div>
         <div className="modal-footer">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {t('projects.cancel')}
           </Button>
           <Button type="submit" disabled={isBlocked}>
@@ -180,7 +180,7 @@ export function ResumeIssueDialog({
           )}
         </div>
         <div className="modal-footer">
-          <Button variant="ghost" data-autofocus onClick={onClose}>
+          <Button variant="secondary" data-autofocus onClick={onClose}>
             {t('projects.cancel')}
           </Button>
           <Button onClick={onConfirm} disabled={isBlocked}>

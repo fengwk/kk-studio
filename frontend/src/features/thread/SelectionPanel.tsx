@@ -193,7 +193,7 @@ export function SelectionPanel({
         <div className="thread-selection-error" role="alert">
           <span>{loadError}</span>
           {onRetryLoad ? (
-            <Button variant="ghost" disabled={selectionPending} onClick={onRetryLoad}>
+            <Button variant="secondary" disabled={selectionPending} onClick={onRetryLoad}>
               {t('shared.conflict.retry')}
             </Button>
           ) : null}

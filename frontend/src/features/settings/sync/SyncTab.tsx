@@ -126,7 +126,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
       ) : null}
 
       <div className="settings-sync-actions">
-        <Button variant="ghost" onClick={openFilePicker} disabled={busy}>
+        <Button variant="secondary" onClick={openFilePicker} disabled={busy}>
           {t('settings.sync.import')}
         </Button>
         <Button
@@ -155,7 +155,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
         <div className="settings-error-state">
           <StateBlock title={t('settings.sync.loadFailed')} tone="danger" />
           <Button
-            variant="ghost"
+            variant="secondary"
             onClick={() => {
               void inventoryQuery.refetch()
             }}

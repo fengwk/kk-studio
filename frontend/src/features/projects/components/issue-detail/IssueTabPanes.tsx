@@ -62,12 +62,12 @@ export function IssueActivityTimeline({ feed }: { feed: IssueActivityFeed }) {
                 <div className="evidence-feedback" role="alert">
                   <CircleAlert size={16} aria-hidden="true" />
                   <span>{t('projects.issue.activitiesLoadMoreFailed')}</span>
-                  <Button size="compact" variant="ghost" disabled={feed.isLoadingMore} onClick={feed.loadMore}>
+                  <Button size="compact" variant="secondary" disabled={feed.isLoadingMore} onClick={feed.loadMore}>
                     {t('shared.retry')}
                   </Button>
                 </div>
               ) : (
-                <Button size="compact" variant="ghost" loading={feed.isLoadingMore} onClick={feed.loadMore}>
+                <Button size="compact" variant="secondary" loading={feed.isLoadingMore} onClick={feed.loadMore}>
                   {t('projects.issue.loadMoreActivities')}
                 </Button>
               )}
@@ -228,7 +228,7 @@ export function IssueAgentThreadsPane({
           </div>
           {onOpenThread && (
             <Button
-              variant="ghost"
+              variant="secondary"
               onClick={() => onOpenThread(thread.threadId)}
               title={t('projects.issue.openAgentThreadTitle')}
             >

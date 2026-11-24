@@ -67,7 +67,7 @@ export function IssueSpecPane({
             />
           </label>
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <Button variant="ghost" onClick={onCancel} disabled={isActionPending}>
+            <Button variant="secondary" onClick={onCancel} disabled={isActionPending}>
               {t('projects.cancel')}
             </Button>
             <Button type="submit" disabled={isWriteBlocked}>
@@ -105,7 +105,7 @@ function IssueSpecView({
       <div className="spec-head">
         <h2 className="spec-title">{issue.title}</h2>
         <Button
-          variant="ghost"
+          variant="secondary"
           onClick={onEdit}
           disabled={editDisabled}
           title={t('projects.issue.editSpecTitle')}

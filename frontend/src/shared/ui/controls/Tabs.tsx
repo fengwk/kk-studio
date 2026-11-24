@@ -117,6 +117,7 @@ export function Tabs({
                 id={tabId(tab.id)}
                 type="button"
                 role="tab"
+                data-ui-focus="row"
                 className="ui-tab"
                 disabled={tab.disabled}
                 aria-selected={selected}

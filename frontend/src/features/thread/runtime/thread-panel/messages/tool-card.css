@@ -54,7 +54,7 @@
 }
 
 .thread-tool-summary-detail:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -215,7 +215,7 @@
 }
 
 .thread-tool-details:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -232,7 +232,7 @@
 }
 
 .thread-tool-output.is-bounded:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -247,7 +247,7 @@
 }
 
 .thread-tool-approval-review > summary:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -403,6 +403,6 @@
 }
 
 .thread-tool-thread-link:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }

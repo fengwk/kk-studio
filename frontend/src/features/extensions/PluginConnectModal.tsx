@@ -178,7 +178,7 @@ function PluginConnection({
             <span>{t('plugins.connectDialog.step1')}</span>
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               className="btn-outline"
               disabled={pending || hasNoCandidates || !selectedRegion}
               onClick={handleOpenLogin}
@@ -231,7 +231,7 @@ function PluginConnection({
         <div className="modal-footer">
           <Button
             type="button"
-            variant="ghost"
+            variant="secondary"
             disabled={pending}
             onClick={() => {
               setAuthAttemptId(null)

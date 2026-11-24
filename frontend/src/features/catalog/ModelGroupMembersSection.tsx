@@ -49,7 +49,7 @@ export function ModelGroupMembersSection({
       <div className="structured-section-head">
         <h3 id="model-group-members-heading">{t('ai.catalog.form.groupMembers')}</h3>
         <Button
-          variant="inline"
+          variant="secondary"
           onClick={() => onChange({ ...draft, members: [...draft.members, newGroupMemberDraft()] })}
         >
           {t('ai.catalog.form.addGroupMember')}
@@ -91,7 +91,7 @@ export function ModelGroupMembersSection({
               />
               <div className="group-member-actions">
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   disabled={index === 0}
                   aria-label={t('ai.catalog.form.moveGroupMemberUp')}
@@ -100,7 +100,7 @@ export function ModelGroupMembersSection({
                   <ArrowUp aria-hidden="true" />
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   disabled={index === draft.members.length - 1}
                   aria-label={t('ai.catalog.form.moveGroupMemberDown')}
@@ -109,7 +109,7 @@ export function ModelGroupMembersSection({
                   <ArrowDown aria-hidden="true" />
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   danger
                   aria-label={t('ai.catalog.form.removeGroupMember', { index: index + 1 })}

@@ -55,6 +55,7 @@ export function AgentSelect({
         ref={triggerRef}
         type="button"
         className="ui-select-trigger"
+        data-ui-focus="control"
         aria-label={label}
         aria-describedby={joinDescribedBy(value ? `${panelId}-value` : undefined, errorId)}
         aria-expanded={open}

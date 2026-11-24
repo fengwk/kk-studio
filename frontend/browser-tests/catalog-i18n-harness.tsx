@@ -1,3 +1,4 @@
+import { Button } from '@/shared/ui/controls/Button'
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
@@ -174,39 +175,39 @@ export function HarnessApp() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/skill-packages']}>
         <div style={{ borderBottom: '1px solid #2d3732', padding: '12px 24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button
+          <Button
             type="button"
             id="toggle-locale-btn"
-            className="ghost-btn"
+            variant="secondary"
             onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
           >
             Locale: {locale} (Click to switch)
-          </button>
+          </Button>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button
+            <Button
               type="button"
               id="tab-model-btn"
-              className={tab === 'model' ? 'btn-primary' : 'ghost-btn'}
+              variant={tab === 'model' ? 'primary' : 'secondary'}
               onClick={() => setTab('model')}
             >
               Model Form
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               id="tab-skills-btn"
-              className={tab === 'skills' ? 'btn-primary' : 'ghost-btn'}
+              variant={tab === 'skills' ? 'primary' : 'secondary'}
               onClick={() => setTab('skills')}
             >
               Skill Packages
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               id="tab-nav-btn"
-              className={tab === 'nav' ? 'btn-primary' : 'ghost-btn'}
+              variant={tab === 'nav' ? 'primary' : 'secondary'}
               onClick={() => setTab('nav')}
             >
               Ai Navigation
-            </button>
+            </Button>
           </div>
         </div>
 

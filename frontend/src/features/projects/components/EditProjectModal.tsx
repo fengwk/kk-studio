@@ -128,10 +128,10 @@ function EditProjectModalContent({
               {recoveryMessage}
             </span>
             <div className="edit-project-recovery-actions">
-              <Button variant="ghost" disabled={isPending} onClick={() => void save.recover(false)}>
+              <Button variant="secondary" disabled={isPending} onClick={() => void save.recover(false)}>
                 {t('projects.edit.reloadKeepDraft')}
               </Button>
-              <Button variant="ghost" disabled={isPending} onClick={() => void save.recover(true)}>
+              <Button variant="secondary" disabled={isPending} onClick={() => void save.recover(true)}>
                 {t('projects.edit.reloadDiscardDraft')}
               </Button>
             </div>
@@ -206,7 +206,7 @@ function EditProjectModalContent({
       </Tabs>
 
       <div className="modal-footer">
-        <Button variant="ghost" onClick={onClose} disabled={isPending}>
+        <Button variant="secondary" onClick={onClose} disabled={isPending}>
           {t('projects.close')}
         </Button>
       </div>

@@ -79,7 +79,7 @@ export function IssueActionBar({
         ) : !isDone && (
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             disabled={isWriteBlocked}
             onClick={onOpenBlock}
             title={t('projects.issue.blockActionTitle')}
@@ -92,7 +92,7 @@ export function IssueActionBar({
         {!isDone && (
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             disabled={isWriteBlocked}
             onClick={onOpenStop}
             title={t('projects.issue.stopActionTitle')}

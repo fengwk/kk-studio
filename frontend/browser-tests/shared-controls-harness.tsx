@@ -290,12 +290,12 @@ function PickerAndActions() {
     <section style={{ padding: 24, display: 'grid', gap: 12 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <Button>保存</Button>
-        <Button variant="ghost"><Plus size={16} /> 添加模型</Button>
-        <Button variant="inline" size="compact">复制</Button>
-        <Button variant="ghost" danger>删除</Button>
+        <Button variant="secondary"><Plus size={16} /> 添加模型</Button>
+        <Button variant="secondary" size="compact">复制</Button>
+        <Button variant="secondary" danger>删除</Button>
         <Button danger>确认删除</Button>
         <Button loading>保存中</Button>
-        <Button variant="ghost" onClick={() => setNameDialog(true)}>新建空间</Button>
+        <Button variant="secondary" onClick={() => setNameDialog(true)}>新建空间</Button>
         <div style={{ position: 'relative' }}>
           <IconButton label="操作" aria-haspopup="menu" aria-expanded={Boolean(menuAnchor)} onClick={(event) => setMenuAnchor(menuAnchor ? null : event.currentTarget)}><Ellipsis /></IconButton>
           {menuAnchor && <Menu onClose={() => setMenuAnchor(null)} returnFocusTo={menuAnchor}

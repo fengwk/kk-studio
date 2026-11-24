@@ -51,7 +51,7 @@ export function RemoteModelIdPicker({
   return (
     <div className="remote-model-ids">
       <Button
-        variant="inline"
+        variant="secondary"
         disabled={!providerName || current?.status === 'loading'}
         onClick={() => void fetchIds()}
       >

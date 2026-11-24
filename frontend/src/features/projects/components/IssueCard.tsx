@@ -118,7 +118,7 @@ export function IssueCard({
         {isBlocked && onRecover && (
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             onClick={onRecover}
             title={t('projects.issue.actionRecoverTitle', {
               state: issue.blockedFromState
@@ -134,7 +134,7 @@ export function IssueCard({
         {isDone && onReopen && (
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             onClick={onReopen}
             title={t('projects.issue.actionReopenTitle')}
           >
@@ -146,7 +146,7 @@ export function IssueCard({
         {!isBlocked && !isDone && onBlock && (
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             onClick={onBlock}
             title={t('projects.issue.actionBlockTitle')}
           >
@@ -162,7 +162,7 @@ export function IssueCard({
               <Button
                 key={nextState}
                 size="compact"
-                variant="ghost"
+                variant="secondary"
                 onClick={() => onTransition(nextState)}
               >
                 <span>{t('projects.issue.transitionToState', { state: stateName(nextState) })}</span>

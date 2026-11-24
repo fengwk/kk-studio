@@ -161,13 +161,13 @@ export function ModelPricingPlanEditor({ value, onChange, pricingImportNotice }:
               ...changes.map((change) => ({ value: change.draftKey, label: `${change.from || '—'}${change === active ? ` · ${activeLabel}` : ''}` })),
             ]} onChange={setSelection} />
         </div>
-        <Button variant="ghost" onClick={() => setNewDate(newDate === null ? '' : null)}>{t('ai.catalog.form.addPricingChange')}</Button>
+        <Button variant="secondary" onClick={() => setNewDate(newDate === null ? '' : null)}>{t('ai.catalog.form.addPricingChange')}</Button>
       </div>
       {newDate !== null && <div className="pricing-plan-toolbar">
         <Field label={t('ai.catalog.form.pricingFromDate')}>
           <DateInput value={newDate} onChange={setNewDate} aria-label={t('ai.catalog.form.pricingFromDate')} />
         </Field>
-        <Button variant="ghost" disabled={!newDate || duplicateDate(newDate)} onClick={addChange}>{t('ai.catalog.form.pricingCreateDraft')}</Button>
+        <Button variant="secondary" disabled={!newDate || duplicateDate(newDate)} onClick={addChange}>{t('ai.catalog.form.pricingCreateDraft')}</Button>
         {newDate && duplicateDate(newDate) && <span className="field-error" role="alert">{t('ai.catalog.form.pricingDuplicateDate')}</span>}
       </div>}
       {selected && newDate === null && <div className="pricing-plan-toolbar">
@@ -177,7 +177,7 @@ export function ModelPricingPlanEditor({ value, onChange, pricingImportNotice }:
             onChange({ ...value, changes: value.changes.map((change) => change === selected ? { ...change, from } : change) })
           }} />
         </Field>
-        <Button variant="ghost" onClick={() => {
+        <Button variant="secondary" onClick={() => {
           onChange({ ...value, changes: value.changes.filter((change) => change !== selected) })
           setSelection(undefined)
         }}>{t('ai.catalog.form.pricingRemoveChange')}</Button>
@@ -226,7 +226,7 @@ function DefinitionEditor({ definition, configured, onChange }: {
           <summary>{index + 1}. {summary}</summary>
           <div className="pricing-rule-fields">
             {children}
-            <button type="button" className="ghost-btn" onClick={remove}>{t('ai.catalog.form.removePricingRule')}</button>
+            <Button type="button" variant="secondary" onClick={remove}>{t('ai.catalog.form.removePricingRule')}</Button>
           </div>
         </details>
         {!!peerRows.length && <span className="field-error" role="alert">{t(`ai.catalog.form.${reason}`, { rows: peerRows.join(', ') })}</span>}
@@ -309,13 +309,13 @@ function DefinitionEditor({ definition, configured, onChange }: {
               onChange={(cacheWriteByTtl) => update({ cacheWriteByTtl })} />}
           </>, () => updateRows('inputTokenRanges', inputTokenRanges.filter((row) => row !== range)))
       })}
-      <button type="button" className="ghost-btn" onClick={() => {
+      <Button type="button" variant="secondary" onClick={() => {
         const draftKey = createPricingDraftKey()
         setNewRule(draftKey)
         updateRows('inputTokenRanges', [...inputTokenRanges, {
           draftKey, minInputTokens: '', maxInputTokensExclusive: '', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
         }])
-      }}>{t('ai.catalog.form.addPricingRange')}</button>
+      }}>{t('ai.catalog.form.addPricingRange')}</Button>
     </Section>
     <Section title={t('ai.catalog.form.pricingTiers')}>
       {serviceTiers.map((tier, index) => {
@@ -326,11 +326,11 @@ function DefinitionEditor({ definition, configured, onChange }: {
           <FactorInputs factors={tier.factors} onChange={(factors) => update({ factors })} />
         </>, () => updateRows('serviceTiers', serviceTiers.filter((row) => row !== tier)))
       })}
-      <button type="button" className="ghost-btn" onClick={() => {
+      <Button type="button" variant="secondary" onClick={() => {
         const draftKey = createPricingDraftKey()
         setNewRule(draftKey)
         updateRows('serviceTiers', [...serviceTiers, { draftKey, serviceTier: '', factors: blankFactors() }])
-      }}>{t('ai.catalog.form.addPricingTier')}</button>
+      }}>{t('ai.catalog.form.addPricingTier')}</Button>
     </Section>
     <Section title={t('ai.catalog.form.pricingTimes')}>
       {!!timePeriods.length && <Field label={t('ai.catalog.form.pricingTimezone')}>
@@ -354,19 +354,19 @@ function DefinitionEditor({ definition, configured, onChange }: {
           </div>
           {split.length > 0 && <div>
             <p className="inline-hint">{t('ai.catalog.form.pricingOvernight', { intervals: split.map(label).join(' / ') })}</p>
-            <Button variant="ghost" onClick={() => updateRows('timePeriods', timePeriods.flatMap((row) => row === period
+            <Button variant="secondary" onClick={() => updateRows('timePeriods', timePeriods.flatMap((row) => row === period
               ? splitCrossMidnightPeriod(period) : [row]))}>{t('ai.catalog.form.pricingConfirmSplit')}</Button>
           </div>}
           <FactorInputs factors={period.factors} onChange={(factors) => update({ factors })} />
         </>, () => updateRows('timePeriods', timePeriods.filter((row) => row !== period)))
       })}
-      <button type="button" className="ghost-btn" onClick={() => {
+      <Button type="button" variant="secondary" onClick={() => {
         const draftKey = createPricingDraftKey()
         setNewRule(draftKey)
         updateRows('timePeriods', [...timePeriods, {
           draftKey, weekdays: [], start: '00:00', end: '24:00', timezone: timePeriods[0]?.timezone ?? 'UTC', factors: blankFactors(),
         }])
-      }}>{t('ai.catalog.form.addPricingTime')}</button>
+      }}>{t('ai.catalog.form.addPricingTime')}</Button>
     </Section>
   </>
 }
@@ -469,7 +469,7 @@ function PricingPreview({ value }: { value: ModelPricingDraft }) {
       <Field label={t('ai.catalog.form.pricingServiceTier')}><TextInput id={tierId} value={serviceTier}
         onChange={(event) => setServiceTier(event.target.value)} /></Field>
     </div>
-    <Button variant="ghost" loading={busy} onClick={() => void run()}>{t('ai.catalog.form.pricingPreviewRun')}</Button>
+    <Button variant="secondary" loading={busy} onClick={() => void run()}>{t('ai.catalog.form.pricingPreviewRun')}</Button>
     {error && <p className="field-error" role="alert">{error}</p>}
     {result && <div className="pricing-preview-result" role="status">
       {result.rates ? <>
@@ -483,8 +483,8 @@ function PricingPreview({ value }: { value: ModelPricingDraft }) {
       </> : <>
         <p>{t(hasConfiguredPricing(value) ? 'ai.catalog.form.pricingPreviewUnknown' : 'ai.catalog.form.pricingNotConfigured')}</p>
         {hasConfiguredPricing(value) && <div className="pricing-plan-toolbar">
-          {!requestedAt && <Button variant="ghost" onClick={() => document.getElementById(timeId)?.focus()}>{t('ai.catalog.form.pricingPreviewAddTime')}</Button>}
-          {!serviceTier.trim() && <Button variant="ghost" onClick={() => document.getElementById(tierId)?.focus()}>{t('ai.catalog.form.pricingPreviewAddTier')}</Button>}
+          {!requestedAt && <Button variant="secondary" onClick={() => document.getElementById(timeId)?.focus()}>{t('ai.catalog.form.pricingPreviewAddTime')}</Button>}
+          {!serviceTier.trim() && <Button variant="secondary" onClick={() => document.getElementById(tierId)?.focus()}>{t('ai.catalog.form.pricingPreviewAddTier')}</Button>}
         </div>}
       </>}
     </div>}

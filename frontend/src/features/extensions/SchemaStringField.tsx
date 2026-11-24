@@ -187,7 +187,7 @@ export function SchemaStringField({
             />
           ) : null}
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             disabled={disabled}
             aria-expanded={textEditorOpen}
@@ -226,7 +226,7 @@ export function SchemaStringField({
               onChange={toggleJsonValidation}
             />
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               disabled={disabled}
               onClick={() => fileInputRef.current?.click()}
@@ -235,7 +235,7 @@ export function SchemaStringField({
               {t('plugins.configDialog.importJsonFile')}
             </Button>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               disabled={disabled || textDraft === null}
               aria-label={t('plugins.configDialog.discardDraft', { name })}

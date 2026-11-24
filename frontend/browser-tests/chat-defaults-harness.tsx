@@ -1,3 +1,4 @@
+import { Button } from '@/shared/ui/controls/Button'
 import { useState, useMemo, type FormEventHandler } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
@@ -166,30 +167,29 @@ export function ChatDefaultsHarnessApp() {
   return (
     <div className="chat-defaults-harness-frame" style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
       <header style={{ marginBottom: 20, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <button
+        <Button
           type="button"
           data-testid="open-create-btn"
-          className="btn-primary"
           onClick={openCreate}
         >
           新建 Chat
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           data-testid="open-edit-btn"
-          className="ghost-btn"
+          variant="secondary"
           onClick={openEdit}
         >
           编辑 Chat (YOLO开启+指定环境)
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           data-testid="open-edit-unavailable-btn"
-          className="ghost-btn"
+          variant="secondary"
           onClick={openEditUnavailable}
         >
           编辑 Chat (不可用环境)
-        </button>
+        </Button>
       </header>
 
       <section style={{ marginBottom: 24 }}>

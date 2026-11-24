@@ -31,7 +31,7 @@ export function CatalogSetupGuide({ state }: { state: CatalogSetupState }) {
             {step.done ? (
               <span className="catalog-setup-step-status">{t('ai.setup.done')}</span>
             ) : (
-              <Link className={index === currentIndex ? 'btn-primary' : 'ghost-btn'} to={step.to}>
+              <Link className={index === currentIndex ? 'btn-primary' : 'btn-secondary'} to={step.to}>
                 {t(`ai.setup.${step.key}.action`)}
               </Link>
             )}

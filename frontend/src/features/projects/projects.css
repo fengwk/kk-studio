@@ -211,7 +211,7 @@
 
 .issue-card-title-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus);
   border-radius: var(--radius-sm);
 }
 
@@ -417,7 +417,7 @@
 
 .workflow-stage-select:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus);
   border-radius: var(--radius-sm);
 }
 

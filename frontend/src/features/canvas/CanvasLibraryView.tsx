@@ -127,7 +127,7 @@ export function CanvasLibraryView() {
                 message: (canvasesQuery.error as Error).message,
               })}
             />
-            <Button variant="ghost" onClick={() => void canvasesQuery.refetch()}>
+            <Button variant="secondary" onClick={() => void canvasesQuery.refetch()}>
               {t('shared.retry')}
             </Button>
           </div>
@@ -197,7 +197,7 @@ export function CanvasLibraryView() {
             </div>
             <div className="modal-footer">
               <Button
-                variant="ghost"
+                variant="secondary"
                 onClick={closeCreateDialog}
                 disabled={createMutation.isPending}
               >

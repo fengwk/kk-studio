@@ -26,10 +26,11 @@ export function SearchField({
   const { t } = useI18n()
 
   return (
-    <label className="searchbox">
+    <label className="searchbox" data-ui-focus="within">
       <Search aria-hidden="true" />
       <input
         className="ui-search-input"
+        data-ui-focus="delegate"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder ?? t('shared.searchResources')}

@@ -50,7 +50,7 @@ export function InteractionsPage() {
           : t('ai.interaction.pendingCount', { count: items.length })}
         actions={(
           <Button
-            variant="ghost"
+            variant="secondary"
             disabled={isLoading || isFetchingMore}
             onClick={() => void refresh()}
           >
@@ -134,7 +134,7 @@ export function InteractionsPage() {
             {hasMore ? (
               <div className="interactions-load-more-row">
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   disabled={isFetchingMore}
                   onClick={() => void loadMore()}
                 >

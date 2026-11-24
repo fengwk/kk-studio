@@ -93,7 +93,7 @@ export function UnconfirmedExecutionsPanel({
             </div>
             {canAbandon ? (
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="compact"
                 danger
                 disabled={pending}

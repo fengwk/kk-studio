@@ -1,3 +1,4 @@
+import { Button } from '@/shared/ui/controls/Button'
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
@@ -57,12 +58,12 @@ export function LayoutFoundationHarnessApp() {
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
       <h1 style={{ margin: 0, fontSize: 16 }}>Layout Foundation Harness</h1>
-      <button type="button" id="open-foundation-dialog" className="btn-primary" onClick={() => setDialogOpen(true)}>
+      <Button type="button" id="open-foundation-dialog" onClick={() => setDialogOpen(true)}>
         {copy.openDialog}
-      </button>
-      <button type="button" id="open-confirm-dialog" className="btn-primary" onClick={() => setConfirmOpen(true)}>
+      </Button>
+      <Button type="button" id="open-confirm-dialog" onClick={() => setConfirmOpen(true)}>
         {copy.openConfirm}
-      </button>
+      </Button>
       <div style={{ width: 260 }}>
         <div className="form-group">
           <span>{copy.modelLabel}</span>
@@ -100,12 +101,12 @@ export function LayoutFoundationHarnessApp() {
             </div>
           </div>
           <div className="modal-footer">
-            <button type="button" className="ghost-btn" onClick={() => setDialogOpen(false)}>
+            <Button type="button" variant="secondary" onClick={() => setDialogOpen(false)}>
               {copy.cancel}
-            </button>
-            <button type="button" className="btn-primary" onClick={() => setDialogOpen(false)}>
+            </Button>
+            <Button type="button" onClick={() => setDialogOpen(false)}>
               {copy.save}
-            </button>
+            </Button>
           </div>
         </Dialog>
       ) : null}

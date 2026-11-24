@@ -66,7 +66,7 @@ export function IssueEvidencePane({
           {loadFailed && (
             <div className="evidence-failure">
               <StateBlock tone="danger" title={t('projects.issue.evidenceLoadFailed')} />
-              <Button size="compact" variant="ghost" disabled={isRetrying} onClick={onRetry}>
+              <Button size="compact" variant="secondary" disabled={isRetrying} onClick={onRetry}>
                 {t('shared.retry')}
               </Button>
             </div>

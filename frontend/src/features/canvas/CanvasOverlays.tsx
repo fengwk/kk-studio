@@ -73,20 +73,20 @@ export function CanvasOverlays() {
               </span>
               <div className="canvas-conflict-actions">
                 {isRemoteDeleted ? (
-                  <Button variant="ghost" size="compact" onClick={() => void saveDraftAsNewNode(nodeId)}>
+                  <Button variant="secondary" size="compact" onClick={() => void saveDraftAsNewNode(nodeId)}>
                     {t('canvas.conflict.saveAsNew')}
                   </Button>
                 ) : (
                   <>
-                    <Button variant="ghost" size="compact" onClick={() => void retryDraft(nodeId)}>
+                    <Button variant="secondary" size="compact" onClick={() => void retryDraft(nodeId)}>
                       {t('canvas.conflict.retryLatest')}
                     </Button>
-                    <Button variant="ghost" size="compact" onClick={() => void saveDraftAsNewNode(nodeId)}>
+                    <Button variant="secondary" size="compact" onClick={() => void saveDraftAsNewNode(nodeId)}>
                       {t('canvas.conflict.saveAsNew')}
                     </Button>
                   </>
                 )}
-                <Button variant="ghost" size="compact" danger onClick={() => dismissDraft(nodeId)}>
+                <Button variant="secondary" size="compact" danger onClick={() => dismissDraft(nodeId)}>
                   {t('canvas.conflict.discard')}
                 </Button>
               </div>
@@ -99,14 +99,14 @@ export function CanvasOverlays() {
             <div className="canvas-conflict-actions">
               {canRetryRecovery ? (
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   onClick={() => void retryRecovery().catch(() => undefined)}
                 >
                   {t('shared.retry')}
                 </Button>
               ) : null}
-              <Button variant="ghost" size="compact" onClick={dismissConflictMessage}>
+              <Button variant="secondary" size="compact" onClick={dismissConflictMessage}>
                 {t('shared.close')}
               </Button>
             </div>

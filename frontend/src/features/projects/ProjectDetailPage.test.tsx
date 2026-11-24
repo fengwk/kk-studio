@@ -239,7 +239,7 @@ describe('ProjectDetailPage', () => {
     expect(card.querySelector('.ui-badge')).toBeNull()
 
     const transition = within(card).getByRole('button', { name: '流转至 进行中' })
-    expect(transition).toHaveClass('ghost-btn')
+    expect(transition).toHaveClass('btn-secondary')
     // 看板列与卡片没有主按钮；页头「新建 Issue」是该区域唯一主动作。
     expect(document.querySelectorAll('.project-board-section .btn-primary')).toHaveLength(0)
     expect(document.querySelectorAll('header.project-detail-header .btn-primary')).toHaveLength(1)
@@ -248,7 +248,7 @@ describe('ProjectDetailPage', () => {
     // 阻塞动作保留警示语义的说明，外观与其它卡片动作一致。
     const block = within(card).getByRole('button', { name: '阻塞' })
     expect(block).toHaveAttribute('title', '设置业务阻塞原因')
-    expect(block).toHaveClass('ghost-btn')
+    expect(block).toHaveClass('btn-secondary')
   })
 
   it('describes the run on a card with stage name and readable status', async () => {

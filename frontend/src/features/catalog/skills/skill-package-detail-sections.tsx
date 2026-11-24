@@ -95,11 +95,11 @@ export function SkillPackageSummarySection({
         </p>
       ) : null}
       <div className="skill-detail-actions">
-        <Button variant="ghost" loading={downloadPending} onClick={onDownload}>
+        <Button variant="secondary" loading={downloadPending} onClick={onDownload}>
           {!downloadPending && <Download aria-hidden="true" />}
           {t('ai.skillPackages.downloadArchive')}
         </Button>
-        <Button variant="ghost" onClick={onEdit}>
+        <Button variant="secondary" onClick={onEdit}>
           {t('ai.skillPackages.edit')}
         </Button>
       </div>

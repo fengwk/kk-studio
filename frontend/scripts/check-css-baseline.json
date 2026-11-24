@@ -2,7 +2,7 @@
   "src/features/canvas/canvas.css": {
     "spacing": 92,
     "box-shadow": 5,
-    "outline": 5,
+    "outline": 3,
     "important": 5
   },
   "src/features/catalog/ai-console-resource-editor.css": {

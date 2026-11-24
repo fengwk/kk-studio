@@ -50,7 +50,7 @@ export function ThreadEventList({
     >
       {loading ? <div role="status">{t('ai.runtime.thread.loading')}</div> : null}
       {error ? <div role="alert"><p>{error}</p>
-        {onRetry ? <Button variant="ghost" onClick={onRetry}>{t('ai.runtime.agentTree.retry')}</Button> : null}
+        {onRetry ? <Button variant="secondary" onClick={onRetry}>{t('ai.runtime.agentTree.retry')}</Button> : null}
       </div> : null}
       {!loading && !error && events.length === 0 ? (
         <div className="thread-empty">

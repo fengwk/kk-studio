@@ -70,6 +70,7 @@ export function SelectMenu({
             }}
             type="button"
             role="option"
+            data-ui-focus="row"
             tabIndex={activeIndex === index ? 0 : -1}
             disabled={option.disabled}
             aria-selected={isSelected}

@@ -366,7 +366,7 @@ function LocalPendingRunNotice({
         <strong>{t('canvas.generation.localPendingTitle')}</strong>
         <p>{t('canvas.generation.localPendingUnreadable')}</p>
         <Button
-          variant="inline"
+          variant="secondary"
           size="compact"
           danger
           data-testid="discard-pending-btn"

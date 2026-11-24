@@ -294,7 +294,7 @@ function TurnUsageHarness() {
   const timeline = buildThreadTimeline(entries, [], [])
   return (
     <main style={{ padding: 24, maxWidth: 720 }}>
-      <Button variant="ghost" onClick={() => setReadOnly((value) => !value)}>
+      <Button variant="secondary" onClick={() => setReadOnly((value) => !value)}>
         {readOnly ? '启用分支' : '只读子代理'}
       </Button>
       <output data-testid="fork-entry-id">{forkEntryId}</output>

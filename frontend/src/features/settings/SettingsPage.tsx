@@ -147,7 +147,7 @@ function SchemaError({ error, onRetry }: { error: string; onRetry: () => void })
   return (
     <div className="settings-error-state">
       <StateBlock title={error} tone="danger" />
-      <Button variant="ghost" onClick={onRetry}>
+      <Button variant="secondary" onClick={onRetry}>
         {t('settings.retry')}
       </Button>
     </div>

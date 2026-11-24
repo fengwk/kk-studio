@@ -50,7 +50,7 @@ export function SettingsToolbar({ editor }: { editor: SystemSettingsEditor }) {
           {editor.saving ? t('settings.saving') : t('settings.save')}
         </Button>
         <Button
-          variant="ghost"
+          variant="secondary"
           disabled={!editor.dirty || editor.saving}
           onClick={editor.reset}
         >

@@ -51,7 +51,7 @@ export function EnvironmentManagementModal({
             {actions.map(({ label, run, danger }) => (
               <Button
                 key={label}
-                variant="ghost"
+                variant="secondary"
                 danger={danger}
                 onClick={() => {
                   onClose()
@@ -85,7 +85,7 @@ export function EnvironmentManagementModal({
                     <StateBlock tone="danger" title={t('ai.environment.events.loadFailed')} />
                     <Button
                       size="compact"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={eventsQuery.isFetching}
                       onClick={retryEvents}
                     >
@@ -125,7 +125,7 @@ export function EnvironmentManagementModal({
         </details>
       </div>
       <div className="modal-footer">
-        <Button variant="ghost" onClick={onClose}>{t('shared.close')}</Button>
+        <Button variant="secondary" onClick={onClose}>{t('shared.close')}</Button>
       </div>
     </Dialog>
   )

@@ -101,7 +101,7 @@ export function ThreadEventDetail({
       {canPreviewHistoricalRequest ? (
         <div className="thread-event-detail-actions">
           <Button
-            variant="inline"
+            variant="secondary"
             data-testid="historical-request-preview"
             title={t('ai.runtime.debug.historicalRequestHint')}
             aria-label={t('ai.runtime.debug.historicalRequestHint')}

@@ -38,9 +38,9 @@ test.describe('Canvas library real browser regression', () => {
       probe.className = 'btn-primary is-compact'
       document.body.appendChild(probe)
       const refStyle = getComputedStyle(probe)
-      const expectedBg = refStyle.backgroundImage
+      const expectedBg = refStyle.backgroundColor
       const expectedColor = refStyle.color
-      const expectedBorder = refStyle.borderTopColor
+      const expectedBorder = refStyle.borderTopWidth
       const expectedPadding = refStyle.padding
       probe.remove()
       return {
@@ -52,9 +52,10 @@ test.describe('Canvas library real browser regression', () => {
         titleFontWeight: getComputedStyle(title).fontWeight,
         actionHeight: Math.round(action.getBoundingClientRect().height),
         actionPadding: actionStyle.padding,
-        actionBg: actionStyle.backgroundImage,
+        actionBg: actionStyle.backgroundColor,
+        actionBackgroundImage: actionStyle.backgroundImage,
         actionColor: actionStyle.color,
-        actionBorder: actionStyle.borderTopColor,
+        actionBorder: actionStyle.borderTopWidth,
         actionSvgWidth: actionSvg ? Math.round(actionSvg.getBoundingClientRect().width) : 0,
         expectedBg,
         expectedColor,
@@ -64,7 +65,7 @@ test.describe('Canvas library real browser regression', () => {
     })
     // 与共享资源卡基座规范一致。
     expect(metrics.padding).toBe('16px')
-    expect(metrics.borderRadius).toBe('12px')
+    expect(metrics.borderRadius).toBe('8px')
     expect(metrics.iconWidth).toBe('40px')
     expect(metrics.iconHeight).toBe('40px')
     expect(metrics.titleFontSize).toBe('15px')
@@ -72,7 +73,7 @@ test.describe('Canvas library real browser regression', () => {
     expect(metrics.actionHeight).toBe(28)
     expect(metrics.actionPadding).toBe(metrics.expectedPadding)
     expect(metrics.actionBg).toBe(metrics.expectedBg)
-    expect(metrics.actionBg).not.toBe('none')
+    expect(metrics.actionBackgroundImage).toBe('none')
     expect(metrics.actionColor).toBe(metrics.expectedColor)
     expect(metrics.actionBorder).toBe(metrics.expectedBorder)
     expect(metrics.actionSvgWidth).toBe(14)
@@ -136,8 +137,8 @@ test.describe('Canvas library real browser regression', () => {
     await openButton.hover()
     await openButton.focus()
     await expect(openButton).toBeFocused()
-    const focusShadow = await openButton.evaluate((el) => getComputedStyle(el).boxShadow)
-    expect(focusShadow).toContain(await tokenColor(page, '--focus-ring'))
+    await expect(openButton).toHaveCSS('outline-width', '1px')
+    await expect(openButton).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
 
     // 窄屏单列且不横向溢出。
     await page.setViewportSize({ width: 360, height: 900 })

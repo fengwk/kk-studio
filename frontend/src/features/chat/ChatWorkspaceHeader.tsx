@@ -59,7 +59,7 @@ export function ChatWorkspaceHeader({
     <header className="chat-workspace-header chat-workspace-header-with-breadcrumb">
       <div className="chat-workspace-title">
         <div className="chat-workspace-title-lead">
-          {debugging ? <Button variant="ghost" size="compact" onClick={onCloseDebug}>
+          {debugging ? <Button variant="secondary" size="compact" onClick={onCloseDebug}>
             {t('ai.runtime.debug.close')}
           </Button> : currentView?.parentThreadId ? <ThreadPresentationActions view={currentView} /> : <Link
             className="chat-workspace-back"
@@ -104,7 +104,7 @@ export function ChatWorkspaceHeader({
         {debugging ? null : (
           <span title={ideHint}>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               className="chat-ide-toggle"
               aria-label={t('ai.ide.toggle')}

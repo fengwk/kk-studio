@@ -42,15 +42,15 @@ export function ProjectBoardToolbar({
           <Plus size={14} aria-hidden="true" />
           <span>{t('projects.issue.create')}</span>
         </Button>
-        <Button variant="ghost" onClick={onEditWorkflow}>
+        <Button variant="secondary" onClick={onEditWorkflow}>
           <Pencil size={14} aria-hidden="true" />
           <span>{t('projects.detail.editWorkflow')}</span>
         </Button>
-        <Button variant="ghost" onClick={onToggleArchive}>
+        <Button variant="secondary" onClick={onToggleArchive}>
           <Archive size={14} aria-hidden="true" />
           <span>{archived ? t('projects.unarchive') : t('projects.detail.archiveAction')}</span>
         </Button>
-        <Button variant="ghost" danger onClick={onDeleteProject}>
+        <Button variant="secondary" danger onClick={onDeleteProject}>
           <Trash2 size={14} aria-hidden="true" />
           <span>{t('projects.detail.deleteAction')}</span>
         </Button>

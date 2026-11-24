@@ -76,7 +76,7 @@ export function ThreadComposerDock({
   onFileInputChange: (event: ChangeEvent<HTMLInputElement>) => void
 }) {
   return (
-    <div className="thread-dock">
+    <div className="thread-dock" data-ui-focus="within">
       <AttachmentStrip
         uploads={uploads}
         parts={parts}

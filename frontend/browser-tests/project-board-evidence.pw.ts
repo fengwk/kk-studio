@@ -586,9 +586,9 @@ for (const locale of Object.keys(copy) as Locale[]) {
       await expect(initCard.locator('.issue-number')).toHaveText('#1')
       await expect(initCard.locator('.ui-badge')).toHaveCount(0)
       const transition = initCard.getByRole('button', { name: copy[locale].transitionToWork })
-      await expect(transition).toHaveClass(/ghost-btn/)
+      await expect(transition).toHaveClass(/btn-secondary/)
       await expect(transition).not.toHaveClass(/btn-primary/)
-      await expect(initCard.getByRole('button', { name: copy[locale].block })).toHaveClass(/ghost-btn/)
+      await expect(initCard.getByRole('button', { name: copy[locale].block })).toHaveClass(/btn-secondary/)
 
       // 当前阶段的 Run 不重复阶段名；没有徽标时执行状态仍用可读文字。
       const workCard = card(ISSUE_WORK)

@@ -128,7 +128,7 @@ export function CreateProjectModal({
           </div>
 
           <div className="modal-footer">
-            <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
+            <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
               {t('projects.cancel')}
             </Button>
             <Button type="submit" loading={isSubmitting}>

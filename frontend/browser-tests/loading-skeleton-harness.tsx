@@ -23,7 +23,7 @@ function RealGridProbe() {
           subtitle="用于比对列数与卡片宽度"
           meta={[['类型', 'model']]}
           actions={
-            <Button size="compact" variant="ghost">
+            <Button size="compact" variant="secondary">
               <Trash2 size={14} /> 删除
             </Button>
           }
@@ -69,7 +69,7 @@ export function LoadingSkeletonHarnessApp() {
           <Button
             id="test-compact-button"
             size="compact"
-            variant="ghost"
+            variant="secondary"
             loading={btnLoading}
             onClick={() => setClickCount((c) => c + 1)}
           >
@@ -118,7 +118,7 @@ export function LoadingSkeletonHarnessApp() {
                   subtitle="商业模型"
                   meta={[['类型', 'LLM'], ['状态', 'Ready']]}
                   actions={
-                    <Button size="compact" variant="ghost">
+                    <Button size="compact" variant="secondary">
                       <Trash2 size={14} /> 删除
                     </Button>
                   }

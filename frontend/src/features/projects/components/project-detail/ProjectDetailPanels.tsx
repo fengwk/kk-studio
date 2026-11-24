@@ -49,7 +49,7 @@ export function ProjectAgentDock({
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             onClick={onOpenIssueDetail}
             title={t('projects.detail.viewIssueDetail')}

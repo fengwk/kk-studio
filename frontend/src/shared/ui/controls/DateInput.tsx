@@ -113,7 +113,7 @@ export function DateInput({ id, value, onChange, placeholder, disabled, required
   </div>
 
   return <>
-    <button {...buttonProps} ref={triggerRef} id={triggerId} value={value} type={buttonProps.type || 'button'} disabled={disabled} className={`ui-select-trigger${!displayValue ? ' is-placeholder' : ''}${className ? ` ${className}` : ''}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-activedescendant={open ? `${panelId}-${isoDate(active)}` : undefined} aria-required={required || undefined} onClick={(event) => { onTriggerClick?.(event); if (!event.defaultPrevented) { if (open) setOpen(false); else begin() } }} onKeyDown={handleKeyDown}>
+    <button {...buttonProps} ref={triggerRef} id={triggerId} value={value} type={buttonProps.type || 'button'} disabled={disabled} className={`ui-select-trigger${!displayValue ? ' is-placeholder' : ''}${className ? ` ${className}` : ''}`} data-ui-focus="control" aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-activedescendant={open ? `${panelId}-${isoDate(active)}` : undefined} aria-required={required || undefined} onClick={(event) => { onTriggerClick?.(event); if (!event.defaultPrevented) { if (open) setOpen(false); else begin() } }} onKeyDown={handleKeyDown}>
       <span className="ui-select-value">{label}</span><Calendar className="ui-select-chevron" aria-hidden="true" />
     </button>
     {panel && portalRoot && createPortal(panel, portalRoot)}

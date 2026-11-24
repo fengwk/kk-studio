@@ -103,7 +103,7 @@ export function WorkflowStageList({
         )
       })}
 
-      <Button variant="ghost" size="compact" disabled={isPending} onClick={onAdd}>
+      <Button variant="secondary" size="compact" disabled={isPending} onClick={onAdd}>
         <Plus size={14} aria-hidden="true" />
         <span>{t('projects.edit.addStage')}</span>
       </Button>

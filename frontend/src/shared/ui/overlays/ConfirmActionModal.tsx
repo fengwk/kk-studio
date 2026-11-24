@@ -51,7 +51,7 @@ export function ConfirmActionModal({
       </div>
       <div className="modal-footer">
         <Button
-          variant="ghost"
+          variant="secondary"
           data-autofocus
           onClick={onClose}
           disabled={pending}

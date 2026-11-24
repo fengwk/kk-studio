@@ -23,7 +23,7 @@ export function CanvasEditor() {
         />
         <p>{(snapshotQuery.error as Error).message}</p>
         <div className="canvas-editor-state-actions">
-          <Button variant="ghost" onClick={openLibrary}>{t('canvas.editor.backToLibrary')}</Button>
+          <Button variant="secondary" onClick={openLibrary}>{t('canvas.editor.backToLibrary')}</Button>
           {!notFound ? (
             <Button onClick={() => void snapshotQuery.refetch()}>{t('canvas.editor.retry')}</Button>
           ) : null}

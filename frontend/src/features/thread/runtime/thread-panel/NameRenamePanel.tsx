@@ -108,7 +108,7 @@ export function NameRenamePanel({
         ) : null}
       </div>
       <div className="name-rename-actions">
-        <Button variant="ghost" onClick={onClose} disabled={pending || busy}>
+        <Button variant="secondary" onClick={onClose} disabled={pending || busy}>
           {t('shared.cancel')}
         </Button>
         <Button

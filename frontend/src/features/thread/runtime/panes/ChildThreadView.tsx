@@ -81,7 +81,7 @@ export function ThreadView({
       }
     }}>
       {onPresentation == null ? <header className="agent-pane-thread-heading">
-        {views.mode === 'debug' ? <Button variant="ghost" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
+        {views.mode === 'debug' ? <Button variant="secondary" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
           {t('ai.runtime.debug.close')}
         </Button> : presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
         {views.mode !== 'debug' ? <div className="agent-pane-thread-caption">

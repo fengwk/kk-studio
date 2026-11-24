@@ -180,6 +180,7 @@ export function Dialog({
         ref={cardRef}
         className={['modal-card', className].filter(Boolean).join(' ')}
         role={role}
+        data-ui-focus="none"
         aria-modal="true"
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : (ariaLabelledBy ?? (title !== undefined ? titleId : undefined))}

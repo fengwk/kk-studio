@@ -119,7 +119,7 @@ export function PluginConnectionCheckModal({
 
       <div className="modal-footer">
         <Button
-          variant="ghost"
+          variant="secondary"
           data-autofocus
           data-testid="plugin-check-close"
           onClick={onClose}

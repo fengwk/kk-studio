@@ -73,7 +73,7 @@ export function IssueDetailHeader({
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <Button
-          variant="ghost"
+          variant="secondary"
           danger
           onClick={onDelete}
           disabled={deleteDisabled}

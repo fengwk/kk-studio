@@ -191,7 +191,7 @@ describe('CanvasPage integration', () => {
     expect(container.querySelector('.library-content')).toHaveClass('screen-body', 'library-content')
     expect(container.querySelector('.resource-grid')).toHaveClass('resource-grid', 'canvas-library-grid')
     expect(openBtn).toHaveClass('btn-primary', 'is-compact')
-    expect(openBtn).not.toHaveClass('ghost-btn')
+    expect(openBtn).not.toHaveClass('btn-secondary')
     expect(openBtn.querySelector('svg')).not.toBeNull()
 
     await user.click(openBtn)

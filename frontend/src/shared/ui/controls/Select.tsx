@@ -156,6 +156,7 @@ export function Select({
         id={id}
         type="button"
         className="ui-select-trigger"
+        data-ui-focus="control"
         disabled={disabled}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}

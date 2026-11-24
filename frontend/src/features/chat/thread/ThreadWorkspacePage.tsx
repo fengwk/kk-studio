@@ -54,7 +54,7 @@ export function ThreadWorkspacePage() {
     return (
       <div className="thread-state danger">
         {t('ai.thread.invalidId')}
-        <Button variant="ghost" onClick={() => navigate('/chats')}>
+        <Button variant="secondary" onClick={() => navigate('/chats')}>
           {t('ai.chat.backToList')}
         </Button>
       </div>
@@ -79,7 +79,7 @@ export function ThreadWorkspacePage() {
     return (
       <div className="thread-state danger">
         {t('ai.thread.loadFailed')}
-        <Button variant="ghost" onClick={() => navigate('/chats')}>
+        <Button variant="secondary" onClick={() => navigate('/chats')}>
           {t('ai.chat.backToList')}
         </Button>
       </div>
@@ -118,7 +118,7 @@ function ThreadWorkspaceContent({ thread, agents, environments }: {
     }}>
       <header className="chat-workspace-header">
         <div className="chat-workspace-title">
-          {debugActive ? <Button variant="ghost" size="compact"
+          {debugActive ? <Button variant="secondary" size="compact"
             onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
             {t('ai.runtime.debug.close')}
           </Button> : (presentation?.parentThreadId ?? thread.parentThreadId) ? <ThreadPresentationActions view={presentation} /> : <Link

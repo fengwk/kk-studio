@@ -47,16 +47,16 @@ export function CompactionBranchView({
           <>
             <header className="compaction-branch-header">
               {onBack != null ? (
-                <Button variant="ghost" size="compact" onClick={onBack}>{t('ai.runtime.compactionBranch.back')}</Button>
+                <Button variant="secondary" size="compact" onClick={onBack}>{t('ai.runtime.compactionBranch.back')}</Button>
               ) : thread?.parentThreadId != null ? (
-                <ThreadLink className="ghost-btn is-compact" threadId={thread.parentThreadId}>
+                <ThreadLink className="btn-secondary is-compact" threadId={thread.parentThreadId}>
                   {t('ai.runtime.childThread.back')}
                 </ThreadLink>
               ) : null}
               <h2 className="compaction-branch-title">{t('ai.runtime.compactionBranch.title')}</h2>
               <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
               {running ? (
-                <Button size="compact" variant="ghost" className="compaction-branch-stop"
+                <Button size="compact" variant="secondary" className="compaction-branch-stop"
                   disabled={state.stopPending} loading={state.stopPending} onClick={state.stop}>
                   {t(state.stopPending ? 'ai.runtime.compactionBranch.stopping' : 'ai.runtime.compactionBranch.stop')}
                 </Button>

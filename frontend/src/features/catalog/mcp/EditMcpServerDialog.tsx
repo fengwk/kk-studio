@@ -62,7 +62,7 @@ export function EditMcpServerDialog({
           <div className="modal-body">
             <StateBlock title={form.fetchError || t('ai.mcp.loadConfigFailed')} tone="danger" />
             <div style={{ marginTop: 12, textAlign: 'center' }}>
-              <Button variant="ghost" onClick={onRetryLoad}>
+              <Button variant="secondary" onClick={onRetryLoad}>
                 {t('shared.retry')}
               </Button>
             </div>
@@ -147,7 +147,7 @@ export function EditMcpServerDialog({
 
             <div className="modal-footer modal-footer-with-leading-action">
               <Button
-                variant="ghost"
+                variant="secondary"
                 className="modal-footer-leading-action"
                 onClick={onDiscover}
                 disabled={saving}
@@ -156,7 +156,7 @@ export function EditMcpServerDialog({
                 {!form.discoverPending && <RefreshCw aria-hidden="true" />}
                 {t('ai.mcp.discover')}
               </Button>
-              <Button variant="ghost" onClick={requestClose} disabled={busy}>
+              <Button variant="secondary" onClick={requestClose} disabled={busy}>
                 {t('shared.cancel')}
               </Button>
               <Button type="submit" disabled={form.discoverPending} loading={saving}>

@@ -43,7 +43,7 @@ describe('NewBranchDialog', () => {
     expect(nameInput().classList.contains('ui-text-input')).toBe(true)
     expect(form!.querySelector('.field-label')).not.toBeNull()
     expect(submit().classList.contains('btn-primary')).toBe(true)
-    expect(document.querySelector('.modal-footer .ghost-btn')).not.toBeNull()
+    expect(document.querySelector('.modal-footer .btn-secondary')).not.toBeNull()
   })
 
   it('submits the normalized name with the default destination pane', async () => {
@@ -99,7 +99,7 @@ describe('NewBranchDialog', () => {
     expect(document.querySelector('.new-branch-overwrite')?.textContent).toBe('overwrite draft?')
     // 在途（目标 pane 有未完成操作）时提交与取消都被禁用。
     expect(submit()).toBeDisabled()
-    expect(document.querySelector<HTMLButtonElement>('.modal-footer .ghost-btn')).toBeDisabled()
+    expect(document.querySelector<HTMLButtonElement>('.modal-footer .btn-secondary')).toBeDisabled()
 
     // 覆盖确认阶段：目标位置仍然合法则保留用户/调用方的选择，提交走同一回调。
     rerender(

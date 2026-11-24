@@ -262,7 +262,7 @@ function OpenResourceEditorModal({
           body
         )}
         <div className="modal-footer">
-          <Button variant="inline" disabled={pending} onClick={requestClose}>
+          <Button variant="secondary" disabled={pending} onClick={requestClose}>
             {t('shared.cancel')}
           </Button>
           <Button type="submit" disabled={pending}>

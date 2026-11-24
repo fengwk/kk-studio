@@ -119,7 +119,7 @@ export function TimeInput({ id, value, onChange, placeholder, disabled, required
   const label = valid ? value : placeholder ?? t('controls.chooseTime')
 
   return <>
-    <button {...buttonProps} ref={triggerRef} id={triggerId} value={value} type={buttonProps.type || 'button'} disabled={disabled} className={`ui-select-trigger${!valid ? ' is-placeholder' : ''}${className ? ` ${className}` : ''}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-activedescendant={open ? activeId : undefined} aria-required={required || buttonProps['aria-required'] || undefined} onClick={(event) => { onTriggerClick?.(event); if (!event.defaultPrevented) { if (open) setOpen(false); else begin() } }} onKeyDown={keyDown}>
+    <button {...buttonProps} ref={triggerRef} id={triggerId} value={value} type={buttonProps.type || 'button'} disabled={disabled} className={`ui-select-trigger${!valid ? ' is-placeholder' : ''}${className ? ` ${className}` : ''}`} data-ui-focus="control" aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId} aria-activedescendant={open ? activeId : undefined} aria-required={required || buttonProps['aria-required'] || undefined} onClick={(event) => { onTriggerClick?.(event); if (!event.defaultPrevented) { if (open) setOpen(false); else begin() } }} onKeyDown={keyDown}>
       <span className="ui-select-value">{label}</span><Clock className="ui-select-chevron" aria-hidden="true" />
     </button>
     {panel && portalRoot && createPortal(panel, portalRoot)}

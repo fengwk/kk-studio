@@ -86,7 +86,7 @@ export function IssueAlerts({
             </Button>
             {!isDiscardConfirmOpen ? (
               <Button
-                variant="ghost"
+                variant="secondary"
                 danger
                 onClick={() => setIsDiscardConfirmOpen(true)}
                 disabled={isActionPending}
@@ -110,7 +110,7 @@ export function IssueAlerts({
                 >
                   {t('projects.issue.confirmDiscard')}
                 </Button>
-                <Button variant="ghost" onClick={() => setIsDiscardConfirmOpen(false)} size="compact">
+                <Button variant="secondary" onClick={() => setIsDiscardConfirmOpen(false)} size="compact">
                   {t('projects.cancel')}
                 </Button>
               </div>
@@ -137,7 +137,7 @@ export function IssueAlerts({
                 {t('projects.issue.confirmOverwriteRisk')}
               </Button>
             )}
-            <Button variant="ghost" onClick={onReloadFreshData} size="compact">
+            <Button variant="secondary" onClick={onReloadFreshData} size="compact">
               <RefreshCw size={12} aria-hidden="true" />
               <span>{t('projects.issue.refreshAndKeepDraft')}</span>
             </Button>

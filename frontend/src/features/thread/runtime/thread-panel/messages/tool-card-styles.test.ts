@@ -20,7 +20,7 @@ const messagesDir = resolve(
 )
 const css = readFileSync(resolve(messagesDir, 'tool-card.css'), 'utf8')
 const disclosureCss = readFileSync(resolve(messagesDir, 'thread-disclosure.css'), 'utf8')
-const globalCss = readFileSync(resolve(process.cwd(), 'src', 'styles.css'), 'utf8')
+const buttonCss = readFileSync(resolve(process.cwd(), 'src/shared/ui/controls/Button.css'), 'utf8')
 
 /** 只匹配以该选择器开头的规则本体，避免命中复合选择器。 */
 function rule(source: string, pattern: RegExp): string {
@@ -61,7 +61,7 @@ describe('tool card style contracts', () => {
     expect(details).toContain('overflow: auto')
     expect(details).toContain('overscroll-behavior: auto')
     expect(rule(css, /^\.thread-tool-details:focus-visible\s*\{[^}]*\}/m))
-      .toContain('outline: 1px solid var(--focus-ring)')
+      .toContain('outline: 1px solid var(--focus)')
 
     expect(bounded).toContain('max-height')
     expect(bounded).toContain('overflow: auto')
@@ -113,11 +113,10 @@ describe('tool card style contracts', () => {
     expect(summary).toContain('cursor: pointer')
   })
 
-  it('uses the danger token for approval rejection borders', () => {
-    const dangerButton = rule(globalCss, /\.ghost-btn\.danger\s*\{[^}]*\}/)
+  it('uses the shared danger surface and foreground for approval rejection', () => {
+    const dangerButton = rule(buttonCss, /\.btn-secondary\.danger\s*\{[^}]*\}/)
 
-    // 组件只需声明 danger；该规则确保最终视觉始终使用设计系统的红色边框。
-    expect(dangerButton).toContain('border-color: var(--danger-border)')
+    expect(dangerButton).toContain('background: var(--danger-soft)')
     expect(dangerButton).toContain('color: var(--danger)')
   })
 })

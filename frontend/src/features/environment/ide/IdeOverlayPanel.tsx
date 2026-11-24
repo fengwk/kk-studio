@@ -267,7 +267,7 @@ export function IdeOverlayPanel({
             return (
               <div key={view.viewId} className="ide-workspace-tab" data-testid="ide-tab" data-ide-view={view.viewId}>
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   aria-current={view.viewId === selectedViewId ? 'page' : undefined}
                   title={directory ?? label}
@@ -276,7 +276,7 @@ export function IdeOverlayPanel({
                   <span className="ide-workspace-tab-label">{label}</span>
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   onClick={() => { void handleClose(view) }}
                   loading={view.closeInFlight === true}
@@ -292,7 +292,7 @@ export function IdeOverlayPanel({
           })}
           {selectedEnvironmentId != null ? (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               className="ide-open-workspace"
               data-testid="ide-open-workspace-btn"
@@ -306,7 +306,7 @@ export function IdeOverlayPanel({
           ) : null}
         </nav>
         <Button
-          variant="ghost"
+          variant="secondary"
           size="compact"
           className="ide-toolbar-icon"
           onClick={onCollapse}
@@ -337,7 +337,7 @@ export function IdeOverlayPanel({
       {directoryError != null && selectedView != null && isSameBinding(selectedView, directoryError.binding) ? (
         <div className="ide-panel-error-banner" role="alert">
           <span>{commandMessage(directoryError.message, 'ai.ide.changeDirectoryFailed')}</span>
-          <Button variant="ghost" size="compact" onClick={() => setDirectoryError(null)}>{t('ai.ide.dismiss')}</Button>
+          <Button variant="secondary" size="compact" onClick={() => setDirectoryError(null)}>{t('ai.ide.dismiss')}</Button>
         </div>
       ) : null}
       <div className="ide-panel-body" data-testid="ide-panel-body">

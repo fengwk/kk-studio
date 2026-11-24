@@ -68,7 +68,7 @@ export function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
           href={presignedUrl?.url || '#'}
           target="_blank"
           rel="noreferrer"
-          className="ghost-btn"
+          className="btn-secondary"
           onClick={handleClick}
           title={t('projects.issue.previewOrDownload')}
         >
@@ -81,7 +81,7 @@ export function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
         <div className="evidence-feedback" role="alert">
           <CircleAlert size={16} aria-hidden="true" />
           <span>{t('projects.issue.evidenceOpenFailed')}</span>
-          <Button size="compact" variant="ghost" disabled={isOpening} onClick={() => void openEvidence()}>
+          <Button size="compact" variant="secondary" disabled={isOpening} onClick={() => void openEvidence()}>
             {t('shared.retry')}
           </Button>
         </div>

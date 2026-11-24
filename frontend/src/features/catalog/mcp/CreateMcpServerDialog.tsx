@@ -119,7 +119,7 @@ export function CreateMcpServerDialog({
           </div>
 
           <div className="modal-footer">
-            <Button variant="ghost" onClick={requestClose} disabled={pending}>
+            <Button variant="secondary" onClick={requestClose} disabled={pending}>
               {t('shared.cancel')}
             </Button>
             <Button type="submit" loading={pending}>

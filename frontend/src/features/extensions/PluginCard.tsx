@@ -161,7 +161,7 @@ export function PluginCard({
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             aria-label={`${t('plugins.configure')} ${plugin.name}`}
             onClick={onConfigure}
           >
@@ -172,7 +172,7 @@ export function PluginCard({
           {plugin.connectionCheckSupported ? (
             <Button
               size="compact"
-              variant="ghost"
+              variant="secondary"
               aria-label={`${t('plugins.connectionCheck')} ${plugin.name}`}
               disabled={!connectionCheckAvailable}
               loading={connectionCheckPending}
@@ -186,7 +186,7 @@ export function PluginCard({
           {isDeepLink ? (
             isConnected ? (
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="compact"
                 danger
                 aria-label={`${t('plugins.disconnect')} ${plugin.name}`}

@@ -181,7 +181,7 @@ export function RootAgentPane({
     && !threadCommand.disabled
     ? (
       <div className="draft-resume-action">
-        <Button variant="ghost" onClick={() => composer.onCommand?.(threadCommand)}>
+        <Button variant="secondary" onClick={() => composer.onCommand?.(threadCommand)}>
           {t('ai.chat.continueConversation')}
         </Button>
       </div>
@@ -323,7 +323,7 @@ export function RootAgentPane({
               {t('shared.conflict.retry')}
             </Button>
           ) : null}
-          <Button variant="ghost" onClick={pane.abandonPendingAcceptance}>
+          <Button variant="secondary" onClick={pane.abandonPendingAcceptance}>
             {t('shared.cancel')}
           </Button>
         </div>
@@ -361,7 +361,7 @@ export function RootAgentPane({
             {t('shared.conflict.retry')}
           </Button>
           <Button
-            variant="ghost"
+            variant="secondary"
             disabled={pane.controller.pending}
             onClick={pane.abandonPendingMessage}
           >

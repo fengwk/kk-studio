@@ -35,7 +35,7 @@ export function NameDialog({ title, initialName = '', confirmLabel, onConfirm, o
           aria-label={t('controls.name')} invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />
         {error && <div id={errorId} className="field-error" role="alert">{error}</div>}
         <div className="ui-name-dialog-actions">
-          <Button variant="ghost" onClick={onCancel}>{t('shared.cancel')}</Button>
+          <Button variant="secondary" onClick={onCancel}>{t('shared.cancel')}</Button>
           <Button type="submit">{confirmLabel ?? t('shared.confirm')}</Button>
         </div>
       </form>

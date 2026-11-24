@@ -323,7 +323,7 @@ export function SchemaElementRenderer({
               <FieldLabel>{name}</FieldLabel>
               {objectItems ? (
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="compact"
                   disabled={disabled || subtreeHasDraftErrors}
                   aria-describedby={
@@ -385,7 +385,7 @@ export function SchemaElementRenderer({
                 <legend>{`${name}[${index}]`}</legend>
                 <div className="plugin-config-array-item-actions">
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="compact"
                     danger
                     disabled={disabled || removalBlocked}
@@ -420,7 +420,7 @@ export function SchemaElementRenderer({
               {t('plugins.configDialog.arrayAddItem', { name })}
             </Button>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               disabled={disabled || subtreeHasDraftErrors}
               aria-describedby={

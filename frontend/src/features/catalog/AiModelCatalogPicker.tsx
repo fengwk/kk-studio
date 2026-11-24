@@ -118,7 +118,7 @@ export function ModelCatalogPicker({
           models.dev
         </span>
         <Button
-          variant="ghost"
+          variant="secondary"
           size="compact"
           loading={loading}
           aria-label={t('ai.catalog.catalog.refresh')}
@@ -132,7 +132,7 @@ export function ModelCatalogPicker({
       {error ? (
         <div className="inline-hint danger" role="alert">
           {error}{' '}
-          <Button variant="inline" onClick={() => void load(currentQuery.current, null, false)}>
+          <Button variant="secondary" onClick={() => void load(currentQuery.current, null, false)}>
             {t('ai.catalog.catalog.retry')}
           </Button>
         </div>
@@ -156,7 +156,7 @@ export function ModelCatalogPicker({
                   </span>
                 </button>
                 <Button
-                  variant="inline"
+                  variant="secondary"
                   onClick={(event) => {
                     event.stopPropagation()
                     onApply(candidate)
@@ -177,7 +177,7 @@ export function ModelCatalogPicker({
 
       {nextCursor ? (
         <Button
-          variant="ghost"
+          variant="secondary"
           disabled={loading}
           onClick={() => void load(currentQuery.current, nextCursor, true)}
         >

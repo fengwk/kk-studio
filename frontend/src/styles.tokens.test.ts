@@ -42,6 +42,8 @@ describe('style gate rules', () => {
     const root = mkdtempSync(join(tmpdir(), 'css-gate-'))
     dirs.push(root)
     mkdirSync(join(root, 'src'))
+    mkdirSync(join(root, 'scripts'))
+    writeFileSync(join(root, 'scripts/check-css-baseline.json'), '{}\n')
     writeFileSync(join(root, 'src/styles.css'), TOKENS)
     writeFileSync(join(root, 'src/feature.css'), feature)
     return root
