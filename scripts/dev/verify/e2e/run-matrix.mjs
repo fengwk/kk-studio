@@ -39,7 +39,6 @@ import { createDurationTimer } from './lib/time.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
 import { cases as seedCases } from './cases/seed-and-harness.mjs'
 import { cases as crudCases } from './cases/crud.mjs'
-import { cases as projectCases } from './cases/project.mjs'
 import { cases as i18nCases } from './cases/i18n.mjs'
 import { cases as configMatrixCases } from './cases/config-matrix.mjs'
 import { cases as systemSettingsCases } from './cases/system-settings.mjs'
@@ -62,7 +61,7 @@ const __dirname = path.dirname(__filename)
 
 // 卡片用例先于配置同步注册，保证配置同步引用的卡片 fixture/断言先就绪。
 export const ALL_CASES = [
-  ...seedCases, ...crudCases, ...projectCases, ...i18nCases, ...configMatrixCases,
+  ...seedCases, ...crudCases, ...i18nCases, ...configMatrixCases,
   ...systemSettingsCases, ...environmentCardCases, ...configSyncCases, ...runtimeIdeCases,
   ...appEventsCases, ...modelAttemptCases, ...canvasStorageCases, ...canvasFunctionCases,
   ...chatAttachmentCases, ...canvasApiCases, ...interactionCases, ...queuedBatchCases,

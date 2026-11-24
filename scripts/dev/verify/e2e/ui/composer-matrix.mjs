@@ -23,7 +23,6 @@ import {
   getThreadSnapshot,
   createNewThread,
   createNewSession,
-  setAgentCommand,
   setExecutionCommand,
   stopThreadForCleanup,
   threadTarget,
@@ -1249,24 +1248,23 @@ async function createDurableHistoryFixture(
       agentName: target.agent.name,
       yoloEnabled: false,
     })
-    // 主 Thread：NEW_SESSION 用不存在的 Agent 确定性创建（第一条消息随创建批入队），
+    // 主 Thread：NEW_SESSION 创建有效 Agent 的 Thread（第一条消息随创建批入队），
     // 后续 messages 每条一个 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
     await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
-      rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
+      rootSettings: branchSettingsOf(target.agent, target.model),
       yoloEnabled: false,
       commands: [userMessageCommand(messages[0], cid())],
     })
     state.threadId = String(threadId)
     state.sessionId = String(sessionId)
     for (const message of messages.slice(1)) {
-      // 每条 THREAD batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
+      // 每条 THREAD batch 前等待上一 turn 收敛，
       // 再读最新 snapshot；仅 EXIT_UNCONFIRMED 冲突短暂等待后重试（最多 5 次兜底）。
       let accepted
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -1275,7 +1273,6 @@ async function createDurableHistoryFixture(
           timeoutMs: 30_000,
           intervalMs: 50,
         }).catch(() => {})
-        const current = await getThreadSnapshot(apiCtx, state.threadId)
         try {
           accepted = await acceptCommandBatch(apiCtx, {
             owner,
@@ -1336,12 +1333,11 @@ async function createBranchedHistoryFixture(
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
     await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
-      rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
+      rootSettings: branchSettingsOf(target.agent, target.model),
       yoloEnabled: false,
       commands: [userMessageCommand(trunkMessage, cid())],
     })
@@ -1367,7 +1363,6 @@ async function createBranchedHistoryFixture(
           timeoutMs: 30_000,
           intervalMs: 50,
         }).catch(() => {})
-        const current = await getThreadSnapshot(apiCtx, state.threadId)
         try {
           accepted = await acceptCommandBatch(apiCtx, {
             owner,
@@ -1507,15 +1502,15 @@ async function createHoldingQueueFixture(
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    // 先以不存在的 Agent 确定性创建空闲 Thread，再在 mock 上通过 THREAD batch 启动真实 hold turn。
+    // 先绑定 hold Agent 和不可用的模型，后续通过 THREAD batch 启动 hold turn。
     await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
       rootSettings: branchSettingsOf(
-        { name: `e2e-ui-hold-missing-${suffix}` },
+        state.agent,
         {
-          modelName: state.model.name,
+          modelName: `${state.model.name}-missing`,
           variant: 'default',
         },
       ),
@@ -1536,7 +1531,6 @@ async function createHoldingQueueFixture(
         expectedNextCommandSequence: idle.nextCommandSequence,
       }),
       commands: [
-        setAgentCommand(state.agent.name, cid()),
         setExecutionCommand(
           state.agent.execution.settings,
           cid(),

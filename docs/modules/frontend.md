@@ -28,9 +28,9 @@ PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸�
 一级特性按用户心智划分：[`chat`](../../frontend/src/features/chat)（Chat 工作区、Thread 运行时与编辑区）、
 [`catalog`](../../frontend/src/features/catalog)（Agent、模型、Provider、Skill Package 与 MCP Server）、
 [`environment`](../../frontend/src/features/environment)（执行环境与 IDE）、
-[`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas、projects 与 settings。
+[`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas 与 settings。
 四个内置扩展提供页面：应用层的 [`ai-console`](../../frontend/src/app/ai-console) 把 chat、catalog、environment
-的页面组装进同一个 AI 导航分组，Projects、Canvas、Settings 各自声明扩展。
+的页面组装进同一个 AI 导航分组，Canvas、Settings 各自声明扩展。
 i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 按业务领域维护固定前缀。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
 把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
@@ -72,7 +72,6 @@ HTTP 的命令、上传与资源等联合类型消费生成契约，在使用点
 浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Session-file/Storage/Interaction 平台客户端。
-[Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
 [Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 由 Canvas feature 持有。
 公开 HTTP 路由事实源是生成的 `ApiRoutes`，JSON 字段规则见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)。
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
@@ -88,7 +87,7 @@ Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 接受连接却不发 `connected`（或立即关闭）的服务端会继续退避，不会以最小间隔无限重试。
 浏览器 online 或页面重新可见时立即重连，并同时重置退避序列（用户侧恢复信号）。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
-projects/interactions/environments 发 `changed` 提示，不携带 cursor。Thread 首载通过
+interactions/environments 发 `changed` 提示，不携带 cursor。Thread 首载通过
 `GET /api/harness/threads/{threadId}` 取得完整权威快照，以其 `headEntryId` 作为 WS 订阅的
 `afterEntryId`。`subscribed.cursor` 固定为 `"0"`；后续 WS `snapshot` 从 Entry 游标接续完整历史，
 同 version 的 checkpoint 仍参与对账。Canvas 则只在 revision 提示严格大于本地值时读取。
@@ -229,7 +228,7 @@ queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明�
 会作废迟到意图，后台 Snapshot 更新不会再次抢焦点。
 已计划但尚未执行的 Composer 聚焦也在 pane 失去 workspace 焦点时取消。
 pane 与布局的存储键分别以 owner 身份和 pane 隔离，
-ISSUE_AGENT 与独立地址不落 Chat target 存储。
+独立地址不落 Chat target 存储。
 本地快照只保存布局与各 pane 的视图绑定；与当前槽位或格式不兼容的旧快照整份丢弃并回到默认状态，
 不迁移其中的布局与目标。服务端已保存的对话不随之丢失：Chat 有既有对话时，空白 pane 可点击“继续已有对话”，
 打开和 `/thread` 相同的 Session/Thread 选择面板。面板以名称和本地时间为主；消息预览去掉常见 Markdown 标记，
@@ -242,8 +241,8 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
 显式选 Agent 同步其 execution 并保留环境、YOLO、输入与附件；Builtin 的模型和默认变体由目录解析，
 其他 Driver 的 settings 原样保留；
-已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
-配置差异按 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT
+已有执行根 Thread可调整 Agent，子任务 Thread 只读。
+配置差异按 SET_EXECUTION → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。
 执行根仍有正在运行的子代理时，环境菜单显示“切换对正在运行的子 Agent 同样生效”；
 提示只说明生效范围，不改变切换与提交路径。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
@@ -567,31 +566,6 @@ Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 
 
 闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；SVG 裁到图形范围并与正文左对齐。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
 
-### Resource URI 预览
-
-[`MarkdownRenderer`](../../frontend/src/shared/ui/markdown/MarkdownRenderer.tsx) 拦截 Markdown 与工具输出中的 `resource://` 链接，阻止浏览器将 URI 当作导航地址。文件资源通过当前 Session 的 `/api/harness/sessions/{sessionId}/resources/{resourceId}` 接口读取；图片以鉴权请求生成的本地 Blob URL 内联预览，其他文件提供预览或下载入口。复制 Markdown 与文本时保留原始 Resource URI。没有当前 Session 时不请求资源接口，显示不可用状态。
-
-Projects 使用权威 ProjectSnapshot/IssueDetail。看板按工作流阶段分列并显示阶段名称，卡片不重复当前阶段；
-卡片的次级动作写明目标阶段，页头的新建 Issue 是唯一主动作。窄屏可横向滚动列。
-Issue 证据读取失败时可就地重试，只有读取成功才显示计数和空态。
-写入通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
-Issue Agent Pane 复用 Harness 时间线；暂停原因只有 USER/ERROR，结果未知的停止以 ERROR 暂停与阶段状态分别展示。
-Issue 详情在暂停时提供“继续”：USER 暂停直接提交，ERROR 暂停先展示暂停详情并提醒核查外部副作用；
-确认期间 Issue 更新时须重新检查。继续成功后刷新 Issue；写操作通过侧车保留请求身份，
-结果未知时锁定写入，支持用原版本和 requestKey 重试或显式放弃。
-ProjectsInvalidationBridge 经 extension overlay 失效 Query，重连全量对账。
-Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
-Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；基础信息、YOLO 与工作流
-三个子表单共用单一提交互斥与按子表单隔离的结果提示。版本基线仅在成功写入或显式 reload 后推进，
-409 保留草稿与原版本。看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。
-工作流阶段编辑器是独立组件，包含阶段列表与选中阶段的属性表单，支持重排、转移边及人工/Agent 执行；
-缺失 Agent 或非法额度不能保存。Projects 的删除确认复用共享 ConfirmActionModal，
-复杂弹窗统一使用 Dialog 的 modal-body/modal-footer，并在窄屏通过 modal-touch-target
-提供 44px 触区与安全区留白；Issue 详情的规格编辑与证据上传分别由独立 pane 与 hook 承担。
-快照的 `referencedStateCodes` 汇总所有 Issue 的阶段与阻塞恢复点，
-因此可见列表为空也不能删除或改码这些阶段。项目级推送同时失效该项目下的 Issue 与 Evidence，
-订阅与重连共用既有 WebSocket。
-
 Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动，
 未编辑或改回编辑基线时，表单跟随最近读取的服务端设置。编辑后，完整聚合与首次编辑时所见版本一起提交（`expectedVersion`），
 后台回读不覆盖草稿，也不推进它的提交版本；重置则丢弃草稿并显示最近读取的值。权限与 apply timing 按封闭类型渲染。
@@ -699,7 +673,7 @@ Tabs 统一处理图标与文字间距；页签栏放不下时横向滚动，切
 
 ### 文案与维护
 
-用户操作围绕对话、Thread、会话、项目、Issue、画布、Agent 和环境，不暴露独立 branch 实体或内部绑定路径。主导航在桌面和移动端都只显示当前语言的标签。名称、配置标识和用户正文原样保留；系统文案和数量通过 i18n 生成，中英文的语义、单位和占位符一致，英文按需要区分单复数。不以裸 UUID 代替可读名称。大写小标题样式（`text-transform: uppercase`）只作用于拉丁语文案，中文下按 `:lang(zh)` 保留原拼写，大小写敏感的产品术语（如 Thread）不随语言变换。
+用户操作围绕对话、Thread、会话、画布、Agent 和环境，不暴露独立 branch 实体或内部绑定路径。主导航在桌面和移动端都只显示当前语言的标签。名称、配置标识和用户正文原样保留；系统文案和数量通过 i18n 生成，中英文的语义、单位和占位符一致，英文按需要区分单复数。不以裸 UUID 代替可读名称。大写小标题样式（`text-transform: uppercase`）只作用于拉丁语文案，中文下按 `:lang(zh)` 保留原拼写，大小写敏感的产品术语（如 Thread）不随语言变换。
 按钮、标题和菜单只描述操作，不用括号重复英文名称或补充解释；会影响判断的说明使用统一的 `?` 帮助提示（键盘可展开、读屏可获取），链接标签与 aria 名称同样不写括号旁白。单位、范围、计数、快捷键和真实数据对（如 `名称 (状态)`、模型与变体）保留括号，其余解释性括号改为自然语句或帮助提示。
 新建入口使用“新建对象 / New Object”，提交使用“创建 / Create”或“创建并进入 / Create and open”。其他按钮也描述操作结果，例如“保存工作流”“返回项目”；错误说明当前阻塞与可采取的动作。诊断严格区分冻结调用输入与历史重建，不把重建内容称为实际 HTTP 原文。
 
@@ -735,4 +709,4 @@ Vitest/jsdom 测试与实现就近组织，Canvas 集成用例在 feature 的测
 构建、lint、coverage 和 E2E 的命令与分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、
-[Canvas](canvas.md)、[Project](project.md)。
+[Canvas](canvas.md)。

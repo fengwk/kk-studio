@@ -20,7 +20,6 @@ import {
   listEnvironments,
   createNewThread,
   createNewSession,
-  setAgentCommand,
   setExecutionCommand,
   snapshotEntries,
   stopThread,
@@ -1119,7 +1118,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/harness/threads/{threadId}/command-batches 提交 SET_AGENT/SET_EXECUTION + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；用例等待异步退出确认及两次稳定 IDLE 快照，以 IDLE + STOPPED 建立退出基线（确认可独立推进 version，不改变 barrier head）；再以同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、相对退出基线 head/version 不变；API 本身允许收敛前重放，但新 USER 续写须等收敛；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于收敛基线后并仅产生一个新 assistant MESSAGE',
+  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 使用正确 Agent 与不可用执行配置确定性创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/harness/threads/{threadId}/command-batches 提交 SET_EXECUTION + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；用例等待异步退出确认及两次稳定 IDLE 快照，以 IDLE + STOPPED 建立退出基线（确认可独立推进 version，不改变 barrier head）；再以同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、相对退出基线 head/version 不变；API 本身允许收敛前重放，但新 USER 续写须等收敛；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于收敛基线后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
 
@@ -1157,10 +1156,10 @@ registerCase({
         sessionId,
         threadId: tid,
         rootSettings: branchSettingsOf(
-          { name: `e2e-stop-partial-missing-${suffix}` },
+          { name: tempAgent.name },
           {
-            modelName: minimaxModel.modelName,
-            variant: minimaxModel.variant,
+            modelName: `e2e-stop-unavailable-${suffix}`,
+            variant: 'default',
           },
         ),
         yoloEnabled: false,
@@ -1181,11 +1180,7 @@ registerCase({
                 expectedNextCommandSequence: idle.nextCommandSequence,
               }),
               commands: [
-                setAgentCommand(tempAgent.name, cid()),
-                setExecutionCommand(
-                  tempAgent.execution.settings,
-                  cid(),
-                ),
+                setExecutionCommand(tempAgent.execution.settings, cid()),
                 userMessageCommand(initialPrompt, cid()),
               ],
             }),

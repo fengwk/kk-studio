@@ -71,10 +71,10 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 ## Thread
 
-[`ThreadState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadState.java) 只保存 Thread 自己拥有的事实：创建后不可变的身份（Session、父 Thread、执行根 `rootThreadId`、[`ThreadKind`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadKind.java)、创建请求哈希、创建时间），可变的 head、名称、执行控制、输入水位、命令序号与 `version`。`kind` 在创建时确定并持久化为非空封闭枚举：`USER` 表示用户创建的普通 Thread，`SUBAGENT` 表示模型委派的子代理，`COMPACTION` 表示压缩子 Thread，`CONTROLLER_TASK` 表示控制器任务，`PLUGIN_TASK` 表示插件任务；它不从父关系、执行名或当前状态推断，也不会在生命周期中变化。
+[`ThreadState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadState.java) 只保存 Thread 自己拥有的事实：创建后不可变的身份（Session、父 Thread、执行根 `rootThreadId`、[`ThreadKind`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadKind.java)、创建请求哈希、创建时间），可变的 head、名称、执行控制、输入水位、命令序号与 `version`。`kind` 在创建时确定并持久化为非空封闭枚举：`USER` 表示用户创建的普通 Thread，`SUBAGENT` 表示模型委派的子代理，`COMPACTION` 表示压缩子 Thread，`PLUGIN_TASK` 表示插件任务；它不从父关系、执行名或当前状态推断，也不会在生命周期中变化。
 
 - `version` 是结构与控制状态的 CAS 游标，不是快照内容版本：任何非精确重放的变更让它严格 +1，精确重放原样接受；Model 的流式 checkpoint 在同一 version 内推进。名称与 YOLO 由控制面直接更新，同值 no-op，不产生 Command、Entry 或 Work。
-- `rootThreadId` 是执行根：根指向自身，子代理继承父 Thread 的执行根。`yolo_enabled` 开关只属于执行根，子代理恒为 false，其有效值取自执行根。根开关只修改根行，不递归修改子行或子行版本；Chat/Project 开关仅初始化新根。权限判定读取执行根的开关。YOLO 影响尚未完成权限决定的调用，不自动批准 `WAITING_APPROVAL`，不回答问卷，也不回滚已派发工具。
+- `rootThreadId` 是执行根：根指向自身，子代理继承父 Thread 的执行根。`yolo_enabled` 开关只属于执行根，子代理恒为 false，其有效值取自执行根。根开关只修改根行，不递归修改子行或子行版本；Chat 开关仅初始化新根。权限判定读取执行根的开关。YOLO 影响尚未完成权限决定的调用，不自动批准 `WAITING_APPROVAL`，不回答问卷，也不回滚已派发工具。
 - 人工接口只能控制执行根：自由输入、设置、YOLO、Stop、压缩、重命名与分支创建均校验目标为执行根；审批与回答是写回子调用的合法例外。待办事实只有 ToolInvocation 的 `WAITING_APPROVAL` 与 `WAITING_INPUT`，不复制待办表。归属解析按来源 Thread 的执行根定位，再读取根的产品绑定；响应保留原始调用身份，另提供 `rootThreadId`。人工交互沿执行父关系汇聚到根；子任务结果由原始 `ThreadJoin` 的订阅方持有，结果通知与执行唤醒仍交给直接派发子任务的父 Agent。树级 Stop 与 YOLO 不改变 Join 的订阅方、预算和回执身份。
 - [`ThreadExecutionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionControl.java) 只有 `RUNNABLE` / `STOPPED`：Stop 把目标与全部后代置为 `STOPPED`，跨重启保留；显式的新用户输入或新任务只恢复目标本身。`inputThroughSequence` 由 `INPUT` 回合推进；Stop 物化已排队通知时也同步覆盖这些通知的序号，保证状态投影与 Join 判据对“已消费通知”一致。
 
@@ -91,7 +91,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `NEW_FORKED_SESSION`：把执行根在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从切点处的生效快照推导，不复制 Join、命令或调用。
 - `THREAD`：续写既有 Thread。精确的有序重放先于一切游标与 preflight 准入；单条纯 `USER_MESSAGE` 不带游标、按锁内邮箱尾部入队，其它批次必须携带 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 并精确匹配（不匹配为 `STALE_COMMAND_CURSOR`）。
 
-命令类型包括人工输入 `USER_MESSAGE`、可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`）与系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
+命令类型包括人工输入 `USER_MESSAGE`、可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`）与系统通知 `NOTIFICATION`。配置命令 `SET_EXECUTION -> SET_ENVIRONMENT` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
 
 - 创建型 target 与统一 `spawn` 批次必须以恰好一条 user-like 任务输入结尾。
 - 既有 Thread 接受纯设置批次：在回合间的安全边界上立即归约为一条 `SETTINGS` Entry，不打开回合、不调度模型、不恢复 `STOPPED`。
@@ -99,7 +99,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 命令状态由标记字段派生：无标记为 `QUEUED`，有 `appliedEntryId` 为 `APPLIED`，成对的 `stopRequestId` / `cancelledAt` 为 `CANCELLED`。Session 显示名在创建时从首批末尾 user-like 消息派生（前 40 个码点，无文本时回退 `session-` 加 UUID 前缀），ROOT Thread 固定为 `main`，分支名由调用方给出；手工名称经 [`Names.normalize`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/Names.java) 折叠空白，超过 256 个码点报错，绝不截断。
 
-`getThreadSnapshot` 支持可选的 `afterEntryId` 增量游标（祖先匹配时返回轻量增量 `EntrySlice`，不匹配时回退全量快照），只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。对活动 `task` 工具调用，快照在同一事务按工具 invocation ID 查 durable Join，并将其 `childThreadId` 投影到对应工具 DTO；Join 尚未提交或不存在时该字段为显式 null，不按参数猜测或按工具类型串接。子 Thread 已可导航不代表任务已有结果；结果物化后仍由既有 Join receipt 与工具结果回执完成结算和定位。Session 普通 Thread 列表仍只包含 `USER`；`getThreadTree` 持执行根的 tree 锁读取同根全部 Thread，返回轻量只读节点 [`ThreadTreeNode`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ThreadTreeNode.java)，节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，不构建完整快照，查询不写任何事实。HTTP 执行树查询一次返回执行根及全部 `SUBAGENT` 后代，并排除内部 `COMPACTION` 节点；执行根可以是 `USER`、`CONTROLLER_TASK` 或 `PLUGIN_TASK`。
+`getThreadSnapshot` 支持可选的 `afterEntryId` 增量游标（祖先匹配时返回轻量增量 `EntrySlice`，不匹配时回退全量快照），只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。对活动 `task` 工具调用，快照在同一事务按工具 invocation ID 查 durable Join，并将其 `childThreadId` 投影到对应工具 DTO；Join 尚未提交或不存在时该字段为显式 null，不按参数猜测或按工具类型串接。子 Thread 已可导航不代表任务已有结果；结果物化后仍由既有 Join receipt 与工具结果回执完成结算和定位。Session 普通 Thread 列表仍只包含 `USER`；`getThreadTree` 持执行根的 tree 锁读取同根全部 Thread，返回轻量只读节点 [`ThreadTreeNode`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ThreadTreeNode.java)，节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，不构建完整快照，查询不写任何事实。HTTP 执行树查询一次返回执行根及全部 `SUBAGENT` 后代，并排除内部 `COMPACTION` 节点；执行根可以是 `USER` 或 `PLUGIN_TASK`。
 
 ## ToolInvocation
 
@@ -341,7 +341,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 同一命名空间还放专用契约子包：[`spi.store`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/) 是领域模型与物理持久化的唯一边界，[`spi.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/) 是 Agent Driver 契约，见 [Agent Driver](#agent-driver)；它投影出的 generation 公开快照在 [`api.generation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/generation/)。两者共同引用的 Work 邮箱值契约在 [`spi.work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/)，不反向依赖 `runtime.*`。压缩配置与重试策略这些部署配置同样是反向依赖：压缩配置经 [`spi.compaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/) 在每个决策点现读，重试策略直接使用 JDK `Supplier` / `Function`，都不缓存快照；Tool 权限策略与工具设置不是内核端口，由平台在 Tool 网关边界实现，见 [Platform](platform.md#model-与-tool-执行)。
 
-三种准入结论各对应唯一的 durable 后续：`Busy` 确定未开始，安全重排；`Rejected` 是确定性失败；`Admitted` 先落 RUNNING 再执行，此后请求或副作用都可能已发生，Model 记一次失败 attempt、Tool 收敛为 `UNKNOWN`，严禁盲目重放。内核不反查 owner、Issue 或阶段等产品门禁，需要终止在途执行时由业务显式调用 Stop。
+三种准入结论各对应唯一的 durable 后续：`Busy` 确定未开始，安全重排；`Rejected` 是确定性失败；`Admitted` 先落 RUNNING 再执行，此后请求或副作用都可能已发生，Model 记一次失败 attempt、Tool 收敛为 `UNKNOWN`，严禁盲目重放。内核不反查产品归属或业务阶段等产品门禁，需要终止在途执行时由业务显式调用 Stop。
 
 并发槽位 `ConcurrencyAdmission` 属于平台实现，由 Model 与 Tool 网关各自持有，内核只声明端口；[`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java) 只计算是否允许下一次重试及其延迟（`FIXED` / `EXPONENTIAL`），不读时钟、不写状态，[`InvocationRetryDecision`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryDecision.java) 才把策略、错误可重试性与已消耗 attempt 合成唯一决策。策略对象全部构造注入：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java) 与共用的 [`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ProcessorLeaseConfig.java)（heartbeat 间隔必须严格小于租约时长），重试与压缩配置在每个决策点现读。Builtin 的 `ModelProcessorConfig` 与模型重试策略在 [Harness Agent Builtin](harness-agent-builtin.md) 维护。
 
@@ -407,9 +407,9 @@ environmentSupport       NONE / ROUTED / REQUIRED
 
 ## Prompt 模板
 
-[`PromptRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptRenderer.java) 从 classpath 读取 UTF-8 Markdown，以 JMustache 编译并缓存模板；变量或条件缺失时失败。双花括号默认执行 XML 转义，三花括号显式插入原文，插入的值不会再次执行。工具 JSON schema 作为资源原样读取，不作为模板执行。Harness 的模板按 system、tools、messages、compaction 分目录；Platform 和 Project 的消息资源由各模块持有。Agent 用户正文不作为模板执行。
+[`PromptRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptRenderer.java) 从 classpath 读取 UTF-8 Markdown，以 JMustache 编译并缓存模板；变量或条件缺失时失败。双花括号默认执行 XML 转义，三花括号显式插入原文，插入的值不会再次执行。工具 JSON schema 作为资源原样读取，不作为模板执行。Harness 的模板按 system、tools、messages、compaction 分目录；Platform 的消息资源由各模块持有。Agent 用户正文不作为模板执行。
 
-System prompt 的具名段落按名称自然排序：`[agent]` → `[environment]` → `[harness]` → `[paths]` → `[skills]` → `[subagents]`，段间空一行。段落以名称和正文判断变化，JSON 对象的键顺序不属于上下文语义；内存规划、持久化读回与请求重建使用同一渲染顺序。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的绝对路径、平台资源和宿主字段说明按本轮实际注入的工具生成；未选 Environment 时仍说明 `REQUIRED` 操作不会执行，且 `read` 仍可读取 `resource://` URI。`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，Issue 等任务内容只进入任务消息。
+System prompt 的具名段落按名称自然排序：`[agent]` → `[environment]` → `[harness]` → `[paths]` → `[skills]` → `[subagents]`，段间空一行。段落以名称和正文判断变化，JSON 对象的键顺序不属于上下文语义；内存规划、持久化读回与请求重建使用同一渲染顺序。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的绝对路径、平台资源和宿主字段说明按本轮实际注入的工具生成；未选 Environment 时仍说明 `REQUIRED` 操作不会执行，且 `read` 仍可读取 `resource://` URI。`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，任务内容只进入任务消息。
 
 
 `[skills]` 按 Agent 配置顺序列出技能名称与描述，不包含文件路径、交付方式、摘要或 Environment 安装状态。

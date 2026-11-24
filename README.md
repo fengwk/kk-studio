@@ -25,7 +25,6 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
 | MCP | 注册 Streamable HTTP MCP Server，发现其工具并作为 Agent 可选工具执行 |
 | Canvas | 用节点组织文本与媒体，通过资源引用和显式 Function 运行完成裁剪、生成或 ComfyUI 处理 |
-| Project / Issue | 配置工作阶段、Agent 分工与执行额度，在稳定 Thread 中完成工作并跟踪交付证据 |
 
 当前内置模型协议包括 OpenAI Chat Completions、OpenAI Responses、Anthropic
 Messages 和 Google Gemini。
@@ -169,7 +168,7 @@ node scripts/dev/verify/repository/check-sensitive-data.mjs
 | [部署与运行](docs/operations/deployment.md) | Fat JAR、镜像、部署拓扑和运行配置 |
 | [开发与测试](docs/operations/development-and-testing.md) | 开发环境和全部质量入口 |
 | [系统设计](docs/system-design.md) | 系统职责、依赖、配置与执行恢复链 |
-| [Canvas](docs/modules/canvas.md) 与 [Project](docs/modules/project.md) | 资源编辑、Function 运行、Issue 分工、交接和交付证据 |
+| [Canvas](docs/modules/canvas.md) | 资源编辑与 Function 运行 |
 | [文档导航](docs/README.md) | 所有模块与 Operations 文档 |
 
 ## 安全与许可证

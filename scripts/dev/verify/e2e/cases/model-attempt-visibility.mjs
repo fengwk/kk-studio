@@ -8,7 +8,6 @@ import {
   createChat,
   getThreadSnapshot,
   createNewSession,
-  setAgentCommand,
   setExecutionCommand,
   stopThread,
   threadTarget,
@@ -108,8 +107,8 @@ registerCase({
         agentName: agent.name,
         yoloEnabled: false,
       })
-      // 先用不存在的 Agent 确定性创建空闲 Thread（不触发 Provider），随后在已订阅事件通道后
-      // 通过 THREAD batch 一次性 SET_AGENT/SET_EXECUTION + USER_MESSAGE 启动 mock turn。
+      // 使用正确 Agent 与不可用模型创建空闲 Thread（不触发 mock Provider），随后在已订阅事件通道后
+      // 通过 THREAD batch 更新执行配置并发送 USER_MESSAGE 启动 mock turn。
       const sessionId = cid()
       const createdThreadId = cid()
       await createNewSession(ctx, {
@@ -117,8 +116,8 @@ registerCase({
         sessionId,
         threadId: createdThreadId,
         rootSettings: branchSettingsOf(
-          { name: `e2e-attempt-missing-${suffix}` },
-          agent.execution.settings,
+          { name: agent.name },
+          { modelName: `e2e-unavailable-${suffix}`, variant: 'default' },
         ),
         yoloEnabled: false,
         commands: [userMessageCommand(`materialize ${suffix}`, cid())],
@@ -147,11 +146,7 @@ registerCase({
                 expectedNextCommandSequence: idleThread.nextCommandSequence,
               }),
               commands: [
-                setAgentCommand(agent.name, cid()),
-                setExecutionCommand(
-                  agent.execution.settings,
-                  cid(),
-                ),
+                setExecutionCommand(agent.execution.settings, cid()),
                 userMessageCommand(initialMarker, cid()),
               ],
             })
@@ -160,7 +155,7 @@ registerCase({
         )
       assert(
         Array.isArray(startResult?.acceptedCommands)
-          && startResult.acceptedCommands.length === 3
+          && startResult.acceptedCommands.length === 2
           && startResult.acceptedCommands.at(-1).type === 'USER_MESSAGE',
         `initial message batch: ${JSON.stringify(startResult)}`,
       )
@@ -475,8 +470,7 @@ function assertFirstTurnDurable(
   assert(snapshot.queuedCommands.length === 0, JSON.stringify(snapshot.queuedCommands))
 
   const entries = snapshot.entries
-  // bootstrap turn（missing Agent PLANNING_FAILED）产生持久 ASSISTANT_ERROR + TURN_END(FAILED)，
-  // 属预期；本断言只覆盖 initialMarker 之后的 mock retry turn。
+  // bootstrap turn 使用不可用执行配置失败；本断言只覆盖 initialMarker 之后的 mock retry turn。
   const userIndex = findUserEntryIndex(entries, initialMarker)
   assert(userIndex >= 0, JSON.stringify(entries))
   const turnEntries = entries.slice(userIndex)
