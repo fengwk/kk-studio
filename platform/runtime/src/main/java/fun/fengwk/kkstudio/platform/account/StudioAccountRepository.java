@@ -14,6 +14,11 @@ import java.util.UUID;
 
 @Repository
 class StudioAccountRepository {
+  private static final String USER_COLUMNS =
+      """
+      id, username, password_hash, role, disabled_at is null as enabled, created_at
+      """;
+
   private final JdbcClient jdbc;
   private final JsonMapper mapper;
 
@@ -24,7 +29,12 @@ class StudioAccountRepository {
 
   JsonNode profile(UUID id) {
     return mapper.readTree(
-        jdbc.sql("select profile::text from studio_user where id = :id")
+        jdbc.sql(
+                """
+        select profile::text
+        from studio_user
+        where id = :id
+        """)
             .param("id", id)
             .query(String.class)
             .single());
@@ -40,7 +50,12 @@ class StudioAccountRepository {
 
   Optional<User> byUsername(String username) {
     return jdbc.sql(
-            "select id, username, password_hash, role, disabled_at is null enabled, created_at from studio_user where username = :username")
+            """
+        select %s
+        from studio_user
+        where username = :username
+        """
+                .formatted(USER_COLUMNS))
         .param("username", username)
         .query(this::map)
         .optional();
@@ -48,7 +63,13 @@ class StudioAccountRepository {
 
   Optional<User> lockById(UUID id) {
     return jdbc.sql(
-            "select id, username, password_hash, role, disabled_at is null enabled, created_at from studio_user where id = :id for update")
+            """
+        select %s
+        from studio_user
+        where id = :id
+        for update
+        """
+                .formatted(USER_COLUMNS))
         .param("id", id)
         .query(this::map)
         .optional();
@@ -56,7 +77,12 @@ class StudioAccountRepository {
 
   Optional<User> byId(UUID id) {
     return jdbc.sql(
-            "select id, username, password_hash, role, disabled_at is null enabled, created_at from studio_user where id = :id")
+            """
+        select %s
+        from studio_user
+        where id = :id
+        """
+                .formatted(USER_COLUMNS))
         .param("id", id)
         .query(this::map)
         .optional();
@@ -64,7 +90,12 @@ class StudioAccountRepository {
 
   List<User> list() {
     return jdbc.sql(
-            "select id, username, password_hash, role, disabled_at is null enabled, created_at from studio_user order by username")
+            """
+        select %s
+        from studio_user
+        order by username
+        """
+                .formatted(USER_COLUMNS))
         .query(this::map)
         .list();
   }
@@ -84,14 +115,22 @@ class StudioAccountRepository {
   }
 
   long countEnabledAdmins() {
-    return jdbc.sql("select count(*) from studio_user where role='ADMIN' and disabled_at is null")
+    return jdbc.sql(
+            """
+            select count(*)
+            from studio_user
+            where role = 'ADMIN' and disabled_at is null
+            """)
         .query(Long.class)
         .single();
   }
 
   void create(UUID id, String username, String hash, StudioRole role) {
     jdbc.sql(
-            "insert into studio_user(id, username, password_hash, role) values (:id,:username,:hash,:role)")
+            """
+            insert into studio_user (id, username, password_hash, role)
+            values (:id, :username, :hash, :role)
+            """)
         .param("id", id)
         .param("username", username)
         .param("hash", hash)
@@ -101,7 +140,15 @@ class StudioAccountRepository {
 
   void save(UUID id, String username, String hash, StudioRole role, Boolean enabled) {
     jdbc.sql(
-            "update studio_user set username=:username, password_hash=coalesce(:hash,password_hash), role=:role, disabled_at=case when :enabled then null else coalesce(disabled_at,current_timestamp) end, updated_at=current_timestamp where id=:id")
+            """
+            update studio_user
+            set username = :username,
+                password_hash = coalesce(:hash, password_hash),
+                role = :role,
+                disabled_at = case when :enabled then null else coalesce(disabled_at, current_timestamp) end,
+                updated_at = current_timestamp
+            where id = :id
+            """)
         .param("id", id)
         .param("username", username)
         .param("hash", hash)
@@ -112,7 +159,10 @@ class StudioAccountRepository {
 
   void session(byte[] tokenHash, UUID userId) {
     jdbc.sql(
-            "insert into login_session(token_hash,user_id,expires_at) values (:hash,:user,current_timestamp + interval '30 days')")
+            """
+            insert into login_session (token_hash, user_id, expires_at)
+            values (:hash, :user, current_timestamp + interval '30 days')
+            """)
         .param("hash", tokenHash)
         .param("user", userId)
         .update();
@@ -120,29 +170,44 @@ class StudioAccountRepository {
 
   Optional<User> sessionPrincipal(byte[] tokenHash) {
     return jdbc.sql(
-            "select u.id, u.username, u.password_hash, u.role, u.disabled_at is null enabled, u.created_at from login_session s join studio_user u on u.id=s.user_id where s.token_hash=:hash and s.expires_at > current_timestamp and u.disabled_at is null")
+            """
+            select %s
+            from studio_user
+            where disabled_at is null
+              and id = (select user_id from login_session
+                        where token_hash = :hash and expires_at > current_timestamp)
+            """
+                .formatted(USER_COLUMNS))
         .param("hash", tokenHash)
         .query(this::map)
         .optional();
   }
 
   void deleteSession(byte[] hash) {
-    jdbc.sql("delete from login_session where token_hash=:hash").param("hash", hash).update();
+    jdbc.sql("delete from login_session where token_hash = :hash").param("hash", hash).update();
   }
 
   void deleteSessionsExcept(UUID userId, byte[] tokenHash) {
-    jdbc.sql("delete from login_session where user_id=:user and token_hash<>:hash")
+    jdbc.sql(
+            """
+            delete from login_session
+            where user_id = :user and token_hash <> :hash
+            """)
         .param("user", userId)
         .param("hash", tokenHash)
         .update();
   }
 
   void deleteSessions(UUID userId) {
-    jdbc.sql("delete from login_session where user_id=:user").param("user", userId).update();
+    jdbc.sql("delete from login_session where user_id = :user").param("user", userId).update();
   }
 
   void deleteExpired(UUID userId) {
-    jdbc.sql("delete from login_session where user_id=:user and expires_at <= current_timestamp")
+    jdbc.sql(
+            """
+            delete from login_session
+            where user_id = :user and expires_at <= current_timestamp
+            """)
         .param("user", userId)
         .update();
   }
