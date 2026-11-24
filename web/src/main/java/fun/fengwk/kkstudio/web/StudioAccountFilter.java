@@ -58,6 +58,9 @@ public class StudioAccountFilter extends OncePerRequestFilter {
     }
     String path = normalized.toString();
     boolean api = under(path, "/api");
+    if (api) {
+      response.setHeader("Cache-Control", "no-store");
+    }
     boolean socket = path.equals("/ws/events");
     boolean read = "GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod());
     boolean login = "POST".equals(request.getMethod()) && path.equals("/api/auth/login");
@@ -90,7 +93,6 @@ public class StudioAccountFilter extends OncePerRequestFilter {
       }
       request.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, principal);
     }
-    response.setHeader("Cache-Control", "no-store");
     chain.doFilter(request, response);
   }
 
@@ -100,7 +102,6 @@ public class StudioAccountFilter extends OncePerRequestFilter {
 
   private void reject(
       HttpServletRequest request, HttpServletResponse response, DomainException error) {
-    response.setHeader("Cache-Control", "no-store");
     problems.resolveException(request, response, null, error);
   }
 }

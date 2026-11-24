@@ -744,7 +744,7 @@ OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与�
 
 [`ConfigSyncController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync/http/ConfigSyncController.java)
 挂在 `/api/platform/config-sync`：`GET` 返回清单，`POST /export`、`POST /check-import`、`POST /import` 承担选择导出、
-只读预检查与确认执行；响应由 `ConfigSyncNoStoreFilter` 统一设置 `no-store`。DTO 位于
+只读预检查与确认执行；`/api/**` 响应统一设置 `Cache-Control: no-store`。DTO 位于
 [`platform/configsync/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync/dto/)，
 跳过项的 `kind` 是配置集合枚举（未知顶层类别为 null，原始类别名保留在 `name`）。
 
