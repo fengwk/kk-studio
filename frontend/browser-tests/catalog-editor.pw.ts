@@ -28,8 +28,6 @@ async function visibleTouchTargets(dialog: Locator): Promise<TouchTarget[]> {
       'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])',
       'textarea',
       'label.ui-checkbox',
-      '.pricing-rule-details > summary',
-      '.pricing-factor-details > summary',
     ]
     return selectors.flatMap((selector) =>
       Array.from(card.querySelectorAll(selector))
@@ -106,17 +104,12 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   expectTouchTargets(await visibleTouchTargets(dialog))
   await expectNoHorizontalOverflow(page, body)
 
-  // 展开服务档规则：既有规则默认折叠，点摘要展开后统一倍率立即可见，单费用项覆盖倍率在嵌套 details 中。
+  // 现有规则及其覆盖倍率无需额外操作即可编辑。
   const tiers = dialog.locator('.pricing-plan-section').filter({ has: page.getByRole('heading', { name: '服务档', exact: true }) })
   const tierRule = tiers.locator('.pricing-rule-details').first()
-  await expect(tierRule).not.toHaveAttribute('open', '')
-  await tiers.locator('.pricing-rule-details > summary').first().click()
-  await expect(tierRule).toHaveAttribute('open', '')
   const tierFactor = tierRule.getByRole('textbox', { name: '所有费用项倍率', exact: true })
   await expect(tierFactor).toBeVisible()
   const factorOverrides = tierRule.locator('.pricing-factor-details')
-  await expect(factorOverrides).not.toHaveAttribute('open', '')
-  await factorOverrides.locator('summary').click()
   await expect(factorOverrides.locator('input[inputmode="decimal"]')).toHaveCount(5)
   await expect(factorOverrides.locator('input[inputmode="decimal"]').first()).toBeVisible()
 
@@ -127,7 +120,6 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   await tiers.getByRole('button', { name: '添加服务档', exact: true }).click()
   await expect(tiers.locator('.pricing-rule-details')).toHaveCount(2)
   const addedTierRule = tiers.locator('.pricing-rule-details').nth(1)
-  await expect(addedTierRule).toHaveAttribute('open', '')
   await expect(addedTierRule.getByRole('textbox', { name: '所有费用项倍率', exact: true })).toBeVisible()
 
   expectTouchTargets(await visibleTouchTargets(tiers))

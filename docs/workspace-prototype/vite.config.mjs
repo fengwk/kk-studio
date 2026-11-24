@@ -66,6 +66,7 @@ export function previewConfig() {
     resolve: {
       dedupe: Object.keys(dependencies),
       alias: {
+        '@/features/catalog/ai-model-pricing-preview': path.join(prototypeDir, 'catalog-editor-preview-plugin.mjs'),
         '@/features/settings/config-sync-service': path.join(prototypeDir, 'mock/local-config-sync.ts'),
         '@/features/environment/environment-runtime-query': path.join(prototypeDir, 'mock/local-environment-runtime.ts'),
         '@/features/thread/runtime/thread-panel/messages/MetaMessageBlock': path.join(prototypeDir, 'workspace/TurnFooter.tsx'),

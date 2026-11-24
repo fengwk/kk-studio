@@ -1,4 +1,6 @@
 import { Button } from '@/shared/ui/controls/Button'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { Plus, X } from 'lucide-react'
 import { useId } from 'react'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { FieldError } from '@/shared/ui/controls/FieldError'
@@ -63,11 +65,8 @@ export function PricingTtlInputs({ rows, onChange }: {
                   onChange={(event) => updateRow(row.draftKey, { rate: sanitizeDecimalInput(event.target.value) })} />
               </label>
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              aria-label={t('ai.catalog.form.removePricingRule')}
-              onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}>×</Button>
+            <IconButton label={t('ai.catalog.form.removePricingRule')} danger size="compact"
+              onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}><X size={14} aria-hidden="true" /></IconButton>
             {issue ? <FieldError id={errorId} role="alert">{t(ISSUE_KEYS[issue])}</FieldError> : null}
           </div>
         )
@@ -76,7 +75,7 @@ export function PricingTtlInputs({ rows, onChange }: {
         type="button"
         variant="secondary"
         onClick={() => onChange([...rows, { draftKey: createPricingDraftKey(), seconds: '', rate: '' }])}>
-        {t('ai.catalog.form.addPricingTtl')}
+        <Plus aria-hidden="true" />{t('ai.catalog.form.addPricingTtl')}
       </Button>
     </>
   )

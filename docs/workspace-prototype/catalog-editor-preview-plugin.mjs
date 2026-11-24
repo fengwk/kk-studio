@@ -1,8 +1,6 @@
-// Apply only to the original Catalog modules in this offline build. Each anchor
-// must match exactly once so upstream edits cannot silently re-enable online UI.
 // The offline demo consumes the already-normalized draft, not an HTTP mock.
 // Match the runtime's rule order and use decimal strings (no float rounding).
-async function offlinePricingPreview({ pricing, inputTokens, requestedAt, serviceTier }, signal) {
+export async function previewModelPricing({ pricing, inputTokens, requestedAt, serviceTier }, signal) {
   signal.throwIfAborted()
   const empty = { rates: null, activeFrom: null, matchedRules: [] }
   if (!pricing || (pricing.changes.length && requestedAt === undefined)) return empty
@@ -172,37 +170,6 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
           replace('value={variant.reasoningEffort}', "id={'x-effort-' + variant.draftId} value={variant.reasoningEffort}")
           replace("                  <span className=\"inline-hint\">{t('ai.catalog.form.protocolOptionsHint')}</span>\n")
           break
-        case 'ModelPricingPlanEditor.tsx':
-          replace("import { previewModelPricing } from '@/features/catalog/ai-model-pricing-preview'\n")
-          replace("import { TextInput } from '@/shared/ui/controls/TextInput'\n", "import { TextInput } from '@/shared/ui/controls/TextInput'\nimport { HelpHint } from '@/shared/ui/controls/HelpHint'\nimport { Plus } from 'lucide-react'\n")
-          replace("import './ai-pricing.css'", `import './ai-pricing.css'\n\nconst previewModelPricing = ${offlinePricingPreview.toString()}`)
-          replace('  const [newRule, setNewRule] = useState(\'\')\n')
-          for (const group of ['inputTokenRanges', 'serviceTiers', 'timePeriods']) {
-            replace(`        setNewRule(draftKey)\n        updateRows('${group}'`, `        updateRows('${group}'`)
-          }
-          replace('<details className="pricing-rule-details" open={newRule === key || undefined}>\n          <summary>{index + 1}. {summary}</summary>', '<section className="pricing-rule-details">\n          <h5 className="catalog-preview-price-heading">{index + 1}. {summary}</h5>')
-          replace('          </div>\n        </details>', '          </div>\n        </section>')
-          replace('<details className="pricing-factor-details">\n      <summary>{t(\'ai.catalog.form.pricingFactorOverrides\')}</summary>', `<div className="pricing-factor-details"><h6 className="catalog-preview-price-heading">{t('ai.catalog.form.pricingFactorOverrides')}</h6>`)
-          replace('    </details>\n  </>', '    </div>\n  </>')
-          replace('placeholder={factors.factor}', "placeholder={locale === 'zh-CN' ? `继承 ×${factors.factor}` : `Inherit ×${factors.factor}`}")
-          replace('  const { t } = useI18n()\n  return <>\n    <Field label=', '  const { t, locale } = useI18n()\n  return <>\n    <Field label=')
-          replace("  const { t } = useI18n()\n  const { base, inputTokenRanges", "  const { t, locale } = useI18n()\n  const { base, inputTokenRanges")
-          replace('  const { t } = useI18n()\n  const today = new Date().toISOString().slice(0, 10)', "  const { t, locale } = useI18n()\n  const today = new Date().toISOString().slice(0, 10)")
-          replace('<span>{t(\'ai.catalog.form.pricingSelectPlan\')}</span>', `<div className="field-label-row"><span>{t('ai.catalog.form.pricingSelectPlan')}</span>{(!selected || selected.from && selected.from <= today) && hasConfiguredPricing(value) ? <HelpHint label={locale === 'zh-CN' ? '帮助：定价历史' : 'Help: pricing history'}>{t('ai.catalog.form.pricingHistoryWarning')}</HelpHint> : null}</div>`)
-          replace(/\{\(!selected \|\| selected\.from && selected\.from <= today\) && hasConfiguredPricing\(value\)\n\s*\? <p className="inline-hint">\{t\('ai\.catalog\.form\.pricingHistoryWarning'\)\}<\/p> : null\}\n/)
-          replace("  const { t } = useI18n()\n  const timeId", "  const { t, locale } = useI18n()\n  const timeId")
-          replace("<Section title={t('ai.catalog.form.pricingPreview')}>", "<Section title={locale === 'zh-CN' ? '离线费率试算' : 'Offline pricing preview'}>")
-          replace(/    <p className="inline-hint">\{t\('ai.catalog.form.pricingPreviewScope'\)\}<\/p>\n/)
-          replace("placeholder={field === 'cacheWrite' ? t('ai.catalog.form.pricingNotSet') : configured ? required : unpriced}", "placeholder={field === 'cacheWrite' || !configured ? t('ai.catalog.form.pricingNotSet') : required}")
-          replace("  const unpriced = t('ai.catalog.form.pricingUnpriced')\n")
-          replace("      {!configured && <p className=\"inline-hint\">{t('ai.catalog.form.pricingNotConfigured')}</p>}\n")
-          for (const group of ['inputTokenRanges', 'serviceTiers', 'timePeriods']) {
-            const key = group === 'inputTokenRanges' ? 'addPricingRange' : group === 'serviceTiers' ? 'addPricingTier' : 'addPricingTime'
-            replace(`>{t('ai.catalog.form.${key}')}</Button>`, `><Plus aria-hidden="true" />{t('ai.catalog.form.${key}')}</Button>`)
-          }
-          replace("{t('ai.catalog.form.addPricingChange')}</Button>", "<Plus aria-hidden=\"true\" />{t('ai.catalog.form.addPricingChange')}</Button>")
-          replace("{t('ai.catalog.form.pricingCreateDraft')}</Button>", "<Plus aria-hidden=\"true\" />{t('ai.catalog.form.pricingCreateDraft')}</Button>")
-          break
         case 'AiModelGroupResourceForm.tsx':
           replace("import { FieldLabel } from '@/shared/ui/controls/FieldLabel'\n", "import { FieldLabel } from '@/shared/ui/controls/FieldLabel'\nimport { HelpHint } from '@/shared/ui/controls/HelpHint'\n")
           replace('<FieldLabel required>{t(\'ai.catalog.form.name\')}</FieldLabel>', `<FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel> <HelpHint label={locale === 'zh-CN' ? '帮助：名称' : 'Help: name'}>{t('ai.catalog.form.groupNameHint')}</HelpHint>`)
@@ -212,13 +179,6 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
           replace('<FieldLabel>{t(\'ai.catalog.form.cooldownSeconds\')}</FieldLabel>', `<FieldLabel>{t('ai.catalog.form.cooldownSeconds')}</FieldLabel> <HelpHint label={locale === 'zh-CN' ? '帮助：冷却时间' : 'Help: cooldown'}>{t('ai.catalog.form.cooldownHint')}</HelpHint>`)
           replace('        <span className="inline-hint">{t(\'ai.catalog.form.cooldownHint\')}</span>\n')
           replace('  const { t } = useI18n()\n  const candidates = models.filter(', '  const { t, locale } = useI18n()\n  const candidates = models.filter(')
-          break
-        case 'PricingTtlInputs.tsx':
-          replace("import { TextInput } from '@/shared/ui/controls/TextInput'\n", "import { TextInput } from '@/shared/ui/controls/TextInput'\nimport { IconButton } from '@/shared/ui/controls/IconButton'\nimport { Plus, X } from 'lucide-react'\n")
-          replace(/            <Button\n              type="button"\n              variant="secondary"\n              aria-label=\{t\('ai.catalog.form.removePricingRule'\)\}[\s\S]*?\n            \{issue \?/, `            <IconButton label={t('ai.catalog.form.removePricingRule')} danger size="compact"
-              onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}><X size={14} aria-hidden="true" /></IconButton>
-            {issue ?`)
-          replace("{t('ai.catalog.form.addPricingTtl')}", "<Plus aria-hidden=\"true\" />{t('ai.catalog.form.addPricingTtl')}")
           break
         default:
           return
