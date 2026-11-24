@@ -16,7 +16,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | --- | --- | --- |
 | L5 组合根 | [`web`](../web/pom.xml) | 装配模块与插件；HTTP 边界、浏览器事件通道、Daemon 接入、错误映射、SPA 与链路追踪 |
 | L4 产品 | [`apps/chat`](../apps/chat/pom.xml) | Chat 列表与会话归属；自带的 HTTP 接口与 DTO；拥有 `chat`、`chat_session` |
-| L4 产品 | [`apps/project`](../apps/project/pom.xml) | Project 与 Issue 工作流、调度、Issue 工具；自带的 HTTP 接口与 DTO；拥有 `project_*` |
+
 | L4 产品 | [`apps/canvas/spi`](../apps/canvas/spi/pom.xml) | 画布函数 SPI，插件只依赖它 |
 | L4 产品 | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | 画布领域、typed command、持久化、Function Run、HTTP 接口、DTO 与版本通知 |
 | L4 产品 | [`apps/ide`](../apps/ide/pom.xml) | IDE 视图与数据面、浏览器使用身份、跨节点路由、HTTP 接口与 DTO |
@@ -118,7 +118,7 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 
 `/api` 后的业务域表达资源归属：`/api/platform` 是目录、环境、设置与存储等平台资源；
 `/api/harness` 是执行事实与控制，`/api/harness/builtin` 是内置 Driver 的接口；
-`/api/chat`、`/api/project`、`/api/canvas`、`/api/ide` 分别由相应产品模块提供。
+`/api/chat`、`/api/canvas`、`/api/ide` 分别由相应产品模块提供。
 浏览器事件与 Daemon 连接分别使用 `/ws/events`、`/ws/daemon`，IDE 数据面使用
 `/ide/{environmentId}/{viewId}/`，节点间接口使用 `/internal`。完整的公开路由及其请求、
 响应类型由生成的 [`ApiRoutes`](../frontend/src/shared/api/generated/contracts.ts) 定义。
@@ -130,7 +130,7 @@ JSON 成功响应直接返回资源：通常读取、更新和动作使用 200�
   64 位整数字段在请求与响应中均为规范非负十进制字符串，DTO 使用 `Long` / `long`，由 HTTP 边界统一解析；
   非法值按请求校验错误处理。Provider 超时、MCP `timeoutMillis` 和上传 `sizeBytes` 也遵循此规则。
 - 结构由运行时决定的自由格式 JSON 使用 JSON 节点；多形态 DTO 使用 `type` 区分各变体。
-  Harness 的 `execution.settings`、Canvas 的 Function `args` / `argsSchema` 与 Issue Activity 的 `data`
+  Harness 的 `execution.settings`、Canvas 的 Function `args` / `argsSchema` 与 Canvas Function 的 `data`
   都是节点，必须保留原始文本的内容按对应字段契约传输。Harness Entry 的 `payload` 是历史 codec 的 JSON 节点，
   `/ws/events` 的 realtime 事件由 realtime codec 编码，二者的时间都是毫秒精度 ISO-8601 文本，不套用 DTO 的时间规则。
 - 有界配置集合直接返回数组；无界集合通过 `cursor`、`limit` 读取，响应提供
@@ -256,7 +256,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
   存储视图，`PostgresqlModelTransaction` 只访问 `builtin_model_invocation`（另读 `harness_tool_invocation`），
   通用代码通过 `PostgresqlDriverWorkStorage` 的 `workOwner` 与 `workTargetExists` 做围栏，不认识 Builtin 概念。
 - `durable_work.target_type` 只校验大写格式，类型常量由各模块定义：内核 `THREAD`、`TOOL`，Builtin `MODEL`，
-  Project `ISSUE`，Canvas `CANVAS_RUN`。环境亲和性由 Work 类型声明，只有当前节点持有目标 Environment 的 READY
+  Canvas `CANVAS_RUN`。环境亲和性由 Work 类型声明，只有当前节点持有目标 Environment 的 READY
   路由租约时该 Work 才可被 claim。
 
 ### 存储与附件
@@ -279,8 +279,8 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 某个 Session、创建与列举 Session、删除前的锁与清理钩子、按根线程与根会话解析展示信息、交互判定前的锁。
 
 - 消费者是平台编排，不是产品：命令接受、会话删除、交互查询与交互裁决、会话查询统一通过这个 SPI 交互，避免按
-  具体产品类型分支。Chat 的实现允许分叉与直写；Project 的实现不允许，删除前必须解除 Issue 与 Agent 的绑定。
-- Agent 引用检查同属这一类：`AgentReferenceCheck` 由 Project 实现（工作流阶段引用 Agent），平台删除 Agent 前
+  具体产品类型分支。Chat 的实现允许分叉与直写。
+- Agent 引用检查同属这一类：`AgentReferenceCheck` 由产品实现，平台删除 Agent 前
   逐实现询问，不用 SQL 读产品表。
 - 跨模块传输区分写入口与展示：命令接受的 `HarnessCommandOwnerDTO` 只携带不透明的 `{kind, id}`，不接收客户端
   提供的展示字段；`InteractionOwnerDTO` 的 `title` 与 `link` 由服务端解析，只用于展示，不参与授权。
@@ -342,18 +342,13 @@ URI 编码与解析、读取鉴权、Session 持有与释放见 [Common：Resour
 | 产品 | 模块 | 拥有 | 实现的平台 SPI |
 | --- | --- | --- | --- |
 | Chat | [`apps/chat`](../apps/chat/pom.xml) | `chat`、`chat_session`；`ChatController` 与模块内 DTO | 会话归属 `CHAT` |
-| Project | [`apps/project`](../apps/project/pom.xml) | `project_*`；`ProjectController`、`IssueController` 与模块内 DTO | 会话归属 `ISSUE_AGENT`、Agent 引用检查 |
+
 | Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；三个控制器与模块内 DTO | 无（不参与会话归属） |
 | IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
 
 **Chat**：控制器以 `/api/chat/chats` 提供列表、创建、详情、整体替换、YOLO 子资源、删除与会话列表，DTO 在模块内，删除按预期版本校验。
 会话归属允许分叉与通用直写，`chat_session` 记录 Chat 与 Session 的关联。
 
-**Project**：领域含可配置工作流与阶段、Issue、Run、Activity、阶段预算与证据，HTTP 面覆盖 `/api/project/projects`、
-`/api/project/issues` 与项目下的 Issue 创建。Run 接受只使用通用命令提交 Agent、执行方式与环境，加一条项目模板渲染的任务
-消息，不写产品专属的 harness 状态；`issue_transition` 是 SELECTABLE 工具，由 Issue Agent 的配置显式声明，工具按
-调用线程查询项目自己的 Run 记录并在业务锁内复核身份、阶段、版本与合法交接边。Issue 对账以 `ISSUE` Work 认领，只
-认本次 Run 冻结的终态收尾。归属实现按 Project 再 Issue 的锁序序列化，证据引用 `resource://files/<uuid>`。
 
 **Canvas**：[`apps/canvas/spi`](../apps/canvas/spi/pom.xml) 只有画布函数 SPI（adapter、冻结运行计划、执行上下
 文与严格 codec），只依赖 JDK、`common` 与 Jackson 流式 API，插件通过它贡献函数。Runtime 拥有节点模型、typed
@@ -451,7 +446,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
 ## 一次请求的执行链
 
 ```text
-产品（Chat / Project） ──▶ HarnessRuntime.acceptCommands
+产品（Chat） ──▶ HarnessRuntime.acceptCommands
   ──▶ 短事务：Session / Thread / Command CAS，命令邮箱 + THREAD Work
   ──▶ Worker claim
   ──▶ ThreadProcessor 选择下一项 durable action
@@ -473,8 +468,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
 
 ## 执行权与恢复
 
-全部后台调度共用单一 `durable_work` 邮箱：内核的 `THREAD` 与 `TOOL`、Builtin 的 `MODEL`、Project 的
-`ISSUE`、Canvas 的 `CANVAS_RUN`。到期 Work 经 claim 获得随机 token 与数据库时钟截止点，heartbeat 只续租当前
+全部后台调度共用单一 `durable_work` 邮箱：内核的 `THREAD` 与 `TOOL`、Builtin 的 `MODEL` 与 Canvas 的 `CANVAS_RUN`。到期 Work 经 claim 获得随机 token 与数据库时钟截止点，heartbeat 只续租当前
 owner，checkpoint、终态与 reschedule 再次复验执行权。绑定环境的 Work 还要求目标节点持有该 Environment 的 READY
 路由租约。
 
@@ -508,11 +502,11 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 ```
 
 - Thread 按 Entry 游标推送快照，辅以有损 realtime 增量；执行树按根 Thread 推送完整快照。Canvas 的 revision 与
-  Projects、Interactions、Environments 的变更事件提示浏览器回读。
+  Chats、Interactions、Environments 的变更事件提示浏览器回读。
 - Thread 和执行树的单帧快照放不下时，服务端只对该资源发送回读提示。能定位资源的坏载荷也仅影响该资源；
   无法解析的连接级帧仍会终止连接。终态始终来自数据库事实，不从有损增量推断。
 - 通知的生产方拥有 channel 与 payload 协议：Harness 的 thread version、执行树、交互，Canvas 的 revision，
-  Project 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
+  Chat 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
   `NotificationInvalidationHub` 只做定点失效；组合根持有 LISTEN 循环（durable 通知与 realtime 各一条）并按绑定投递与 resync。
 - 通道与帧格式见 [Web](modules/web.md)，合并与恢复见 [Frontend](modules/frontend.md)。
 
@@ -542,7 +536,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 | 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）、图片档位模型视图（`storage_image_model_view`）与对象清理（`storage_object_cleanup`） |
 | 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`） |
 | 3 | 平台 Driver 存储：目录（`provider`、`model`、`agent`、`model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
-| 4 | 产品表：Canvas（`canvas_*`）、Chat（`chat`、`chat_session`）与 Project（`project_*`） |
+| 4 | 产品表：Canvas（`canvas_*`）与 Chat（`chat`、`chat_session`） |
 
 - 表与 SQL 只由归属模块访问：产品表由产品模块维护，目录、设置、存储、环境与插件由平台维护，`harness_*` 由平台的
   内核存储适配包维护，`builtin_model_invocation` 由平台的 Builtin 适配包维护。

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.StopResult;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
@@ -67,7 +67,7 @@ class HarnessRuntimeStopContinuationTest {
     runtime.setThreadYolo(new SetThreadYoloCommand(threadId, true));
     // 配置 Command 本会被 CONTINUATION 计划应用进 TURN_START settings；Stop 必须取消它而不是应用。
     seedQueuedCommand(
-        store, threadId, 1L, new SetAgentCommandPayload("other-agent"), TestIds.id(1));
+        store, threadId, 1L, new SetEnvironmentCommandPayload("other-agent"), TestIds.id(1));
     seedThreadWork(store, threadId);
 
     StopResult result = runtime.stop(new StopCommand(threadId, TestIds.id(1), 2));

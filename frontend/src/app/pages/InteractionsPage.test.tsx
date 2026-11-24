@@ -221,8 +221,8 @@ describe('InteractionsPage', () => {
           threadId: 'th-2',
           rootThreadId: 'root-th-2',
           sessionId: 'sess-2',
-          owner: { kind: 'ISSUE_AGENT', id: 'issue-101:architect', title: '修复缺陷',
-            link: '/projects/proj-xyz?issue=issue-101&thread=old#details' },
+          owner: { kind: 'CHAT', id: 'chat-xyz', title: '修复缺陷',
+            link: '/chats/chat-xyz?thread=old#details' },
           toolCallId: 'call-2',
           toolName: 'write',
           argumentsJson: '{"path":"/repo/main.ts","content":"x\\n"}',
@@ -265,10 +265,10 @@ describe('InteractionsPage', () => {
     expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=root-th-1')
 
     // 服务器提供的查询参数与片段必须保留，旧 thread 则替换为执行根。
-    const issueSourceBtn = screen.getByRole('button', { name: 'Issue · 修复缺陷' })
-    fireEvent.click(issueSourceBtn)
+    const approvalSourceBtn = screen.getByRole('button', { name: '对话 · 修复缺陷' })
+    fireEvent.click(approvalSourceBtn)
     await waitFor(() => {
-      expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=root-th-2#details')
+      expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-xyz?thread=root-th-2#details')
     })
     // 审批仍写原始调用并只移除完成的条目，不影响问卷。
     const decision = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
@@ -315,7 +315,7 @@ describe('InteractionsPage', () => {
           threadId: 'th-err',
           rootThreadId: 'root-th-err',
           sessionId: 'sess-err',
-          owner: { kind: 'ISSUE_AGENT', id: 'issue-missing:coder', title: '来源', link },
+          owner: { kind: 'CHAT', id: 'chat-missing', title: '来源', link },
           toolCallId: 'call-err',
           toolName: 'ask_user',
           argumentsJson: '{}',

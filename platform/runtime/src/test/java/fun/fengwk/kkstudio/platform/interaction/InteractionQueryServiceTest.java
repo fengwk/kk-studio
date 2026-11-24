@@ -106,8 +106,7 @@ class InteractionQueryServiceTest {
     stubRoot(root2);
     stubOwner(root1, session1, "CHAT", id(103), "chat");
     when(other.findOwner(root2, session2))
-        .thenReturn(
-            Optional.of(new SessionOwnerDisplay("ISSUE_AGENT", "issue:agent", "issue", null)));
+        .thenReturn(Optional.of(new SessionOwnerDisplay("CUSTOM", "issue:agent", "issue", null)));
     Instant time = Instant.parse("2026-03-01T10:00:00Z");
     PendingInteraction first = waitingInput(id(104), root1, session1, time);
     PendingInteraction second = waitingInput(id(204), root2, session2, time.plusSeconds(1));
@@ -179,11 +178,11 @@ class InteractionQueryServiceTest {
   }
 
   /**
-   * 测试意图：验证服务端沿来源 Thread 的祖先链解析产品归属——根为 Chat Session 或 Issue+Agent 绑定时可见，两者都解析不到的内部行被过滤；
-   * 同时验证后代来源用根的 Session 解析 owner 且 DTO 同时携带原始来源坐标与真实 rootThreadId。
+   * 测试意图：验证服务端沿来源 Thread 的祖先链解析产品归属——根为 Chat Session 或 CUSTOM 绑定时可见，两者都解析不到的内部行被过滤； 同时验证后代来源用根的
+   * Session 解析 owner 且 DTO 同时携带原始来源坐标与真实 rootThreadId。
    */
   @Test
-  void ownerResolutionResolvesChatAndIssueAgentAndFiltersInvisibleRows() {
+  void ownerResolutionResolvesChatAndCustomOwnerAndFiltersInvisibleRows() {
     UUID sessionId1 = id(10);
     UUID threadId1 = id(11);
     UUID invocationId1 = id(101);
@@ -220,7 +219,7 @@ class InteractionQueryServiceTest {
             Optional.of(
                 new SessionOwnerDisplay(
                     "CHAT", id(1001).toString(), "deploy chat", "/chats/1001")));
-    stubOwner(threadId2, sessionId2, "ISSUE_AGENT", id(2001), "fix the pipeline");
+    stubOwner(threadId2, sessionId2, "CUSTOM", id(2001), "fix the pipeline");
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row1, row2, row3), false));
@@ -254,7 +253,7 @@ class InteractionQueryServiceTest {
     assertEquals("{\"env\":\"prod\"}", dto2.argumentsJson());
     assertEquals(JsonValues.readTree("{\"allowed\":false}"), dto2.approval());
     assertEquals(t2, dto2.createdAt());
-    assertEquals("ISSUE_AGENT", dto2.owner().getKind());
+    assertEquals("CUSTOM", dto2.owner().getKind());
     assertEquals(id(2001).toString(), dto2.owner().getId());
     assertEquals("fix the pipeline", dto2.owner().getTitle());
     assertNull(dto2.owner().getLink());
@@ -458,9 +457,9 @@ class InteractionQueryServiceTest {
     stubRoot(id(6));
     stubOwner(id(6), id(5), "CHAT", id(500), null);
 
-    // row4 可见 (IssueAgent)
+    // row4 可见 (custom owner)
     stubRoot(id(8));
-    stubOwner(id(8), id(7), "ISSUE_AGENT", id(800), null);
+    stubOwner(id(8), id(7), "CUSTOM", id(800), null);
 
     // row5 可见 (Chat)
     stubRoot(id(10));
@@ -908,7 +907,7 @@ class InteractionQueryServiceTest {
     verifyNoInteractions(environmentService);
   }
 
-  /** 测试意图：控制器/插件发起、没有 Chat 或 Issue 归属的独立任务根以 AGENT_TASK 暴露并计数，否则其审批无人可见、任务永久挂起。 */
+  /** 测试意图：插件发起、没有 Chat 归属的独立任务根以 AGENT_TASK 暴露并计数，否则其审批无人可见、任务永久挂起。 */
   @Test
   void headlessAgentTaskRootIsExposedAsAgentTask() {
     UUID rootThreadId = id(71);
@@ -919,7 +918,7 @@ class InteractionQueryServiceTest {
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
     when(thread.name()).thenReturn("nightly report");
-    when(thread.kind()).thenReturn(ThreadKind.CONTROLLER_TASK);
+    when(thread.kind()).thenReturn(ThreadKind.PLUGIN_TASK);
     EntryCurrentState entryState = mock(EntryCurrentState.class);
     when(entryState.baseSettings())
         .thenReturn(

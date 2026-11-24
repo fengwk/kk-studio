@@ -4,9 +4,6 @@
 -- every fixture is rolled back and this file never touches a shared database.
 --
 -- Scope note: these assertions only prove what PostgreSQL itself enforces
--- (FK/UK/CHECK/index shape and data shape). Workflow membership, Agent binding
--- re-pointing, Agent Session ownership and browser behavior are application
--- concerns and are never claimed here.
 -- Assertion style: a rejection that can only break one object names the expected
 -- constraint, so an unrelated second broken edge cannot masquerade as the tested
 -- one; deliberately multi-edge rejections pass no expected constraint.
@@ -47,8 +44,6 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Fixtures: Catalog identity, workflow projects, Harness Session/Thread/Entry,
--- Issue+Agent Thread bindings, stage budgets and Runs.
 -- ---------------------------------------------------------------------------
 insert into environment (id, name, registration_token_hash, daemon_config)
     values (pg_temp.uid(9000), 'install-fixture', repeat('a', 64),
@@ -174,23 +169,6 @@ select pg_temp.rejects('execution requires a driver',
       values('probe-missing','{"settings":{}}','{}')$$,
     '23514', 'ck_agent_execution_shape');
 
-insert into project (id, title, description, workflow) values
-    (pg_temp.uid(1), 'one', '',
-        '{"states":[{"state":"INIT","name":"start","next":["WORK"]},'
-        '{"state":"WORK","name":"work","agent":"designer","maxRuns":2,"next":["REVIEW"]},'
-        '{"state":"REVIEW","name":"review","agent":"reviewer","maxRuns":2,"next":["WORK","DONE"]},'
-        '{"state":"BLOCKED","name":"blocked"},{"state":"DONE","name":"done"}]}'::jsonb),
-    (pg_temp.uid(2), 'two', '',
-        '{"states":[{"state":"INIT","name":"start","next":["DONE"]},'
-        '{"state":"BLOCKED","name":"blocked"},'
-        '{"state":"DONE","name":"done"}]}'::jsonb);
-
-insert into project_issue (id, project_id, number, title, state) values
-    (pg_temp.uid(10), pg_temp.uid(1), 1, 'first', 'WORK'),
-    (pg_temp.uid(11), pg_temp.uid(1), 2, 'second', 'WORK'),
-    (pg_temp.uid(12), pg_temp.uid(2), 1, 'other', 'INIT'),
-    (pg_temp.uid(13), pg_temp.uid(1), 3, 'third', 'WORK');
-
 insert into harness_session (id, name, created_at) values
     (pg_temp.uid(100), 'designer', now()), (pg_temp.uid(101), 'reviewer', now()),
     (pg_temp.uid(102), 'second', now()), (pg_temp.uid(103), 'unbound', now()),
@@ -256,46 +234,15 @@ delete from harness_thread where id = pg_temp.uid(306);
 select pg_temp.assert_true('deleting a thread cascades its realtime subscriptions',
     not exists(select 1 from realtime_subscription where thread_id = pg_temp.uid(306)));
 
-insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)
-select v.issue_id, v.agent_name, t.session_id, t.id
-from (values
-    (pg_temp.uid(10), 'designer', pg_temp.uid(300)),
-    (pg_temp.uid(10), 'reviewer', pg_temp.uid(301)),
-    (pg_temp.uid(11), 'designer', pg_temp.uid(302)),
-    (pg_temp.uid(11), 'reviewer', pg_temp.uid(303)),
-    (pg_temp.uid(13), 'designer', pg_temp.uid(305))
-) as v(issue_id, agent_name, thread_id)
-join harness_thread t on t.id = v.thread_id;
-insert into project_issue_stage_budget (issue_id, state, max_runs) values
-    (pg_temp.uid(10), 'WORK', 2),
-    (pg_temp.uid(10), 'REVIEW', 2),
-    (pg_temp.uid(11), 'WORK', 2),
-    (pg_temp.uid(13), 'WORK', 2);
-insert into project_issue_run (id, issue_id, ordinal, state, session_id, thread_id, status,
-    start_entry_id, remaining_execution_ms, active_since) values
-    (pg_temp.uid(400), pg_temp.uid(10), 1, 'WORK', pg_temp.uid(100), pg_temp.uid(300),
-        'RUNNING', pg_temp.uid(200), 60000, now()),
-    (pg_temp.uid(401), pg_temp.uid(11), 1, 'WORK', pg_temp.uid(102), pg_temp.uid(302),
-        'RUNNING', pg_temp.uid(202), 60000, now()),
-    (pg_temp.uid(402), pg_temp.uid(13), 1, 'WORK', pg_temp.uid(104), pg_temp.uid(305),
-        'RUNNING', pg_temp.uid(203), 60000, now());
-update project_issue set next_run_ordinal = 2 where id in (pg_temp.uid(10), pg_temp.uid(11), pg_temp.uid(13));
-
 -- ---------------------------------------------------------------------------
--- Structure: exactly the 15 target tables, no removed product object survives.
+-- Structure: exactly the 8 retained canvas/chat domain tables exist.
 -- ---------------------------------------------------------------------------
-select pg_temp.assert_true('exactly the 15 target domain tables exist',
-    (select count(*) = 15 from pg_tables where schemaname = 'public'
-        and (tablename like 'canvas_%' or tablename = 'project' or tablename like 'project_%'
-            or tablename = 'chat_session')));
+select pg_temp.assert_true('exactly the 8 retained domain tables exist',
+    (select count(*) = 8 from pg_tables where schemaname = 'public'
+        and (tablename like 'canvas_%' or tablename = 'chat_session')));
 select pg_temp.assert_true('removed product and runtime tables are gone',
     to_regclass('public.harness_claude_execution') is null
     and to_regclass('public.canvas_link') is null
-    and to_regclass('public.project_state') is null
-    and to_regclass('public.project_transition') is null
-    and to_regclass('public.project_issue_dependency') is null
-    and to_regclass('public.project_issue_agent_session') is null
-    and to_regclass('public.project_issue_branch') is null
     and to_regclass('public.session_owner') is null
     and to_regclass('public.human_question') is null
     and to_regclass('public.comfyui_workflow_api') is null);
@@ -321,272 +268,19 @@ select pg_temp.assert_true('Harness Thread gained a same-Session composite key',
         where c.conrelid = 'harness_thread'::regclass
             and c.conname = 'uk_harness_thread_session'
             and c.contype = 'u'));
-select pg_temp.assert_true('the Agent Thread binding stores its Session',
-    (select count(*) = 5 from information_schema.columns
-        where table_name = 'project_issue_agent_thread')
-    and exists(select 1 from information_schema.columns
-        where table_name = 'project_issue_agent_thread' and column_name = 'session_id'));
-select pg_temp.assert_true('the stage budget stores no Session or Thread pointer',
-    (select count(*) = 6 from information_schema.columns
-        where table_name = 'project_issue_stage_budget')
-    and not exists(select 1 from information_schema.columns
-        where table_name = 'project_issue_stage_budget'
-        and column_name in ('session_id', 'thread_id')));
-select pg_temp.assert_true('a Run is pinned to the stage budget and to the Agent Thread binding',
-    exists(select 1 from pg_constraint c
-        where c.conrelid = 'project_issue_run'::regclass
-            and c.conname = 'fk_project_issue_run_stage_budget'
-            and c.confrelid = 'project_issue_stage_budget'::regclass)
-    and exists(select 1 from pg_constraint c
-        where c.conrelid = 'project_issue_run'::regclass
-            and c.conname = 'fk_project_issue_run_agent_thread'
-            and c.confrelid = 'project_issue_agent_thread'::regclass
-            and (select array_agg(a.attname::text order by a.attname::text)
-                from unnest(c.conkey) k
-                join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k)
-                = array['issue_id', 'thread_id']));
 select pg_temp.assert_true('chat_session keeps only the direct Session association',
     (select count(*) = 3 from information_schema.columns where table_name = 'chat_session')
     and not exists(select 1 from information_schema.columns
         where table_name = 'chat_session'
         and column_name in ('creation_request_hash', 'idempotency_key')));
 
--- ---------------------------------------------------------------------------
--- Project workflow: strict JSON shape, charset-only state checking, gates.
--- ---------------------------------------------------------------------------
-select pg_temp.assert_true('yolo_enabled defaults to true',
-    (select yolo_enabled from project where id = pg_temp.uid(1)));
-select pg_temp.rejects('workflow must be a JSON object',
-    $$insert into project(id,title,workflow) values(pg_temp.uid(3),'bad','[]'::jsonb)$$, '23514');
-select pg_temp.rejects('workflow must carry a states array',
-    $$insert into project(id,title,workflow) values(pg_temp.uid(3),'bad','{"nodes":[]}'::jsonb)$$, '23514');
-select pg_temp.rejects('a JSON null states is not a bypass',
-    $$insert into project(id,title,workflow) values(pg_temp.uid(3),'bad','{"states":null}'::jsonb)$$, '23514');
-select pg_temp.rejects('Issue state must be an uppercase code',
-    $$update project_issue set state='work' where id=pg_temp.uid(10)$$, '23514');
--- Boundary: the DB checks the charset but not membership in project.workflow.
-update project_issue set state='ORPHAN_CODE' where id = pg_temp.uid(12);
-select pg_temp.assert_true('workflow membership is application-validated, not a DB FK/CHECK',
-    (select state = 'ORPHAN_CODE' from project_issue where id = pg_temp.uid(12)));
-select pg_temp.rejects('pause reason without detail',
-    $$update project_issue set pause_reason='ERROR' where id=pg_temp.uid(10)$$, '23514');
-select pg_temp.rejects('pause reason must be USER/ERROR',
-    $$update project_issue set pause_reason='UNKNOWN',pause_detail='x' where id=pg_temp.uid(10)$$, '23514');
-select pg_temp.rejects('pause detail without a reason',
-    $$update project_issue set pause_detail='x' where id=pg_temp.uid(10)$$, '23514');
-update project_issue set pause_reason='ERROR', pause_detail='execution failed' where id = pg_temp.uid(10);
-select pg_temp.assert_true('a control pause keeps the business state',
-    (select state = 'WORK' from project_issue where id = pg_temp.uid(10)));
-update project_issue set pause_reason=null, pause_detail=null where id = pg_temp.uid(10);
-
--- ---------------------------------------------------------------------------
--- Stable Issue+Agent Thread identity: one binding per Agent, one Session each.
--- ---------------------------------------------------------------------------
-select pg_temp.assert_true('one Issue binds a distinct Thread per Agent',
-    (select count(*) = 2 and count(distinct thread_id) = 2
-        from project_issue_agent_thread where issue_id = pg_temp.uid(10)));
-select pg_temp.rejects('an unknown Agent cannot own a Thread',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
-      select pg_temp.uid(12),'ghost',session_id,id from harness_thread where id=pg_temp.uid(304)$$, '23503', 'fk_project_issue_agent_thread_agent');
-select pg_temp.rejects('one stable Thread per Issue+Agent',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
-      select pg_temp.uid(10),'designer',session_id,id from harness_thread where id=pg_temp.uid(304)$$, '23505', 'pk_project_issue_agent_thread');
-select pg_temp.rejects('a bound Thread cannot be shared by another Issue',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
-      select pg_temp.uid(12),'designer',session_id,id from harness_thread where id=pg_temp.uid(300)$$, '23505', 'uk_project_issue_agent_thread_thread');
-select pg_temp.rejects('a binding cannot claim another Session',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
-      values(pg_temp.uid(12),'designer',pg_temp.uid(100),pg_temp.uid(304))$$,
-    '23503', 'fk_project_issue_agent_thread_thread');
--- Harness supports forks; this standalone Thread is not a second Project Agent
--- binding. Product services prevent out-of-Run execution on an Issue Session.
 select pg_temp.assert_true('Harness may hold an unbound sibling Thread in the same Session',
     (select count(*) = 2 from harness_thread where session_id = pg_temp.uid(101)));
 
--- ---------------------------------------------------------------------------
--- Stage budget: one grant per Issue work state, never per Agent.
--- ---------------------------------------------------------------------------
-select pg_temp.rejects('a budget state uses the state charset',
-    $$insert into project_issue_stage_budget(issue_id,state,max_runs)
-      values(pg_temp.uid(11),'review',1)$$, '23514', 'ck_project_issue_stage_budget_state');
-select pg_temp.rejects('a stage budget grant must be positive',
-    $$insert into project_issue_stage_budget(issue_id,state,max_runs)
-      values(pg_temp.uid(11),'REVIEW',0)$$, '23514', 'ck_project_issue_stage_budget_max_runs');
-select pg_temp.rejects('a budget high-water mark is non-negative',
-    $$update project_issue_stage_budget set budget_after_ordinal=-1
-      where issue_id=pg_temp.uid(10) and state='WORK'$$, '23514',
-    'ck_project_issue_stage_budget_after_ordinal');
-
--- ---------------------------------------------------------------------------
--- Run: frozen coordinates, product references, single active Run.
--- ---------------------------------------------------------------------------
-select pg_temp.rejects('a Run state must have a stage budget',
-    $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,
-        start_entry_id,end_entry_id,remaining_execution_ms,ended_at)
-      values(pg_temp.uid(406),pg_temp.uid(13),2,'REVIEW',pg_temp.uid(104),pg_temp.uid(305),
-        'CANCELLED',pg_temp.uid(203),pg_temp.uid(203),1000,now())$$, '23503',
-    'fk_project_issue_run_stage_budget');
-select pg_temp.rejects('a Run Thread must be bound to its Issue',
-    $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,
-        start_entry_id,end_entry_id,remaining_execution_ms,ended_at)
-      values(pg_temp.uid(407),pg_temp.uid(13),2,'WORK',pg_temp.uid(102),pg_temp.uid(302),
-        'CANCELLED',pg_temp.uid(202),pg_temp.uid(202),1000,now())$$, '23503',
-    'fk_project_issue_run_agent_thread');
-select pg_temp.rejects('a Run Session must be the Thread Session',
-    $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,
-        start_entry_id,end_entry_id,remaining_execution_ms,ended_at)
-      values(pg_temp.uid(408),pg_temp.uid(13),2,'WORK',pg_temp.uid(100),pg_temp.uid(305),
-        'CANCELLED',pg_temp.uid(200),pg_temp.uid(200),1000,now())$$, '23503',
-    'fk_project_issue_run_thread_session');
-select pg_temp.rejects('one active main Run per Issue',
-    $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,start_entry_id,remaining_execution_ms,active_since)
-      values(pg_temp.uid(403),pg_temp.uid(10),2,'WORK',pg_temp.uid(100),pg_temp.uid(300),'RUNNING',pg_temp.uid(200),1000,now())$$, '23505');
-update project_issue_run set status='WAITING', active_since=null where id = pg_temp.uid(400);
-select pg_temp.assert_true('WAITING pauses the active clock on the same Run',
-    (select status = 'WAITING' and active_since is null from project_issue_run where id = pg_temp.uid(400)));
-update project_issue_run set status='RUNNING', active_since=now() where id = pg_temp.uid(400);
-
--- Terminal history keeps its interval and report references.
-update project_issue_run set status='COMPLETED', active_since=null, end_entry_id=pg_temp.uid(206),
-    final_answer_entry_id=pg_temp.uid(205), ended_at=now() where id = pg_temp.uid(400);
--- Run status has no separate "outcome unknown" state: an undetermined stop is a
--- FAILED Run whose reason says the outcome is unknown.
-select pg_temp.rejects('Run status has no UNKNOWN terminal',
-    $$update project_issue_run set status='UNKNOWN' where id=pg_temp.uid(400)$$, '23514');
-select pg_temp.rejects('Run ordinal is unique per Issue',
-    $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,
-        start_entry_id,end_entry_id,remaining_execution_ms,ended_at)
-      values(pg_temp.uid(404),pg_temp.uid(10),1,'WORK',pg_temp.uid(100),pg_temp.uid(300),
-        'CANCELLED',pg_temp.uid(200),pg_temp.uid(206),60000,now())$$, '23505',
-    'uk_project_issue_run_issue_ordinal');
-update project_issue_run set status='COMPLETED', active_since=null, end_entry_id=pg_temp.uid(202),
-    ended_at=now() where id = pg_temp.uid(401);
-
--- ---------------------------------------------------------------------------
--- Agent switch: another stable Thread for the new Agent, one shared budget.
--- ---------------------------------------------------------------------------
-insert into project_issue_run (id, issue_id, ordinal, state, session_id, thread_id, status,
-    start_entry_id, end_entry_id, remaining_execution_ms, ended_at) values
-    (pg_temp.uid(405), pg_temp.uid(10), 2, 'REVIEW', pg_temp.uid(100), pg_temp.uid(300),
-        'CANCELLED', pg_temp.uid(206), pg_temp.uid(206), 60000, now()),
-    (pg_temp.uid(406), pg_temp.uid(10), 3, 'WORK', pg_temp.uid(101), pg_temp.uid(301),
-        'CANCELLED', pg_temp.uid(201), pg_temp.uid(201), 60000, now());
-update project_issue set next_run_ordinal=4 where id = pg_temp.uid(10);
-select pg_temp.assert_true('one Agent reuses its stable Thread across work stages',
-    (select count(*) = 2 and count(distinct thread_id) = 1 and count(distinct state) = 2
-        from project_issue_run where issue_id = pg_temp.uid(10) and session_id = pg_temp.uid(100))
-    and (select distinct thread_id = pg_temp.uid(300) from project_issue_run
-        where issue_id = pg_temp.uid(10) and session_id = pg_temp.uid(100)));
-select pg_temp.assert_true('the switched-in Agent keeps its own Thread and history',
-    (select thread_id = pg_temp.uid(301) and state = 'WORK' from project_issue_run
-        where id = pg_temp.uid(406)));
-select pg_temp.assert_true('one stage budget counts the Runs of every Agent',
-    (select count(*) from project_issue_run r join project_issue_stage_budget b
-        on b.issue_id=r.issue_id and b.state=r.state
-        where r.issue_id = pg_temp.uid(10) and r.state = 'WORK'
-            and r.ordinal > b.budget_after_ordinal) = 2
-    and (select count(distinct session_id) = 2 from project_issue_run
-        where issue_id = pg_temp.uid(10) and state = 'WORK'));
-select pg_temp.assert_true('the replaced Agent Run history stays queryable',
-    (select count(*) = 1 from project_issue_run
-        where issue_id = pg_temp.uid(10) and state = 'WORK' and session_id = pg_temp.uid(100))
-    and (select count(*) = 1 from project_issue_run
-        where issue_id = pg_temp.uid(10) and state = 'WORK' and session_id = pg_temp.uid(101)));
-
--- Reset fixture is quiescent: history remains immutable, the server takes the
--- Issue ordinal high-water mark. This exercises the representation, not an API.
-update project_issue_stage_budget b set budget_after_ordinal=i.next_run_ordinal-1
-    from project_issue i where b.issue_id=i.id and b.issue_id=pg_temp.uid(10) and b.state='WORK';
-select pg_temp.assert_true('a reset advances the counting boundary without deleting history',
-    (select count(*) = 0 from project_issue_run r join project_issue_stage_budget b
-        on b.issue_id=r.issue_id and b.state=r.state
-        where r.issue_id=pg_temp.uid(10) and r.state='WORK' and r.ordinal>b.budget_after_ordinal)
-    and (select count(*)=2 from project_issue_run
-        where issue_id=pg_temp.uid(10) and state='WORK'));
-
--- ---------------------------------------------------------------------------
--- Activity: one timeline, RUN references only, typed events, no QUESTION.
--- ---------------------------------------------------------------------------
-insert into project_issue_activity (issue_id, sequence, kind, actor_type, run_id, idempotency_key, request_hash)
-    values (pg_temp.uid(10), 1, 'RUN', 'SYSTEM', pg_temp.uid(400), 'run-400', repeat('a', 64));
-select pg_temp.rejects('one RUN presentation per Run',
-    $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,run_id,idempotency_key,request_hash)
-      values(pg_temp.uid(10),2,'RUN','SYSTEM',pg_temp.uid(400),'run-400b',repeat('b',64))$$, '23505');
-insert into project_issue_activity (issue_id, sequence, kind, actor_type, run_id, body, idempotency_key, request_hash) values
-    (pg_temp.uid(10), 2, 'COMMENT', 'HUMAN', pg_temp.uid(400), 'note', 'comment-2', repeat('c', 64)),
-    (pg_temp.uid(10), 3, 'INSTRUCTION', 'HUMAN', pg_temp.uid(405), 'do it', 'instruction-3', repeat('d', 64));
-select pg_temp.rejects('the QUESTION kind is gone',
-    $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,idempotency_key,request_hash)
-      values(pg_temp.uid(10),5,'QUESTION','SYSTEM','question-5',repeat('e',64))$$, '23514');
-select pg_temp.rejects('an activity cannot reference another Issue Run',
-    $$update project_issue_activity set run_id=pg_temp.uid(401) where sequence=2$$, '23503',
-    'fk_project_issue_activity_run');
--- Run history alone blocks deleting its Run: only Activity refers to it so far.
-select pg_temp.rejects('Activity blocks deleting its Run',
-    $$delete from project_issue_run where id=pg_temp.uid(400)$$, '23503',
-    'fk_project_issue_activity_run');
-insert into project_issue_activity (issue_id, sequence, kind, actor_type, data, idempotency_key, request_hash)
-    values (pg_temp.uid(10), 4, 'STATE_CHANGE', 'SYSTEM',
-        '{"from":"WORK","to":"REVIEW"}'::jsonb, 'state-4', repeat('f', 64));
-select pg_temp.assert_true('a typed event is the single content copy',
-    (select data ->> 'to' = 'REVIEW' from project_issue_activity where sequence = 4));
-select pg_temp.rejects('event data must be a JSON object',
-    $$update project_issue_activity set data='[]'::jsonb where sequence=4$$, '23514');
-select pg_temp.rejects('AGENT actor requires an Agent identity',
-    $$update project_issue_activity set actor_type='AGENT' where sequence=2$$, '23514');
-select pg_temp.rejects('a non-AGENT actor cannot carry an Agent identity',
-    $$update project_issue_activity set actor_agent_name='designer' where sequence=3$$, '23514');
-select pg_temp.rejects('an activity request key is unique per Issue',
-    $$update project_issue_activity set idempotency_key='comment-2' where sequence=3$$, '23505',
-    'uk_project_issue_activity_request');
-select pg_temp.rejects('an activity sequence is positive',
-    $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,body,idempotency_key,request_hash)
-      values(pg_temp.uid(10),0,'COMMENT','HUMAN','x','comment-0',repeat('a',64))$$, '23514');
-
--- ---------------------------------------------------------------------------
--- Evidence: independent Blob owner edge, Run only via an Agent author.
--- ---------------------------------------------------------------------------
 insert into storage_blob (id, sha256, size_bytes, media_type, ref_count) values
     (pg_temp.uid(600), repeat('f', 64), 1, 'image/png', 1),
     (pg_temp.uid(601), repeat('1', 64), 1, 'image/png', 1),
     (pg_temp.uid(602), repeat('2', 64), 1, 'application/octet-stream', 1);
-insert into project_issue_evidence (issue_id, blob_id, actor_agent_name, run_id, name)
-    values (pg_temp.uid(10), pg_temp.uid(600), 'designer', pg_temp.uid(400), 'output.png');
-select pg_temp.assert_true('evidence keeps an independent Blob relationship',
-    (select actor_agent_name = 'designer' from project_issue_evidence
-        where issue_id = pg_temp.uid(10) and blob_id = pg_temp.uid(600)));
-select pg_temp.rejects('evidence is unique by Issue and Blob',
-    $$insert into project_issue_evidence(issue_id,blob_id,actor_agent_name,run_id,name)
-      values(pg_temp.uid(10),pg_temp.uid(600),'designer',pg_temp.uid(400),'other.png')$$, '23505',
-    'pk_project_issue_evidence');
-select pg_temp.rejects('a source Run implies an Agent author',
-    $$insert into project_issue_evidence(issue_id,blob_id,run_id,name)
-      values(pg_temp.uid(10),pg_temp.uid(601),pg_temp.uid(400),'x.png')$$, '23514',
-    'ck_project_issue_evidence_author');
-insert into project_issue_evidence (issue_id, blob_id, name)
-    values (pg_temp.uid(10), pg_temp.uid(602), 'manual.bin');
-select pg_temp.assert_true('a human publication needs neither Agent nor Run',
-    (select actor_agent_name is null and run_id is null from project_issue_evidence
-        where issue_id = pg_temp.uid(10) and blob_id = pg_temp.uid(602)));
-select pg_temp.rejects('an evidence source Run must belong to the Issue',
-    $$update project_issue_evidence set run_id=pg_temp.uid(401)
-      where issue_id=pg_temp.uid(10) and blob_id=pg_temp.uid(600)$$, '23503',
-    'fk_project_issue_evidence_run');
-select pg_temp.rejects('evidence blocks deleting its Blob',
-    $$delete from storage_blob where id=pg_temp.uid(600)$$, '23503',
-    'fk_project_issue_evidence_blob');
--- A dedicated Run that no Activity, pin or call refers to: Evidence alone blocks it.
-insert into project_issue_run (id, issue_id, ordinal, state, session_id, thread_id, status,
-    start_entry_id, end_entry_id, remaining_execution_ms, ended_at) values
-    (pg_temp.uid(410), pg_temp.uid(11), 2, 'WORK', pg_temp.uid(102), pg_temp.uid(302),
-        'CANCELLED', pg_temp.uid(202), pg_temp.uid(202), 60000, now());
-update project_issue set next_run_ordinal=3 where id=pg_temp.uid(11);
-insert into project_issue_evidence (issue_id, blob_id, actor_agent_name, run_id, name)
-    values (pg_temp.uid(11), pg_temp.uid(601), 'designer', pg_temp.uid(410), 'review.png');
-select pg_temp.rejects('evidence blocks deleting its source Run',
-    $$delete from project_issue_run where id=pg_temp.uid(410)$$, '23503',
-    'fk_project_issue_evidence_run');
-
 -- ---------------------------------------------------------------------------
 -- Storage object cleanup: a permanent, key-deduplicated delete tombstone.
 -- ---------------------------------------------------------------------------
@@ -1164,43 +858,6 @@ select pg_temp.rejects('durable work rejects lowercase target types',
     $$insert into durable_work (target_type, target_id, available_at, wake_version)
       values ('custom', pg_temp.uid(14), now(), 1)$$, '23514', 'ck_durable_work_target_type');
 
--- The dedicated run-free, call-free Thread of Issue 11: only the Agent Thread
--- binding keeps it alive.
-select pg_temp.rejects('the Agent Thread binding blocks deleting its Thread',
-    $$delete from harness_thread where id=pg_temp.uid(303)$$, '23503',
-    'fk_project_issue_agent_thread_thread');
--- A Thread with Run history is held by more than one edge, so no single
--- constraint is claimed here.
-select pg_temp.rejects('Run history blocks deleting its Thread',
-    $$delete from harness_thread where id=pg_temp.uid(305)$$, '23503');
-
-create temporary table deleting_sessions (session_id uuid primary key);
-insert into deleting_sessions
-    select distinct th.session_id from project_issue_agent_thread binding
-        join harness_thread th on th.id=binding.thread_id
-        where binding.issue_id=pg_temp.uid(10);
-delete from project_issue_activity where issue_id = pg_temp.uid(10);
-delete from project_issue_evidence where issue_id = pg_temp.uid(10);
-delete from project_issue_run where issue_id = pg_temp.uid(10);
-delete from project_issue_stage_budget where issue_id = pg_temp.uid(10);
-delete from project_issue_agent_thread where issue_id = pg_temp.uid(10);
-delete from harness_thread where session_id in (select session_id from deleting_sessions);
-delete from harness_entry where session_id in (select session_id from deleting_sessions);
-delete from harness_session where id in (select session_id from deleting_sessions);
-delete from project_issue where id = pg_temp.uid(10);
-select pg_temp.assert_true('relational cleanup removes every Session and Thread of the Issue',
-    not exists(select 1 from project_issue where id = pg_temp.uid(10))
-    and not exists(select 1 from project_issue_agent_thread where issue_id = pg_temp.uid(10))
-    and not exists(select 1 from project_issue_stage_budget where issue_id = pg_temp.uid(10))
-    and not exists(select 1 from harness_session where id in (select session_id from deleting_sessions))
-    and not exists(select 1 from harness_thread where session_id in (select session_id from deleting_sessions)));
-select pg_temp.assert_true('cleanup leaves other Issues, Threads and the Chat Session untouched',
-    exists(select 1 from project_issue_agent_thread
-        where issue_id = pg_temp.uid(11) and agent_name = 'designer')
-    and exists(select 1 from project_issue_run where id = pg_temp.uid(410))
-    and exists(select 1 from harness_thread where id = pg_temp.uid(302))
-    and exists(select 1 from harness_tool_invocation where id = pg_temp.uid(1200))
-    and exists(select 1 from chat_session where session_id = pg_temp.uid(103)));
 
 delete from canvas_function_resource_pin;
 delete from canvas_function_run;
@@ -1211,5 +868,37 @@ delete from canvas_command_dedup;
 delete from canvas_document;
 select pg_temp.assert_true('Canvas dependency-ordered deep delete completes',
     not exists(select 1 from canvas_document) and not exists(select 1 from canvas_resource));
+select pg_temp.assert_true('project tables absent', not exists (
+    select 1 from pg_tables where schemaname = 'public'
+      and (tablename = 'project' or tablename like 'project\_%' escape '\')
+));
+select pg_temp.assert_true('waiting child accepted by invocation status check', exists (
+    select 1 from pg_constraint
+     where conrelid = 'harness_tool_invocation'::regclass
+       and conname = 'ck_harness_tool_invocation_status'
+       and pg_get_constraintdef(oid) like '%WAITING_CHILD%'
+));
+select pg_temp.assert_true('waiting child included in nonterminal index', exists (
+    select 1 from pg_indexes where schemaname = 'public'
+      and indexname = 'idx_harness_tool_invocation_thread_nonterminal'
+      and indexdef like '%WAITING_CHILD%'
+));
+select pg_temp.assert_true('controller task excluded from thread kind check', exists (
+    select 1 from pg_constraint
+     where conrelid = 'harness_thread'::regclass and conname = 'ck_harness_thread_kind'
+       and pg_get_constraintdef(oid) not like '%CONTROLLER_TASK%'
+));
+select pg_temp.assert_true('set agent excluded from command type check', exists (
+    select 1 from pg_constraint
+     where conrelid = 'harness_thread_command'::regclass
+       and conname = 'ck_harness_thread_command_type'
+       and pg_get_constraintdef(oid) not like '%SET_AGENT%'
+));
+select pg_temp.assert_true('credential generation has UUID default', exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'plugin_credential'
+       and column_name = 'generation' and data_type = 'uuid'
+       and is_nullable = 'NO' and column_default like '%gen_random_uuid%'
+));
 select 'PASS ' || count(*) || ' database contract assertions' from contract_checks;
 rollback;

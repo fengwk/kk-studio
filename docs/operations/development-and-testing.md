@@ -382,7 +382,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 阅读 case 结果时还需保留两个边界：
 
 - 无 READY owner 的 IDE 用例使用无目录创建请求，验证读写均在路由层拒绝。它不证明已 READY 时的 exact-intent 校验、
-  视图占用或续租；API 契约断言也不替代真实 Agent 的 Issue 接受与阶段交接。
+  视图占用或续租。
 - `node --test scripts/dev/verify/e2e/tests/*.test.mjs` 只验证 case 与 HTTP mock 的脚本契约，
   不能替代对真实服务执行对应 case。
 

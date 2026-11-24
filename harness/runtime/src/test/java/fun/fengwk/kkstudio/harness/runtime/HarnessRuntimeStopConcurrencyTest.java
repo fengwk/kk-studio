@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
@@ -192,7 +192,7 @@ class HarnessRuntimeStopConcurrencyTest {
                               new AcceptCommandsTarget.Thread(
                                   baseline.threadId(), baseline.rootEntryId(), 1),
                               List.of(
-                                  setAgentCommand(TestIds.id(10)),
+                                  setEnvironmentCommand(TestIds.id(10)),
                                   userMessageCommand(TestIds.id(1), "a"))),
                           AcceptancePreflight.IDENTITY)));
       Future<Attempt> second =
@@ -205,7 +205,7 @@ class HarnessRuntimeStopConcurrencyTest {
                               new AcceptCommandsTarget.Thread(
                                   baseline.threadId(), baseline.rootEntryId(), 1),
                               List.of(
-                                  setAgentCommand(TestIds.id(11)),
+                                  setEnvironmentCommand(TestIds.id(11)),
                                   userMessageCommand(TestIds.id(2), "b"))),
                           AcceptancePreflight.IDENTITY)));
       Attempt one = first.get();
@@ -222,8 +222,8 @@ class HarnessRuntimeStopConcurrencyTest {
     }
   }
 
-  private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
-    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
+  private static NewThreadCommand setEnvironmentCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload("assistant"), idempotencyKey);
   }
 
   private static HarnessRuntime runtime(InMemoryHarnessStore store) {

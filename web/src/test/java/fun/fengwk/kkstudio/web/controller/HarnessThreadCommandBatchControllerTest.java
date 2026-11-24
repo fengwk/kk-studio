@@ -97,7 +97,7 @@ class HarnessThreadCommandBatchControllerTest {
             THREAD_ID,
             batch(
                 "["
-                    + setAgentCommand(SET_COMMAND_KEY)
+                    + setEnvironmentCommand(SET_COMMAND_KEY)
                     + ","
                     + userMessageElement(COMMAND_KEY)
                     + "]"))
@@ -124,7 +124,7 @@ class HarnessThreadCommandBatchControllerTest {
             .map(command -> command.payload().type())
             .toList();
     assertEquals(
-        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.USER_MESSAGE), acceptedTypes);
+        List.of(ThreadCommandType.SET_ENVIRONMENT, ThreadCommandType.USER_MESSAGE), acceptedTypes);
     assertEquals(
         UUID.fromString(COMMAND_KEY), commandCaptor.getValue().commands().get(1).idempotencyKey());
 
@@ -189,7 +189,7 @@ class HarnessThreadCommandBatchControllerTest {
   @Test
   void rejectsMalformedCursorBeforeTouchingAcceptanceServiceOrRuntime() throws Exception {
     String commands =
-        "[" + setAgentCommand(SET_COMMAND_KEY) + "," + userMessageElement(COMMAND_KEY) + "]";
+        "[" + setEnvironmentCommand(SET_COMMAND_KEY) + "," + userMessageElement(COMMAND_KEY) + "]";
 
     postBatch("not-a-uuid", batch(commands)).andExpect(status().isBadRequest());
     for (String malformedUuid :
@@ -209,7 +209,7 @@ class HarnessThreadCommandBatchControllerTest {
 
     // cursor 字段缺失对 SET_* 混合批次是请求错误，绝不静默回退默认值；纯消息的省略由单独用例覆盖。
     String mixedCommands =
-        "[" + setAgentCommand(COMMAND_KEY) + "," + userMessageElement(COMMAND_KEY) + "]";
+        "[" + setEnvironmentCommand(COMMAND_KEY) + "," + userMessageElement(COMMAND_KEY) + "]";
     postBatch(
             THREAD_ID,
             """
@@ -378,12 +378,12 @@ class HarnessThreadCommandBatchControllerTest {
         .formatted(idempotencyKey);
   }
 
-  private static String setAgentCommand(String idempotencyKey) {
+  private static String setEnvironmentCommand(String idempotencyKey) {
     return """
         {
-          "type":"SET_AGENT",
+          "type":"SET_ENVIRONMENT",
           "idempotencyKey":"%s",
-          "agentName":"coder"
+          "environmentName":"coder"
         }
         """
         .formatted(idempotencyKey);

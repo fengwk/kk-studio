@@ -17,9 +17,9 @@ import java.util.UUID;
  * owner -&gt; tree -&gt; Session -&gt; Thread 的规范锁序原子删除 Thread 执行事实与 join 回执、release Session blob
  * ref、删归属行与 Entry/Session，绝不误删其他 owner 的 Session。
  *
- * <p>归属行（{@code chat_session} / {@code project_issue_agent_thread}，均为 FK RESTRICT）必须先于 harness
- * Thread/Session 行删除。已绑定归属的 Session 不提供绕过业务清理的裸删除：Run 仍引用其 Thread/归属时，删除由复合 FK RESTRICT
- * 整体拒绝，本服务不做任何约束绕过、不删除 Run/Activity/预算等产品事实。因此 Issue 深删除的调用方必须先收尾并删除该 Issue 的 Run，再按 Agent 调用本服务。
+ * <p>归属行（{@code chat_session}，为 FK RESTRICT）必须先于 harness Thread/Session 行删除。已绑定归属的 Session
+ * 不提供绕过业务清理的裸删除：Run 仍引用其 Thread/归属时，删除由复合 FK RESTRICT 整体拒绝，本服务不做任何约束绕过、不删除 Run/Activity/预算等产品事实。因此
+ * Issue 深删除的调用方必须先收尾并删除该 Issue 的 Run，再按 Agent 调用本服务。
  */
 @Service
 public class SessionDeletionOrchestrator {

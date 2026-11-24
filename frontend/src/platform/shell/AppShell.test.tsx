@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Bot, FolderKanban, Grid2X2, Inbox, Settings } from 'lucide-react'
+import { Bot, Grid2X2, Inbox, Settings } from 'lucide-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { applicationContributions } from '@/app/application-contributions'
 import { AppShell } from '@/platform/shell/AppShell'
@@ -32,14 +32,6 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
     labelKey: 'ai.nav.interactions',
     ariaKey: 'ai.nav.interactionsAria',
     icon: Inbox,
-  },
-  {
-    id: 'projects',
-    groupId: 'projects',
-    to: '/projects',
-    labelKey: 'platform.nav.projects',
-    ariaKey: 'platform.nav.projectsAria',
-    icon: FolderKanban,
   },
   {
     id: 'canvas',
@@ -174,39 +166,17 @@ describe('AppShell settings navigation', () => {
     renderShell('/settings', <div>Settings content</div>)
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(document.querySelector('.app-frame')).not.toHaveClass('workspace-immersive')
-    // settings 激活时 AI/Projects/Canvas 一律不误激活。
+    // settings 激活时 AI/Canvas 一律不误激活。
     expect(screen.getByRole('link', { name: '设置' })).toHaveClass('active')
     expect(screen.getByRole('link', { name: '智能' })).not.toHaveClass('active')
-    expect(screen.getByRole('link', { name: '项目' })).not.toHaveClass('active')
     expect(screen.getByRole('link', { name: '画布' })).not.toHaveClass('active')
     expect(screen.getByRole('link', { name: '待处理事项' })).not.toHaveClass('active')
   })
 
-  it('does not mis-activate Settings on AI, Projects or Canvas routes', () => {
+  it('does not mis-activate Settings on the AI route', () => {
     renderShell('/chats', <div>Content</div>)
     expect(screen.getByRole('link', { name: '设置' })).not.toHaveClass('active')
     expect(screen.getByRole('link', { name: '智能' })).toHaveClass('active')
-  })
-})
-
-describe('AppShell platform feature navigation', () => {
-  it.each([
-    ['/projects', '项目', '/projects'],
-  ])('activates the feature link and keeps the brand in that feature for %s', (path, label, href) => {
-    renderShell(path, <div>Feature content</div>)
-
-    expect(screen.getByRole('link', { name: label })).toHaveClass('active')
-    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', href)
-    expect(screen.getByRole('link', { name: '智能' })).not.toHaveClass('active')
-  })
-
-  it('uses the immersive workspace shell for a project board', () => {
-    // 看板只有业务内部头部，不重复应用导航；项目列表仍保留全局导航。
-    renderShell('/projects/123', <div>Project board</div>)
-    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
-    expect(document.querySelector('.app-frame')).toHaveClass('workspace-immersive')
-    expect(screen.getByText('Project board')).toBeInTheDocument()
   })
 })
 

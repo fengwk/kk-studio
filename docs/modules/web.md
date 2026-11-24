@@ -1,9 +1,9 @@
 # Web 模块
 
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
-是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
+是生产 Spring Boot 组合根：装配 Platform、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Platform 与 Harness 的 Controller、DTO 和编排位于 `platform/runtime`，Chat、Canvas、Project 与 IDE 的
+Platform 与 Harness 的 Controller、DTO 和编排位于 `platform/runtime`，Chat、Canvas 与 IDE 的
 Controller 和 DTO 位于各自产品模块。Web 装配这些接口以及组合根自身的传输入口；领域规则、映射和事务由所属模块持有。
 HTTP 边界统一配置 JSON、参数绑定与错误映射，Web 不直连业务表或业务 repository。
 
@@ -54,7 +54,6 @@ PluginResourceGateway 留在 Harness 组合内，因为它需要 Harness 会话�
 | 生命周期 owner | 启停职责 |
 | --- | --- |
 | `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim 与本地执行准入并标记排空；2) 按 `LocalExecutionLifecycle` 的物理句柄在 `drainTimeout` 内等待 body 与资源结束；3) 使用同一总 deadline 的剩余预算中断未结束的本地 body、`EnvironmentDaemonServer.drain()` GOAWAY 并释放环境租约、交由 `ToolProcessor.drain()` 移交可 reattach 的远端工具并 release TOOL Work；4) 已产生的退出证据先持久化，无法证明退出时保留日志目录锁到 JVM 退出。默认 `60s + 30s = 90s`，下层不得各自重开预算；线程池由同一 deadline 的 shutdown/await 收尾，不另做无界 close 等待；`workersEnabled=false` 时不启动 dispatcher |
-| `issueReconcileRuntimeLifecycle` | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
 | `canvasFunctionDispatcherLifecycle` | 启动 wake，周期 poll，stop 关闭 drain；独立于 Harness worker 开关 |
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
 | ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
@@ -85,8 +84,6 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Canvas | `/api/canvas/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas/functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/platform/storage/uploads`、`/api/platform/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
-| Project | `/api/project/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
-| Issue | `/api/project/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开（控制器在 [apps/project](project.md)） |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/uninstall-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/{id}/events` | 创建、读取与整体替换（`note` + `daemonConfig`）、当前 owner 运行快照、注册令牌轮换、一次性安装码与按卡片安装/卸载脚本、受管二进制在线更新、运维事件；创建和轮换响应及安装脚本含凭据 |
@@ -108,15 +105,15 @@ Session 的 `GET /api/harness/sessions/{sessionId}/entries?cursor&limit` 按存�
 `limit` 默认 100、最大 200，响应为 `{items, nextCursor}`，`nextCursor` 为 null 表示末页。
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
-`/api/harness/command-batches` 只服务允许通用命令直写的创建型产品 owner（当前为 `CHAT`；`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
-`ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/harness/threads/{threadId}/command-batches`
+`/api/harness/command-batches` 只服务允许通用命令直写的创建型产品 owner（当前为 `CHAT`；`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`）；
+`/api/harness/threads/{threadId}/command-batches`
 服务既有 Thread 的 owner-free 续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。
-Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
+人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
 Harness 命令、target 与消息内容都是 sealed union：每个 variant 只携带自己的字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
 `NEW_FORKED_SESSION` 携带 `sourceThreadId`），未知 variant/字段由严格 HTTP mapper 拒绝，续写面仍校验精确 cursor。
-产品命令批为 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE；
+产品命令批为 SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE；
 `CUSTOM_MESSAGE` 与 `NOTIFICATION` 不在产品 HTTP 面。
 附件在接受事务转为 Resource，图片档位随消息冻结。
 Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。
@@ -141,7 +138,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 
 ### 请求诊断与预览
 
-`GET /api/harness/threads/{threadId}/tree` 单次返回该 Thread 所属执行树的执行根与全部 `SUBAGENT` 后代，排除内部 `COMPACTION` 节点；执行根可以是 `USER`、`CONTROLLER_TASK` 或 `PLUGIN_TASK`。目标 Thread 本身为 `COMPACTION` 时返回 404。节点字段包括 `threadId`、`kind`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `EXIT_PENDING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updatedAt` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。节点顺序为 `createdAt` 再 UUID。
+`GET /api/harness/threads/{threadId}/tree` 单次返回该 Thread 所属执行树的执行根与全部 `SUBAGENT` 后代，排除内部 `COMPACTION` 节点；执行根可以是 `USER` 或 `PLUGIN_TASK`。目标 Thread 本身为 `COMPACTION` 时返回 404。节点字段包括 `threadId`、`kind`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `EXIT_PENDING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updatedAt` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。节点顺序为 `createdAt` 再 UUID。
 
 `POST /api/harness/builtin/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configuration`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
@@ -161,9 +158,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
 Canvas commands 返回 patch，Function start 返回 202；资源读模型按 `type` 分为 `TEXT`（内联文本）与 `BLOB`（blob 引用）。
-Canvas Function 的 UNKNOWN resolve 要求 resolution 与非空 verification。Issue 结果未定的停止按 FAILED 收尾并以
-ERROR 暂停，`error`/`pauseDetail` 明确说明结果未知，只能由显式 resume 继续。
-Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
+Canvas Function 的 UNKNOWN resolve 要求 resolution 与非空 verification。Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
 ## 同源 IDE 网关
 
@@ -195,8 +190,7 @@ JSON Controller 直接返回资源本身：读取、更新与动作 200，创建
 自有代码只解析到该 Jackson 3 mapper；HTTP DTO 的严格字段规则直接由 Jackson 3 注解声明
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。`protocolOptionsJson` 的内容语法、64 KiB 上限与 canonical 化
 由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行，HTTP mapper 只检查 wire 形状，不重复解析选项。
-wire DTO 归属各领域模块：平台族在 `platform.runtime` 的 `<feature>.dto`（Harness DTO 在 `platform.harness.dto`），Canvas 与
-Project 在各自 `dto` 包。持久化 JSON 的领域 codec 复用
+wire DTO 归属各领域模块：平台族在 `platform.runtime` 的 `<feature>.dto`（Harness DTO 在 `platform.harness.dto`），Canvas 与持久化 JSON 的领域 codec 复用
 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)
 的节点读取、精确字段集合与“不回声上游字段集合”校验原语，各 codec 只声明字段集合和值类型。
 required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/HttpBoundaryConfiguration.java)
@@ -233,13 +227,13 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 ## 通知与浏览器事件
 
 [`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
-共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
-Thread version、Canvas revision、Project changed、Settings、执行树、交互、环境失效与 Plugin 目录变更；realtime 走独立的 LISTEN 连接。
+共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Canvas Function）、
+Thread version、Canvas revision、Settings、执行树、交互、环境失效与 Plugin 目录变更；realtime 走独立的 LISTEN 连接。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
 通道、payload 与进程内 fan-out 归各自生产方所有：Harness 的 Thread version、执行树与交互失效由
 [`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)
 给出 channel 与回调绑定；Canvas revision 属于 [Canvas](canvas.md#revision-通知) 的 `CanvasVersionNotifications`；
-Project 快照失效属于 `ProjectChangeNotifications`；环境失效属于
+环境失效属于
 [`EnvironmentChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentChangeNotifications.java)。
 Web 只把生产方的 channel 登记到 LISTEN 连接，把通知与 resync 转交给生产方入口，再把事件转发给浏览器。
 

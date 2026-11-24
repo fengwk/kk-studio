@@ -12,7 +12,7 @@ import { useActiveThreadTree } from './useActiveThreadTree'
 
 const transport = vi.fn()
 /** 同一 socket 上另一个资源订阅收到的提示次数，用来证明共享连接仍健康。 */
-let projectsChanged = 0
+let environmentsChanged = 0
 
 const ROOT = '00000000-0000-4000-8000-000000000001'
 const CHILD = '00000000-0000-4000-8000-000000000002'
@@ -41,12 +41,12 @@ function Panel() {
 }
 
 /** 同一物理 socket 上的另一个资源订阅：证明执行树恢复提示不拖垮共享连接。 */
-function ProjectsHint() {
-  useResourceSync({ kind: 'projects' }, {
+function EnvironmentsHint() {
+  useResourceSync({ kind: 'environments' }, {
     sync: () => {},
     syncOnSubscribed: false,
     onEvent: () => {
-      projectsChanged += 1
+      environmentsChanged += 1
     },
   })
   return null
@@ -66,13 +66,13 @@ function eventHost(client: QueryClient, sockets: FakeWebSocketHarness) {
     </QueryClientProvider>
   )
 }
-function renderPanel({ withProjectsHint = false }: { withProjectsHint?: boolean } = {}) {
+function renderPanel({ withEnvironmentsHint = false }: { withEnvironmentsHint?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
   render(eventHost(client, sockets)(
     <>
       <Panel />
-      {withProjectsHint ? <ProjectsHint /> : null}
+      {withEnvironmentsHint ? <EnvironmentsHint /> : null}
     </>,
   ))
   return { client, sockets }
@@ -508,16 +508,16 @@ describe('execution tree HTTP Instant contract', () => {
   })
 
   it('keeps a shared socket healthy: other resource hints still arrive after an oversized tree', async () => {
-    projectsChanged = 0
+    environmentsChanged = 0
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel({ withProjectsHint: true })
+    const { client, sockets } = renderPanel({ withEnvironmentsHint: true })
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(2))
     expect(socket.sentMessages()).toEqual(expect.arrayContaining([
       { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } },
-      { type: 'subscribe', resource: { kind: 'projects' } },
+      { type: 'subscribe', resource: { kind: 'environments' } },
     ]))
 
     const oversized = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'oversized shared' }]
@@ -527,9 +527,9 @@ describe('execution tree HTTP Instant contract', () => {
 
     // 溢出提示只影响该资源：物理连接与另一个订阅仍然工作。
     act(() => socket.emitServer({
-      type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: ROOT },
+      type: 'event', resource: { kind: 'environments' }, name: 'changed', data: {},
     }))
-    expect(projectsChanged).toBe(1)
+    expect(environmentsChanged).toBe(1)
     const live = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'live shared' }]
     act(() => socket.emitServer({
       type: 'event', resource: { kind: 'thread-tree', id: ROOT }, name: 'snapshot',

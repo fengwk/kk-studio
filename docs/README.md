@@ -24,7 +24,7 @@
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
-| 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas](modules/canvas.md) 与 [Project](modules/project.md) |
+| 使用 Canvas 资源与 Function | [Canvas](modules/canvas.md) |
 | 核对数据库关系、约束与基线 | [Schema](modules/schema.md)及 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
 | 报告安全漏洞 | [Security Policy](../SECURITY.md) |
 
@@ -79,7 +79,7 @@ HTML 和截图留在 `reports/`，不入库。构建后对两份 HTML 分别运�
 | --- | --- |
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
 | [Chat](modules/chat.md) | 对话集合如何持久化、分页，并持有与深删除 Harness Session？ |
-| [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
+
 | [IDE](modules/ide.md) | Chat 内同源 code-server 视图如何经 Daemon 命令通道、权威快照与复用数据连接打开、恢复和转发？ |
 
 ### 组合根与前端

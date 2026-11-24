@@ -32,13 +32,10 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRe
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifications;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
-import fun.fengwk.kkstudio.work.WorkClaim;
 
 import javax.sql.DataSource;
 
@@ -80,13 +77,10 @@ public class ApplicationEventConfiguration {
   public PostgresqlNotificationLoop postgresqlNotificationLoop(
       DataSource dataSource,
       HarnessWorkDispatcher dispatcher,
-      @Qualifier("issueReconcileDispatcher")
-          BoundedWorkDispatcher<WorkClaim> issueReconcileDispatcher,
       @Qualifier("canvasFunctionDispatcher")
           BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher,
       HarnessChangeNotifications harnessNotifications,
       CanvasVersionNotifications canvasVersionNotifications,
-      ProjectChangeNotifications projectChangeNotifications,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       EnvironmentChangeNotifications environmentChangeNotifications,
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
@@ -105,15 +99,9 @@ public class ApplicationEventConfiguration {
             new PostgresqlNotificationHandler(
                 DurableWorkStore.CHANNEL,
                 targetType ->
-                    durableWorkDispatcher(
-                            targetType,
-                            dispatcher,
-                            issueReconcileDispatcher,
-                            canvasFunctionDispatcher)
-                        .run(),
+                    durableWorkDispatcher(targetType, dispatcher, canvasFunctionDispatcher).run(),
                 () -> {
                   dispatcher.wake();
-                  issueReconcileDispatcher.wake();
                   canvasFunctionDispatcher.wake();
                 }),
             // Thread version 仍供平台内部等待者使用；浏览器快照推送订阅 threadSnapshots 通道。
@@ -131,11 +119,6 @@ public class ApplicationEventConfiguration {
                 CanvasVersionNotifications.CHANNEL,
                 canvasVersionNotifications::onNotification,
                 canvasVersionNotifications::broadcastResync),
-            // Project/Issue 失效：生产方拥有通道与订阅入口，数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
-            new PostgresqlNotificationHandler(
-                ProjectChangeNotifications.CHANNEL,
-                projectChangeNotifications::onNotification,
-                projectChangeNotifications::broadcastResync),
             // 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
@@ -232,7 +215,6 @@ public class ApplicationEventConfiguration {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      ProjectChangeNotifications projectChangeNotifications,
       EnvironmentChangeNotifications environmentChangeNotifications,
       Supplier<ApplicationEventSettings> settingsProvider,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
@@ -243,7 +225,6 @@ public class ApplicationEventConfiguration {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectChangeNotifications,
         environmentChangeNotifications,
         () -> settingsProvider.get().queueCapacity(),
         threadTreeSnapshotPublisher,
@@ -302,10 +283,8 @@ public class ApplicationEventConfiguration {
   private static Runnable durableWorkDispatcher(
       String targetType,
       HarnessWorkDispatcher harnessDispatcher,
-      BoundedWorkDispatcher<WorkClaim> issueReconcileDispatcher,
       BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher) {
     return switch (targetType) {
-      case IssueReconciler.TARGET_TYPE -> issueReconcileDispatcher::wake;
       case CanvasFunctionWorkStore.TARGET_TYPE -> canvasFunctionDispatcher::wake;
       default -> harnessDispatcher::wake;
     };

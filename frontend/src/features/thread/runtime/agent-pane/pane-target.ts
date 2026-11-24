@@ -150,9 +150,6 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
         && Array.isArray(value.contents)
         && value.contents.length > 0
         && value.contents.every(isCommandContent)
-    case 'SET_AGENT':
-      return hasExactKeys(value, ['type', 'idempotencyKey', 'agentName'])
-        && nonBlank(value.agentName)
     case 'SET_EXECUTION':
       return hasExactKeys(value, ['type', 'idempotencyKey', 'execution'])
         && isExecutionSelection(value.execution)

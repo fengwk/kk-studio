@@ -234,35 +234,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         "an ownerless root exposes nothing");
   }
 
-  /**
-   * Issue+Agent 执行根：R' 绑定 Issue，孙 C' 的等待审批沿祖先链归属到 R'，并读取根的 Issue/Agent owner。经 {@link
-   * InteractionService} 提交同一审批必须成功，证明先产品层级锁、再 Runtime 写回的祖先归属路径在真实 PG 上成立。
-   */
-  @Test
-  void issueAgentRootResolvesGrandchildInteractionThroughAncestorAttribution() {
-    Tree tree = buildTree();
-    IssueBinding issue = bindIssueAgent(tree.root());
-    UUID cInvocation = attachWaiting(tree.c(), false, "{}", true);
-
-    InteractionPageDTO page = queryService.listInteractions(tree.root(), null, 50);
-    assertEquals(1, page.getItems().size());
-    InteractionDTO.Approval item = approval(page.getItems().getFirst());
-    assertEquals(cInvocation.toString(), item.toolInvocationId());
-    assertEquals(tree.c().toString(), item.threadId());
-    assertEquals(tree.root().toString(), item.rootThreadId());
-    assertEquals("ISSUE_AGENT", item.owner().getKind());
-    assertEquals(issue.issueId() + ":" + AGENT, item.owner().getId());
-
-    UUID decisionId = UUID.randomUUID();
-    ToolInvocation decided =
-        interactionService.decideApproval(
-            new ToolApprovalCommand(
-                tree.c(), cInvocation, ToolApprovalDecision.ALLOWED, decisionId, ACTOR, null));
-    // ALLOWED 把调用放回 READY 以便按 completed approval 重新派发，审批决定本身已 durable。
-    assertEquals(ToolInvocationStatus.READY, decided.status());
-    assertEquals(ToolApprovalDecision.ALLOWED, decided.approval().decision());
-  }
-
   /** root 过滤 + keyset 分页：同一执行根下跨 C/B/A 三个节点的等待行必须全部收敛，即便每页只取一条也不能漏；插在中间的无归属等待行不得打乱游标。 */
   @Test
   void rootFilterPaginationNeverDropsWaitingSiblings() {
@@ -952,31 +923,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     return chatId;
   }
 
-  /** 在执行根上插入一个 Issue+Agent 归属，并返回 product 层级 id。 */
-  private IssueBinding bindIssueAgent(UUID rootThreadId) {
-    UUID projectId = UUID.randomUUID();
-    jdbc.update(
-        "insert into project (id, title, description, workflow)"
-            + " values (?, ?, '', '{\"states\":[]}'::jsonb)",
-        projectId,
-        "project-" + projectId);
-    UUID issueId = UUID.randomUUID();
-    jdbc.update(
-        "insert into project_issue (id, project_id, number, title, state)"
-            + " values (?, ?, ?, ?, 'INIT')",
-        issueId,
-        projectId,
-        1L,
-        "issue-" + issueId);
-    jdbc.update(
-        "insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)"
-            + " select ?, ?, session_id, id from harness_thread where id = ?",
-        issueId,
-        AGENT,
-        rootThreadId);
-    return new IssueBinding(projectId, issueId);
-  }
-
   /**
    * 在既有 Thread 上按真实 Runtime 同款 domain 形状挂一个等待调用：ROOT -&gt; TURN_START -&gt; USER -&gt;
    * ASSISTANT(tool call) + SUCCEEDED Model + ToolInvocation；{@code freeze} 时再走 READY-&gt;WAITING
@@ -1429,6 +1375,4 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private record Tree(UUID root, UUID rootSessionId, UUID a, UUID b, UUID c, UUID cSessionId) {}
 
   private record Seed(UUID threadId, UUID sessionId, UUID invocationId) {}
-
-  private record IssueBinding(UUID projectId, UUID issueId) {}
 }

@@ -99,7 +99,7 @@ export function handlePaneCommand(ctx: PaneCommandContext, command: ThreadComman
       ctx.changeTarget({ kind: 'NEW_SESSION_DRAFT' }, ctx.activeDraft)
       return
     case 'agent':
-      if (capabilities?.allowSwitchAgent === false) {
+      if (isBoundTarget(target)) {
         setActionError(t('ai.runtime.action.agentSwitchDisabled'))
         return
       }

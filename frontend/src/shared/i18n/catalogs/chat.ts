@@ -74,6 +74,18 @@ export const chatCatalog = {
     'en-US': 'Failed to load environments; current selection kept',
     'zh-CN': '环境列表加载失败，已保留当前选择',
   },
+  'ai.chat.yolo': {
+    'en-US': 'YOLO mode',
+    'zh-CN': 'YOLO 模式',
+  },
+  'ai.chat.yoloEnabled': {
+    'en-US': 'Enabled',
+    'zh-CN': '已启用',
+  },
+  'ai.chat.yoloDisabled': {
+    'en-US': 'Disabled',
+    'zh-CN': '已禁用',
+  },
   'ai.chat.yoloDescription': {
     'en-US': 'Automatically approve tool calls without manual confirmation',
     'zh-CN': '自动批准工具调用，跳过人工确认',
@@ -2294,10 +2306,6 @@ export const chatCatalog = {
   'ai.interaction.ownerKind.CHAT': {
     'en-US': 'Chat',
     'zh-CN': '对话',
-  },
-  'ai.interaction.ownerKind.ISSUE_AGENT': {
-    'en-US': 'Issue',
-    'zh-CN': 'Issue',
   },
   'ai.interaction.ownerKind.AGENT_TASK': {
     'en-US': 'Agent task',

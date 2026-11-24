@@ -61,7 +61,6 @@ class ApplicationEventHubTest {
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
   private static final ResourceKey THREAD_TREE_KEY =
       new ResourceKey(ResourceKind.THREAD_TREE, THREAD);
-  private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
 
   /** Hub 构造注入的缓冲上限：足够小以便测试溢出折叠路径，同时 > 1 覆盖多信号缓冲。 */
   private static final int BUFFER_CAPACITY = 8;
@@ -70,7 +69,6 @@ class ApplicationEventHubTest {
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
-  private NotificationInvalidationSource projectChangeSource;
   private HarnessInvalidationChanges executionTreeChangeSource;
   private HarnessInvalidationChanges interactionChangeSource;
   private NotificationInvalidationSource environmentChangeSource;
@@ -83,7 +81,6 @@ class ApplicationEventHubTest {
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
-    projectChangeSource = mock(NotificationInvalidationSource.class);
     executionTreeChangeSource = mock(HarnessInvalidationChanges.class);
     interactionChangeSource = mock(HarnessInvalidationChanges.class);
     environmentChangeSource = mock(NotificationInvalidationSource.class);
@@ -95,7 +92,6 @@ class ApplicationEventHubTest {
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(() -> {});
-    when(projectChangeSource.subscribe(any(), any())).thenReturn(() -> {});
     when(executionTreeChangeSource.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
     when(interactionChangeSource.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
     when(environmentChangeSource.subscribe(any(), any())).thenReturn(() -> {});
@@ -105,7 +101,6 @@ class ApplicationEventHubTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> BUFFER_CAPACITY);
   }
@@ -138,7 +133,6 @@ class ApplicationEventHubTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> BUFFER_CAPACITY,
             publisher);
@@ -183,7 +177,6 @@ class ApplicationEventHubTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> BUFFER_CAPACITY,
             publisher);
@@ -420,50 +413,22 @@ class ApplicationEventHubTest {
     assertEquals(List.of(new Signal.Version("4")), canvasSignals);
   }
 
-  @Test
-  void projectInvalidationFansOutAndReleasesItsUpstream() {
-    AtomicReference<Consumer<NotificationInvalidationSource.Event>> projectConsumer =
-        new AtomicReference<>();
-    AtomicInteger projectReleases = new AtomicInteger();
-    when(projectChangeSource.subscribe(any(), any()))
-        .thenAnswer(
-            inv -> {
-              projectConsumer.set(inv.getArgument(1));
-              return (Runnable) projectReleases::incrementAndGet;
-            });
-
-    List<Signal> projectSignals = new ArrayList<>();
-    Subscription projectSubscription = hub.subscribe(PROJECTS_KEY, projectSignals::add);
-    assertEquals(0L, projectSubscription.cursor());
-    projectSubscription.activate();
-
-    UUID projectId = UUID.randomUUID();
-    projectConsumer.get().accept(new NotificationInvalidationSource.Event.Changed(projectId));
-    projectConsumer.get().accept(new NotificationInvalidationSource.Event.Resync());
-    assertEquals(
-        List.of(new Signal.ProjectChanged(projectId), new Signal.Resync()), projectSignals);
-
-    projectSubscription.close();
-    assertEquals(
-        1, projectReleases.get(), "last release must close the generic invalidation upstream");
-  }
-
   /** Transport sinks and unsubscribe may contend on the connection lock, not on the Hub lock. */
   @Test
   void canReleaseWhileFanoutSinkIsWaiting() throws Exception {
-    AtomicReference<Consumer<NotificationInvalidationSource.Event>> projectConsumer =
+    AtomicReference<Consumer<NotificationInvalidationSource.Event>> environmentConsumer =
         new AtomicReference<>();
-    when(projectChangeSource.subscribe(any(), any()))
+    when(environmentChangeSource.subscribe(any(), any()))
         .thenAnswer(
             invocation -> {
-              projectConsumer.set(invocation.getArgument(1));
+              environmentConsumer.set(invocation.getArgument(1));
               return (Runnable) () -> {};
             });
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch unblock = new CountDownLatch(1);
     Subscription subscription =
         hub.subscribe(
-            PROJECTS_KEY,
+            new ResourceKey(ResourceKind.ENVIRONMENTS, null),
             ignored -> {
               entered.countDown();
               try {
@@ -478,7 +443,9 @@ class ApplicationEventHubTest {
       Future<?> delivery =
           worker.submit(
               () ->
-                  projectConsumer.get().accept(new NotificationInvalidationSource.Event.Resync()));
+                  environmentConsumer
+                      .get()
+                      .accept(new NotificationInvalidationSource.Event.Resync()));
       try {
         assertTrue(entered.await(5, TimeUnit.SECONDS));
         worker.submit(subscription::close).get(2, TimeUnit.SECONDS);
@@ -495,7 +462,7 @@ class ApplicationEventHubTest {
     assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.THREAD_TREE, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceKey(ResourceKind.PROJECTS, UUID.randomUUID()));
+        () -> new ResourceKey(ResourceKind.ENVIRONMENTS, UUID.randomUUID()));
     assertThrows(
         IllegalArgumentException.class,
         () -> new ResourceKey(ResourceKind.INTERACTIONS, UUID.randomUUID()));

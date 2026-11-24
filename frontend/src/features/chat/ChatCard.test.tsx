@@ -107,7 +107,7 @@ describe('ChatCard', () => {
     )
 
     expect(screen.getByText('YOLO 模式')).toBeInTheDocument()
-    expect(screen.getByText('开启')).toBeInTheDocument()
+    expect(screen.getByText('已启用')).toBeInTheDocument()
     expect(screen.getByText('docker-node')).toBeInTheDocument()
 
     rerender(
@@ -119,7 +119,7 @@ describe('ChatCard', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText('关闭')).toBeInTheDocument()
+    expect(screen.getByText('已禁用')).toBeInTheDocument()
     expect(screen.getByText('不选择环境')).toBeInTheDocument()
   })
 

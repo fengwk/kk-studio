@@ -10,7 +10,6 @@ const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 const threadResource = { kind: 'thread', id: THREAD_ID } as const
 const canvasResource = { kind: 'canvas', id: CANVAS_ID } as const
 const treeResource = { kind: 'thread-tree', id: THREAD_ID } as const
-const projectsResource = { kind: 'projects' } as const
 const interactionsResource = { kind: 'interactions' } as const
 const environmentsResource = { kind: 'environments' } as const
 const EVENT_NODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -65,11 +64,6 @@ describe('encodeClientMessage', () => {
         encodeClientMessage({ type: 'unsubscribe', resource: canvasResource }),
       ),
     ).toEqual({ type: 'unsubscribe', resource: canvasResource })
-    expect(
-      JSON.parse(
-        encodeClientMessage({ type: 'subscribe', resource: projectsResource }),
-      ),
-    ).toEqual({ type: 'subscribe', resource: projectsResource })
     expect(
       JSON.parse(encodeClientMessage({ type: 'subscribe', resource: treeResource })),
     ).toEqual({ type: 'subscribe', resource: treeResource })
@@ -171,16 +165,6 @@ describe('decodeServerMessage', () => {
       ),
     ).toEqual({ type: 'subscribed', resource: threadResource, cursor: '0' })
     expect(decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: threadResource, cursor: '42' }))).toBeNull()
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          
-          type: 'subscribed',
-          resource: projectsResource,
-          cursor: '0',
-        }),
-      ),
-    ).toEqual({ type: 'subscribed', resource: projectsResource, cursor: '0' })
   })
 
   it('decodes hint-resource subscribed frames with the mandatory zero cursor', () => {
@@ -305,7 +289,6 @@ describe('decodeServerMessage', () => {
       { type: 'snapshot-ref', resource: treeResource, version: '1' },
       // 其他资源不会以整帧溢出形式出现。
       { type: 'snapshot-ref', resource: canvasResource },
-      { type: 'snapshot-ref', resource: projectsResource },
       { type: 'snapshot-ref', resource: { kind: 'thread', id: 'not-a-uuid' }, version: '1' },
       // 字段集精确：不得混入 event 的字段。
       { type: 'snapshot-ref', resource: threadResource, version: '1', name: 'snapshot' },
@@ -363,7 +346,6 @@ describe('decodeServerMessage', () => {
       // 非法 resource/name 组合。
       JSON.stringify({ type: 'event', resource: threadResource, name: 'revision', data: { revision: '1' } }),
       JSON.stringify({ type: 'event', resource: canvasResource, name: 'snapshot', data: {} }),
-      JSON.stringify({ type: 'event', resource: projectsResource, name: 'snapshot', data: {} }),
       JSON.stringify({ type: 'event', resource: threadResource, name: 'unknown', data: {} }),
       // cursor 出现与否与组合不符：属于连接级违规，不得被降级为资源错误。
       JSON.stringify({ type: 'event', resource: threadResource, name: 'snapshot', data: threadSnapshot(), cursor: '43' }),
@@ -420,22 +402,6 @@ describe('decodeServerMessage', () => {
       name: 'revision',
       data: { revision: '3' },
       cursor: '3',
-    })
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          
-          type: 'event',
-          resource: projectsResource,
-          name: 'changed',
-          data: { projectId: THREAD_ID },
-        }),
-      ),
-    ).toEqual({
-      type: 'event',
-      resource: projectsResource,
-      name: 'changed',
-      data: { projectId: THREAD_ID },
     })
   })
 
@@ -515,16 +481,6 @@ describe('decodeServerMessage', () => {
           
           type: 'resync',
           resource: { kind: 'canvas', id: 7 },
-        }),
-      ),
-    ).toBeNull()
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          
-          type: 'subscribed',
-          resource: { kind: 'projects', id: THREAD_ID },
-          cursor: '0',
         }),
       ),
     ).toBeNull()
@@ -745,32 +701,10 @@ describe('decodeServerMessage', () => {
     ).toBeNull()
   })
 
-  it('rejects unknown resources and invalid project payloads', () => {
-    const projectChanged = {
-      
-      type: 'event',
-      resource: projectsResource,
-      name: 'changed',
-      data: { projectId: THREAD_ID },
-    }
-    // cursor 出现本身与提示型组合不符：连接级违规。
-    expect(
-      decodeServerMessage(JSON.stringify({ ...projectChanged, cursor: '1' })),
-    ).toBeNull()
-    // 载荷值非法：只影响 projects 资源。
+  it('rejects unknown resources', () => {
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...projectChanged, data: { projectId: 'not-a-uuid' } }),
-      ),
-    ).toEqual(invalidPayload(projectsResource, 'projects', 'changed'))
-    expect(
-      decodeServerMessage(
-        JSON.stringify({ ...projectChanged, data: { projectId: THREAD_ID, extra: true } }),
-      ),
-    ).toEqual(invalidPayload(projectsResource, 'projects', 'changed'))
-    expect(
-      decodeServerMessage(
-        JSON.stringify({ ...projectChanged, resource: { kind: 'unknown' } }),
+        JSON.stringify({ type: 'event', resource: { kind: 'unknown' }, name: 'changed', data: {} }),
       ),
     ).toBeNull()
   })

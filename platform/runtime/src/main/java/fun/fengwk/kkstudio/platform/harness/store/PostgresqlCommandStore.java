@@ -268,8 +268,8 @@ final class PostgresqlCommandStore implements CommandStore {
 
   /**
    * {@code appliedEntryId}（若有）必须与命令类型精确匹配：{@code NOTIFICATION} 必须引用自身四字段完全一致的 NOTIFICATION
-   * Entry；standalone 分支设置命令（SET_AGENT / SET_EXECUTION / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS
-   * 快照 Entry；其它命令 必须引用本 Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
+   * Entry；standalone 分支设置命令（SET_EXECUTION / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS 快照 Entry；其它命令
+   * 必须引用本 Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
    */
   private void requireValidAppliedEntry(ThreadCommand command) {
     UUID appliedEntryId = command.appliedEntryId();
@@ -315,9 +315,7 @@ final class PostgresqlCommandStore implements CommandStore {
   }
 
   private static boolean isBranchSettingCommand(ThreadCommandType type) {
-    return type == ThreadCommandType.SET_AGENT
-        || type == ThreadCommandType.SET_EXECUTION
-        || type == ThreadCommandType.SET_ENVIRONMENT;
+    return type == ThreadCommandType.SET_EXECUTION || type == ThreadCommandType.SET_ENVIRONMENT;
   }
 
   private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {

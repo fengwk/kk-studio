@@ -62,8 +62,8 @@ describe('interactionOwnerLabel', () => {
   it('归属固定为“类型 · 标题”，标题来自会话归属 SPI', () => {
     expect(interactionOwnerLabel({ ...owner, title: '产品对话' })).toBe('对话 · 产品对话')
     setLocale('en-US')
-    expect(interactionOwnerLabel({ ...owner, kind: 'ISSUE_AGENT', title: '修复缺陷' }))
-      .toBe('Issue · 修复缺陷')
+    expect(interactionOwnerLabel({ ...owner, kind: 'CHAT', title: '修复缺陷' }))
+      .toBe('Chat · 修复缺陷')
     expect(interactionOwnerLabel({ ...owner, kind: 'AGENT_TASK', title: 'reporter' }))
       .toBe('Agent task · reporter')
     setLocale('zh-CN')

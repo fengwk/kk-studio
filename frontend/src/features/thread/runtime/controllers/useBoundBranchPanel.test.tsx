@@ -171,8 +171,6 @@ function busyThreadFixture(
 
 function acceptedCommandPayload(command: HarnessCommandCreateDTO): Record<string, unknown> {
   switch (command.type) {
-    case 'SET_AGENT':
-      return { agentName: command.agentName }
     case 'SET_EXECUTION':
       return { execution: command.execution }
     case 'SET_ENVIRONMENT':
@@ -376,7 +374,7 @@ describe('useBoundBranchPanel', () => {
   it('initializes the draft from the snapshot with queued SET_* projected, and submits without a reversal diff', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID), {
-        queuedCommands: [queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' })],
+        queuedCommands: [queuedSettingCommand('1', 'SET_EXECUTION', { execution: createBuiltinExecution('Claude', 'fast') })],
       }),
     )
     const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
@@ -384,10 +382,10 @@ describe('useBoundBranchPanel', () => {
     })
 
     await waitFor(() => expect(result.current.controller.thread?.threadId).toBe(THREAD_ID))
-    // base 跟随快照事实；draft 投影 queued SET_AGENT（绝不重复携带在途 settings）。
+    // base 跟随快照事实；draft 投影 queued SET_EXECUTION（绝不重复携带在途 settings）。
     expect(result.current.branchState?.base.agentName).toBe('assistant')
-    expect(result.current.draft?.agentName).toBe('coder')
-    expect(result.current.effectiveBase?.agentName).toBe('coder')
+    expect(result.current.draft?.execution).toEqual(createBuiltinExecution('Claude', 'fast'))
+    expect(result.current.effectiveBase?.execution).toEqual(createBuiltinExecution('Claude', 'fast'))
     expect(result.current.dirty).toBe(false)
 
     await send(result)
@@ -401,7 +399,7 @@ describe('useBoundBranchPanel', () => {
     // 既有 Thread 的命令批次由路径定位，请求体不携带 owner 或 target。
     expect(request).not.toHaveProperty('owner')
     expect(request).not.toHaveProperty('target')
-    // 投影后 effectiveBase === draft：最小 diff 只含 USER_MESSAGE，无 SET_AGENT reversal。
+    // 投影后 effectiveBase === draft：最小 diff 只含 USER_MESSAGE，无 SET_EXECUTION reversal.
     expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
     expect(request.commands[0]).toMatchObject({
       contents: [{ type: 'TEXT', text: 'hello world' }],
@@ -417,16 +415,14 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.dirty).toBe(false)
 
     act(() => {
-      // 采用新 agent 及其关联预设 model；yolo 保持快照值，后续手动选择覆盖。
-      expect(result.current.selectAgent('coder')).toBe(true)
-      expect(result.current.selectAgent('missing')).toBe(false)
+      // 执行配置和环境通过命令提交，YOLO 通过控制面提交。
       result.current.setYoloEnabled(true)
       result.current.selectModel({ modelName: 'GPT-5', variant: 'v2' })
       result.current.selectEnvironment('dev-env')
     })
 
     expect(result.current.draft).toEqual({
-      agentName: 'coder',
+      agentName: 'assistant',
       execution: createBuiltinExecution('GPT-5', 'v2'),
       environmentName: 'dev-env',
       yoloEnabled: true,
@@ -439,104 +435,18 @@ describe('useBoundBranchPanel', () => {
 
     const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(batchThreadId).toBe(THREAD_ID)
-    // buildBranchDiffCommands 的固定顺序：AGENT/EXECUTION/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
+    // buildBranchDiffCommands 的固定顺序：EXECUTION/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
       'SET_EXECUTION',
       'SET_ENVIRONMENT',
       'USER_MESSAGE',
     ])
-    const setAgent = batch.commands[0]!
-    expect(setAgent).toMatchObject({ agentName: 'coder' })
-    const setEnv = batch.commands[2]!
+    const setEnv = batch.commands[1]!
     expect(setEnv).toMatchObject({ environmentName: 'dev-env' })
     // 直接控制面只提交目标策略，绝不生成 SET_YOLO command。
     expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
       yoloEnabled: true,
     })
-  })
-
-  it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_EXECUTION+USER_MESSAGE', async () => {
-    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
-      wrapper: clientWrapper(createClient()),
-    })
-
-    await waitFor(() => expect(result.current.branchState).not.toBeNull())
-    act(() => {
-      result.current.selectEnvironment('existing-env')
-      result.current.setYoloEnabled(true)
-    })
-
-    act(() => {
-      // 切换到目标 agent writer，其模型为 anthropic/Claude，变体为 fast
-      const ok = result.current.selectAgent('writer')
-      expect(ok).toBe(true)
-    })
-
-    expect(result.current.draft).toEqual({
-      agentName: 'writer',
-      execution: createBuiltinExecution('Claude', 'fast'),
-      environmentName: 'existing-env',
-      yoloEnabled: true,
-    })
-    expect(result.current.dirty).toBe(true)
-
-    await send(result)
-
-    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
-    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
-    expect(batchThreadId).toBe(THREAD_ID)
-    expect(batch.commands.map((cmd) => cmd.type)).toEqual([
-      'SET_AGENT',
-      'SET_EXECUTION',
-      'SET_ENVIRONMENT',
-      'USER_MESSAGE',
-    ])
-    expect(batch.commands[0]).toMatchObject({ agentName: 'writer' })
-    expect(batch.commands[1]).toMatchObject({
-      execution: createBuiltinExecution('Claude', 'fast'),
-    })
-  })
-
-  it('rejects selectAgent when agent model or variant is unresolvable without mutating draft', async () => {
-    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
-      wrapper: clientWrapper(createClient()),
-    })
-
-    await waitFor(() => expect(result.current.branchState).not.toBeNull())
-    const initialDraft = { ...result.current.draft! }
-
-    act(() => {
-      // 不存在的 model
-      expect(result.current.selectAgent('broken-model-agent')).toBe(false)
-    })
-    expect(result.current.draft).toEqual(initialDraft)
-
-    act(() => {
-      // 不存在的 variant
-      expect(result.current.selectAgent('broken-variant-agent')).toBe(false)
-    })
-    expect(result.current.draft).toEqual(initialDraft)
-  })
-
-  it('resets manual model modification when reselecting the same agent', async () => {
-    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
-      wrapper: clientWrapper(createClient()),
-    })
-
-    await waitFor(() => expect(result.current.branchState).not.toBeNull())
-    act(() => {
-      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
-    })
-    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
-
-    act(() => {
-      // 重新选中当前 agent assistant，显式恢复 preset 模型设置
-      expect(result.current.selectAgent('assistant')).toBe(true)
-    })
-    expect(result.current.draft?.execution).toEqual(
-      createBuiltinExecution('MiniMax', 'default'),
-    )
   })
 
   it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
@@ -546,29 +456,29 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
       result.current.setYoloEnabled(true)
     })
-    // 乐观：draft 立即变脏（yolo 目标值 + 未发送 agent），base 保持快照。
+    // 乐观：draft 立即变脏（yolo 目标值 + 未发送的模型设置），base 保持快照。
     expect(result.current.draft?.yoloEnabled).toBe(true)
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.branchState?.base.yoloEnabled).toBe(false)
 
     await act(async () => {
       await Promise.resolve()
     })
-    // 成功：base + draft 的 yolo 对齐服务器权威值；未发送的 agent 编辑原样保留。
+    // 成功：base + draft 的 yolo 对齐服务器权威值；未发送的模型编辑原样保留。
     expect(result.current.branchState?.base.yoloEnabled).toBe(true)
     expect(result.current.draft?.yoloEnabled).toBe(true)
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.yoloError).toBeNull()
 
     await send(result)
     const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(batchThreadId).toBe(THREAD_ID)
-    // 未发送的 agent 编辑仍与消息一起提交；yolo 已对齐，绝不重复发送。
+    // 未发送的模型编辑仍与消息一起提交；yolo 已对齐，绝不重复发送。
     expect(batch.commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
+      'SET_EXECUTION',
       'USER_MESSAGE',
     ])
   })
@@ -887,7 +797,7 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
       result.current.setYoloEnabled(true)
     })
     expect(result.current.dirty).toBe(true)
@@ -925,10 +835,10 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
       result.current.setYoloEnabled(true)
     })
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.dirty).toBe(true)
 
     rerender({ threadId: THREAD_ID_2 })
@@ -941,7 +851,7 @@ describe('useBoundBranchPanel', () => {
     // 即使是旧 Thread 的 snapshot 也绝不会被当作新 Thread 的状态初始化。
     expect(result.current.controller.thread).toBeUndefined()
     act(() => {
-      expect(result.current.selectAgent('writer')).toBe(false)
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     expect(result.current.draft).toBeUndefined()
 
@@ -1027,9 +937,9 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
 
     // 更新的权威 snapshot（settings 变化 + version 前进）：base 跟随，draft 保留本地编辑。
     await act(async () => {
@@ -1044,7 +954,7 @@ describe('useBoundBranchPanel', () => {
       )
     })
     await waitFor(() => expect(result.current.branchState?.base.agentName).toBe('updated'))
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.dirty).toBe(true)
   })
 
@@ -1108,7 +1018,7 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     expect(result.current.dirty).toBe(true)
 
@@ -1120,7 +1030,7 @@ describe('useBoundBranchPanel', () => {
         }),
       )
     })
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
 
     // 当前 Thread 的权威 DTO：base === draft === snapshot（干净），并采纳其 yolo/version。
     act(() => {
@@ -1155,19 +1065,19 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      expect(result.current.selectAgent('writer')).toBe(true)
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
 
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
     const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(batchThreadId).toBe(THREAD_ID)
     // busy 立即提交纯设置批次：固定顺序的 SET_*，绝不伪造 USER_MESSAGE 终止输入。
-    expect(request.commands.map((command) => command.type)).toEqual(['SET_AGENT', 'SET_EXECUTION'])
+    expect(request.commands.map((command) => command.type)).toEqual(['SET_EXECUTION'])
     expect(request.expectedHeadEntryId).toBe('e-assistant')
     expect(request.expectedNextCommandSequence).toBe('1')
 
     // 选择即时反映为待生效，而不是本地草稿。
-    expect(result.current.draft?.agentName).toBe('writer')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
     expect(result.current.settingsError).toBeNull()
   })
@@ -1190,7 +1100,7 @@ describe('useBoundBranchPanel', () => {
       await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
       act(() => {
-        expect(result.current.selectAgent('coder')).toBe(true)
+        result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
       })
       await act(async () => {
         await Promise.resolve()
@@ -1198,7 +1108,7 @@ describe('useBoundBranchPanel', () => {
 
       // 静止 Thread 不立即提交：选择保持草稿，随下一条输入一起提交。
       expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
-      expect(result.current.draft?.agentName).toBe('coder')
+      expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
       expect(result.current.settingsStatus).toBe('draft')
       unmount()
     }
@@ -1242,12 +1152,12 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      result.current.selectAgent('writer')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
       result.current.selectModel({ modelName: 'GPT-5', variant: 'v2' })
     })
     // 串行且合并：第二个请求必须等第一个返回后才发出（latest intent 只保留最后目标）。
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.commands).toEqual(['SET_AGENT', 'SET_EXECUTION'])
+    expect(calls[0]!.commands).toEqual(['SET_EXECUTION'])
     // DTO 允许纯消息省 cursor，但设置请求仍必须精确携带初始 cursor。
     expect(calls[0]!.headEntryId).toBe('e-assistant')
     expect(calls[0]!.nextCommandSequence).toBe('1')
@@ -1285,16 +1195,16 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
     // 等待 overlay 装入 effective base：状态同步后 buildBatch 才携带已提交的 SET 差异。
-    await waitFor(() => expect(result.current.effectiveBase?.agentName).toBe('coder'))
+    await waitFor(() => expect(getBuiltinModelSelection(result.current.effectiveBase?.execution)?.modelName).toBe('CustomModel'))
 
     await send(result)
     expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
     const [, messageBatch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]!
-    // snapshot 尚未回读时，已提交的 SET_AGENT 由 overlay 提供 effective base，绝不重复携带。
+    // snapshot 尚未回读时，已提交的 SET_EXECUTION 由 overlay 提供 effective base，绝不重复携带。
     expect(messageBatch.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
   })
 
@@ -1310,12 +1220,12 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      result.current.selectAgent('coder')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     await waitFor(() => expect(result.current.settingsError).toContain('request rejected'))
 
     // 失败保输入：选择留在 draft（随下一条输入提交），绝不被静默丢弃。
-    expect(result.current.draft?.agentName).toBe('coder')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.settingsStatus).toBe('draft')
     act(() => {
       result.current.dismissSettingsError()
@@ -1381,7 +1291,7 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      result.current.selectAgent('writer')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
 
@@ -1411,13 +1321,13 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      expect(result.current.selectAgent('writer')).toBe(true)
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
 
     // 重复 render/effect 绝不触发第二次写：一次选择对应恰好一个 standalone SET 批次。
     await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
     expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
-    expect(result.current.draft?.agentName).toBe('writer')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.settingsError).toBeNull()
   })
 
@@ -1453,7 +1363,7 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      result.current.selectAgent('writer')
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0]!.threadId).toBe(THREAD_ID)

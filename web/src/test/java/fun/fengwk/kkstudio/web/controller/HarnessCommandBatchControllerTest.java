@@ -292,14 +292,14 @@ class HarnessCommandBatchControllerTest {
             newThreadTarget(),
             """
             [{
+              "type":"SET_ENVIRONMENT",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000022",
+              "environmentName":"default-assistant"
+            },
+            {
               "type":"SET_EXECUTION",
               "idempotencyKey":"00000000-0000-0000-0000-000000000021",
               "execution":{"driver":"builtin","settings":{"modelName":"gpt-5","variant":"default"}}
-            },
-            {
-              "type":"SET_AGENT",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000022",
-              "agentName":"default-assistant"
             },
             {
               "type":"USER_MESSAGE",
@@ -383,8 +383,8 @@ class HarnessCommandBatchControllerTest {
   }
 
   @Test
-  void rejectsIssueAgentCommandsAtPublicHttpBoundary() throws Exception {
-    // 测试意图：Issue Agent 的用户输入和分叉必须经 Issue 业务工作流，不能直接以 owner 伪造公共命令批，返回 409 Conflict。
+  void rejectsCustomOwnerCommandsAtPublicHttpBoundary() throws Exception {
+    // 测试意图：禁止直接命令的 owner 不能通过公共命令批入口写入，返回 409 Conflict。
     when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
         .thenThrow(new DirectCommandsNotAllowedException());
     for (String target : List.of(newSessionTarget(), newThreadTarget())) {
@@ -401,9 +401,7 @@ class HarnessCommandBatchControllerTest {
                       .formatted(IDEMPOTENCY_KEY))
               .replace(
                   "\"owner\":{\"kind\":\"CHAT\",\"id\":\"" + OWNER_ID + "\"}",
-                  "\"owner\":{\"kind\":\"ISSUE_AGENT\",\"id\":\""
-                      + OWNER_ID
-                      + ":default-assistant\"}");
+                  "\"owner\":{\"kind\":\"CUSTOM\",\"id\":\"" + OWNER_ID + ":custom-owner\"}");
       mockMvc
           .perform(
               post("/api/harness/command-batches")

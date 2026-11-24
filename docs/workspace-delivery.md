@@ -39,7 +39,7 @@
 
 | 范围 | 退出内容 |
 | --- | --- |
-| **Project / Issue** | [后端](../apps/project/)、[前端](../frontend/src/features/projects/)、7 张表、`CONTROLLER_TASK`、独有的 API、文案、E2E 和[模块文档](modules/project.md)。 |
+| **Project / Issue** | 后端、前端、7 张表、`CONTROLLER_TASK`、独有的 API、文案、E2E 和模块文档。 |
 | **旧 Chat** | [后端](../apps/chat/)、[前端](../frontend/src/features/chat/)、`chat_session`、旧路由、旧目录／多面板外壳和[模块文档](modules/chat.md)。应用归属改用目录边和外键，移除 `SessionOwnership` 与 `AgentReferenceCheck` 派发。 |
 | **被替代的 UI** | 独立 Entry 历史树、旧会话／Thread 选择器、`/agent` 换 Agent 入口、[全局待处理页](../frontend/src/app/pages/InteractionsPage.tsx)、画布库、Studio IDE 浮层及外层标签。保留的行为迁入新宿主后，再删除专用组件、样式、存储和测试。 |
 | **被替代的接口** | 通用的 `POST /api/harness/command-batches` 创建入口、旧 Session／Thread 改名接口、无归属的画布创建／列表接口、通用 Blob 取址接口和 `projects` 实时资源。 |
@@ -85,5 +85,5 @@
 1. **存储与授权。** 先完成空库 V1、账号与登录、资源归属和授权。用两个普通用户及管理员验收按资源隔离、Origin、撤销登录、最后一名管理员与工作区归属约束。账号换名保留资源归属；改密时按操作类型保留本次或撤销全部登录。首条消息与 Session、`main`、目录边原子提交。
 2. **执行与资源。** 在同一授权边界内补物理事务锁序、统一树查询、批量执行事实、切点分支、深删除和回收。验收 Stop 并发、压缩切点、共享历史、复制附件及旧 Worker 失权；在工作区投影前确认运行中与等待并存时的显示优先级。
 3. **接入窗格。** 将 Thread、Canvas、IDE 接入新壳。验证 1440、1024、390、320px 下的布局、统一打开、草稿和焦点，目检关键截图。新入口通过验收后，删除旧路由、旧壳、对应契约及专用组件。
-4. **定时与回归。** 在隔离 PostgreSQL 验证双 Worker、过期跳过、夏令时、幂等、账号禁用竞态及执行记录分页。启用账号后任务保持暂停；删 Thread 不删执行记录。[Project 用例](../scripts/dev/verify/e2e/cases/project.mjs)退役；其余用例按新工作区契约更新，[HTTP 助手](../scripts/dev/verify/e2e/lib/http.mjs)与 WebSocket 带相应 Cookie 和 Origin。
+4. **定时与回归。** 在隔离 PostgreSQL 验证双 Worker、过期跳过、夏令时、幂等、账号禁用竞态及执行记录分页。启用账号后任务保持暂停；删 Thread 不删执行记录。Project 用例退役；其余用例按新工作区契约更新，[HTTP 助手](../scripts/dev/verify/e2e/lib/http.mjs)与 WebSocket 带相应 Cookie 和 Origin。
 5. **交付。** 更新[生成契约](../scripts/dev/verify/generated-contracts/write.sh)、[导航](README.md)及受影响的模块和[部署文档](operations/deployment.md)。从隔离新卷初始化，保留旧库备份并复核配置导入；首次部署在修改初始密码后再开放。正式开发使用独占 worktree，按授权集成。Daemon 核对与项目版本匹配的 CI、发行件和校验文件。

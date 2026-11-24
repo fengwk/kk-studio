@@ -452,16 +452,15 @@ describe('ThreadWorkspacePage', () => {
     expect(payload.decisionId).toBeDefined()
   })
 
-  it('isolates child thread routing from IssueAgent and Chat owner state without crosstalk', async () => {
+  it('isolates child thread routing from another Chat owner state without crosstalk', async () => {
     // 测试意图：验证子线程独立路由工作区在没有显式 owner 时，作为只读的 BOUND_THREAD 渲染，
-    // 绝不调用 chatService.listChatSessions，并且即使 localStorage 中存在其他 CHAT 或 ISSUE_AGENT 的 PaneTarget，
-    // 也严格锁定在 URL 参数指定的 childThreadId 上，子线程路由与 IssueAgent/Chat owner 语义互不混淆。
-    const foreignIssueTarget = JSON.stringify({
+    // 绝不调用 chatService.listChatSessions，并且即使 localStorage 中存在其他 CHAT PaneTarget，
+    // 也严格锁定在 URL 参数指定的 childThreadId 上。
+    const foreignChatTarget = JSON.stringify({
       kind: 'BOUND_THREAD',
       threadId: 'foreign-thread-999',
     })
-    localStorage.setItem('kk-studio.agent-pane-target.ISSUE_AGENT:issue-1:architect:thread-00000000-0000-0000-0000-000000000999', foreignIssueTarget)
-    localStorage.setItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-1', foreignIssueTarget)
+    localStorage.setItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-1', foreignChatTarget)
 
     const childSnapshot = snapshotWithPendingTool(CHILD_THREAD_ID)
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(childSnapshot)

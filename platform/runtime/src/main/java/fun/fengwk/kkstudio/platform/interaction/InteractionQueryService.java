@@ -479,7 +479,7 @@ public class InteractionQueryService {
       }
       ThreadSnapshot root = rootSnapshot(rootThreadId);
       ThreadKind trigger = root.thread().kind();
-      if (trigger == ThreadKind.CONTROLLER_TASK || trigger == ThreadKind.PLUGIN_TASK) {
+      if (trigger == ThreadKind.PLUGIN_TASK) {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
         owner.setKind("AGENT_TASK");
         owner.setId(rootThreadId.toString());

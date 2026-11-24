@@ -99,7 +99,6 @@ describe('command batch replay identity', () => {
       }),
     })
     expect(batch.request.commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
       'SET_EXECUTION',
       'USER_MESSAGE',
     ])

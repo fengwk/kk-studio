@@ -99,7 +99,6 @@ class ApplicationEventWebSocketHandlerTest {
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
-  private NotificationInvalidationSource projectChangeSource;
   private NotificationInvalidationSource environmentChangeSource;
   private ApplicationEventHub hub;
   private IdeBrowserUseRegistry browserUseRegistry;
@@ -119,13 +118,11 @@ class ApplicationEventWebSocketHandlerTest {
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
-    projectChangeSource = mock(NotificationInvalidationSource.class);
     environmentChangeSource = mock(NotificationInvalidationSource.class);
     when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
-    when(projectChangeSource.subscribe(any(), any())).thenReturn(() -> {});
     when(environmentChangeSource.subscribe(any(), any())).thenReturn(() -> {});
     hub =
         new ApplicationEventHub(
@@ -133,7 +130,6 @@ class ApplicationEventWebSocketHandlerTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> 512);
     browserUseRegistry = new IdeBrowserUseRegistry();
@@ -460,7 +456,6 @@ class ApplicationEventWebSocketHandlerTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> 512,
             publisher);
@@ -488,7 +483,8 @@ class ApplicationEventWebSocketHandlerTest {
     handler.afterConnectionEstablished(springSession);
 
     handler.handleTextMessage(
-        springSession, textMessage("{\"type\":\"refresh\",\"resource\":{\"kind\":\"projects\"}}"));
+        springSession,
+        textMessage("{\"type\":\"refresh\",\"resource\":{\"kind\":\"environments\"}}"));
     handler.handleTextMessage(
         springSession,
         textMessage(
@@ -662,7 +658,6 @@ class ApplicationEventWebSocketHandlerTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> DEFAULT_SENDER_CAPACITY,
             null,
@@ -842,7 +837,6 @@ class ApplicationEventWebSocketHandlerTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectChangeSource,
             environmentChangeSource,
             () -> DEFAULT_SENDER_CAPACITY,
             publisher);
@@ -1117,7 +1111,6 @@ class ApplicationEventWebSocketHandlerTest {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectChangeSource,
         environmentChangeSource,
         () -> DEFAULT_SENDER_CAPACITY,
         null,

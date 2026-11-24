@@ -12,7 +12,6 @@ import {
   getThreadSnapshot,
   createNewSession,
   listEnvironments,
-  setAgentCommand,
   setEnvironmentCommand,
   setExecutionCommand,
   stopThreadForCleanup,
@@ -894,19 +893,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       `create alt usage environment: ${JSON.stringify(otherEnvironmentResponse)}`,
     )
     state.otherEnvironment = otherEnvironmentResponse.json
-    const otherAgentResponse = await apiCtx.call('POST', '/api/platform/agents', {
-      name: `e2e-ui-usage-alt-agent-${suffix}`,
-      description: 'Second environment-bound agent for Footer projection tests.',
-      systemPrompt: 'Return the deterministic local response.',
-      execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
-      config: { tools: [], skills: [], subagents: [] },
-    })
-    assert(
-      otherAgentResponse.status === 201,
-      `create alt usage agent: ${JSON.stringify(otherAgentResponse)}`,
-    )
-    state.otherAgent = otherAgentResponse.json
-
     const switched = await acceptCommandBatch(apiCtx, {
       owner,
       target: threadTarget({
@@ -915,18 +901,13 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
         expectedNextCommandSequence: completed.nextCommandSequence,
       }),
       commands: [
-        setAgentCommand(state.otherAgent.name, cid()),
-        setExecutionCommand(
-          state.otherAgent.execution.settings,
-          cid(),
-        ),
         setEnvironmentCommand(state.otherEnvironment.name, cid()),
         userMessageCommand(`footer environment ${stamp}`, cid()),
       ],
     })
     assert(
       switched.acceptedCommands.map((command) => command.type).join(',')
-        === 'SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE',
+        === 'SET_ENVIRONMENT,USER_MESSAGE',
       JSON.stringify(switched.acceptedCommands),
     )
     await waitForQuiescentThread(apiCtx, state.threadId, {
@@ -1024,15 +1005,15 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    // 先用不存在的 Agent 确定性创建空闲 Thread；浏览器绑定后 start 经 THREAD batch 启动 task。
+    // 先用不可用的模型创建空闲 Thread，避免 bootstrap 消费 mock；浏览器绑定后再启动任务。
     await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
       rootSettings: branchSettingsOf(
-        { name: `e2e-ui-task-missing-${suffix}` },
+        state.parentAgent,
         {
-          modelName: state.model.name,
+          modelName: `${state.model.name}-missing`,
           variant: 'default',
         },
       ),
@@ -1057,11 +1038,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
             expectedNextCommandSequence: idle.nextCommandSequence,
           }),
           commands: [
-            setAgentCommand(state.parentAgent.name, cid()),
-            setExecutionCommand(
-              state.parentAgent.execution.settings,
-              cid(),
-            ),
+            setExecutionCommand(state.parentAgent.execution.settings, cid()),
             userMessageCommand(parentMarker, cid()),
           ],
         })
@@ -1184,11 +1161,9 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       sessionId,
       threadId,
       rootSettings: branchSettingsOf(
-        // root settings 保持 canonical 但不存在的 Agent 名称：初始 USER_MESSAGE 必须确定性失败，
-        // 绝不消费 mock 的 tool-call 响应；真正的 Agent 由 start() 的 SET_AGENT 冻结。
-        { name: `e2e-ui-tool-card-missing-${suffix}` },
+        state.agent,
         {
-          modelName: state.model.name,
+          modelName: `${state.model.name}-missing`,
           variant: 'default',
         },
         matchedEnv.name,
@@ -1214,11 +1189,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
             expectedNextCommandSequence: idle.nextCommandSequence,
           }),
           commands: [
-            setAgentCommand(state.agent.name, cid()),
-            setExecutionCommand(
-              state.agent.execution.settings,
-              cid(),
-            ),
+            setExecutionCommand(state.agent.execution.settings, cid()),
             userMessageCommand(markers[toolName], cid()),
           ],
         })
@@ -1254,15 +1225,6 @@ async function cleanupCompletedUsageFixture(state) {
       await state.apiCtx.call(
         'DELETE',
         `/api/platform/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
-      )
-    }
-  })
-  // Alt Agent 必须先于其绑定的 Environment 删除，否则 Environment 处于 in-use 拒绝删除。
-  await cleanup('alt agent', errors, async () => {
-    if (state.otherAgent?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/agents/${encodeURIComponent(state.otherAgent.name)}?expectedVersion=${encodeURIComponent(state.otherAgent.version)}`,
       )
     }
   })

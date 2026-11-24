@@ -5,7 +5,6 @@ import {
   branchDraftFromThread,
   branchDraftsEqual,
   buildBranchDiffCommands,
-  materializeAgentBranchDraft,
   projectPendingTarget,
   type BranchDraft,
 } from '@/features/thread/branch-draft'
@@ -314,30 +313,6 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * 解析目标 Agent 的模型后原子更新选择；未就绪或配置无效时保留原草稿。
-   */
-  function selectAgent(agentName: string): boolean {
-    const currentDraft = draftRef.current
-    if (currentDraft == null || boundThread == null) {
-      return false
-    }
-    const agent = controller.agents.find((candidate) => candidate.name === agentName)
-    if (agent == null) {
-      return false
-    }
-    const draft = materializeAgentBranchDraft(
-      agent,
-      controller.models,
-      currentDraft,
-    )
-    if (draft == null) {
-      return false
-    }
-    commitDraft(draft)
-    return true
-  }
-
-  /**
    * 尝试接受一个新的权威 Thread 快照：只接受同线程且不使 version 回退的值
    * （精确十进制比较），避免迟到的 /yolo 前 snapshot 覆盖已确认的新 version。
    * 返回是否被采纳；调用方在拒绝时应整体忽略该 snapshot，避免用回退值改写 base。
@@ -624,7 +599,6 @@ export function useBoundBranchPanel({
       setSettingsConflict(null)
       setYoloConflict(null)
     },
-    selectAgent,
     setYoloEnabled,
     selectModel,
     selectEnvironment,

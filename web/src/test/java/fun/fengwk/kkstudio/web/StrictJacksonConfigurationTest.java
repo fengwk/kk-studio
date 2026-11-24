@@ -184,11 +184,6 @@ class StrictJacksonConfigurationTest {
               assertInstanceOf(HarnessCommandCreateDTO.SetEnvironmentDTO.class, withName)
                   .environmentName());
 
-          HarnessCommandCreateDTO absent =
-              mapper.readValue(
-                  "{\"type\":\"SET_AGENT\",\"idempotencyKey\":\"id-1\",\"agentName\":\"a\"}",
-                  HarnessCommandCreateDTO.class);
-          assertInstanceOf(HarnessCommandCreateDTO.SetAgentDTO.class, absent);
           assertEquals(
               "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\","
                   + "\"environmentName\":null}",

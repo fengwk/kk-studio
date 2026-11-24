@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
@@ -94,7 +94,7 @@ class TurnPlanBuilderCompactionTest {
         command(
             store,
             baseline.threadId(),
-            seedCommand(store, baseline.threadId(), new SetAgentCommandPayload("coding")));
+            seedCommand(store, baseline.threadId(), new SetEnvironmentCommandPayload("coding")));
     CompactionPreparation preparation =
         new CompactionPreparation(CompactionTrigger.MANUAL, baseline.rootEntryId());
 
@@ -132,7 +132,7 @@ class TurnPlanBuilderCompactionTest {
         command(
             store,
             baseline.threadId(),
-            seedCommand(store, baseline.threadId(), new SetAgentCommandPayload("coding")));
+            seedCommand(store, baseline.threadId(), new SetEnvironmentCommandPayload("coding")));
 
     TurnPlan plan =
         build(

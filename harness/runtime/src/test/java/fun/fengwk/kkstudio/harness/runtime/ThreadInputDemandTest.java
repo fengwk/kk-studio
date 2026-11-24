@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -41,7 +41,7 @@ class ThreadInputDemandTest {
             List.of(command(1L, notification(UUID.randomUUID()), null, null))));
     assertFalse(
         ThreadInputDemand.hasQueuedDemand(
-            List.of(command(1L, new SetAgentCommandPayload("assistant"), null, null))));
+            List.of(command(1L, new SetEnvironmentCommandPayload("assistant"), null, null))));
     assertFalse(ThreadInputDemand.hasQueuedDemand(List.of()));
   }
 
@@ -60,7 +60,7 @@ class ThreadInputDemandTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     insertCommands(
-        store, baseline, command(1L, new SetAgentCommandPayload("assistant"), null, null));
+        store, baseline, command(1L, new SetEnvironmentCommandPayload("assistant"), null, null));
     assertFalse(hasInputDemand(store, baseline.threadId()));
   }
 

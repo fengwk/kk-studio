@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -340,8 +339,28 @@ class SubagentTaskRunnerTest {
   }
 
   @Test
+  void resumeRejectsWhenCurrentChildSnapshotAgentDoesNotMatchRequest() {
+    stubParent(List.of(AGENT));
+    UUID childThreadId = UUID.randomUUID();
+    ThreadSnapshot child = child(childThreadId, parentThreadId, 9L);
+    EntryCurrentState childState = mock(EntryCurrentState.class);
+    when(childState.baseSettings())
+        .thenReturn(new BranchSettings("beta", BuiltinExecution.of(MODEL), "child-env"));
+    when(child.entryState()).thenReturn(childState);
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> acceptAsync(runner(config()), request(null, childThreadId)));
+
+    assertTrue(rejected.getMessage().contains("agent"), rejected.getMessage());
+    verify(runtime, never()).spawn(any(), any());
+  }
+
+  @Test
   void busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix() {
-    // resume 不要求前一次 join 已交付，也不要求子线程 idle：只追加 agent/model/prompt，绝不改写既有子环境。
+    // resume 不要求前一次 join 已交付，也不要求子线程 idle：只追加 execution/prompt，绝不改写既有子环境。
     stubParent(List.of(AGENT));
     UUID childThreadId = UUID.randomUUID();
     ThreadSnapshot child = child(childThreadId, parentThreadId, 9L);
@@ -358,12 +377,11 @@ class SubagentTaskRunnerTest {
     assertNull(command.getValue().sessionId());
     assertEquals(9L, command.getValue().continuation().expectedNextCommandSequence());
     List<NewThreadCommand> commands = command.getValue().commands();
-    assertEquals(3, commands.size());
-    // 续接前缀只由本次目标 settings 决定：SET_AGENT + SET_MODEL + prompt。
-    assertEquals(new SetAgentCommandPayload(AGENT), commands.get(0).payload());
+    assertEquals(2, commands.size());
+    // 续接只更新 execution setting 并追加 prompt，不会重设 child agent。
     assertEquals(
-        new SetExecutionCommandPayload(BuiltinExecution.of(MODEL)), commands.get(1).payload());
-    assertTrue(commands.get(2).payload() instanceof CustomMessageCommandPayload);
+        new SetExecutionCommandPayload(BuiltinExecution.of(MODEL)), commands.get(0).payload());
+    assertTrue(commands.get(1).payload() instanceof CustomMessageCommandPayload);
     // 环境由执行根持有，续接绝不向子线程发送 SET_ENVIRONMENT。
     assertTrue(
         commands.stream().noneMatch(c -> c.payload() instanceof SetEnvironmentCommandPayload),
@@ -372,8 +390,7 @@ class SubagentTaskRunnerTest {
 
   @Test
   void busyResumeReplayWithChangedAgentIsRejectedInsteadOfRewritingChild() {
-    // 同一 invocation 的 busy 续接重放必须命中同一份委派：agent 变更属于另一次委派，
-    // 必须拒绝而不是给既有子线程换 agent（resume 的 SET_AGENT 只用于同一委派的重放场景）。
+    // 同一 invocation 的 busy 续接重放必须命中同一份委派：agent 变更属于另一次委派，拒绝而不修改子线程。
     UUID childThreadId = UUID.randomUUID();
     SubagentTaskRequest original = request(null, childThreadId);
     when(runtime.findJoin(invocationId))
@@ -861,7 +878,7 @@ class SubagentTaskRunnerTest {
                 NOW));
     EntryCurrentState childState = mock(EntryCurrentState.class);
     when(childState.baseSettings())
-        .thenReturn(new BranchSettings("child-agent", BuiltinExecution.of(MODEL), "child-env"));
+        .thenReturn(new BranchSettings(AGENT, BuiltinExecution.of(MODEL), "child-env"));
     when(child.entryState()).thenReturn(childState);
     return child;
   }

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -188,7 +187,6 @@ final class TurnPlanBuilder {
                       value.kind(),
                       value.sourceThreadId(),
                       value.message())));
-          case SetAgentCommandPayload ignored -> {}
           case SetExecutionCommandPayload ignored -> {}
           case SetEnvironmentCommandPayload ignored -> {}
         }

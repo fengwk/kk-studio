@@ -9,7 +9,6 @@ import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMap
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.mapContent;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newThreadTarget;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.request;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setAgent;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setEnvironment;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setExecution;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.threadBatch;
@@ -55,24 +54,22 @@ class HarnessRuntimeRequestMapperCommandTest {
 
   @Test
   void mapsFixedSetPrefixAndRawRequestHash() {
-    // 只允许稳定 SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
+    // 只允许稳定 SET_EXECUTION -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
     HarnessThreadCommandBatchDTO request = cursorBatch(userCommand("user"));
-    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
     HarnessCommandCreateDTO execution = setExecution("execution", executionSelection());
     HarnessCommandCreateDTO environment = setEnvironment("environment", "local");
-    request.setCommands(List.of(agent, execution, environment, userCommand("user")));
+    request.setCommands(List.of(execution, environment, userCommand("user")));
 
     AcceptCommandsCommand mapped =
         HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, request);
 
     assertEquals(
         List.of(
-            ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.USER_MESSAGE),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
-    assertEquals(new SetEnvironmentCommandPayload("local"), mapped.commands().get(2).payload());
+    assertEquals(new SetEnvironmentCommandPayload("local"), mapped.commands().get(1).payload());
     assertEquals(
         ThreadCommandPayloadJsonCodec.requestHash(mapped.commands().getLast().payload()),
         mapped.commands().getLast().requestHash());
@@ -278,9 +275,6 @@ class HarnessRuntimeRequestMapperCommandTest {
     HarnessCommandCreateDTO slashEnvironment =
         new HarnessCommandCreateDTO.SetEnvironmentDTO(idText(51), "a/b");
     assertCommandRejected(slashEnvironment);
-
-    HarnessCommandCreateDTO blankAgent = new HarnessCommandCreateDTO.SetAgentDTO(idText(52), " ");
-    assertCommandRejected(blankAgent);
 
     HarnessCommandCreateDTO missingExecution =
         new HarnessCommandCreateDTO.SetExecutionDTO(idText(53), null);

@@ -6,9 +6,8 @@ import java.util.Objects;
 /**
  * 运行时注入的上下文切换提醒：durable USER 消息，正文精确包在 {@code <system-reminder>} 定界符中。
  *
- * <p>系统指令只由每次请求的 systemInstruction 承载，会话中不存在 SYSTEM 角色。设置变更（SET_AGENT / SET_MODEL /
- * SET_ENVIRONMENT）与内部 steering（如 task max turns）因此统一以该 USER 形态进入持久历史，模型与前端都能看到它是一次注入的
- * 上下文提醒，而不是用户发言。
+ * <p>系统指令只由每次请求的 systemInstruction 承载，会话中不存在 SYSTEM 角色。设置变更（SET_MODEL / SET_ENVIRONMENT）与内部
+ * steering（如 task max turns）因此统一以该 USER 形态进入持久历史，模型与前端都能看到它是一次注入的 上下文提醒，而不是用户发言。
  */
 public final class SystemReminder {
 

@@ -584,11 +584,9 @@ async function installChatApi(
         // 既有 Thread 的纯设置批次：回显 durable SET 命令并推进 version，后续快照读回它们。
         boundVersion += 1
         const accepted = (body.commands ?? []).map((command, index) => {
-          const payload = command.type === 'SET_AGENT'
-            ? { agentName: command.agentName }
-            : command.type === 'SET_EXECUTION'
-              ? { execution: command.execution }
-              : { environmentName: command.environmentName ?? null }
+          const payload = command.type === 'SET_EXECUTION'
+            ? { execution: command.execution }
+            : { environmentName: command.environmentName ?? null }
           return {
             threadId: THREAD_ID,
             sequence: String(index + 1),
