@@ -32,7 +32,7 @@ export function ScheduleList({ rows, onToggle }: { rows: ScheduleRow[]; onToggle
     </div>
     <div className="x-sch-meta">
       {next && <time className="x-sch-next" dateTime={next.dateTime} title={next.title}>下次 {next.label}</time>}
-      <Button variant="ghost" size="compact" className="x-sch-disclosure" aria-label={`「${name}」的执行记录`}
+      <Button variant="secondary" size="compact" className="x-sch-disclosure" aria-label={`「${name}」的执行记录`}
         data-action="sch-history" aria-expanded={!!history} aria-controls={`sch-history-${id}`}>
         执行记录<ChevronDown className="x-ic" aria-hidden="true" />
       </Button>
@@ -46,7 +46,7 @@ export function ScheduleList({ rows, onToggle }: { rows: ScheduleRow[]; onToggle
               <span className="x-sch-record-text" title={thread ?? reason} data-allow-truncate>{thread ?? reason}</span>
             </>
             return <li key={runId}>
-              {thread ? <Button variant="ghost" className="x-sch-record" data-action="sch-open-run"
+              {thread ? <Button variant="secondary" className="x-sch-record" data-action="sch-open-run"
                 data-run={runId} data-fkey={`sch-run:${runId}`}>
                 {content}<ChevronRight className="x-ic" aria-hidden="true" />
               </Button> : <div className="x-sch-record">{content}</div>}
@@ -54,10 +54,10 @@ export function ScheduleList({ rows, onToggle }: { rows: ScheduleRow[]; onToggle
           })}
         </ul>
         {(history.hasNewer || history.hasOlder) && <div className="x-sch-pager">
-          <Button variant="ghost" size="compact" data-action="sch-newer" data-fkey={`sch-newer:${id}`} disabled={!history.hasNewer}>
+          <Button variant="secondary" size="compact" data-action="sch-newer" data-fkey={`sch-newer:${id}`} disabled={!history.hasNewer}>
             <ChevronLeft className="x-ic" aria-hidden="true" />较新
           </Button>
-          <Button variant="ghost" size="compact" data-action="sch-older" data-fkey={`sch-older:${id}`} disabled={!history.hasOlder}>
+          <Button variant="secondary" size="compact" data-action="sch-older" data-fkey={`sch-older:${id}`} disabled={!history.hasOlder}>
             较早<ChevronRight className="x-ic" aria-hidden="true" />
           </Button>
         </div>}

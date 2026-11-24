@@ -125,13 +125,13 @@ export function EnvironmentSettingsPreview() {
                 <Button size="compact" aria-label={`安装 / 覆盖 ${environment.name}`} onClick={() => setDialog('install')}>
                   <Download aria-hidden="true" />安装 / 覆盖
                 </Button>
-                <Button size="compact" variant="ghost" onClick={() => setDialog('manage')}>
+                <Button size="compact" variant="secondary" onClick={() => setDialog('manage')}>
                   <SlidersHorizontal aria-hidden="true" />管理
                 </Button>
-                <Button size="compact" variant="ghost" onClick={openEdit}>
+                <Button size="compact" variant="secondary" onClick={openEdit}>
                   <Pencil aria-hidden="true" />编辑
                 </Button>
-                <Button size="compact" variant="ghost" danger onClick={() => setDialog('delete')}>
+                <Button size="compact" variant="secondary" danger onClick={() => setDialog('delete')}>
                   <Trash2 aria-hidden="true" />删除
                 </Button>
               </>
@@ -166,7 +166,7 @@ export function EnvironmentSettingsPreview() {
               {formError && <p className="field-error" role="alert">{formError}</p>}
             </div>
             <div className="modal-footer">
-              <Button variant="ghost" onClick={() => setDialog(null)}>取消</Button>
+              <Button variant="secondary" onClick={() => setDialog(null)}>取消</Button>
               <Button type="submit">保存示例</Button>
             </div>
           </form>
@@ -179,7 +179,7 @@ export function EnvironmentSettingsPreview() {
             <p className="modal-body-text">覆盖安装会中断目标主机上正在运行的工具调用，但会保留环境配置和数据。</p>
           </div>
           <div className="modal-footer">
-            <Button variant="ghost" onClick={() => setDialog(null)}>关闭</Button>
+            <Button variant="secondary" onClick={() => setDialog(null)}>关闭</Button>
           </div>
         </Dialog>
       )}
@@ -203,7 +203,7 @@ export function EnvironmentSettingsPreview() {
               </section>
             </div>
           </div>
-          <div className="modal-footer"><Button variant="ghost" onClick={() => setDialog(null)}>关闭</Button></div>
+          <div className="modal-footer"><Button variant="secondary" onClick={() => setDialog(null)}>关闭</Button></div>
         </Dialog>
       )}
 

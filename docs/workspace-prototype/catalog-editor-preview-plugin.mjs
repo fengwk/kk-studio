@@ -2,10 +2,6 @@
 // must match exactly once so upstream edits cannot silently re-enable online UI.
 // The offline demo consumes the already-normalized draft, not an HTTP mock.
 // Match the runtime's rule order and use decimal strings (no float rounding).
-import path from 'node:path'
-
-const PROTOTYPE_PICKERS = new Set(['@preview-catalog/DateInput', '@preview-catalog/TimeInput'])
-
 async function offlinePricingPreview({ pricing, inputTokens, requestedAt, serviceTier }, signal) {
   signal.throwIfAborted()
   const empty = { rates: null, activeFrom: null, matchedRules: [] }
@@ -77,10 +73,6 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
   return {
     name: 'catalog-editor-preview',
     enforce: 'pre',
-    resolveId(source) {
-      if (!PROTOTYPE_PICKERS.has(source)) return
-      return path.resolve(sourceRoot, '../../docs/workspace-prototype/workspace', `${source.slice(source.lastIndexOf('/') + 1)}.tsx`)
-    },
     transform(source, id) {
       if (!id.startsWith(catalog) || id.includes('?')) return
       const file = id.slice(catalog.length)
@@ -181,14 +173,8 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
           replace("                  <span className=\"inline-hint\">{t('ai.catalog.form.protocolOptionsHint')}</span>\n")
           break
         case 'ModelPricingPlanEditor.tsx':
-          replace("import { previewModelPricing } from '@/features/catalog/ai-model-pricing-preview'\n", "import { cloneElement, isValidElement } from 'react'\n")
-          replace('  return <label className="form-group"><span>{label}</span>{children}</label>', `  const id = useId()
-  if (isValidElement<{ id?: string }>(children) && (children.type === DateInput || children.type === TimeInput)) {
-    const triggerId = children.props.id ?? id
-    return <div className="form-group"><label className="field-label" htmlFor={triggerId}>{label}</label>{cloneElement(children, { id: triggerId })}</div>
-  }
-  return <label className="form-group"><span>{label}</span>{children}</label>`)
-          replace("import { TextInput } from '@/shared/ui/controls/TextInput'\n", "import { TextInput } from '@/shared/ui/controls/TextInput'\nimport { DateInput } from '@preview-catalog/DateInput'\nimport { TimeInput } from '@preview-catalog/TimeInput'\nimport { HelpHint } from '@/shared/ui/controls/HelpHint'\nimport { Plus } from 'lucide-react'\n")
+          replace("import { previewModelPricing } from '@/features/catalog/ai-model-pricing-preview'\n")
+          replace("import { TextInput } from '@/shared/ui/controls/TextInput'\n", "import { TextInput } from '@/shared/ui/controls/TextInput'\nimport { HelpHint } from '@/shared/ui/controls/HelpHint'\nimport { Plus } from 'lucide-react'\n")
           replace("import './ai-pricing.css'", `import './ai-pricing.css'\n\nconst previewModelPricing = ${offlinePricingPreview.toString()}`)
           replace('  const [newRule, setNewRule] = useState(\'\')\n')
           for (const group of ['inputTokenRanges', 'serviceTiers', 'timePeriods']) {
@@ -200,30 +186,19 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
           replace('    </details>\n  </>', '    </div>\n  </>')
           replace('placeholder={factors.factor}', "placeholder={locale === 'zh-CN' ? `继承 ×${factors.factor}` : `Inherit ×${factors.factor}`}")
           replace('  const { t } = useI18n()\n  return <>\n    <Field label=', '  const { t, locale } = useI18n()\n  return <>\n    <Field label=')
-          replace(/<Field label=\{t\('ai\.catalog\.form\.pricingFromDate'\)\}>\s*<TextInput type="date" value=\{newDate\} onChange=\{\(event\) => setNewDate\(event\.target\.value\)\} \/>\s*<\/Field>/, "<Field label={t('ai.catalog.form.pricingFromDate')}><DateInput value={newDate} onChange={setNewDate} /></Field>")
-          replace(/<Field label=\{t\('ai\.catalog\.form\.pricingFromDate'\)\}>\s*<TextInput type="date" value=\{selected\.from\} onChange=\{\(event\) => \{/, "<Field label={t('ai.catalog.form.pricingFromDate')}><DateInput value={selected.from} onChange={(from) => {")
-          replace("            const from = event.target.value\n", '')
-          replace('          }} />\n        </Field>', '          }} /></Field>')
-          replace('<Field label={t(\'ai.catalog.form.pricingStart\')}><TextInput placeholder="HH:mm" value={period.start}\n              onChange={(event) => update({ start: event.target.value })} /></Field>', '<Field label={t(\'ai.catalog.form.pricingStart\')}><TimeInput value={period.start}\n              onChange={(start) => update({ start })} /></Field>')
-          replace(/            <Field label=\{t\('ai.catalog.form.pricingEnd'\)\}><TextInput[\s\S]*?<\/Field>/, `<Field label={t('ai.catalog.form.pricingEnd')}><TimeInput allowEndOfDay value={period.end}\n              onChange={(end) => update({ end })} /></Field>`)
           replace("  const { t } = useI18n()\n  const { base, inputTokenRanges", "  const { t, locale } = useI18n()\n  const { base, inputTokenRanges")
           replace('  const { t } = useI18n()\n  const today = new Date().toISOString().slice(0, 10)', "  const { t, locale } = useI18n()\n  const today = new Date().toISOString().slice(0, 10)")
           replace('<span>{t(\'ai.catalog.form.pricingSelectPlan\')}</span>', `<div className="field-label-row"><span>{t('ai.catalog.form.pricingSelectPlan')}</span>{(!selected || selected.from && selected.from <= today) && hasConfiguredPricing(value) ? <HelpHint label={locale === 'zh-CN' ? '帮助：定价历史' : 'Help: pricing history'}>{t('ai.catalog.form.pricingHistoryWarning')}</HelpHint> : null}</div>`)
           replace(/\{\(!selected \|\| selected\.from && selected\.from <= today\) && hasConfiguredPricing\(value\)\n\s*\? <p className="inline-hint">\{t\('ai\.catalog\.form\.pricingHistoryWarning'\)\}<\/p> : null\}\n/)
-          replace("  const { t } = useI18n()\n  const timeId", "  const { t, locale } = useI18n()\n  const dateId")
+          replace("  const { t } = useI18n()\n  const timeId", "  const { t, locale } = useI18n()\n  const timeId")
           replace("<Section title={t('ai.catalog.form.pricingPreview')}>", "<Section title={locale === 'zh-CN' ? '离线费率试算' : 'Offline pricing preview'}>")
-          replace("  const [requestedAt, setRequestedAt] = useState('')\n", "  const [requestedDate, setRequestedDate] = useState('')\n  const [requestedTime, setRequestedTime] = useState('')\n")
-          replace("  const signature = JSON.stringify([value, inputTokens, requestedAt, serviceTier])", "  const requestedAt = requestedDate ? requestedDate + 'T' + (requestedTime || '00:00') : ''\n  const signature = JSON.stringify([value, inputTokens, requestedAt, serviceTier])")
           replace(/    <p className="inline-hint">\{t\('ai.catalog.form.pricingPreviewScope'\)\}<\/p>\n/)
-          replace(/      <Field label=\{t\('ai.catalog.form.pricingPreviewTime'\)\}><TextInput id=\{timeId\} type="datetime-local" value=\{requestedAt\}\n        onChange=\{\(event\) => setRequestedAt\(event\.target\.value\)\} \/><\/Field>/, `      <Field label={locale === 'zh-CN' ? '请求日期（UTC）' : 'Request date (UTC)'}><DateInput id={dateId} value={requestedDate}\n        onChange={setRequestedDate} /></Field>\n      <Field label={locale === 'zh-CN' ? '请求时间（UTC）' : 'Request time (UTC)'}><TimeInput value={requestedTime} onChange={setRequestedTime} /></Field>`)
-          replace('document.getElementById(timeId)?.focus()', 'document.getElementById(dateId)?.focus()')
           replace("placeholder={field === 'cacheWrite' ? t('ai.catalog.form.pricingNotSet') : configured ? required : unpriced}", "placeholder={field === 'cacheWrite' || !configured ? t('ai.catalog.form.pricingNotSet') : required}")
           replace("  const unpriced = t('ai.catalog.form.pricingUnpriced')\n")
           replace("      {!configured && <p className=\"inline-hint\">{t('ai.catalog.form.pricingNotConfigured')}</p>}\n")
           for (const group of ['inputTokenRanges', 'serviceTiers', 'timePeriods']) {
-            replace(`      <button type="button" className="ghost-inline-btn" onClick={() => {\n        const draftKey = createPricingDraftKey()\n        updateRows('${group}'`, `      <Button variant="inline" onClick={() => {\n        const draftKey = createPricingDraftKey()\n        updateRows('${group}'`)
             const key = group === 'inputTokenRanges' ? 'addPricingRange' : group === 'serviceTiers' ? 'addPricingTier' : 'addPricingTime'
-            replace(`>{t('ai.catalog.form.${key}')}</button>`, `><Plus aria-hidden="true" />{t('ai.catalog.form.${key}')}</Button>`)
+            replace(`>{t('ai.catalog.form.${key}')}</Button>`, `><Plus aria-hidden="true" />{t('ai.catalog.form.${key}')}</Button>`)
           }
           replace("{t('ai.catalog.form.addPricingChange')}</Button>", "<Plus aria-hidden=\"true\" />{t('ai.catalog.form.addPricingChange')}</Button>")
           replace("{t('ai.catalog.form.pricingCreateDraft')}</Button>", "<Plus aria-hidden=\"true\" />{t('ai.catalog.form.pricingCreateDraft')}</Button>")
@@ -239,13 +214,11 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
           replace('  const { t } = useI18n()\n  const candidates = models.filter(', '  const { t, locale } = useI18n()\n  const candidates = models.filter(')
           break
         case 'PricingTtlInputs.tsx':
-          replace("import { TextInput } from '@/shared/ui/controls/TextInput'\n", "import { TextInput } from '@/shared/ui/controls/TextInput'\nimport { IconButton } from '@/shared/ui/controls/IconButton'\nimport { Button } from '@/shared/ui/controls/Button'\nimport { Plus, X } from 'lucide-react'\n")
-          replace(/            <button\n              type="button"\n              className="ghost-inline-btn"\n              aria-label=\{t\('ai.catalog.form.removePricingRule'\)\}[\s\S]*?\n            \{issue \?/, `            <IconButton label={t('ai.catalog.form.removePricingRule')} danger size="compact"
+          replace("import { TextInput } from '@/shared/ui/controls/TextInput'\n", "import { TextInput } from '@/shared/ui/controls/TextInput'\nimport { IconButton } from '@/shared/ui/controls/IconButton'\nimport { Plus, X } from 'lucide-react'\n")
+          replace(/            <Button\n              type="button"\n              variant="secondary"\n              aria-label=\{t\('ai.catalog.form.removePricingRule'\)\}[\s\S]*?\n            \{issue \?/, `            <IconButton label={t('ai.catalog.form.removePricingRule')} danger size="compact"
               onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}><X size={14} aria-hidden="true" /></IconButton>
             {issue ?`)
-          replace(/      <button\n        type="button"\n        className="ghost-inline-btn"\n        onClick=\{\(\) => onChange\(\[\.\.\.rows, \{ draftKey: createPricingDraftKey\(\), seconds: '', rate: '' \}\]\)\}>\n        \{t\('ai.catalog.form.addPricingTtl'\)\}\n      <\/button>/, `      <Button variant="inline" onClick={() => onChange([...rows, { draftKey: createPricingDraftKey(), seconds: '', rate: '' }])}>
-        <Plus aria-hidden="true" />{t('ai.catalog.form.addPricingTtl')}
-      </Button>`)
+          replace("{t('ai.catalog.form.addPricingTtl')}", "<Plus aria-hidden=\"true\" />{t('ai.catalog.form.addPricingTtl')}")
           break
         default:
           return
