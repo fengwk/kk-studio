@@ -8,8 +8,6 @@ public enum ThreadKind {
   SUBAGENT,
   /** 压缩分支。 */
   COMPACTION,
-  /** Project/Issue 控制器任务。 */
-  CONTROLLER_TASK,
   /** 插件 Prompt 任务。 */
   PLUGIN_TASK
 }

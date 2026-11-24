@@ -78,17 +78,6 @@ export const queryKeys = {
       ['studio', 'canvas-resource', canvasId, resourceId, 'original'] as const
     ),
   },
-  projects: {
-    all: ['projects'] as const,
-    lists: () => ['projects', 'list'] as const,
-    list: (includeArchived = false) => ['projects', 'list', includeArchived] as const,
-    detail: (projectId: string) => ['projects', 'detail', projectId] as const,
-    snapshot: (projectId: string) => ['projects', 'snapshot', projectId] as const,
-    issues: (projectId: string) => ['projects', 'issue', projectId] as const,
-    issue: (projectId: string, issueId: string) => ['projects', 'issue', projectId, issueId] as const,
-    evidence: (projectId: string, issueId: string) =>
-      ['projects', 'issue', projectId, issueId, 'evidence'] as const,
-  },
   interactions: {
     all: ['interactions'] as const,
     list: (rootThreadId?: string | null, cursor?: string | null, limit?: number) =>

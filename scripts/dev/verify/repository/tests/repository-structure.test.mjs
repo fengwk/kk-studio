@@ -452,7 +452,7 @@ test('module boundary guard rejects a harness driver depending on the platform r
 })
 
 test('module boundary guard rejects platform depending on an app in isolation', () => {
-  // Test intent: platform never depends on apps; reintroducing platform -> project must fail closed.
+  // Test intent: platform never depends on apps; an app dependency must fail closed.
   const mirrorRoot = createRepositoryMirror()
   try {
     const mirrorPlatform = path.join(mirrorRoot, 'platform')
@@ -466,7 +466,7 @@ test('module boundary guard rejects platform depending on an app in isolation', 
       pom,
       readFileSync(pom, 'utf8').replace(
         '</dependencies>',
-        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-project</artifactId></dependency>\n    </dependencies>',
+        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-chat</artifactId></dependency>\n    </dependencies>',
       ),
     )
     assert.throws(
@@ -476,7 +476,7 @@ test('module boundary guard rejects platform depending on an app in isolation', 
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
         }),
-      (error) => (error.stderr || '').includes('platform/runtime must not depend on kk-studio-project'),
+      (error) => (error.stderr || '').includes('platform/runtime must not depend on kk-studio-chat'),
     )
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true })
@@ -493,12 +493,12 @@ test('module boundary guard rejects an app depending on another app in test scop
       recursive: true,
       filter: (source) => path.basename(source) !== 'target',
     })
-    const pom = path.join(mirrorApps, 'project/pom.xml')
+    const pom = path.join(mirrorApps, 'chat/pom.xml')
     writeFileSync(
       pom,
       readFileSync(pom, 'utf8').replace(
         '</dependencies>',
-        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-chat</artifactId><scope>test</scope></dependency>\n    </dependencies>',
+        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-ide</artifactId><scope>test</scope></dependency>\n    </dependencies>',
       ),
     )
     assert.throws(
@@ -508,7 +508,7 @@ test('module boundary guard rejects an app depending on another app in test scop
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
         }),
-      (error) => (error.stderr || '').includes('apps/project must not depend on kk-studio-chat'),
+      (error) => (error.stderr || '').includes('apps/chat must not depend on kk-studio-ide'),
     )
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true })

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +16,7 @@ import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO;
@@ -173,8 +173,8 @@ public class HarnessThreadController {
       @PathVariable UUID threadId,
       @PathVariable UUID toolInvocationId,
       @RequestBody HarnessToolApprovalDTO request,
-      HttpServletRequest httpRequest) {
-    String operator = OperatorResolver.resolve(httpRequest);
+      StudioPrincipal principal) {
+    String operator = principal.userId().toString();
     return HarnessRuntimeResponseMapper.toToolInvocationDto(
         interactionService.decideApproval(
             HarnessRuntimeRequestMapper.toToolApprovalCommand(

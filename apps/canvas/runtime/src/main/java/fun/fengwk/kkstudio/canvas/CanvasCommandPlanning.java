@@ -448,9 +448,7 @@ final class CanvasCommandPlanning {
     if (node.run == null) {
       return false;
     }
-    if (node.run.status() == CanvasFunctionRunStatus.READY
-        || node.run.status() == CanvasFunctionRunStatus.RUNNING
-        || node.run.status() == CanvasFunctionRunStatus.UNKNOWN) {
+    if (node.run.status().isUnsettled()) {
       conflicts.add(new CanvasConflict.NodeRunning(node.id, node.run));
       return true;
     }

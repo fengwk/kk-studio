@@ -10,6 +10,7 @@ import {
   listResults,
   cid,
   sleep,
+  studioAuthHeaders,
 } from '../lib/http.mjs'
 import {
   acceptCommandBatch,
@@ -25,7 +26,6 @@ import {
   listSessionThreads,
   renameSession,
   renameThread,
-  setAgentCommand,
   setExecutionCommand,
   setThreadYolo,
   stopThread,
@@ -693,7 +693,7 @@ registerCase({
           ...cursor(),
           commands: [
             userMessageCommand('first', cid()),
-            setAgentCommand('x', cid()),
+            setExecutionCommand({ modelName: 'missing-model', variant: null }, cid()),
           ],
         }),
       { status: 400, code: 'validation', messageIncludes: /order|final|USER_MESSAGE/i },
@@ -765,7 +765,7 @@ registerCase({
       `replay must return the existing command: ${JSON.stringify({ first, replay })}`,
     )
     // 部分重放：HTTP 面 shape 限制一个 batch 恰一条 USER_MESSAGE，因此用
-    // SET_AGENT(新) + USER_MESSAGE(已存在) 构造 partial：SET 是新 id、USER 已存在 =>
+    // SET_EXECUTION(新) + USER_MESSAGE(已存在) 构造 partial：SET 是新 id、USER 已存在 =>
     // present=1/2 => 409 PARTIAL_COMMAND_REPLAY（Runtime 检测先于命令 admission）。
     // 混合批次按契约必须携带当前游标。
     const freshSnapshot = await getThreadSnapshot(ctx, threadId)
@@ -779,7 +779,7 @@ registerCase({
             expectedNextCommandSequence: freshSnapshot.thread.nextCommandSequence,
           }),
           commands: [
-            setAgentCommand('x', cid()),
+            setExecutionCommand({ modelName: 'missing-model', variant: null }, cid()),
             userMessageCommand('replayed again', idempotencyKey),
           ],
         }),
@@ -792,7 +792,7 @@ registerCase({
   id: 'thread.message_cursorless_and_settings_stale_cas',
   level: 'L1',
   title: '纯 USER_MESSAGE 无需 cursor，设置批次仍拒绝 stale CAS',
-  docs: '单条纯 USER_MESSAGE 无 cursor 按当前邮箱尾部入队（即使提交过期 cursor 也不拒绝）；随后 SET_AGENT 混合批次以旧 head/sequence 提交 => 409 STALE_COMMAND_CURSOR，且被拒绝批次不改变 Thread 的 nextCommandSequence/version/head。',
+  docs: '单条纯 USER_MESSAGE 无 cursor 按当前邮箱尾部入队（即使提交过期 cursor 也不拒绝）；随后 SET_EXECUTION 混合批次以旧 head/sequence 提交 => 409 STALE_COMMAND_CURSOR，且被拒绝批次不改变 Thread 的 nextCommandSequence/version/head。',
   async run(ctx) {
     const { agent, model } = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -843,7 +843,7 @@ registerCase({
             expectedNextCommandSequence: before.thread.nextCommandSequence,
           }),
           commands: [
-            setAgentCommand('coder', cid()),
+            setExecutionCommand({ modelName: 'coder', variant: null }, cid()),
             userMessageCommand('stale settings', cid()),
           ],
         }),
@@ -1595,7 +1595,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE 一个 batch；SET_ENVIRONMENT 省略 environmentName 清除原环境；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
+  docs: '前端固定顺序 SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE 一个 batch；SET_ENVIRONMENT 省略 environmentName 清除原环境；SET_EXECUTION 使用不存在的 execution，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1611,10 +1611,7 @@ registerCase({
       sessionId: cid(),
       threadId,
       rootSettings: {
-        ...branchSettingsOf(
-          { name: `e2e-set-all-missing-${cid().slice(0, 8)}` },
-          modelSelectionOf(ctx),
-        ),
+        ...branchSettingsOf(ctx.vars.agent, { modelName: 'missing-bootstrap-model', variant: null }),
         environmentName: 'e2e-previous-environment',
       },
       yoloEnabled: false,
@@ -1624,16 +1621,9 @@ registerCase({
     assert(thread.branchSettings.environmentName === 'e2e-previous-environment', JSON.stringify(thread))
     const marker = `SET-ALL-${cid()}`
     const modelSelection = modelSelectionOf(ctx)
-    const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
+    const missingModel = { modelName: 'missing-model', variant: null }
     const commands = [
-      setAgentCommand(missingAgentName, cid()),
-      setExecutionCommand(
-        {
-          modelName: modelSelection.modelName,
-          variant: modelSelection.variant,
-        },
-        cid(),
-      ),
+      setExecutionCommand(missingModel, cid()),
       { type: 'SET_ENVIRONMENT', idempotencyKey: cid() },
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
     ]
@@ -1650,7 +1640,7 @@ registerCase({
     const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE',
+        'SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -1668,14 +1658,8 @@ registerCase({
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const finalSnapshot = await getThreadSnapshot(ctx, threadId)
     const expectedSettings = {
-      agentName: missingAgentName,
-      execution: {
-        driver: 'builtin',
-        settings: {
-          modelName: modelSelection.modelName,
-          variant: modelSelection.variant,
-        },
-      },
+      agentName: ctx.vars.agent.name,
+      execution: { driver: 'builtin', settings: missingModel },
       environmentName: null,
     }
     assert(
@@ -1706,7 +1690,7 @@ registerCase({
     const planningError = finalSnapshot.entries.find((entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'ASSISTANT_ERROR') return false
       const error = entry.payload.error
-      return error?.code === 'PLANNING_FAILED' && String(error?.message || '').includes(missingAgentName)
+      return error?.code === 'PLANNING_FAILED' && String(error?.message || '').includes(missingModel.modelName)
     })
     assert(
       planningError,
@@ -1748,9 +1732,9 @@ registerCase({
           }),
           commands: [
             {
-              type: 'SET_AGENT',
+              type: 'SET_EXECUTION',
               idempotencyKey: cid(),
-              agentName: 'x',
+              execution: { driver: 'builtin', settings: { modelName: modelSelection.modelName, variant: modelSelection.variant } },
               unexpected: true,
             },
           ],
@@ -1785,7 +1769,7 @@ registerCase({
         }),
       { status: 400, code: 'validation', messageIncludes: /environmentName/i },
     )
-    // 其他 command type 不允许携带 environmentName 字段：sealed variant 由严格 mapper 拒绝，detail 文本不是稳定契约。
+    // SET_EXECUTION 不允许携带 environmentName 字段：sealed variant 由严格 mapper 拒绝，detail 文本不是稳定契约。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1797,9 +1781,9 @@ registerCase({
           }),
           commands: [
             {
-              type: 'SET_AGENT',
+              type: 'SET_EXECUTION',
               idempotencyKey: cid(),
-              agentName: 'x',
+              execution: { driver: 'builtin', settings: { modelName: 'x' } },
               environmentName: 'local',
             },
           ],
@@ -1845,9 +1829,9 @@ registerCase({
           }),
           commands: [
             {
-              type: 'SET_AGENT',
+              type: 'SET_EXECUTION',
               idempotencyKey: cid(),
-              agentName: 'x',
+              execution: { driver: 'builtin', settings: { modelName: modelSelection.modelName, variant: modelSelection.variant } },
               unexpected: { value: '.' },
             },
           ],
@@ -1983,7 +1967,7 @@ registerCase({
       assert(afterTreeQuery.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
       assert(afterTreeQuery.thread.updatedAt === before.thread.updatedAt, 'tree query must not change updatedAt')
 
-      socket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      socket = new WebSocket(threadTreeEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
       const frames = []
       const observedFrames = []
       collect = (event) => {
@@ -2024,7 +2008,7 @@ registerCase({
       assert(observedFrames.indexOf(ack) < observedFrames.indexOf(initialSnapshot), 'snapshot must follow subscribed ack')
       assert(isDeepStrictEqual(initialSnapshot.data.nodes, nodes), JSON.stringify(initialSnapshot))
 
-      secondSocket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      secondSocket = new WebSocket(threadTreeEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
       const secondFrames = []
       const secondObservedFrames = []
       secondCollect = (event) => {
@@ -2038,16 +2022,13 @@ registerCase({
       }
       secondSocket.addEventListener('message', secondCollect)
       await waitForEventSocketOpen(secondSocket, 5_000)
-      secondSocket.send(JSON.stringify({
-        type: 'refresh',
-        resource: { kind: 'projects' },
-      }))
+      secondSocket.send(JSON.stringify({ type: 'refresh', resource: { kind: 'environments' } }))
       const invalidRefresh = await takeEventFrame(
         secondFrames,
         (frame) => frame?.type === 'error' && frame?.code === 'INVALID_REFRESH_RESOURCE',
         5_000,
       )
-      assert(invalidRefresh.resource?.kind === 'projects', JSON.stringify(invalidRefresh))
+      assert(invalidRefresh.resource?.kind === 'environments', JSON.stringify(invalidRefresh))
       secondSocket.send(JSON.stringify({
         type: 'refresh',
         resource: { kind: 'thread-tree', id: threadId },

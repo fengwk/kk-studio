@@ -47,7 +47,6 @@ final class ApplicationEventHub implements AutoCloseable {
   enum ResourceKind {
     THREAD,
     CANVAS,
-    PROJECTS,
     THREAD_TREE,
     INTERACTIONS,
     ENVIRONMENTS
@@ -77,7 +76,6 @@ final class ApplicationEventHub implements AutoCloseable {
           Signal.ThreadSnapshot,
           Signal.ThreadSnapshotFailed,
           Signal.Realtime,
-          Signal.ProjectChanged,
           Signal.ThreadTreeChanged,
           Signal.ThreadTreeSnapshot,
           Signal.ThreadTreeSnapshotFailed,
@@ -91,12 +89,6 @@ final class ApplicationEventHub implements AutoCloseable {
     record ThreadSnapshotFailed() implements Signal {}
 
     record Realtime(RealtimeEvent event) implements Signal {}
-
-    record ProjectChanged(UUID projectId) implements Signal {
-      public ProjectChanged {
-        projectId = Objects.requireNonNull(projectId, "projectId");
-      }
-    }
 
     /** 该根的执行树需要回读；资源本身已带根 id。 */
     record ThreadTreeChanged() implements Signal {}
@@ -147,7 +139,6 @@ final class ApplicationEventHub implements AutoCloseable {
   private final RealtimeEventSource realtimeSource;
   private final RealtimeSubscriptionService realtimeSubscriptions;
   private final CanvasVersionEventSource canvasVersionSource;
-  private final NotificationInvalidationSource projectChangeSource;
   private final NotificationInvalidationSource environmentChangeSource;
   private final IntSupplier maxBufferedSignals;
   private final ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher;
@@ -172,7 +163,6 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource projectChangeSource,
       NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals) {
     this(
@@ -180,7 +170,6 @@ final class ApplicationEventHub implements AutoCloseable {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectChangeSource,
         environmentChangeSource,
         maxBufferedSignals,
         null,
@@ -193,7 +182,6 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource projectChangeSource,
       NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher) {
@@ -202,7 +190,6 @@ final class ApplicationEventHub implements AutoCloseable {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectChangeSource,
         environmentChangeSource,
         maxBufferedSignals,
         threadTreeSnapshotPublisher,
@@ -214,7 +201,6 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource projectChangeSource,
       NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
@@ -224,7 +210,6 @@ final class ApplicationEventHub implements AutoCloseable {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectChangeSource,
         environmentChangeSource,
         maxBufferedSignals,
         threadTreeSnapshotPublisher,
@@ -237,7 +222,6 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource projectChangeSource,
       NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
@@ -248,7 +232,6 @@ final class ApplicationEventHub implements AutoCloseable {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectChangeSource,
         environmentChangeSource,
         maxBufferedSignals,
         threadTreeSnapshotPublisher,
@@ -262,7 +245,6 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource projectChangeSource,
       NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
@@ -274,7 +256,6 @@ final class ApplicationEventHub implements AutoCloseable {
     this.realtimeSubscriptions =
         Objects.requireNonNull(realtimeSubscriptions, "realtimeSubscriptions");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
-    this.projectChangeSource = Objects.requireNonNull(projectChangeSource, "projectChangeSource");
     this.environmentChangeSource =
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     this.maxBufferedSignals = Objects.requireNonNull(maxBufferedSignals, "maxBufferedSignals");
@@ -478,8 +459,6 @@ final class ApplicationEventHub implements AutoCloseable {
         state.canvasVersionHandle = version.handle();
         state.cursor = version.cursor();
       }
-      case PROJECTS -> state.invalidationRelease =
-          projectChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
       case THREAD_TREE -> {
         HarnessChangeSubscription subscription =
             harnessChanges
@@ -556,7 +535,6 @@ final class ApplicationEventHub implements AutoCloseable {
     NotificationInvalidationSource.Event.Changed changed =
         (NotificationInvalidationSource.Event.Changed) event;
     switch (state.key.kind()) {
-      case PROJECTS -> fanout(state, new Signal.ProjectChanged(changed.key()));
       case ENVIRONMENTS -> fanout(state, new Signal.EnvironmentChanged());
       default -> throw new IllegalStateException("unexpected invalidation resource: " + state.key);
     }

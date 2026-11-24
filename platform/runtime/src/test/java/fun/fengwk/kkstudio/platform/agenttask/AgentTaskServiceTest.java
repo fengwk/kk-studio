@@ -70,7 +70,7 @@ class AgentTaskServiceTest {
   }
 
   @Test
-  void rootTaskSpawnsAsAReceiptOnlyControllerRun() {
+  void rootTaskSpawnsAsAReceiptOnlyPluginRun() {
     AcceptedCommands accepted = accepted(UUID.randomUUID());
     when(runtime.spawn(any(), any())).thenReturn(accepted);
     AgentTaskRequest request = request(null, null, null);
@@ -82,7 +82,7 @@ class AgentTaskServiceTest {
         ArgumentCaptor.forClass(AcceptancePreflight.class);
     verify(runtime).spawn(spawn.capture(), preflight.capture());
     SpawnRequest spawned = spawn.getValue();
-    assertEquals(ThreadKind.CONTROLLER_TASK, spawned.kind());
+    assertEquals(ThreadKind.PLUGIN_TASK, spawned.kind());
     assertEquals(JoinDelivery.RECEIPT_ONLY, spawned.delivery());
     assertNull(spawned.parentThreadId());
     assertNull(spawned.expectedParentHeadEntryId());
@@ -246,7 +246,7 @@ class AgentTaskServiceTest {
         SETTINGS,
         List.of(command),
         AcceptancePreflight.IDENTITY,
-        ThreadKind.CONTROLLER_TASK,
+        ThreadKind.PLUGIN_TASK,
         parentId,
         parentHead,
         cont,
@@ -277,7 +277,7 @@ class AgentTaskServiceTest {
         "task",
         threadId,
         false,
-        ThreadKind.CONTROLLER_TASK,
+        ThreadKind.PLUGIN_TASK,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
@@ -40,7 +39,6 @@ class ThreadCommandPayloadJsonCodecTest {
         List.of(
             new UserMessageCommandPayload(user("hello")),
             new CustomMessageCommandPayload(user("custom")),
-            new SetAgentCommandPayload("coding"),
             new SetExecutionCommandPayload(EXECUTION),
             new SetEnvironmentCommandPayload("local"),
             new SetEnvironmentCommandPayload(null));
@@ -61,7 +59,6 @@ class ThreadCommandPayloadJsonCodecTest {
     assertEquals(
         "{\"execution\":{\"driver\":\"builtin\",\"settings\":{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}}}",
         codec.encode(new SetExecutionCommandPayload(EXECUTION)));
-    assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
     // SET_ENVIRONMENT 的 environmentName 必须显式存在：null 表示解除环境选择，不能省略。
     assertEquals(
         "{\"environmentName\":\"local\"}", codec.encode(new SetEnvironmentCommandPayload("local")));
@@ -132,27 +129,33 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\",\"agentName\":\"b\"}"));
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT,
+                "{\"environmentName\":\"a\",\"environmentName\":\"b\"}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\"} {}"));
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"a\"} {}"));
   }
 
   @Test
   void rejectsUnknownMissingAndWrongTypedFields() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\",\"extra\":1}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, "[]"));
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"a\",\"extra\":1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":5}"));
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\" a\"}"));
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "[]"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":5}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\" a\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -163,7 +166,8 @@ class ThreadCommandPayloadJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\",\"unknownField\":null}"));
+                ThreadCommandType.SET_ENVIRONMENT,
+                "{\"environmentName\":\"a\",\"unknownField\":null}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
@@ -193,10 +197,11 @@ class ThreadCommandPayloadJsonCodecTest {
   void rejectsWrongTypeDispatch() {
     String userJson = codec.encode(new UserMessageCommandPayload(user("hello")));
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, userJson));
+        IllegalArgumentException.class,
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, userJson));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"agentName\":\"a\"}"));
+        () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"environmentName\":\"a\"}"));
   }
 
   @Test
@@ -236,14 +241,16 @@ class ThreadCommandPayloadJsonCodecTest {
   @Test
   void rejectsMalformedOrNullJsonAndNullArguments() {
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, "{"));
+        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{"));
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, "null"));
+        IllegalArgumentException.class,
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "null"));
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, ""));
+        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, ""));
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null, "{}"));
-    assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
+    assertThrows(
+        NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, null));
   }
 
   /** 测试意图：NOTIFICATION command 四字段严格往返，canonical 字段序与历史 payload 同形，仅允许 USER 角色。 */

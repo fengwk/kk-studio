@@ -124,7 +124,6 @@ describe('AgentPane acceptance pipeline', () => {
     })
 
     expect(entry.request.commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
       'USER_MESSAGE',
     ])
     // 名称是创建事实的一部分：必须原样出现在 NEW_THREAD target 中，绝不初建后再改名。
@@ -169,7 +168,6 @@ describe('AgentPane acceptance pipeline', () => {
       'yoloEnabled',
     ])
     expect(forked.request.commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
       'USER_MESSAGE',
     ])
 
@@ -184,9 +182,9 @@ describe('AgentPane acceptance pipeline', () => {
 
     // 无 owner / 无 target 的 CAS 请求由 buildThreadCommandBatchRequest 生成。
     const commands = [{
-      type: 'SET_AGENT' as const,
+      type: 'SET_EXECUTION' as const,
       idempotencyKey: 'existing-thread-1',
-      agentName: 'coder',
+      execution: createBuiltinExecution('GPT-5', 'v2'),
     }]
     expect(buildThreadCommandBatchRequest(thread, commands)).toEqual({
       expectedHeadEntryId: thread.headEntryId,
@@ -321,7 +319,7 @@ describe('AgentPane acceptance pipeline', () => {
       NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts', 'files', 'shell'],
       NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'rename-thread', 'files', 'shell'],
       FORK_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'files', 'shell'],
-      BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
+      BOUND_THREAD: THREAD_COMMANDS.filter((command) => command.id !== 'agent').map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {
       const target = kind === 'NEW_SESSION_DRAFT'

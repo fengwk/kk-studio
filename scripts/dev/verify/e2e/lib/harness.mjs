@@ -3,6 +3,7 @@ import {
   cid,
   HttpError,
   sleep,
+  studioAuthHeaders,
 } from './http.mjs'
 
 /**
@@ -23,12 +24,12 @@ import {
  * - WS   /ws/events                        应用级 Thread/Canvas 事件订阅
  * - GET  /api/platform/environments      只读 Environment 注册表（Environment UUID id = canonical 路由身份）
  *
- * 创建型 owner 只接受 CHAT（ISSUE_AGENT 由 Issue 业务工作流拥有）；已有 Thread 的 Continue/Preview 不再需要 owner：
+ * 创建型 owner 只接受 CHAT；已有 Thread 的 Continue/Preview 不再需要 owner：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
  * - NEW_THREAD{sessionId,startEntryId,threadId,threadName,yoloEnabled}：在既有 Session 的合法 fork 边界
  *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
- * commands 必须是固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT 前缀 +
+ * commands 必须是固定顺序 SET_EXECUTION,SET_ENVIRONMENT 前缀 +
  * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
  */
 
@@ -814,12 +815,6 @@ export function userMessageCommand(content, idempotencyKey) {
   return { type: 'USER_MESSAGE', idempotencyKey, contents: [{ type: 'TEXT', text: content }] }
 }
 
-export function setAgentCommand(agentName, idempotencyKey) {
-  assert(agentName && typeof agentName === 'string', 'agentName required')
-  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
-  return { type: 'SET_AGENT', idempotencyKey, agentName }
-}
-
 export function setExecutionCommand(executionOrModel, idempotencyKey) {
   assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
   const execution = executionOrModel?.driver
@@ -1171,7 +1166,9 @@ async function waitForModelDeltaAfterEventSubscribed(
 
   const deadline = Date.now() + timeoutMs
   const controller = new AbortController()
-  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl), {
+    headers: studioAuthHeaders(ctx.baseUrl),
+  })
   try {
     await waitForSocketOpen(socket, deadline, controller.signal)
     socket.send(JSON.stringify({

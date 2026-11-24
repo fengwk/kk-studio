@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
@@ -567,7 +567,7 @@ class ThreadLifecycleCoordinatorJoinTest {
     store.transaction(
         tx -> {
           tx.threads().lock(childId);
-          var payload = new SetAgentCommandPayload("assistant");
+          var payload = new SetEnvironmentCommandPayload("assistant");
           tx.commands()
               .insert(
                   List.of(

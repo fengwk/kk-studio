@@ -116,7 +116,7 @@ final class AsyncTextSender {
    * 终止发送：清空队列，把 {@code errorFrame} 作为最后一帧发出，随后以 {@code code} 关闭连接。 已在途的发送完成后才关闭，保证 error 帧先于 close
    * 帧到达。
    */
-  void fail(String errorFrame, int code) {
+  void fail(String errorFrame, int code, String reason) {
     Objects.requireNonNull(errorFrame, "errorFrame");
     boolean startDrain;
     synchronized (lock) {
@@ -125,7 +125,7 @@ final class AsyncTextSender {
       }
       failed = true;
       this.closeCode = code;
-      this.closeReason = "event channel failed";
+      this.closeReason = reason;
       queue.clear();
       queuedBytes = 0;
       queue.add(new Outbound(errorFrame));

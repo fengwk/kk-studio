@@ -31,7 +31,6 @@ export interface RenameTarget {
 export interface AgentPaneCapabilities {
   allowNewSession?: boolean
   readOnly?: boolean
-  allowSwitchAgent?: boolean
   allowBranching?: boolean
 }
 

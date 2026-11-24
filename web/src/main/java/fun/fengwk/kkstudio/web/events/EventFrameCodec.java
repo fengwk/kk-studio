@@ -73,7 +73,6 @@ final class EventFrameCodec {
 
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
-  private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
   private static final String THREAD_TREE = "thread-tree";
   private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
@@ -229,14 +228,6 @@ final class EventFrameCodec {
       }
       node.put("name", "realtime");
       node.set("data", realtimeCodec.encodeNode(realtime.event()));
-    } else if (signal instanceof Signal.ProjectChanged projectChanged) {
-      if (resource.kind() != ResourceKind.PROJECTS) {
-        throw new IllegalArgumentException("project change signal requires the projects resource");
-      }
-      node.put("name", "changed");
-      ObjectNode data = NODES.objectNode();
-      data.put("projectId", projectChanged.projectId().toString());
-      node.set("data", data);
     } else if (signal instanceof Signal.ThreadTreeSnapshot snapshot) {
       if (resource.kind() != ResourceKind.THREAD_TREE) {
         throw new IllegalArgumentException(
@@ -419,10 +410,6 @@ final class EventFrameCodec {
     if (THREAD_TREE.equals(kindName)) {
       return new ResourceKey(ResourceKind.THREAD_TREE, resourceId(node));
     }
-    if (PROJECTS.equals(kindName)) {
-      JsonCodecSupport.requireFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
-      return new ResourceKey(ResourceKind.PROJECTS, null);
-    }
     if (INTERACTIONS.equals(kindName)) {
       JsonCodecSupport.requireFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.INTERACTIONS, null);
@@ -432,7 +419,7 @@ final class EventFrameCodec {
       return new ResourceKey(ResourceKind.ENVIRONMENTS, null);
     }
     throw new IllegalArgumentException(
-        "frame.resource.kind must be thread, canvas, thread-tree, projects, interactions, or"
+        "frame.resource.kind must be thread, canvas, thread-tree, interactions, or"
             + " environments");
   }
 
@@ -447,7 +434,6 @@ final class EventFrameCodec {
       case THREAD -> node.put("kind", THREAD);
       case CANVAS -> node.put("kind", CANVAS);
       case THREAD_TREE -> node.put("kind", THREAD_TREE);
-      case PROJECTS -> node.put("kind", PROJECTS);
       case INTERACTIONS -> node.put("kind", INTERACTIONS);
       case ENVIRONMENTS -> node.put("kind", ENVIRONMENTS);
     }
@@ -460,7 +446,6 @@ final class EventFrameCodec {
   /** 提示型（无持久游标）资源：ack cursor 恒为 0，只提示回读。 */
   private static boolean isHintResource(ResourceKind kind) {
     return kind == ResourceKind.THREAD
-        || kind == ResourceKind.PROJECTS
         || kind == ResourceKind.THREAD_TREE
         || kind == ResourceKind.INTERACTIONS
         || kind == ResourceKind.ENVIRONMENTS;

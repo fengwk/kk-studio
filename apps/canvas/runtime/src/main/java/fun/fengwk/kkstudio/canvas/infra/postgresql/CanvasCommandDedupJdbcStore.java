@@ -42,6 +42,12 @@ public class CanvasCommandDedupJdbcStore {
         .update();
   }
 
+  void deleteByCanvasId(UUID canvasId) {
+    jdbc.sql("delete from canvas_command_dedup where canvas_id = :canvasId")
+        .param("canvasId", canvasId)
+        .update();
+  }
+
   public Optional<CanvasCommandDedupDO> findById(UUID canvasId, UUID idempotencyKey) {
     return jdbc.sql(
             """

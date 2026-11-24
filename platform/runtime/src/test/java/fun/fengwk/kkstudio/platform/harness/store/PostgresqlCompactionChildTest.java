@@ -33,7 +33,8 @@ import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -915,7 +916,7 @@ class PostgresqlCompactionChildTest {
                   parentId, parent.headEntryId(), parent.nextCommandSequence()),
               List.of(
                   new NewThreadCommand(
-                      new SetAgentCommandPayload("assistant"), UUID.randomUUID()))),
+                      new SetEnvironmentCommandPayload("local"), UUID.randomUUID()))),
           AcceptancePreflight.IDENTITY);
       processNext(parentId);
       assertEquals(1, queuedCommandCount(parentId));
@@ -1464,7 +1465,7 @@ class PostgresqlCompactionChildTest {
               null,
               false,
               ThreadConstraints.NONE,
-              ThreadKind.CONTROLLER_TASK,
+              ThreadKind.PLUGIN_TASK,
               JoinDelivery.NOTIFY_PARENT,
               SpawnRequest.Budget.unlimited(),
               outerJoinId,
@@ -1517,7 +1518,8 @@ class PostgresqlCompactionChildTest {
 
       ThreadSnapshot ownerBeforeSettings = snapshot(ownerThreadId);
       NewThreadCommand settingsCommand =
-          new NewThreadCommand(new SetAgentCommandPayload("assistant"), UUID.randomUUID());
+          new NewThreadCommand(
+              new SetExecutionCommandPayload(branchSettings().execution()), UUID.randomUUID());
       AcceptCommandsCommand settingsRequest =
           new AcceptCommandsCommand(
               new AcceptCommandsTarget.Thread(

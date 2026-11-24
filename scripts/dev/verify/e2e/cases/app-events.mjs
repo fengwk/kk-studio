@@ -1,4 +1,4 @@
-import { assert, cid, sleep } from '../lib/http.mjs'
+import { assert, cid, sleep, studioAuthHeaders } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -10,7 +10,7 @@ registerCase({
   title: '应用事件 WebSocket 周期 heartbeat 保活',
   docs: '原生 WebSocket 直连 /ws/events，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId 与十进制正整数字符串 heartbeatIntervalMillis，再等待严格 {type:"heartbeat"} 且连接保持打开',
   async run(ctx) {
-    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
     const startedAt = Date.now()
     try {
       const frame = await waitForHeartbeat(socket, 25_000)
@@ -33,73 +33,6 @@ registerCase({
       )
     } finally {
       socket.close(1000, 'E2E complete')
-    }
-  },
-})
-
-registerCase({
-  id: 'events.project_invalidation',
-  level: 'L1',
-  title: 'Project 全局失效事件',
-  docs: '订阅无 synthetic id 的 projects 全局资源；数据库提交后的 Project 创建发 changed(projectId)',
-  async run(ctx) {
-    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
-    const frames = []
-    let project
-    const collect = (event) => {
-      try {
-        frames.push(JSON.parse(String(event.data)))
-      } catch {
-        // Ignore non-JSON frames; expected protocol frames are asserted below.
-      }
-    }
-    socket.addEventListener('message', collect)
-    try {
-      await waitForSocketOpen(socket, 5_000)
-
-      socket.send(
-        JSON.stringify({ type: 'subscribe', resource: { kind: 'projects' } }),
-      )
-      const projectsAck = await takeFrame(
-        frames,
-        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'projects',
-        5_000,
-      )
-      assertGlobalSubscriptionAck(projectsAck, 'projects')
-
-      project = (
-          await ctx.call('POST', '/api/project/projects', {
-            title: `Event Project ${cid().slice(0, 8)}`,
-            description: 'Database notification E2E',
-          })
-        ).json
-      const projectEvent = await takeFrame(
-        frames,
-        (frame) =>
-          frame?.type === 'event'
-          && frame?.resource?.kind === 'projects'
-          && frame?.name === 'changed'
-          && frame?.data?.projectId === project.id,
-        10_000,
-      )
-      assertExactKeys(projectEvent, ['type', 'resource', 'name', 'data'], 'project event')
-      assertExactKeys(projectEvent.resource, ['kind'], 'project event resource')
-      assertExactKeys(projectEvent.data, ['projectId'], 'project event data')
-
-      ctx.writeArtifact(
-        'global-invalidation.json',
-        `${JSON.stringify({ projectsAck, projectEvent }, null, 2)}\n`,
-      )
-    } finally {
-      socket.removeEventListener('message', collect)
-      socket.close(1000, 'E2E complete')
-      if (project?.id) {
-        const current = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
-        await ctx.call(
-          'DELETE',
-          `/api/project/projects/${project.id}?expectedVersion=${encodeURIComponent(current.version)}`,
-        )
-      }
     }
   },
 })

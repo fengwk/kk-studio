@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.context.SmartLifecycle;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -18,6 +19,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
+import fun.fengwk.kkstudio.platform.account.StudioAccountService;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
@@ -28,6 +31,8 @@ import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import javax.sql.DataSource;
 
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -62,6 +67,7 @@ import java.util.UUID;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(WebAccountMockMvcTestConfiguration.class)
 public abstract class WebPostgresTestSupport {
 
   private static final String FLYWAY_DISABLED = "false";
@@ -102,6 +108,10 @@ public abstract class WebPostgresTestSupport {
   @Autowired private PluginCatalogRuntime baselineRuntime;
 
   @Autowired private JdbcClient baselineJdbc;
+
+  @Autowired private StudioAccountService accountService;
+
+  @Autowired private WebAccountMockMvcTestConfiguration.AdminCredentials adminCredentials;
 
   @Autowired
   @Qualifier("postgresqlNotificationLoop")
@@ -146,7 +156,23 @@ public abstract class WebPostgresTestSupport {
       verifyDevSeed(conn);
     }
     persistBaselineConfigurations();
+    adminCredentials.setToken(accountService.login("kkstudio", "kkstudio").token());
     pausedLifecycles.forEach(SmartLifecycle::start);
+  }
+
+  /** Build a raw HTTP request authenticated as the admin session created for this test reset. */
+  protected final HttpRequest.Builder adminRequest(URI uri) {
+    return adminRequestWithoutOrigin(uri)
+        .header("Origin", uri.getScheme() + "://" + uri.getRawAuthority());
+  }
+
+  protected final HttpRequest.Builder adminRequestWithoutOrigin(URI uri) {
+    return HttpRequest.newBuilder(uri).header("Cookie", adminCookieHeader());
+  }
+
+  /** Browser session cookie for clients that do not use {@link HttpRequest}. */
+  protected final String adminCookieHeader() {
+    return StudioBrowserSession.COOKIE + "=" + adminCredentials.token();
   }
 
   /** 与共享 Schema 直接竞争的后台生命周期；不枚举或停止其他 Spring 生命周期和服务器。 */

@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -45,7 +45,7 @@ class StopReceiptsTest {
             3L,
             new NotificationCommandPayload(
                 id(11L), NotificationKind.SUBAGENT_RESULT, id(12L), userMessage("notice")));
-    ThreadCommand setting = command(4L, new SetAgentCommandPayload("agent"));
+    ThreadCommand setting = command(4L, new SetEnvironmentCommandPayload("agent"));
 
     List<CancelledThreadInput> inputs =
         StopReceipts.cancelledInputs(List.of(user, custom, notification, setting));

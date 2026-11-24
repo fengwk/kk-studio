@@ -115,7 +115,7 @@ erDiagram
 
 `root_thread_id` 上的索引支持执行树查询。`(session_id, name)` 对执行根唯一，`input_through_sequence < next_command_sequence`。
 
-`ThreadState` 对应 Thread 行。Session、父、根、类型、创建指纹和约束在创建时固定。`kind` 取 `USER`、`SUBAGENT`、`COMPACTION`、`PLUGIN_TASK` 或 `CONTROLLER_TASK`。`maxOutputTokens` 可取 `null`；子 Thread 保存与父约束合并后的有效值，自身的 `yolo_enabled` 为 `false`。
+`ThreadState` 对应 Thread 行。Session、父、根、类型、创建指纹和约束在创建时固定。`kind` 取 `USER`、`SUBAGENT` 或 `COMPACTION`。`maxOutputTokens` 可取 `null`；子 Thread 保存与父约束合并后的有效值，自身的 `yolo_enabled` 为 `false`。
 
 ### 命令、调用与调度
 
@@ -195,7 +195,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 | `created_at` | `timestamptz(3)` | 创建时间 |
 | `updated_at` | `timestamptz(3)` | 最近更新时间 |
 
-`(assistant_entry_id, call_index)` 唯一；同一 Assistant 的调用按顺序形成批次。批次结果写进 Entry 后删除调用行。[V2](../schema/src/main/resources/db/migration/V2__waiting_child_tool_invocations.sql) 将 `WAITING_CHILD` 纳入状态约束与非终态索引；人工待办索引覆盖 `WAITING_APPROVAL` 和 `WAITING_INPUT`。
+`(assistant_entry_id, call_index)` 唯一；同一 Assistant 的调用按顺序形成批次。批次结果写进 Entry 后删除调用行。`WAITING_CHILD` 纳入状态约束与非终态索引；人工待办索引覆盖 `WAITING_APPROVAL` 和 `WAITING_INPUT`。
 
 #### [`durable_work`](../schema/src/main/resources/db/migration/V1__schema.sql#L617)
 
@@ -325,7 +325,6 @@ SQL 校验引用、唯一性、枚举和 JSON 容器，Java 值类型与 codec �
 | --- | --- |
 | `USER_MESSAGE`、`CUSTOM_MESSAGE` | `message` |
 | `NOTIFICATION` | `notificationId`、`kind`、`sourceThreadId`、`message` |
-| `SET_AGENT` | `agentName` |
 | `SET_EXECUTION` | `execution` |
 | `SET_ENVIRONMENT` | `environmentName` |
 

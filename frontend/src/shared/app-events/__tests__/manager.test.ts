@@ -9,7 +9,6 @@ const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } 
 const THREAD_B = { kind: 'thread', id: 'bbbbbbbb-0000-4000-8000-000000000002' } as const
 const CANVAS_A = { kind: 'canvas', id: 'cccccccc-0000-4000-8000-000000000003' } as const
 const TREE_A = { kind: 'thread-tree', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
-const PROJECTS = { kind: 'projects' } as const
 const EVENT_NODE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const EVENT_NODE_B = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab'
 const CONNECTION_A = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -399,29 +398,6 @@ describe('ApplicationEventManager', () => {
     socket.emitServer({ type: 'error', code: 'INTERNAL', message: 'orphan' })
     expect(onSubscribed).toHaveBeenCalledTimes(1)
     expect(onError).toHaveBeenCalledTimes(1)
-  })
-
-  it('subscribes and dispatches the global project resource without a synthetic id', () => {
-    const { manager, harness } = setup()
-    const socket = harness.openLatest()
-    const projectChanged = vi.fn()
-    manager.subscribe(PROJECTS, { onEvent: projectChanged })
-
-    expect(socket.sentMessages()).toEqual([
-      {  type: 'subscribe', resource: PROJECTS },
-    ])
-
-    socket.emitServer({
-      type: 'event',
-      resource: PROJECTS,
-      name: 'changed',
-      data: { projectId: THREAD_A.id },
-    })
-    expect(projectChanged).toHaveBeenCalledWith(
-      'changed',
-      { projectId: THREAD_A.id },
-      undefined,
-    )
   })
 
   it('isolates listener callback exceptions so one consumer cannot block the others', () => {

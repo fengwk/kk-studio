@@ -151,10 +151,10 @@ public final class HarnessRuntime {
    * cursor（否则 STALE_COMMAND_CURSOR），同事务调用 {@code preflight}（仅新 batch），预留连续 sequence 并请求 THREAD
    * Work。
    *
-   * <p>命令 batch 的 shape admission 对所有 target 一致：允许固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
-   * SET_ENVIRONMENT，每种至多一次） 的 SET_* 前缀且必须全部位于消息之前，整体必须以<b>恰一条</b> user-like 输入结尾（USER_MESSAGE、USER
-   * 角色的 CUSTOM_MESSAGE）。运行时注入的 reminder 也是 USER CUSTOM_MESSAGE，同样计入 user-like，因此 {@code [reminder,
-   * USER]} 是两条 user-like 而被拒。非法 batch 是请求校验错误，抛 {@link DomainException}。
+   * <p>命令 batch 的 shape admission 对所有 target 一致：允许固定顺序（SET_MODEL -&gt; SET_ENVIRONMENT，每种至多一次） 的
+   * SET_* 前缀且必须全部位于消息之前，整体必须以<b>恰一条</b> user-like 输入结尾（USER_MESSAGE、USER 角色的 CUSTOM_MESSAGE）。运行时注入的
+   * reminder 也是 USER CUSTOM_MESSAGE，同样计入 user-like，因此 {@code [reminder, USER]} 是两条 user-like 而被拒。非法
+   * batch 是请求校验错误，抛 {@link DomainException}。
    */
   public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {

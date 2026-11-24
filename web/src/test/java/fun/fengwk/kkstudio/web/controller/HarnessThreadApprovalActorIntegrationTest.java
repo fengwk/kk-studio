@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -28,6 +31,22 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
   private static final String DECISION_ID = "00000000-0000-0000-0000-0000000000d1";
 
   @Autowired private MockMvc mockMvc;
+  private Cookie session;
+
+  @BeforeEach
+  void login() throws Exception {
+    session =
+        mockMvc
+            .perform(
+                post("/api/auth/login")
+                    .header("Origin", "http://localhost")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"kkstudio\",\"password\":\"kkstudio\"}"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getCookie("studio_session");
+  }
 
   /** 意图：携带 {@code actor} 的审批请求在真实反序列化阶段即被 400 拒绝，并给出未知字段细节。 */
   @Test
@@ -35,6 +54,8 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
     mockMvc
         .perform(
             put(approvalPath())
+                .cookie(session)
+                .header("Origin", "http://localhost")
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en-US")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
@@ -58,6 +79,8 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
     mockMvc
         .perform(
             put(approvalPath())
+                .cookie(session)
+                .header("Origin", "http://localhost")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"decision\":\"ALLOW\",\"decisionId\":\""

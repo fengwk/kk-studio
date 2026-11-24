@@ -10,7 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -186,7 +186,7 @@ class PostgresqlStopReceiptTest {
                 receipt.threadId(),
                 sequence++,
                 UUID.randomUUID(),
-                new SetAgentCommandPayload("ignored-cancelled-command")));
+                new SetEnvironmentCommandPayload("ignored-cancelled-command")));
       }
       tx.commands().insert(commands);
       List<ThreadCommand> cancelled = new ArrayList<>(commands.size());

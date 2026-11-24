@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
@@ -37,7 +37,7 @@ class ThreadCommandTest {
     assertEquals(ThreadCommandState.QUEUED, queued.state());
     assertEquals(ThreadCommandState.APPLIED, applied.state());
     assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
-    assertEquals(ThreadCommandType.SET_AGENT, queued.type());
+    assertEquals(ThreadCommandType.SET_ENVIRONMENT, queued.type());
     assertFalse(queued.state().isTerminal());
     assertTrue(applied.state().isTerminal());
     assertTrue(cancelled.state().isTerminal());
@@ -158,6 +158,6 @@ class ThreadCommandTest {
   private static final String HASH = ThreadCommandPayloadJsonCodec.requestHash(payload());
 
   private static ThreadCommandPayload payload() {
-    return new SetAgentCommandPayload("coding");
+    return new SetEnvironmentCommandPayload("coding");
   }
 }

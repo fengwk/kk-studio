@@ -11,7 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -1446,7 +1446,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void handlesOtherCommandPayloadTypesWithoutTextPrompt() {
-    // 测试意图：验证对于非消息命令（如 SetAgentCommandPayload）投影时 prompt 为空字符串。
+    // 测试意图：验证对于非消息命令（如 SetEnvironmentCommandPayload）投影时 prompt 为空字符串。
     UUID turnStart = id(960);
     UUID user = id(961);
     UUID assistant = id(962);
@@ -1481,7 +1481,7 @@ class ThreadJoinProjectorTest {
               new ThreadCommand(
                   childThreadId,
                   1L,
-                  new SetAgentCommandPayload("special-agent"),
+                  new SetEnvironmentCommandPayload("special-agent"),
                   id(965),
                   VALID_HASH,
                   null,

@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -120,9 +120,9 @@ class TurnPlanTest {
         new ThreadCommand(
             TestIds.id(1),
             1L,
-            new SetAgentCommandPayload("coding"),
+            new SetEnvironmentCommandPayload("coding"),
             TestIds.id(5),
-            ThreadCommandPayloadJsonCodec.requestHash(new SetAgentCommandPayload("coding")),
+            ThreadCommandPayloadJsonCodec.requestHash(new SetEnvironmentCommandPayload("coding")),
             null,
             null,
             null,

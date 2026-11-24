@@ -216,7 +216,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     HttpClient http = HttpClient.newHttpClient();
     HttpResponse<String> chatResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/chat/chats"))
+            adminRequest(uri("/api/chat/chats"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(
@@ -258,7 +258,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             .formatted(chatId, sessionId, threadId, idempotencyKey);
     HttpResponse<String> threadResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/harness/command-batches"))
+            adminRequest(uri("/api/harness/command-batches"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
@@ -269,7 +269,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(threadId, created.path("thread").path("threadId").asText());
     HttpResponse<String> initial =
         http.send(
-            HttpRequest.newBuilder(uri("/api/harness/threads/" + threadId)).GET().build(),
+            adminRequest(uri("/api/harness/threads/" + threadId)).GET().build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(200, initial.statusCode());
     String base = MAPPER.readTree(initial.body()).path("thread").path("headEntryId").asText();
@@ -305,8 +305,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     // Compare actual JSON types, not asText(): the browser requires decimal strings for bigint.
     HttpResponse<String> delta =
         http.send(
-            HttpRequest.newBuilder(
-                    uri("/api/harness/threads/" + threadId + "?afterEntryId=" + base))
+            adminRequest(uri("/api/harness/threads/" + threadId + "?afterEntryId=" + base))
                 .GET()
                 .build(),
             HttpResponse.BodyHandlers.ofString());
@@ -395,7 +394,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String body = "{\"title\":\"ws-oversize\",\"agentName\":\"default-assistant\"}";
     HttpResponse<String> response =
         http.send(
-            HttpRequest.newBuilder(uri("/api/chat/chats"))
+            adminRequest(uri("/api/chat/chats"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -435,7 +434,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             .formatted(chatId, UUID.randomUUID(), threadId, UUID.randomUUID(), userText);
     HttpResponse<String> response =
         http.send(
-            HttpRequest.newBuilder(uri("/api/harness/command-batches"))
+            adminRequest(uri("/api/harness/command-batches"))
                 .timeout(Duration.ofSeconds(20))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
@@ -450,7 +449,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   private JsonNode getThreadSnapshot(HttpClient http, String threadId) throws Exception {
     HttpResponse<String> response =
         http.send(
-            HttpRequest.newBuilder(uri("/api/harness/threads/" + threadId))
+            adminRequest(uri("/api/harness/threads/" + threadId))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
                 .build(),
@@ -467,7 +466,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   private long updateApplicationEventMaxBytes(HttpClient http, long maxBytes) throws Exception {
     HttpResponse<String> current =
         http.send(
-            HttpRequest.newBuilder(uri("/api/platform/settings"))
+            adminRequest(uri("/api/platform/settings"))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
                 .build(),
@@ -487,7 +486,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
     HttpResponse<String> response =
         http.send(
-            HttpRequest.newBuilder(uri("/api/platform/settings"))
+            adminRequest(uri("/api/platform/settings"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body.toString()))
@@ -532,9 +531,15 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     return URI.create("http://localhost:" + port + path);
   }
 
+  private String origin() {
+    return "http://localhost:" + port;
+  }
+
   private WebSocket connect(FrameCollector collector) throws Exception {
     return HttpClient.newHttpClient()
         .newWebSocketBuilder()
+        .header("Cookie", adminCookieHeader())
+        .header("Origin", origin())
         .buildAsync(URI.create("ws://localhost:" + port + "/ws/events"), collector)
         .get(10, TimeUnit.SECONDS);
   }

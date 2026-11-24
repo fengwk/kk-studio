@@ -97,7 +97,11 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`CanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
 
-HTTP 不提供画布删除入口。删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。Blob 引用释放失败使整个事务回滚。
+`CanvasCommandService.createCanvas(title)` 是 HTTP 创建与工作区编排共用的 Java API，返回文档 ID 和初始 revision。`deleteCanvas(canvasId, expectedRevision)` 仅供 Java 调用，归属目录由调用方在同一事务中维护。两者均加入调用方事务。
+
+深删除先锁文档并核对 revision，再按节点 → Run → Work 的顺序加锁。版本不符返回 `VERSION_CONFLICT`；若有 `READY`、`RUNNING` 或 `UNKNOWN` Run，则返回冲突原因 `EXECUTION_NOT_SETTLED`，不删除任何行，也不重新提交任务。删除释放 pin、清理 Run 和 Work、删除资源边及节点（引用随节点参数删除），最后删除组、命令回执与文档。每条 Blob 资源边只释放一次引用，文件对象仍由 Storage 异步回收；任一步失败均回滚。
+
+单独删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。
 
 [`CanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。
 

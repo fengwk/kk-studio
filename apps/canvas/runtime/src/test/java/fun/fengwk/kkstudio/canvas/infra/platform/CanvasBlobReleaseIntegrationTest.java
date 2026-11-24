@@ -5,20 +5,30 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
@@ -35,7 +45,10 @@ import java.util.UUID;
  *
  * <p>后台维护被替换为 mock，使「释放只切换 DELETING」与「释放失败回滚」的断言不受并发 DELETING 行清扫影响；对象与行的真实回收不在本契约内。
  */
-@Import(CanvasPlatformTestConfiguration.class)
+@Import({
+  CanvasPlatformTestConfiguration.class,
+  CanvasBlobReleaseIntegrationTest.CallerConfiguration.class
+})
 class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
 
   private static final CanvasTransform TRANSFORM = new CanvasTransform(10, 20, 100, 80);
@@ -43,10 +56,95 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private CanvasCommandService commandService;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ApplicationContext context;
+  @Autowired private TransactionalCanvasCaller transactionalCaller;
   @MockitoBean private StorageMaintenance storageBlobSweeper;
 
   @MockitoBean(name = "canvasFunctionDispatcher")
   private BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher;
+
+  /** 外部事务决定创建提交或回滚，服务调用不能提前提交。 */
+  @Test
+  void createCanvasJoinsExternalTransaction() {
+    CanvasDocument committed = transactionalCaller.createAndCommit("external-commit");
+    assertEquals(0L, committed.revision());
+    assertEquals(
+        1L,
+        count("canvas_document", "id = ? and revision = ?", committed.id(), committed.revision()));
+
+    UUID rolledBackId =
+        assertThrows(
+                RollbackAfterCreate.class,
+                () -> transactionalCaller.createAndRollback("external-rollback"))
+            .canvasId;
+    assertEquals(0L, count("canvas_document", "id = ?", rolledBackId));
+  }
+
+  /** 调用方回滚须恢复整个图、Work 与 Blob 引用。 */
+  @Test
+  void deleteCanvasJoinsExternalTransaction() {
+    Graph graph = addGraph(CanvasFunctionRunStatus.SUCCEEDED);
+    assertThrows(
+        RollbackAfterDelete.class,
+        () -> transactionalCaller.deleteAndRollback(graph.canvasId(), graph.revision()));
+    assertGraphIntact(graph, CanvasFunctionRunStatus.SUCCEEDED);
+  }
+
+  /** 清理带引用、pin 和两条共享同一 Blob 的资源边的画布。 */
+  @Test
+  void deleteCanvasRemovesGraphAndReleasesEachBlobEdge() {
+    Graph graph = addGraph(CanvasFunctionRunStatus.SUCCEEDED);
+    commandService.deleteCanvas(graph.canvasId(), graph.revision());
+    assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L), graphRows(graph));
+    assertEquals(0L, refCount(graph.blobId()));
+    assertEquals("DELETING", blobState(graph.blobId()));
+  }
+
+  /** 三种未结算状态均保护整个图；UNKNOWN 不得重新请求 Work。 */
+  @ParameterizedTest
+  @EnumSource(
+      value = CanvasFunctionRunStatus.class,
+      names = {"READY", "RUNNING", "UNKNOWN"})
+  void deleteCanvasRejectsUnsettledRun(CanvasFunctionRunStatus status) {
+    Graph graph = addGraph(status);
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> commandService.deleteCanvas(graph.canvasId(), graph.revision()));
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals("EXECUTION_NOT_SETTLED", error.reason());
+    assertGraphIntact(graph, status);
+  }
+
+  /** 空画布深删除后不留文档行。 */
+  @Test
+  void deleteEmptyCanvas() {
+    CanvasDocument canvas = commandService.createCanvas("empty");
+    commandService.deleteCanvas(canvas.id(), canvas.revision());
+    assertEquals(0L, count("canvas_document", "id = ?", canvas.id()));
+  }
+
+  /** 过期 revision 拒绝删除，文档仍然存在。 */
+  @Test
+  void deleteCanvasRejectsRevisionMismatch() {
+    Graph graph = addGraph(CanvasFunctionRunStatus.SUCCEEDED);
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> commandService.deleteCanvas(graph.canvasId(), graph.revision() - 1));
+    assertEquals(DomainErrorCode.VERSION_CONFLICT, error.code());
+    assertEquals(graph.revision() - 1, error.expectedVersion());
+    assertEquals(graph.revision(), error.actualVersion());
+    assertGraphIntact(graph, CanvasFunctionRunStatus.SUCCEEDED);
+  }
+
+  /** 不存在的画布以类型化领域错误拒绝。 */
+  @Test
+  void deleteMissingCanvas() {
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> commandService.deleteCanvas(UUID.randomUUID(), 0))
+            .code());
+  }
 
   /** 平台适配根显式注册唯一 mapper，Web 无需自行扫描或装配它。 */
   @Test
@@ -99,11 +197,103 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
     assertEquals(resourceId, ownedResourceId(canvas.id(), nodeId));
   }
 
+  private Graph addGraph(CanvasFunctionRunStatus status) {
+    // Blob 写入端已为两条资源边各持有一次引用。
+    UUID blobId = insertBlob("ACTIVE", 2L);
+    CanvasDocument canvas = commandService.createCanvas("graph");
+    UUID source = UUID.randomUUID();
+    UUID function = UUID.randomUUID();
+    UUID group = UUID.randomUUID();
+    UUID request = UUID.randomUUID();
+    long revision =
+        apply(
+            canvas,
+            new CanvasCommand.CreateGroup(group, "group", TRANSFORM),
+            new CanvasCommand.CreateNode(
+                source,
+                "source",
+                TRANSFORM,
+                List.of(new CanvasResourceInput.Blob("a.png", blobId))),
+            new CanvasCommand.CreateNode(
+                function,
+                "function",
+                TRANSFORM,
+                List.of(new CanvasResourceInput.Blob("b.png", blobId))),
+            new CanvasCommand.SetNodeGroup(source, null, group),
+            new CanvasCommand.SetNodeFunction(
+                function,
+                null,
+                new CanvasFunction(
+                    "video.generate",
+                    CanvasJson.parseObject(
+                        "{\"source\":{\"type\":\"resource\",\"nodeId\":\""
+                            + source
+                            + "\",\"index\":0}}"))));
+    UUID pinned = ownedResourceId(canvas.id(), source);
+    jdbc.update(
+        """
+        insert into canvas_function_run (node_id, request_id, status, state_json, error)
+        values (?, ?, ?, cast(? as jsonb), ?)
+        """,
+        function,
+        request,
+        status.name(),
+        "{\"stage\":\"" + status.name() + "\"}",
+        status == CanvasFunctionRunStatus.UNKNOWN ? "external outcome unknown" : null);
+    jdbc.update(
+        """
+        insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
+        values (?, ?, ?, 'INPUT', ?)
+        """,
+        canvas.id(),
+        function,
+        request,
+        pinned);
+    if (status != CanvasFunctionRunStatus.UNKNOWN) {
+      // 也验证终态节点残留的 Work 不会脱离画布独立存在。
+      jdbc.update(
+          """
+          insert into durable_work (target_type, target_id, available_at, wake_version)
+          values ('CANVAS_RUN', ?, statement_timestamp(), 1)
+          """,
+          function);
+    }
+    return new Graph(canvas.id(), function, blobId, revision);
+  }
+
+  private void assertGraphIntact(Graph graph, CanvasFunctionRunStatus status) {
+    assertEquals(
+        List.of(1L, 2L, 1L, 2L, 1L, 1L, 1L, status == CanvasFunctionRunStatus.UNKNOWN ? 0L : 1L),
+        graphRows(graph));
+    assertEquals(
+        1L,
+        count("canvas_document", "id = ? and revision = ?", graph.canvasId(), graph.revision()));
+    assertEquals(
+        1L,
+        count("canvas_function_run", "node_id = ? and status = ?", graph.nodeId(), status.name()));
+    assertEquals(2L, refCount(graph.blobId()));
+    assertEquals("ACTIVE", blobState(graph.blobId()));
+  }
+
+  private List<Long> graphRows(Graph graph) {
+    return List.of(
+        count("canvas_document", "id = ?", graph.canvasId()),
+        count("canvas_node", "canvas_id = ?", graph.canvasId()),
+        count("canvas_group", "canvas_id = ?", graph.canvasId()),
+        count("canvas_resource", "canvas_id = ?", graph.canvasId()),
+        count("canvas_function_run", "node_id = ?", graph.nodeId()),
+        count("canvas_function_resource_pin", "canvas_id = ?", graph.canvasId()),
+        count("canvas_command_dedup", "canvas_id = ?", graph.canvasId()),
+        count("durable_work", "target_type = 'CANVAS_RUN' and target_id = ?", graph.nodeId()));
+  }
+
+  private record Graph(UUID canvasId, UUID nodeId, UUID blobId, long revision) {}
+
   /** 创建和删除必须被接受；若返回冲突，类型断言立即失败。 */
-  private void apply(CanvasDocument canvas, CanvasCommand... commands) {
+  private long apply(CanvasDocument canvas, CanvasCommand... commands) {
     CanvasCommandResult result =
         commandService.applyCommands(canvas.id(), UUID.randomUUID(), List.of(commands));
-    assertInstanceOf(CanvasCommandResult.Accepted.class, result);
+    return assertInstanceOf(CanvasCommandResult.Accepted.class, result).patch().revision();
   }
 
   private UUID ownedResourceId(UUID canvasId, UUID nodeId) {
@@ -137,6 +327,49 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   private String blobState(UUID blobId) {
     return jdbc.queryForObject("select state from storage_blob where id = ?", String.class, blobId);
   }
+
+  @TestConfiguration(proxyBeanMethods = false)
+  static class CallerConfiguration {
+    @Bean
+    TransactionalCanvasCaller transactionalCanvasCaller(CanvasCommandService commandService) {
+      return new TransactionalCanvasCaller(commandService);
+    }
+  }
+
+  static class TransactionalCanvasCaller {
+    private final CanvasCommandService commandService;
+
+    TransactionalCanvasCaller(CanvasCommandService commandService) {
+      this.commandService = commandService;
+    }
+
+    @Transactional
+    public CanvasDocument createAndCommit(String title) {
+      return commandService.createCanvas(title);
+    }
+
+    @Transactional
+    public UUID createAndRollback(String title) {
+      UUID id = commandService.createCanvas(title).id();
+      throw new RollbackAfterCreate(id);
+    }
+
+    @Transactional
+    public void deleteAndRollback(UUID canvasId, long revision) {
+      commandService.deleteCanvas(canvasId, revision);
+      throw new RollbackAfterDelete();
+    }
+  }
+
+  static class RollbackAfterCreate extends RuntimeException {
+    private final UUID canvasId;
+
+    RollbackAfterCreate(UUID canvasId) {
+      this.canvasId = canvasId;
+    }
+  }
+
+  static class RollbackAfterDelete extends RuntimeException {}
 
   private long count(String table, String where, Object... args) {
     Long value =

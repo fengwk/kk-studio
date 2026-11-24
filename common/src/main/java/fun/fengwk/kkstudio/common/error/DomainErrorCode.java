@@ -34,6 +34,8 @@ public enum DomainErrorCode {
   /** 未授权操作（集群内部端点鉴权失败）。 */
   UNAUTHORIZED("unauthorized"),
 
+  FORBIDDEN("forbidden"),
+
   /** 内部未预期错误。 */
   INTERNAL("internal");
 

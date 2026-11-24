@@ -1032,7 +1032,7 @@ class ThreadStateTest {
                     "main",
                     id(100),
                     false,
-                    ThreadKind.CONTROLLER_TASK,
+                    ThreadKind.PLUGIN_TASK,
                     ThreadConstraints.NONE,
                     ThreadExecutionControl.RUNNABLE,
                     0L,

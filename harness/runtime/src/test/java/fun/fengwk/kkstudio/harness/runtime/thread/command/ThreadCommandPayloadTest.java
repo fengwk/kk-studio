@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
@@ -34,13 +33,13 @@ class ThreadCommandPayloadTest {
         List.of(
             ThreadCommandType.USER_MESSAGE,
             ThreadCommandType.CUSTOM_MESSAGE,
-            ThreadCommandType.SET_AGENT,
+            ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
                 new CustomMessageCommandPayload(user("custom")),
-                new SetAgentCommandPayload("coding"),
+                new SetEnvironmentCommandPayload("coding"),
                 new SetExecutionCommandPayload(EXECUTION),
                 new SetEnvironmentCommandPayload(null))
             .stream()
@@ -68,9 +67,6 @@ class ThreadCommandPayloadTest {
   @Test
   void settingPayloadsEnforceCanonicalValuesAndAtomicExecution() {
     assertEquals(EXECUTION, new SetExecutionCommandPayload(EXECUTION).execution());
-    assertEquals("coding", new SetAgentCommandPayload("coding").agentName());
-    assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" coding"));
-    assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" "));
     assertThrows(NullPointerException.class, () -> new SetExecutionCommandPayload(null));
     assertEquals("local", new SetEnvironmentCommandPayload("local").environmentName());
     assertNull(new SetEnvironmentCommandPayload(null).environmentName());
@@ -86,14 +82,12 @@ class ThreadCommandPayloadTest {
   void classifiesMessageAndSettingCommandTypes() {
     assertTrue(ThreadCommandType.USER_MESSAGE.isMessage());
     assertTrue(ThreadCommandType.CUSTOM_MESSAGE.isMessage());
-    assertFalse(ThreadCommandType.SET_AGENT.isMessage());
-    assertFalse(ThreadCommandType.SET_EXECUTION.isMessage());
     assertFalse(ThreadCommandType.SET_ENVIRONMENT.isMessage());
+    assertFalse(ThreadCommandType.SET_EXECUTION.isMessage());
     assertFalse(ThreadCommandType.USER_MESSAGE.isSetting());
     assertFalse(ThreadCommandType.CUSTOM_MESSAGE.isSetting());
-    assertTrue(ThreadCommandType.SET_AGENT.isSetting());
-    assertTrue(ThreadCommandType.SET_EXECUTION.isSetting());
     assertTrue(ThreadCommandType.SET_ENVIRONMENT.isSetting());
+    assertTrue(ThreadCommandType.SET_EXECUTION.isSetting());
   }
 
   private static AgentMessage user(String text) {

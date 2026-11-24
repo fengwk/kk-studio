@@ -160,6 +160,18 @@ public class DomainException extends RuntimeException {
         DomainErrorCode.UPSTREAM_FAILED, resource, null, message, null, null, null, null);
   }
 
+  public static DomainException unauthorized(String reason, String message) {
+    validateReason(reason);
+    return new DomainException(
+        DomainErrorCode.UNAUTHORIZED, null, reason, message, null, null, null, null);
+  }
+
+  public static DomainException forbidden(String reason, String message) {
+    validateReason(reason);
+    return new DomainException(
+        DomainErrorCode.FORBIDDEN, null, reason, message, null, null, null, null);
+  }
+
   public DomainErrorCode code() {
     return code;
   }

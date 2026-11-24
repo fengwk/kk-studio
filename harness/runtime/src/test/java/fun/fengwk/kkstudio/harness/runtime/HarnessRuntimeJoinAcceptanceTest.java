@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -81,8 +81,8 @@ class HarnessRuntimeJoinAcceptanceTest {
         List.of(userMessageCommand(TestIds.id(session + 1000), "prompt")));
   }
 
-  private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
-    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
+  private static NewThreadCommand setEnvironmentCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload("assistant"), idempotencyKey);
   }
 
   private static Ticket request(int invocation, UUID parent, UUID head) {
@@ -291,7 +291,7 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 父线程接纳新的 cursor-bound 批次（SET 前缀 + 真实用户输入），落在 seq 3/4。
     NewThreadCommand userCmd = userMessageCommand(TestIds.id(52), "next prompt");
-    List<NewThreadCommand> batch = List.of(setAgentCommand(TestIds.id(57)), userCmd);
+    List<NewThreadCommand> batch = List.of(setEnvironmentCommand(TestIds.id(57)), userCmd);
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
@@ -344,9 +344,9 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID threadId = root.thread().id();
     UUID head = root.thread().headEntryId();
 
-    // 连续写入两批 SET_AGENT + 用户命令：seq 2/3 与 seq 4/5。SET 前缀使这些批次保持 cursor-bound。
+    // 连续写入两批 SET_ENVIRONMENT + 用户命令：seq 2/3 与 seq 4/5。SET 前缀使这些批次保持 cursor-bound。
     NewThreadCommand cmd2 = userMessageCommand(TestIds.id(52), "cmd 2");
-    List<NewThreadCommand> batch2 = List.of(setAgentCommand(TestIds.id(55)), cmd2);
+    List<NewThreadCommand> batch2 = List.of(setEnvironmentCommand(TestIds.id(55)), cmd2);
     AcceptedCommands acc2 =
         runtime.acceptCommands(
             new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId, head, 2L), batch2),
@@ -358,7 +358,7 @@ class HarnessRuntimeJoinAcceptanceTest {
         runtime.acceptCommands(
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.Thread(threadId, head, 4L),
-                List.of(setAgentCommand(TestIds.id(56)), cmd3)),
+                List.of(setEnvironmentCommand(TestIds.id(56)), cmd3)),
             AcceptancePreflight.IDENTITY);
     assertEquals(4L, acc3.acceptedCommands().getFirst().sequence());
 
@@ -955,14 +955,14 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             false,
             new ThreadConstraints(1_000, false),
-            ThreadKind.CONTROLLER_TASK,
+            ThreadKind.PLUGIN_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4003),
             rootCommand.requestHash());
     AcceptedCommands root = runtime.spawn(rootRequest, AcceptancePreflight.IDENTITY);
     assertEquals(new ThreadConstraints(1_000, false), root.thread().constraints());
-    assertEquals(ThreadKind.CONTROLLER_TASK, root.thread().kind());
+    assertEquals(ThreadKind.PLUGIN_TASK, root.thread().kind());
 
     NewThreadCommand childCommand = userMessageCommand(TestIds.id(4004), "child");
     SpawnRequest childRequest =
@@ -1000,7 +1000,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             new SpawnRequest.Continuation(current.headEntryId(), current.nextCommandSequence()),
             false,
             ThreadConstraints.NONE,
-            ThreadKind.CONTROLLER_TASK,
+            ThreadKind.PLUGIN_TASK,
             JoinDelivery.NOTIFY_PARENT,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4009),
@@ -1060,7 +1060,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             new SpawnRequest.Continuation(TestIds.id(4903), 1),
             false,
             ThreadConstraints.NONE,
-            ThreadKind.CONTROLLER_TASK,
+            ThreadKind.PLUGIN_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             ticket,
@@ -1079,16 +1079,21 @@ class HarnessRuntimeJoinAcceptanceTest {
   void spawnRejectsInvalidBatchShapesBeforeAnyWrite() {
     NewThreadCommand first = userMessageCommand(TestIds.id(5001), "first");
     NewThreadCommand second = userMessageCommand(TestIds.id(5002), "second");
-    NewThreadCommand setAgent =
-        new NewThreadCommand(new SetAgentCommandPayload("worker"), TestIds.id(5003));
+    NewThreadCommand setting =
+        new NewThreadCommand(new SetEnvironmentCommandPayload("worker"), TestIds.id(5003));
     NewThreadCommand setExecution =
         new NewThreadCommand(
             new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")), TestIds.id(5004));
 
     assertSpawnRejected(List.of(first, second));
-    assertSpawnRejected(List.of(setAgent));
-    assertSpawnRejected(List.of(setExecution, setAgent, first));
-    assertSpawnRejected(List.of(first, setAgent));
+    assertSpawnRejected(List.of(setting));
+    assertSpawnRejected(List.of(setting, setExecution, first));
+    assertSpawnRejected(
+        List.of(
+            setting,
+            new NewThreadCommand(new SetEnvironmentCommandPayload("other"), TestIds.id(5005)),
+            first));
+    assertSpawnRejected(List.of(first, setting));
   }
 
   private void assertSpawnRejected(List<NewThreadCommand> commands) {
@@ -1106,7 +1111,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             false,
             ThreadConstraints.NONE,
-            ThreadKind.CONTROLLER_TASK,
+            ThreadKind.PLUGIN_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             ticketId,

@@ -92,10 +92,6 @@ final class HarnessRuntimeRequestMapperTestSupport {
     return idText(Math.abs(suffix.hashCode()) + 100);
   }
 
-  static HarnessCommandCreateDTO setAgent(String suffix, String agentName) {
-    return new HarnessCommandCreateDTO.SetAgentDTO(idempotencyKey(suffix), agentName);
-  }
-
   static HarnessCommandCreateDTO setExecution(
       String suffix, HarnessExecutionSelectionDTO execution) {
     return new HarnessCommandCreateDTO.SetExecutionDTO(idempotencyKey(suffix), execution);

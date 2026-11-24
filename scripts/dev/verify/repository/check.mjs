@@ -32,7 +32,6 @@ const moduleDocuments = [
   'platform.md',
   'platform-plugin-api.md',
   'plugins.md',
-  'project.md',
   'schema.md',
   'web.md',
   'work.md',
@@ -434,7 +433,6 @@ const moduleDependencies = {
     'platform-plugin-api',
     'platform-runtime',
   ],
-  'apps/project': ['common', 'work', 'harness-runtime', 'platform-runtime'],
   'apps/chat': ['common', 'harness-runtime', 'platform-runtime'],
   'apps/ide': ['common', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
   'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
@@ -447,7 +445,6 @@ const moduleDependencies = {
 const appArtifactProducts = {
   'canvas-spi': 'canvas',
   'canvas-runtime': 'canvas',
-  project: 'project',
   chat: 'chat',
   ide: 'ide',
 }
@@ -667,7 +664,6 @@ const webBuiltinImportAllowlist = new Map([
 ])
 
 const webForbiddenImportPrefixes = [
-  'fun.fengwk.kkstudio.project.repo.',
   'fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway',
   'fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection',
   'fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry',
@@ -933,6 +929,8 @@ function checkHarnessPackageAccess() {
  * 前缀映射只有这一份，schema 中的每张表都必须能命中。
  */
 const tableOwners = [
+  ['studio_user', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/account'],
+  ['login_session', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/account'],
   ['agent', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
   ['canvas_', 'apps/canvas'],
@@ -945,7 +943,6 @@ const tableOwners = [
   ['model', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['plugin_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost'],
   ['provider', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
-  ['project', 'apps/project'],
   ['realtime_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster'],
   ['session_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage'],
   ['skill_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
@@ -1073,6 +1070,7 @@ function checkKernelBoundary() {
 }
 
 const platformDomainRoots = [
+  'account',
   'agenttask',
   'catalog',
   'cluster',

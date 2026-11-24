@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportResultDTO;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncInventoryDTO;
 
-/** 配置同步 HTTP 边界；响应缓存由 ConfigSyncNoStoreFilter 统一禁止。 */
+/** 配置同步 HTTP 边界；Studio 的 API 响应统一禁止缓存。 */
 @AllArgsConstructor
 @RequestMapping("/api/platform/config-sync")
 @RestController
