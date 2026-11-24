@@ -157,6 +157,11 @@ public class PostgresqlCanvasFunctionRunRepository {
     return true;
   }
 
+  /** 在 document、node 和 Run 之后锁定该节点的 Work（若存在）。 */
+  void lockWork(UUID nodeId) {
+    canvasRunWorkQueue.lock(nodeId);
+  }
+
   /** 删除节点时清理其 Run 与 Work。没有 Run 也是成功；SQL 异常自然传播，不把更新行数当成失败。 */
   @Transactional
   public void deleteByNodeId(UUID nodeId) {

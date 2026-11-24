@@ -54,6 +54,14 @@ public class PostgresqlCanvasStore {
     return toDomain(persisted);
   }
 
+  /** 删除文档前清理命令回执；调用方须先清理画布内容。 */
+  void deleteDocument(UUID canvasId) {
+    commandDedupStore.deleteByCanvasId(canvasId);
+    if (documentStore.deleteById(canvasId) != 1) {
+      throw new IllegalStateException("delete canvas document failed: " + canvasId);
+    }
+  }
+
   public Optional<CanvasDocument> findDocument(UUID canvasId) {
     return documentStore.findById(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
