@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeConfiguration;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.account.StudioOriginPolicy;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.ClusterProperties;
@@ -1060,7 +1061,7 @@ class IdeGatewayJettyIntegrationTest {
       if (query != null && !query.isEmpty()) {
         rawPathAndQuery = rawPathAndQuery + "?" + query;
       }
-      if (IdeOriginPolicy.isWebSocketUpgrade(request)) {
+      if (StudioOriginPolicy.isWebSocketUpgrade(request)) {
         target
             .forwarder()
             .forwardWebSocket(request, response, target.owner(), ENV, VIEW, rawPathAndQuery);

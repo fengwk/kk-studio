@@ -10,6 +10,7 @@ import {
   listResults,
   cid,
   sleep,
+  studioAuthHeaders,
 } from '../lib/http.mjs'
 import {
   acceptCommandBatch,
@@ -1966,7 +1967,7 @@ registerCase({
       assert(afterTreeQuery.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
       assert(afterTreeQuery.thread.updatedAt === before.thread.updatedAt, 'tree query must not change updatedAt')
 
-      socket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      socket = new WebSocket(threadTreeEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
       const frames = []
       const observedFrames = []
       collect = (event) => {
@@ -2007,7 +2008,7 @@ registerCase({
       assert(observedFrames.indexOf(ack) < observedFrames.indexOf(initialSnapshot), 'snapshot must follow subscribed ack')
       assert(isDeepStrictEqual(initialSnapshot.data.nodes, nodes), JSON.stringify(initialSnapshot))
 
-      secondSocket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      secondSocket = new WebSocket(threadTreeEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
       const secondFrames = []
       const secondObservedFrames = []
       secondCollect = (event) => {

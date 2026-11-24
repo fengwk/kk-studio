@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
@@ -66,8 +66,8 @@ public class InteractionController {
       @PathVariable UUID threadId,
       @PathVariable UUID toolInvocationId,
       @RequestBody HarnessToolInputDTO request,
-      HttpServletRequest httpRequest) {
-    String actor = OperatorResolver.resolve(httpRequest);
+      StudioPrincipal principal) {
+    String actor = principal.userId().toString();
     ToolInputAcceptance acceptance =
         interactionService.submitInput(toCommand(request, threadId, toolInvocationId, actor));
     return toResultDto(acceptance);

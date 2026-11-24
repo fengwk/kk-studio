@@ -48,6 +48,36 @@ export function differentDecimalLong(value, label = 'version') {
   return (current === LONG_MAX ? current - 1n : current + 1n).toString()
 }
 
+const studioCookies = new Map()
+
+/** Authenticate the seeded E2E administrator and retain the server-issued session cookie. */
+export async function loginStudio(baseUrl, timeoutMs = 60_000) {
+  const response = await httpJson(
+    baseUrl,
+    'POST',
+    '/api/auth/login',
+    { username: 'kkstudio', password: 'kkstudio' },
+    timeoutMs,
+    { Origin: new URL(baseUrl).origin },
+  )
+  const setCookie = response.headers.get('set-cookie')
+  assert(setCookie, 'login response did not set a session cookie')
+  const cookie = setCookie.split(';', 1)[0]
+  setStudioCookie(baseUrl, cookie)
+  return cookie
+}
+
+export function setStudioCookie(baseUrl, cookie) {
+  studioCookies.set(new URL(baseUrl).origin, cookie)
+}
+
+export function studioAuthHeaders(baseUrl) {
+  const origin = new URL(baseUrl).origin
+  const cookie = studioCookies.get(origin)
+  assert(cookie, 'call loginStudio before making authenticated E2E requests')
+  return { Cookie: cookie, Origin: origin }
+}
+
 export async function httpJson(
   baseUrl,
   method,
@@ -60,6 +90,7 @@ export async function httpJson(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const headers = {
+      ...(studioCookies.has(new URL(baseUrl).origin) ? studioAuthHeaders(baseUrl) : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...requestHeaders,
     }

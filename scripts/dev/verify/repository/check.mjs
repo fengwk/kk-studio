@@ -929,6 +929,8 @@ function checkHarnessPackageAccess() {
  * 前缀映射只有这一份，schema 中的每张表都必须能命中。
  */
 const tableOwners = [
+  ['studio_user', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/account'],
+  ['login_session', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/account'],
   ['agent', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
   ['canvas_', 'apps/canvas'],
@@ -1068,6 +1070,7 @@ function checkKernelBoundary() {
 }
 
 const platformDomainRoots = [
+  'account',
   'agenttask',
   'catalog',
   'cluster',

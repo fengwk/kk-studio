@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.account.StudioOriginPolicy;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
@@ -80,10 +81,10 @@ public class IdeGatewayDataPlane {
       return;
     }
 
-    boolean isWs = IdeOriginPolicy.isWebSocketUpgrade(request);
+    boolean isWs = StudioOriginPolicy.isWebSocketUpgrade(request);
     if (isWs
-        ? !IdeOriginPolicy.webSocketHandshakeAllowed(request)
-        : !IdeOriginPolicy.httpRequestAllowed(request)) {
+        ? !StudioOriginPolicy.webSocketHandshakeAllowed(request)
+        : !StudioOriginPolicy.httpRequestAllowed(request)) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
@@ -99,7 +100,7 @@ public class IdeGatewayDataPlane {
     }
 
     if (!route.get().local()) {
-      if (IdeOriginPolicy.isWebSocketUpgrade(request)) {
+      if (StudioOriginPolicy.isWebSocketUpgrade(request)) {
         remoteForwarder.forwardWebSocket(
             request, response, route.get(), environmentId, viewId, rawPathAndQuery);
       } else {
@@ -169,7 +170,7 @@ public class IdeGatewayDataPlane {
       return;
     }
 
-    boolean isWs = IdeOriginPolicy.isWebSocketUpgrade(request);
+    boolean isWs = StudioOriginPolicy.isWebSocketUpgrade(request);
     String daemonPath =
         IdeDataPaths.daemonPath(viewId, access.get().bindingEpoch(), rawPathAndQuery);
     Map<String, List<String>> forwardHeaders =

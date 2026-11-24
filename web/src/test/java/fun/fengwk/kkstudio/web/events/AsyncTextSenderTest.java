@@ -139,7 +139,10 @@ class AsyncTextSenderTest {
         new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     sender.enqueue("a");
-    sender.fail("{\"type\":\"error\",\"message\":\"boom\"}", StatusCode.POLICY_VIOLATION);
+    sender.fail(
+        "{\"type\":\"error\",\"message\":\"boom\"}",
+        StatusCode.POLICY_VIOLATION,
+        "event channel failed");
 
     assertEquals(1, fake.calls.size(), "in-flight frame completes first");
     fake.complete(0);
@@ -174,7 +177,10 @@ class AsyncTextSenderTest {
     AsyncTextSender sender =
         new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
-    sender.fail("{\"type\":\"error\",\"message\":\"bad\"}", StatusCode.POLICY_VIOLATION);
+    sender.fail(
+        "{\"type\":\"error\",\"message\":\"bad\"}",
+        StatusCode.POLICY_VIOLATION,
+        "event channel failed");
     assertEquals(1, fake.calls.size());
     assertEquals("{\"type\":\"error\",\"message\":\"bad\"}", fake.calls.get(0).text);
     fake.complete(0);

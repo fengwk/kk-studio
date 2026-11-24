@@ -157,7 +157,49 @@ comment on column storage_object_cleanup.next_attempt_at is 'Next sweep deadline
 
 comment on index idx_storage_object_cleanup_due is 'Storage Maintenance tombstone scan: due keys in next_attempt_at order.';
 
--- 2. Platform kernel storage: environments, Harness protocol and session blobs
+-- 2. Platform kernel storage: accounts, environments, Harness protocol and session blobs
+
+create table studio_user (
+    id uuid primary key,
+    username varchar(32) not null unique,
+    password_hash varchar(256) not null,
+    profile jsonb not null default '{}'::jsonb,
+    role varchar(16) not null,
+    disabled_at timestamptz(3),
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint ck_studio_user_username check (username ~ '^[a-z0-9][a-z0-9._-]{0,31}$'),
+    constraint ck_studio_user_profile check (jsonb_typeof(profile) = 'object'),
+    constraint ck_studio_user_role check (role in ('ADMIN', 'USER'))
+);
+
+create table login_session (
+    token_hash bytea primary key,
+    user_id uuid not null references studio_user(id) on delete cascade,
+    created_at timestamptz(3) not null default current_timestamp,
+    expires_at timestamptz(3) not null
+);
+create index idx_login_session_user on login_session(user_id);
+
+comment on table studio_user is 'Studio account credentials, profile and authorization state.';
+comment on column studio_user.id is 'Application-allocated account UUID.';
+comment on column studio_user.username is 'Unique account username (lowercase letters, digits, dots, underscores or hyphens).';
+comment on column studio_user.password_hash is 'Spring Security encoded password hash.';
+comment on column studio_user.profile is 'Account profile JSON object.';
+comment on column studio_user.role is 'Account role: ADMIN or USER.';
+comment on column studio_user.disabled_at is 'Account disable time; NULL means enabled.';
+comment on column studio_user.created_at is 'Row creation time (timestamptz, millisecond precision).';
+comment on column studio_user.updated_at is 'Application-managed last write time (timestamptz, millisecond precision).';
+comment on table login_session is 'Hashed bearer-token sessions associated with Studio accounts.';
+comment on column login_session.token_hash is 'Hash of the session bearer token; plaintext tokens are not persisted.';
+comment on column login_session.user_id is 'Owning Studio account UUID; sessions are removed with the account.';
+comment on column login_session.created_at is 'Session creation time (timestamptz, millisecond precision).';
+comment on column login_session.expires_at is 'Session expiration time.';
+comment on index idx_login_session_user is 'Lookup sessions by owning account.';
+
+-- Precomputed Spring Security PBKDF2 hash for the built-in kkstudio bootstrap credential.
+insert into studio_user(id, username, password_hash, role)
+values ('00000000-0000-0000-0000-000000000001', 'kkstudio', '{pbkdf2}473d0449576a25f739f57765f5b5d4ddd346ec503ad602aeab8da49810d4c61f460d54a08e070b1552a60ccab0285830', 'ADMIN');
 
 create table environment (
     id                  uuid          primary key,

@@ -14,7 +14,7 @@
  *
  * <pre>{@code
  * {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<canonical UUID>"}}
- * {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
+ * {"type":"subscribe","resource":{"kind":"interactions"|"environments"}}
  * {"type":"unsubscribe","resource":{...}}
  * {"type":"refresh","resource":{"kind":"thread-tree","id":"<canonical UUID>"}}
  * {"type":"ide-use","browserSessionId":"<canonical UUID>","revision":"<positive decimal>","views":[{"environmentId":"<canonical UUID>","viewId":"<canonical UUID>","claimId":"<canonical UUID>","bindingEpoch":"<positive decimal>"}]}

@@ -34,6 +34,15 @@ export interface AgentDTO {
   updatedAt: number
 }
 
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentSummaryDTO */
+export interface AgentSummaryDTO {
+  name: string
+  description?: string | null
+  driver?: string | null
+  modelName?: string | null
+  variant?: string | null
+}
+
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO */
 export interface AgentUpdateDTO {
   description?: string | null
@@ -635,6 +644,13 @@ export interface CreateCanvasRequestDTO {
   title: string
 }
 
+/** Java：fun.fengwk.kkstudio.platform.account.dto.CreateStudioUserRequestDTO */
+export interface CreateStudioUserRequestDTO {
+  username: string
+  password: string
+  role: StudioRole
+}
+
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO */
 export interface DaemonConfigDTO {
   studioUrl: string
@@ -898,6 +914,16 @@ export const ENVIRONMENT_STATUS_VALUES: readonly EnvironmentStatus[] = [
   'READY',
   'OFFLINE',
 ]
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentSummaryDTO */
+export interface EnvironmentSummaryDTO {
+  id: string
+  name: string
+  status: EnvironmentStatus
+  ready: boolean
+  statusExpiresAt?: number | null
+  capabilities: string[]
+}
 
 /** Java：fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport */
 export type EnvironmentSupport =
@@ -1894,6 +1920,14 @@ export interface ModelRateSetDTO {
   reasoning?: string | null
 }
 
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelSummaryDTO */
+export interface ModelSummaryDTO {
+  name: string
+  type: string
+  defaultVariant?: string | null
+  variantIds: string[]
+}
+
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO */
 export interface SingleModelUpdateDTO {
   type: 'MODEL'
@@ -2379,6 +2413,45 @@ export const STORAGE_URL_METHOD_VALUES: readonly StorageUrlMethod[] = [
   'GET',
 ]
 
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioAccountDTO */
+export interface StudioAccountDTO {
+  id: string
+  username: string
+  role: StudioRole
+  profile: unknown
+}
+
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioLoginRequestDTO */
+export interface StudioLoginRequestDTO {
+  username?: string | null
+  password?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioPasswordRequestDTO */
+export interface StudioPasswordRequestDTO {
+  currentPassword: string
+  newPassword: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.account.StudioRole */
+export type StudioRole =
+  | 'ADMIN'
+  | 'USER'
+
+export const STUDIO_ROLE_VALUES: readonly StudioRole[] = [
+  'ADMIN',
+  'USER',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.account.dto.StudioUserDTO */
+export interface StudioUserDTO {
+  id: string
+  username: string
+  role: StudioRole
+  enabled: boolean
+  createdAt: number
+}
+
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO */
 export interface SystemSettingsAdvancedDTO {
   processorLeaseDurationMillis: string
@@ -2694,6 +2767,14 @@ export const TURN_END_OUTCOME_VALUES: readonly TurnEndOutcome[] = [
   'CANCELLED',
 ]
 
+/** Java：fun.fengwk.kkstudio.platform.account.dto.UpdateStudioUserRequestDTO */
+export interface UpdateStudioUserRequestDTO {
+  username?: string | null
+  role?: StudioRole | null
+  password?: string | null
+  enabled?: boolean | null
+}
+
 export interface ApiRoutes {
   'DELETE /api/chat/chats/{chatId}': {
     path: { chatId: string }
@@ -2741,6 +2822,9 @@ export interface ApiRoutes {
   'DELETE /api/platform/storage/uploads/{uploadId}': {
     path: { uploadId: string }
     response: void
+  }
+  'GET /api/auth/me': {
+    response: StudioAccountDTO
   }
   'GET /api/canvas/canvases': {
     response: CanvasDocumentDTO[]
@@ -2814,11 +2898,17 @@ export interface ApiRoutes {
     query: { browserSessionId: string; claimId: string; connectionId: string; eventNodeId: string; expectedDaemonInstanceId?: string }
     response: EnvironmentIdeViewSnapshotDTO
   }
+  'GET /api/platform/agent-summaries': {
+    response: AgentSummaryDTO[]
+  }
   'GET /api/platform/agents': {
     response: AgentDTO[]
   }
   'GET /api/platform/config-sync': {
     response: ConfigSyncInventoryDTO
+  }
+  'GET /api/platform/environment-summaries': {
+    response: EnvironmentSummaryDTO[]
   }
   'GET /api/platform/environments': {
     response: EnvironmentDTO[]
@@ -2857,6 +2947,9 @@ export interface ApiRoutes {
   'GET /api/platform/model-catalog': {
     query: { cursor?: string; limit?: number; query?: string }
     response: ModelCatalogPageDTO
+  }
+  'GET /api/platform/model-summaries': {
+    response: ModelSummaryDTO[]
   }
   'GET /api/platform/models': {
     response: ModelDTO[]
@@ -2898,6 +2991,21 @@ export interface ApiRoutes {
   }
   'GET /api/platform/tools': {
     response: ToolCatalogEntryDTO[]
+  }
+  'GET /api/users': {
+    response: StudioUserDTO[]
+  }
+  'PATCH /api/users/{id}': {
+    path: { id: string }
+    body: UpdateStudioUserRequestDTO
+    response: StudioUserDTO
+  }
+  'POST /api/auth/login': {
+    body?: StudioLoginRequestDTO
+    response: StudioAccountDTO
+  }
+  'POST /api/auth/logout': {
+    response: void
   }
   'POST /api/canvas/canvases': {
     body: CreateCanvasRequestDTO
@@ -3114,6 +3222,14 @@ export interface ApiRoutes {
   'POST /api/platform/storage/uploads/{uploadId}/complete': {
     path: { uploadId: string }
     response: StorageUploadDTO
+  }
+  'POST /api/users': {
+    body: CreateStudioUserRequestDTO
+    response: StudioUserDTO
+  }
+  'PUT /api/auth/password': {
+    body: StudioPasswordRequestDTO
+    response: void
   }
   'PUT /api/chat/chats/{chatId}': {
     path: { chatId: string }

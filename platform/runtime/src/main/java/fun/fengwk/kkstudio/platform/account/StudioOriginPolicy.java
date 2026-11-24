@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.ide.gateway;
+package fun.fengwk.kkstudio.platform.account;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -12,9 +12,9 @@ import java.util.Locale;
  *
  * <p>比较按 URL 规范进行：scheme、host、effective port 三者都必须一致，且 Origin 不得携带 userinfo/query/fragment。
  */
-public final class IdeOriginPolicy {
+public final class StudioOriginPolicy {
 
-  private IdeOriginPolicy() {}
+  private StudioOriginPolicy() {}
 
   /** 判断请求是否为 WebSocket Upgrade 请求。 */
   public static boolean isWebSocketUpgrade(HttpServletRequest request) {
@@ -61,7 +61,7 @@ public final class IdeOriginPolicy {
     if (origin == null) {
       return site != null;
     }
-    return sameOriginExact(origin, request);
+    return hasExactOrigin(request);
   }
 
   /** 浏览器 WS 握手准入：Origin 必须存在且精确等于本请求的 Studio 同源 Origin。 */
@@ -70,8 +70,16 @@ public final class IdeOriginPolicy {
     if (site != null && !isSameSite(site)) {
       return false;
     }
-    String origin = request.getHeader("Origin");
-    return origin != null && sameOriginExact(origin, request);
+    return hasExactOrigin(request);
+  }
+
+  public static boolean hasExactOrigin(HttpServletRequest request) {
+    Enumeration<String> origins = request.getHeaders("Origin");
+    if (origins == null || !origins.hasMoreElements()) {
+      return false;
+    }
+    String origin = origins.nextElement();
+    return !origins.hasMoreElements() && sameOriginExact(origin, request);
   }
 
   /** Origin 头是否与本请求的 scheme/host/effective port 精确一致。 */
@@ -87,7 +95,10 @@ public final class IdeOriginPolicy {
     }
     String scheme = uri.getScheme();
     String host = uri.getHost();
-    if (scheme == null || host == null || (uri.getPath() != null && !uri.getPath().isEmpty())) {
+    if (scheme == null
+        || host == null
+        || uri.getRawAuthority().endsWith(":")
+        || (uri.getPath() != null && !uri.getPath().isEmpty())) {
       return false;
     }
     if (!scheme.equalsIgnoreCase(request.getScheme())) {

@@ -23,7 +23,7 @@ class JettyUriComplianceIntegrationTest extends WebPostgresTestSupport {
 
   private HttpResponse<String> send(String rawPathAndQuery) throws Exception {
     HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + rawPathAndQuery))
+        adminRequestWithoutOrigin(URI.create("http://127.0.0.1:" + port + rawPathAndQuery))
             .GET()
             .build();
     return client.send(request, HttpResponse.BodyHandlers.ofString());
