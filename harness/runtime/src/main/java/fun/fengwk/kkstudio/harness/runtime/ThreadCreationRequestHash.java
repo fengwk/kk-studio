@@ -84,6 +84,19 @@ public final class ThreadCreationRequestHash {
     return digest(envelope);
   }
 
+  static String forIdleRoot(
+      UUID sourceThreadId, UUID turnEndEntryId, UUID sessionId, UUID threadId, String name) {
+    ObjectNode envelope = envelope(sessionId == null ? "IDLE_BRANCH" : "IDLE_FORK");
+    envelope.put("sourceThreadId", requireId(sourceThreadId, "sourceThreadId").toString());
+    envelope.put("turnEndEntryId", requireId(turnEndEntryId, "turnEndEntryId").toString());
+    if (sessionId != null) {
+      envelope.put("sessionId", sessionId.toString());
+    }
+    envelope.put("threadId", requireId(threadId, "threadId").toString());
+    envelope.put("name", name);
+    return digest(envelope);
+  }
+
   /** Computes the identity of an internal COMPACTION child forked within its owner's Session. */
   public static String forSameSessionBranch(
       UUID sessionId,

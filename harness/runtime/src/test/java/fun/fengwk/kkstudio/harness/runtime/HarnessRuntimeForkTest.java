@@ -325,6 +325,29 @@ class HarnessRuntimeForkTest {
     assertEquals(ForkPayload.SESSION_NOTICE, texts.getLast());
   }
 
+  @Test
+  void idleForkPreservesCompactedModelContextWithoutAProvenanceMessage() {
+    CompactionSeed source = seedCompactedHistory(store);
+    ThreadState fork =
+        runtime.createIdleFork(
+            source.threadId(),
+            source.lastEntryId(),
+            TestIds.id(972),
+            TestIds.id(973),
+            "fork",
+            (id, entries) -> {});
+    EntryPath copiedPath = store.transaction(tx -> tx.entries().loadPath(fork.headEntryId()));
+    assertEquals(
+        List.of("summary", "u2", "assistant reply", "u3", "assistant reply"),
+        projectedTexts(copiedPath));
+    var compaction = CompactionTurns.latestComplete(copiedPath).orElseThrow();
+    assertEquals("summary", compaction.result().summaryText());
+    assertTrue(
+        copiedPath.entries().stream()
+            .anyMatch(e -> e.id().equals(compaction.freezing().cutEntryId())));
+    assertEquals(1, fork.nextCommandSequence());
+  }
+
   // ---------------------------------------------------------------- 会话 fork：来源校验
 
   /** 来源必须是执行根：子 Thread 作为来源必须零写入拒绝。 */

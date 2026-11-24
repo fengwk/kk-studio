@@ -167,8 +167,12 @@ public abstract class WebPostgresTestSupport {
   }
 
   protected final HttpRequest.Builder adminRequestWithoutOrigin(URI uri) {
-    return HttpRequest.newBuilder(uri)
-        .header("Cookie", StudioBrowserSession.COOKIE + "=" + adminCredentials.token());
+    return HttpRequest.newBuilder(uri).header("Cookie", adminCookieHeader());
+  }
+
+  /** Browser session cookie for clients that do not use {@link HttpRequest}. */
+  protected final String adminCookieHeader() {
+    return StudioBrowserSession.COOKIE + "=" + adminCredentials.token();
   }
 
   /** 与共享 Schema 直接竞争的后台生命周期；不枚举或停止其他 Spring 生命周期和服务器。 */

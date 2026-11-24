@@ -461,7 +461,7 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 → Command → Driver 私有行 → Tool → Work
 ```
 
-树锁是结构写入和跨 Thread 交付的围栏。相同锁阶内，Thread 按 UUID、单 Thread 的 Command 按序号、同批 Tool 按 `call_index`、Work 按类型 rank 与目标 ID 等规则取锁。持有树锁和 Thread 锁时，父通知命令及 THREAD Work 按 [PostgresqlHarnessLocks](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/store/PostgresqlHarnessLocks.java) 的专用规则取锁。模型和工具在短事务内锁自己的 Thread、调用和 Work；审批和回答锁目标 Thread 与相关调用。Dispatcher 的 claim 和 heartbeat 仅取 Work 锁。Store 在每次回调内独立跟踪锁序。
+树锁是结构写入和跨 Thread 交付的围栏。相同锁阶内，Thread 按 UUID、单 Thread 的 Command 按序号、同批 Tool 按 `call_index`、Work 按类型 rank 与目标 ID 等规则取锁。持有树锁和 Thread 锁时，父通知命令及 THREAD Work 按 [PostgresqlHarnessLocks](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/store/PostgresqlHarnessLocks.java) 的专用规则取锁。模型和工具在短事务内锁自己的 Thread、调用和 Work；审批和回答锁目标 Thread 与相关调用。Dispatcher 的 claim 和 heartbeat 仅取 Work 锁。Store 在同一受管物理事务内跨回调跟踪锁序；事务挂起和恢复时，锁序记录随之挂起和恢复。
 
 ### 等待哪个事实，恢复就读哪个事实
 
@@ -497,6 +497,10 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 
 ### 分支与历史复制
 
+`createIdleBranch` 只接受源公开根 Thread 可见路径中的 `TURN_END`。它在同一 Session 创建无父的 `USER` 根，在 Session 行锁下检查重名。空闲分支直接指向切点，不增加 `FORK` Entry：它只共享原历史，保持真实回合末尾为 head，继承历史设置而不继承原执行的续作义务。`createIdleFork` 复制到新 Session 的独立历史，首条 Thread 为 `main`，由 Platform 在同一事务为复制的资源建立持有边。两个入口都不接受命令或请求 Work。用相同的源 Thread、切点、目标 ID 和规范化名称重放时返回目标 Thread 的当前状态，不再次复制历史或保留资源；同一目标 ID 用于其他请求时拒绝为 `THREAD_ID_REUSED`。
+
+带输入的创建批次由命令接受入口处理：
+
 - **同 Session 分支**：从合法切点追加 `FORK`，新 Thread 以这条 `FORK` 为 head 成为独立执行根，共享切点以前的历史前缀。
 - **跨 Session 复制**：验证切点在源执行根当前路径上，复制截止到该切点的有效上下文，产生新 Entry ID、重写内部坐标，并保留完整的有效压缩回合及所需 Blob 引用。目标 Session 从独立的执行状态开始。分支和复制的创建批次都以一条任务输入结尾。
 
@@ -521,6 +525,8 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 
 本地生命周期使用独占日志目录：先落盘 `PREPARED`，再登记数据库，才允许 body 开始；真实退出的 `EXIT_PROOF` 先落盘再入账。重启时重放已保存的证据，再用旧 `PREPARED` 与数据库记录核对本地 owner。环境恢复后，按原远端执行身份挂接并获取退出证据。首次 `abandonExecution` 要求目标已 `STOPPED` 且 version 匹配。重新接受真实输入之前还要确认未确认执行和未结算直接子 Join 已经收敛，只恢复目标自身。
 
+**删除不替代停止。** `deleteThread` 与 `deleteSessions` 在锁内复验执行是否已结算，拒绝仍在执行、等待输入、未确认退出或等待子执行等情况。`deleteThread` 删除公开根的执行闭包，从受影响 Session 的剩余 Thread head 和 ROOT 标记可达历史；Platform 释放回收历史独占的附件持有边。
+
 **`deleteSessions` 按 Session 深删除。** 它发现并锁定删除范围，复核执行父子边的两端均在范围内；先清 Join 和 Driver 私有记录等 Thread 依赖，再删 Thread，逐 Session 释放 Blob 持有边并删除历史和 Session。调用方的删除门禁和清理回调在同一事务执行。实现见 [StopControl](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StopControl.java)、[退出协议](modules/harness-runtime.md#退出确认与放弃) 和 [SessionDeletion](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/SessionDeletion.java)。
 
 ## 快照与状态 {#thread-read}
@@ -539,6 +545,8 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessThreadSnapshotDTO.java) 包含 `version`、`thread`、`baseEntryId`、`entries`、`queuedCommands`、`activeAssistantOutput`、`generationFailures`、`toolInvocations`、`stopReceipts`、`unconfirmedExecutions`。`thread.branchSettings` 从当前历史路径派生；`activeAssistantOutput` 用 `generationId`、`turnStartEntryId`、`attempt` 和 `sequence` 标识输出，Entry 物化后由历史接管。公开 generation 的 `WAITING_RETRY` 来自 `READY` 且已有失败 attempt；私有 `UNKNOWN` 映射为公开 generation 的 `BLOCKED`。
 
 读服务随后用 Work 和连接租约计算 `waitingForEnvironment`，用用量与目录费率计算费用。Thread version 跟踪内核已提交的结构与控制变更。压缩可用性按需另查。
+
+`getExecutionRootFacts` 按一组根在一个 PostgreSQL 语句快照里汇总其执行树：人工等待、可推进工作、阻塞、STOPPED、根 head 回合结果及最近活动时间。最近活动取树内 Thread 行的最大 `updated_at`；每次推进 head 都写入该时间，单独更新调用行的进度不计入。调用状态只查未终止的调用。上层按用途投影，不持久化另一套状态。
 
 ### 执行控制、运行状态与回合结果
 
@@ -625,7 +633,7 @@ Builtin 单独提供三条查询或追帧接口：
 
 ### WebSocket 与对账
 
-`/ws/events` 的 Harness 资源是 `thread`、`thread-tree`、`interactions`。`subscribe` 先建立订阅，`subscribed` 确认在事件之前。`thread` 可带 `afterEntryId`，首帧和刷新返回权威快照；`thread-tree` 推轻量节点；`interactions` 推失效提示，列表按 HTTP 分页重读。`refresh` 请求已订阅的 `thread` 或 `thread-tree` 快照。
+`/ws/events` 的 Harness 资源是 `thread`、`thread-tree`、`interactions`。`subscribe` 先建立订阅，`subscribed` 确认在事件之前。`thread` 可带 `afterEntryId`，首帧和刷新返回权威快照；`thread-tree` 在确认前经 Platform 的公开执行树查询拒绝内部目标，确认后推轻量节点；`interactions` 推失效提示，列表按 HTTP 分页重读。`refresh` 请求已订阅的 `thread` 或 `thread-tree` 快照。
 
 流式 `realtime` 包含模型 delta/checkpoint 和工具 partial，按调用身份、attempt 与流序号关联。checkpoint 在同一 Thread version 内推进。快照超出单帧限制时发送 `snapshot-ref`，客户端经 HTTP 回读；重连、收到 `resync` 或发现流缺口时，以已提交快照为基准重新对账。完整协议在 [事件编解码器](../web/src/main/java/fun/fengwk/kkstudio/web/events/EventFrameCodec.java) 与 [事件通道](modules/web.md)。
 

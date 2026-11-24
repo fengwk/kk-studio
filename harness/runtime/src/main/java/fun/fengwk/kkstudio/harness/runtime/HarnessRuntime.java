@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
+import fun.fengwk.kkstudio.harness.api.EntryCleanup;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
@@ -52,6 +54,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -172,6 +175,36 @@ public final class HarnessRuntime {
         });
   }
 
+  /** 在同一 Session 的可见回合切点创建无父执行根，不登记输入或 Work。 */
+  public ThreadState createIdleBranch(
+      UUID sourceThreadId, UUID turnEndEntryId, UUID threadId, String threadName) {
+    return store.transaction(
+        tx ->
+            ThreadCreations.createIdleBranch(
+                tx, sourceThreadId, turnEndEntryId, threadId, threadName));
+  }
+
+  /** 复制可见回合切点的有效上下文，资源回调在物理事务提交前执行。 */
+  public ThreadState createIdleFork(
+      UUID sourceThreadId,
+      UUID turnEndEntryId,
+      UUID sessionId,
+      UUID threadId,
+      String sessionName,
+      BiConsumer<UUID, List<Entry>> retainCopiedResources) {
+    Objects.requireNonNull(retainCopiedResources, "retainCopiedResources");
+    return store.transaction(
+        tx ->
+            ThreadCreations.createIdleFork(
+                tx,
+                sourceThreadId,
+                turnEndEntryId,
+                sessionId,
+                threadId,
+                sessionName,
+                retainCopiedResources));
+  }
+
   /** 按 invocationId 读取固定 join receipt（未匹配时 receipt 字段为空）。 */
   public Optional<ThreadJoin> findJoin(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
@@ -235,6 +268,25 @@ public final class HarnessRuntime {
           SessionDeletion.delete(tx, ids, deleteRelations, releaseRefs, driverRegistry);
           return null;
         });
+  }
+
+  /** 深删一个已结算的执行根及其后代，并在同一事务回收不可达历史。 */
+  public void deleteThread(UUID rootThreadId, EntryCleanup cleanup) {
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    Objects.requireNonNull(cleanup, "cleanup");
+    store.transaction(
+        tx -> {
+          SessionDeletion.deleteThread(tx, rootThreadId, cleanup, driverRegistry);
+          return null;
+        });
+  }
+
+  /** 在一个一致读快照内按执行根批量读取投影所用事实。 */
+  public List<ExecutionRootFacts> getExecutionRootFacts(Collection<UUID> rootThreadIds) {
+    List<UUID> ids = List.copyOf(rootThreadIds);
+    return ids.isEmpty()
+        ? List.of()
+        : store.transaction(tx -> tx.threads().findExecutionFacts(ids));
   }
 
   /** 读取目标 Thread 所属执行树的窄摘要：按不可变 {@code rootThreadId} 取同根全部 Thread。 */

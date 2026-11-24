@@ -13,15 +13,6 @@ import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -29,7 +20,6 @@ import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -197,48 +187,10 @@ public class HarnessCommandAcceptanceOrchestrator {
         ownership.sessionCreated(owner, session.id());
       }
       if (target instanceof AcceptCommandsTarget.NewForkedSession) {
-        retainCopiedResources(copiedEntries, session.id());
+        SessionEntryResources.retain(refManager, session.id(), copiedEntries);
       }
       return prepareUserContents(session.id(), commands, branchSettings);
     };
-  }
-
-  /**
-   * 会话 fork 复制有效上下文时必须把被复制消息引用的 blob 重新 retain 到新 Session：新身份的 Entry 只携带 blobId，blob 生命周期由 {@code
-   * session_blob_ref} 持有，源 Session 删除后新历史仍须可用。已存在的 ref 由幂等 retain 自然去重。
-   */
-  private void retainCopiedResources(List<Entry> copiedEntries, UUID sessionId) {
-    for (Entry entry : copiedEntries) {
-      for (ResourceMessageContent resource : referencedResources(entry.payload())) {
-        refManager.retainRef(sessionId, resource.blobId());
-      }
-    }
-  }
-
-  /** 提取 Entry payload 中模型可见消息引用的 Resource（含 tool result 内嵌内容）；其它 payload 无资源引用。 */
-  private static List<ResourceMessageContent> referencedResources(EntryPayload payload) {
-    List<AgentMessageContent> contents =
-        switch (payload) {
-          case MessagePayload message -> message.message().contents();
-          case CustomMessagePayload message -> message.message().contents();
-          case NotificationPayload message -> message.message().contents();
-          case AssistantAbortedPayload message -> message.message().contents();
-          default -> List.of();
-        };
-    List<ResourceMessageContent> resources = new ArrayList<>();
-    collectResources(contents, resources);
-    return resources;
-  }
-
-  private static void collectResources(
-      List<AgentMessageContent> contents, List<ResourceMessageContent> resources) {
-    for (AgentMessageContent content : contents) {
-      if (content instanceof ResourceMessageContent resource) {
-        resources.add(resource);
-      } else if (content instanceof ToolResultMessageContent result) {
-        collectResources(result.contents(), resources);
-      }
-    }
   }
 
   /**

@@ -1327,6 +1327,10 @@ create unique index uk_builtin_model_invocation_result
 
 comment on index uk_builtin_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
 
+create index idx_builtin_model_invocation_thread_nonterminal
+    on builtin_model_invocation (thread_id)
+    where status in ('READY', 'RUNNING');
+
 alter table skill_package
     add constraint fk_skill_package_artifact
         foreign key (artifact_blob_id) references storage_blob (id) on delete restrict;

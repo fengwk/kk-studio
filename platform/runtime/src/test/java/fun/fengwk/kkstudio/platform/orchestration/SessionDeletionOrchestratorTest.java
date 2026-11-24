@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
@@ -25,7 +27,9 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.spi.store.CommandStore;
 import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
+import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
 import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
@@ -48,7 +52,7 @@ import java.util.function.Function;
  *
  * <p>本测试用内存模型表达 Harness Store 的 Thread/Session 图，固定锁序（Owner -&gt; Tree -&gt; Session -&gt;
  * Thread）、以 Session 为单位推进的删除闭包（含 task 子 Session 与其中的无父 root fork）、归属行先于 harness Thread/Session
- * 删除、blob 引用释放，以及「存在 Run 引用绑定/Thread 时删除被 RESTRICT 拒绝且不产生半删状态」的 fail closed 行为。
+ * 删除、blob 引用释放，以及业务引用阻止清理时不产生半删状态。
  */
 class SessionDeletionOrchestratorTest {
 
@@ -103,6 +107,8 @@ class SessionDeletionOrchestratorTest {
     when(transaction.entries()).thenReturn(entryStore);
     when(transaction.threads()).thenReturn(threadStore);
     when(transaction.joins()).thenReturn(joinStore);
+    when(transaction.commands()).thenReturn(mock(CommandStore.class));
+    when(transaction.exits()).thenReturn(mock(ExecutionExitStore.class));
     when(runtimes.getIfAvailable())
         .thenReturn(
             new HarnessRuntime(store, new DriverRegistry(), () -> new CompactionConfig(20_000)));
@@ -192,8 +198,8 @@ class SessionDeletionOrchestratorTest {
             refManager,
             chatOwnership);
     deleteOrder.verify(genericOwnership).lockForDeletion(GENERIC_OWNER);
-    deleteOrder.verify(genericOwnership).beforeSessionDeletion(GENERIC_OWNER, SESSION_1);
     deleteOrder.verify(threadStore).lock(THREAD_1);
+    deleteOrder.verify(genericOwnership).beforeSessionDeletion(GENERIC_OWNER, SESSION_1);
     deleteOrder.verify(joinStore).deleteForThreads(List.of(THREAD_1));
     deleteOrder.verify(threadStore).delete(eq(List.of(THREAD_1)), any());
     deleteOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
@@ -379,6 +385,8 @@ class SessionDeletionOrchestratorTest {
     this.sessionThreads.put(sessionId, threadsInSession);
     for (ThreadState thread : sessionThreads) {
       threads.put(thread.id(), thread);
+      when(entryStore.loadPath(thread.headEntryId()))
+          .thenReturn(new EntryPath(List.of(rootEntry(thread.headEntryId(), sessionId))));
     }
   }
 
@@ -423,7 +431,7 @@ class SessionDeletionOrchestratorTest {
         threadId,
         sessionId,
         parentThreadId,
-        id(100),
+        sessionId,
         "0".repeat(64),
         "thread",
         parentThreadId == null ? threadId : parentThreadId,

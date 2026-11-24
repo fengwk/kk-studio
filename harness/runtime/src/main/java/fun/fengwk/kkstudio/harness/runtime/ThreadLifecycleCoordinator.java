@@ -182,7 +182,7 @@ public final class ThreadLifecycleCoordinator {
    *
    * <p>状态与结算共用同一事实判据，不把本地单轮 TURN_END 冒充为整段委派的完成。直接子 Join 自身也遵循同一判据，自底向上自然收敛。
    */
-  private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
+  static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
     int incompleteChildJoins = tx.joins().countIncompleteChildren(child.id());
     boolean hasInputDemand = ThreadInputDemand.hasInputDemand(tx, child);
     EntryPath path = tx.entries().loadPath(child.headEntryId());

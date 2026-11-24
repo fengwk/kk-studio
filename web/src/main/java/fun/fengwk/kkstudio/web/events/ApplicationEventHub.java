@@ -144,6 +144,7 @@ final class ApplicationEventHub implements AutoCloseable {
   private final ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher;
   private final ThreadSnapshotPublisher threadSnapshotPublisher;
   private final Consumer<UUID> threadValidator;
+  private final Consumer<UUID> threadTreeValidator;
   private final Map<ResourceKey, ApplicationEventResourceState> resources =
       new ConcurrentHashMap<>();
 
@@ -226,6 +227,30 @@ final class ApplicationEventHub implements AutoCloseable {
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
       ThreadSnapshotPublisher threadSnapshotPublisher,
       Consumer<UUID> threadValidator) {
+    this(
+        harnessChanges,
+        realtimeSource,
+        realtimeSubscriptions,
+        canvasVersionSource,
+        environmentChangeSource,
+        maxBufferedSignals,
+        threadTreeSnapshotPublisher,
+        threadSnapshotPublisher,
+        threadValidator,
+        null);
+  }
+
+  ApplicationEventHub(
+      HarnessChangeSubscriptions harnessChanges,
+      RealtimeEventSource realtimeSource,
+      RealtimeSubscriptionService realtimeSubscriptions,
+      CanvasVersionEventSource canvasVersionSource,
+      NotificationInvalidationSource environmentChangeSource,
+      IntSupplier maxBufferedSignals,
+      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
+      ThreadSnapshotPublisher threadSnapshotPublisher,
+      Consumer<UUID> threadValidator,
+      Consumer<UUID> threadTreeValidator) {
     this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.realtimeSubscriptions =
@@ -237,6 +262,7 @@ final class ApplicationEventHub implements AutoCloseable {
     this.threadTreeSnapshotPublisher = threadTreeSnapshotPublisher;
     this.threadSnapshotPublisher = threadSnapshotPublisher;
     this.threadValidator = threadValidator;
+    this.threadTreeValidator = threadTreeValidator;
   }
 
   /**
@@ -260,6 +286,9 @@ final class ApplicationEventHub implements AutoCloseable {
     }
     if (resource.kind() == ResourceKind.THREAD && threadValidator != null) {
       threadValidator.accept(resource.id());
+    }
+    if (resource.kind() == ResourceKind.THREAD_TREE && threadTreeValidator != null) {
+      threadTreeValidator.accept(resource.id());
     }
     while (true) {
       ApplicationEventResourceState state;

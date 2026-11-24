@@ -23,6 +23,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -279,6 +280,97 @@ class PostgresqlHarnessTransactionNotificationTest {
     }
   }
 
+  @Test
+  void executionFactsAttributeHumanAndEnvironmentWaitsToTheRoot() {
+    JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+    seedEnvironmentConnection(jdbc, ENVIRONMENT, UUID.randomUUID());
+    SessionRoot session = seedSessionRoot(store);
+    ToolChain root = seedToolChain(store, session, null, null, ToolKind.BASH);
+    ToolChain child =
+        seedToolChain(store, session, root.threadId(), root.threadId(), ToolKind.BASH);
+    ToolChain question =
+        seedToolChain(store, seedSessionRoot(store), null, null, ToolKind.ASK_USER);
+    updateTool(store, child.toolId(), tool -> tool.requestApproval("needs approval", T2));
+    updateTool(store, question.toolId(), tool -> tool.requestInput(T2));
+    inTransaction(
+        store,
+        tx -> {
+          var thread = tx.threads().lock(child.threadId()).orElseThrow();
+          tx.threads().update(thread.touchVersion(T3));
+        });
+    requestEnvironmentWork(
+        store, root.threadId(), new WorkTarget(WorkTargetType.TOOL, root.toolId()), ENVIRONMENT);
+    jdbc.update("delete from environment_connection where environment_id = ?", ENVIRONMENT.value());
+    var facts =
+        store.transaction(
+            tx -> tx.threads().findExecutionFacts(List.of(root.threadId(), question.threadId())));
+    assertEquals(2, facts.size());
+    var parent =
+        facts.stream()
+            .filter(f -> f.rootThreadId().equals(root.threadId()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(parent.waitingForHuman());
+    assertTrue(parent.blocked());
+    assertFalse(parent.hasWork());
+    assertEquals(T3, parent.lastActivityAt());
+    var input =
+        facts.stream()
+            .filter(f -> f.rootThreadId().equals(question.threadId()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(input.waitingForHuman());
+    assertFalse(input.blocked());
+  }
+
+  @Test
+  void executionFactsIgnoreLargeTerminalInvocationHistory() {
+    SessionRoot session = seedSessionRoot(store);
+    ToolChain root = seedToolChain(store, session, null, null, ToolKind.BASH);
+    updateTool(store, root.toolId(), tool -> tool.requestApproval("needs approval", T2));
+    var before = store.transaction(tx -> tx.threads().findExecutionFacts(List.of(root.threadId())));
+    assertTrue(before.getFirst().waitingForHuman());
+    assertFalse(before.getFirst().hasWork());
+    JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+    // 压入已终止但尚未清理的行；更新较晚的调用时间不能覆盖 Thread 活动时间。
+    assertEquals(
+        256,
+        jdbc.update(
+            """
+        insert into harness_tool_invocation
+            (id, thread_id, turn_start_entry_id, assistant_entry_id, call_index,
+             call, binding, status, attempt, created_at, updated_at)
+        select gen_random_uuid(), i.thread_id, i.turn_start_entry_id, i.assistant_entry_id,
+               n, i.call, i.binding, 'CANCELLED', 0, i.created_at, i.updated_at + interval '1 day'
+        from harness_tool_invocation i cross join generate_series(1, 256) n
+        where i.id = ?
+        """,
+            root.toolId()));
+    assertEquals(
+        256,
+        jdbc.update(
+            """
+        with history as (
+            insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)
+            select gen_random_uuid(), e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at
+            from builtin_model_invocation m join harness_entry e on e.id = m.turn_start_entry_id
+            cross join generate_series(1, 256)
+            where m.thread_id = ?
+            returning id
+        )
+        insert into builtin_model_invocation
+            (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status,
+             attempt, failed_attempts, created_at, updated_at)
+        select gen_random_uuid(), m.thread_id, h.id, h.id, m.request_spec, 'CANCELLED',
+               0, '[]'::jsonb, m.created_at, m.updated_at + interval '1 day'
+        from builtin_model_invocation m cross join history h where m.thread_id = ?
+        """,
+            root.threadId(),
+            root.threadId()));
+    assertEquals(
+        before, store.transaction(tx -> tx.threads().findExecutionFacts(List.of(root.threadId()))));
+  }
+
   /** 测试意图：人工输入等待（WAITING_INPUT）的进入、等待态内重写与离开都要失效交互列表。 */
   @Test
   void toolWaitingInputTransitionsPublishInteractionAtTrueRoot() throws SQLException {
@@ -312,6 +404,12 @@ class PostgresqlHarnessTransactionNotificationTest {
       listener.assertSilent();
       updateTool(store, chain.toolId(), tool -> tool.markRunning(T4));
       listener.assertSilent();
+      var facts =
+          store
+              .transaction(tx -> tx.threads().findExecutionFacts(List.of(chain.threadId())))
+              .getFirst();
+      assertTrue(facts.hasWork());
+      assertFalse(facts.waitingForHuman());
     }
   }
 

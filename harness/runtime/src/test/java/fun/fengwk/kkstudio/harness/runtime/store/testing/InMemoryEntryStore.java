@@ -332,6 +332,15 @@ final class InMemoryEntryStore implements EntryStore {
   }
 
   @Override
+  public void deleteEntries(List<UUID> entryIds) {
+    tx.checkOpen();
+    for (UUID id : entryIds) {
+      state.entries.remove(id);
+      state.entrySequences.remove(id);
+    }
+  }
+
+  @Override
   public int delete(UUID sessionId) {
     tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");

@@ -64,7 +64,7 @@ class SessionDeletionTest {
     SessionThread child = seedChildThread(store, owned.threadId());
     SessionThread fork = seedRootThreadIn(store, child.sessionId(), child.rootEntryId(), "fork");
     Baseline survivor = HarnessRuntimeTestSupport.seedBaseline(store);
-    seedCommandAndPendingJoin(store, owned.threadId(), child.threadId());
+    seedSettledCommandAndJoin(store, owned.threadId(), child.threadId());
 
     List<String> events = new ArrayList<>();
     store.transaction(
@@ -109,10 +109,10 @@ class SessionDeletionTest {
             line("threads.lockTree", fork.threadId()),
             line("sessions.lockForUpdate", owned.sessionId()),
             line("sessions.lockForUpdate", child.sessionId()),
-            line("callback.deleteRelations", List.of(owned.sessionId(), child.sessionId())),
             line("threads.lock", owned.threadId()),
             line("threads.lock", child.threadId()),
             line("threads.lock", fork.threadId()),
+            line("callback.deleteRelations", List.of(owned.sessionId(), child.sessionId())),
             line("joins.deleteForThreads", deletedThreads),
             line("threads.delete", deletedThreads),
             line("callback.releaseRefs", List.of(owned.sessionId())),
@@ -144,7 +144,7 @@ class SessionDeletionTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Baseline owned = HarnessRuntimeTestSupport.seedBaseline(store);
     SessionThread child = seedChildThread(store, owned.threadId());
-    seedCommandAndPendingJoin(store, owned.threadId(), child.threadId());
+    seedSettledCommandAndJoin(store, owned.threadId(), child.threadId());
 
     IllegalStateException thrown =
         assertThrows(
@@ -177,7 +177,7 @@ class SessionDeletionTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Baseline owned = HarnessRuntimeTestSupport.seedBaseline(store);
     SessionThread child = seedChildThread(store, owned.threadId());
-    seedCommandAndPendingJoin(store, owned.threadId(), child.threadId());
+    seedSettledCommandAndJoin(store, owned.threadId(), child.threadId());
 
     List<List<UUID>> released = new ArrayList<>();
     IllegalStateException thrown =
@@ -426,13 +426,15 @@ class SessionDeletionTest {
         });
   }
 
-  /** 子 Thread 上的一条 QUEUED command 与一条 pending join：深删必须先删 join 再删 Thread。 */
-  private static void seedCommandAndPendingJoin(
+  /** 子 Thread 上的已取消命令与已结算 Join 仍需按 FK 顺序清理。 */
+  private static void seedSettledCommandAndJoin(
       InMemoryHarnessStore store, UUID parentThreadId, UUID childThreadId) {
     store.transaction(
         tx -> {
-          tx.threads().lock(childThreadId).orElseThrow();
+          ThreadState child = tx.threads().lock(childThreadId).orElseThrow();
           tx.commands().insert(List.of(command(childThreadId, 1L, id(90L))));
+          tx.commands().loadQueued(childThreadId);
+          tx.commands().update(List.of(command(childThreadId, 1L, id(90L)).cancel(id(92L), T0)));
           tx.joins()
               .insert(
                   new ThreadJoin(
@@ -449,8 +451,10 @@ class SessionDeletionTest {
                       null,
                       T0,
                       T0,
-                      JoinDelivery.NOTIFY_PARENT,
+                      JoinDelivery.SETTLE_TOOL_RESULT,
                       null));
+          tx.joins()
+              .update(tx.joins().find(JOIN_ID).orElseThrow().match(child.headEntryId(), null, T0));
           return null;
         });
   }

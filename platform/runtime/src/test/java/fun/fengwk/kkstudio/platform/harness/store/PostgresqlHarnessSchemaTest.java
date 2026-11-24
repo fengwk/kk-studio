@@ -431,6 +431,7 @@ class PostgresqlHarnessSchemaTest {
             String.class);
     assertEquals(
         List.of(
+            "idx_builtin_model_invocation_thread_nonterminal",
             "idx_harness_entry_parent",
             "idx_harness_entry_session_seq",
             "idx_harness_execution_exit_invocation",
@@ -459,6 +460,15 @@ class PostgresqlHarnessSchemaTest {
         indexes);
 
     String modelResult = indexDefinition("uk_builtin_model_invocation_result");
+    String modelNonterminal = indexDefinition("idx_builtin_model_invocation_thread_nonterminal");
+    assertTrue(modelNonterminal.contains("(thread_id)"));
+    assertEquals(
+        Set.of("READY", "RUNNING"),
+        Pattern.compile("'([^']+)'")
+            .matcher(modelNonterminal)
+            .results()
+            .map(match -> match.group(1))
+            .collect(Collectors.toSet()));
     String workAvailable = indexDefinition("idx_durable_work_available");
     String workLease = indexDefinition("idx_durable_work_lease_until");
     String threadParent = indexDefinition("idx_harness_thread_parent");
