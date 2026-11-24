@@ -1,19 +1,8 @@
-.modal-card.environment-install-modal {
+.environment-install-modal {
   width: min(560px, 100%);
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-}
-
-.environment-install-modal .modal-body {
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.environment-install-modal .modal-header,
-.environment-install-modal .modal-footer {
-  flex-shrink: 0;
-  gap: 8px;
 }
 
 .environment-install-modal .modal-header h2 {
@@ -35,10 +24,6 @@
   font-family: var(--mono);
   font-weight: 400;
   resize: vertical;
-}
-
-.environment-install-modal .modal-footer {
-  flex-wrap: wrap;
 }
 
 .environment-install-modal .field-help {

@@ -94,7 +94,7 @@ export function QuestionnaireInvalidView({
       </details>
       <div className="interaction-actions-bar">
         <Button
-          variant="ghost"
+          variant="secondary"
           danger
           className="interaction-decline-btn"
           disabled={disabled}

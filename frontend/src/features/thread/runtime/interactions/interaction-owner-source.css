@@ -18,7 +18,7 @@
 .interaction-subagent-source:focus-visible {
   outline: none;
   border-radius: var(--radius-sm);
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .interaction-subagent-source svg {

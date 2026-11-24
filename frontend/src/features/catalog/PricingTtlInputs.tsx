@@ -1,3 +1,4 @@
+import { Button } from '@/shared/ui/controls/Button'
 import { useId } from 'react'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { FieldError } from '@/shared/ui/controls/FieldError'
@@ -62,21 +63,21 @@ export function PricingTtlInputs({ rows, onChange }: {
                   onChange={(event) => updateRow(row.draftKey, { rate: sanitizeDecimalInput(event.target.value) })} />
               </label>
             </div>
-            <button
+            <Button
               type="button"
-              className="ghost-inline-btn"
+              variant="secondary"
               aria-label={t('ai.catalog.form.removePricingRule')}
-              onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}>×</button>
+              onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}>×</Button>
             {issue ? <FieldError id={errorId} role="alert">{t(ISSUE_KEYS[issue])}</FieldError> : null}
           </div>
         )
       })}
-      <button
+      <Button
         type="button"
-        className="ghost-inline-btn"
+        variant="secondary"
         onClick={() => onChange([...rows, { draftKey: createPricingDraftKey(), seconds: '', rate: '' }])}>
         {t('ai.catalog.form.addPricingTtl')}
-      </button>
+      </Button>
     </>
   )
 }

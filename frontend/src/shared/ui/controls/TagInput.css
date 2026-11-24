@@ -1,0 +1,85 @@
+/* TagInput: 统一标签输入组件 */
+.ui-tag-input-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ui-tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 36px;
+  max-height: 128px;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-raised);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  cursor: text;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+
+.ui-tag-input[data-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-tag-input.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ui-tag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-family: var(--mono);
+  color: var(--fg);
+  line-height: 1.4;
+}
+
+.ui-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  transition: color var(--duration-fast), background-color var(--duration-fast);
+}
+
+.ui-tag-remove:hover:not(:disabled) {
+  color: var(--fg);
+  background-color: var(--surface-hover);
+}
+
+.ui-tag-input-field {
+  flex: 1 1 80px;
+  min-width: 60px;
+  height: 24px;
+  padding: 0 var(--space-1);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+}
+
+.ui-tag-input-field::placeholder {
+  color: var(--fg-muted);
+}

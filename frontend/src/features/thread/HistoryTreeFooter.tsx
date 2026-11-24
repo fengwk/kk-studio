@@ -42,12 +42,12 @@ export function HistoryTreeFooter({
         </span>
       ) : null}
       <div className="history-tree-actions">
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="secondary" onClick={onClose}>
           {t('ai.chat.history.cancel')}
         </Button>
         {onForkSession ? (
           <Button
-            variant="ghost"
+            variant="secondary"
             disabled={loading || selectedRow?.canFork !== true}
             title={selectedRow?.canFork === false
               ? t('ai.chat.branch.notBoundary')

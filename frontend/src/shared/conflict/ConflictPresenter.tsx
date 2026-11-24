@@ -38,10 +38,10 @@ export function ConflictPresenter({
         <p className="modal-body-text">{conflict.detail}</p>
       </div>
       <div className="modal-footer">
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="secondary" onClick={onClose}>
           {translate('shared.cancel')}
         </Button>
-        <Button variant="ghost" onClick={onRefresh}>
+        <Button variant="secondary" onClick={onRefresh}>
           {translate('shared.conflict.refresh')}
         </Button>
         {onRetry ? <Button onClick={onRetry}>{translate('shared.conflict.retry')}</Button> : null}

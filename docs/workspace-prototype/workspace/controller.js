@@ -1595,8 +1595,8 @@ export function startWorkspaceController() {
       var p = pair.split(':');
       el[p[0]] = byId(p[1]);
     });
-    var controls = { icon: ['icon-button'], iconCompact: ['icon-button', 'is-compact'], ghost: ['ghost-btn'],
-      ghostCompact: ['ghost-btn', 'is-compact'], ghostDanger: ['ghost-btn', 'danger'], primary: ['btn-primary'], danger: ['btn-primary', 'danger'] };
+    var controls = { icon: ['icon-button'], iconCompact: ['icon-button', 'is-compact'], ghost: ['btn-secondary'],
+      ghostCompact: ['btn-secondary', 'is-compact'], ghostDanger: ['btn-secondary', 'danger'], primary: ['btn-primary'], danger: ['btn-primary', 'danger'] };
     el.screen.querySelectorAll('[data-control]').forEach(function (n) { n.classList.add(...controls[n.dataset.control]); });
     el.screen.querySelectorAll('[data-ic]').forEach(function (n) { n.innerHTML = svg(n.getAttribute('data-ic')); });
     paneView = createPaneLayoutView({ panes: el.panes, storage: el.storage, mobileHeader: el.mobileView,

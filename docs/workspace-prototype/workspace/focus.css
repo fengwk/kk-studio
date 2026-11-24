@@ -2,7 +2,6 @@
 :root[data-scheme] {
   --x-focus: var(--border);
   --focus: var(--x-focus);
-  --focus-ring: var(--x-focus);
 }
 
 /* Give editable controls a visible surface even when they have no focus. */
@@ -44,7 +43,7 @@ html[data-scheme] body .switch:has(input:focus-visible),
 html[data-scheme] body .ui-checkbox-input:focus-visible + .ui-checkbox-box {
   /* Override component-local rings without changing their layout or hit area. */
   outline: 1px solid var(--x-focus) !important;
-  outline-offset: var(--x-focus-offset, 1px) !important;
+  outline-offset: var(--focus-offset, 1px) !important;
   box-shadow: none !important;
 }
 
@@ -55,7 +54,7 @@ html[data-scheme] body :is(.search input, .searchbox input, .ui-tag-input-field,
 
 .x-app :is(.x-row, .x-trow-main, .x-menu-item, .x-divider, .x-side-resize, [role='tab']),
 .ui-select-menu .ui-select-option {
-  --x-focus-offset: -1px;
+  --focus-offset: -1px;
 }
 
 @media (forced-colors: active) {

@@ -69,7 +69,7 @@ export function CompactionEntryBlock({
       ) : null}
       {showRetry && actions != null ? (
         <Button
-          variant="ghost"
+          variant="secondary"
           size="compact"
           className="thread-compaction-action"
           disabled={retryDisabledReason != null}

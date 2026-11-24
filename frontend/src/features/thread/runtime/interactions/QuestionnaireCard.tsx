@@ -308,7 +308,7 @@ export function QuestionnaireCard({
 
       <div className="interaction-actions-bar">
         <Button
-          variant="ghost"
+          variant="secondary"
           className="interaction-decline-btn"
           disabled={locked}
           onClick={handleDecline}

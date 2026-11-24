@@ -1,0 +1,2 @@
+.ui-name-dialog { display: flex; flex-direction: column; gap: var(--space-3); }
+.ui-name-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }

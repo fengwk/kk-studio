@@ -171,7 +171,7 @@ export function EnvironmentInstallModal({
           )}
         </div>
         <div className="modal-footer">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {t('ai.environment.close')}
           </Button>
           <Button type="submit" disabled={disabled}>

@@ -50,7 +50,7 @@ export function useAccountForm() {
 
 export function AccountActions({ onClose, label }: { onClose: () => void; label: string }) {
   return <div className="x-account-actions">
-    <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+    <Button type="button" variant="secondary" onClick={onClose}>取消</Button>
     <Button type="submit" variant="primary">{label}</Button>
   </div>
 }

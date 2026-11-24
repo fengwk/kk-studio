@@ -151,6 +151,7 @@ export function ComposerEditor({
     <div
       ref={editorRef}
       className="composer-editor"
+      data-ui-focus="delegate"
       contentEditable={!disabled}
       role="textbox"
       aria-multiline="true"

@@ -173,7 +173,7 @@ export function AgentForm({
             )}
             {models.length > 0 && !draft.model && (
               <Button
-                variant="inline"
+                variant="secondary"
                 onClick={() =>
                   onChange(applyAgentModelSelection(draft, models[0].name, models))
                 }

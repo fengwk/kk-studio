@@ -13,7 +13,7 @@ export function CanvasFunctionCatalogNotice({ showMissing = false }: { showMissi
     return (
       <div className="canvas-catalog-error">
         <span role="alert">{t('canvas.catalog.failed')}</span>
-        <Button variant="ghost" loading={modelsQuery.isFetching} onClick={() => void modelsQuery.refetch()}>
+        <Button variant="secondary" loading={modelsQuery.isFetching} onClick={() => void modelsQuery.refetch()}>
           {t('canvas.editor.retry')}
         </Button>
       </div>

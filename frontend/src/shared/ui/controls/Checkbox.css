@@ -1,0 +1,89 @@
+/* Accessible themed checkbox */
+.ui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  line-height: 1.4;
+}
+
+@media (max-width: 860px) {
+  .modal-touch-target .ui-checkbox {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+}
+
+.ui-checkbox.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-checkbox-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.ui-checkbox-box {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--duration-fast), border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+
+.ui-checkbox:hover:not(.is-disabled) .ui-checkbox-box {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
+.ui-checkbox.is-invalid .ui-checkbox-box {
+  border-color: var(--danger);
+}
+
+.ui-checkbox.is-indeterminate .ui-checkbox-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ui-checkbox.is-checked .ui-checkbox-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ui-checkbox.is-checked:hover:not(.is-disabled) .ui-checkbox-box {
+  background: var(--accent);
+  border-color: var(--border);
+}
+
+.ui-checkbox-check {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+  color: var(--fg-on-accent);
+}
+
+.ui-checkbox-label {
+  min-width: 0;
+  color: var(--fg-muted);
+  transition: color var(--duration-fast);
+}
+
+.ui-checkbox:hover:not(.is-disabled) .ui-checkbox-label {
+  color: var(--fg);
+}

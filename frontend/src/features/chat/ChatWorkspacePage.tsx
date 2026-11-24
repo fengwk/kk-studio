@@ -218,7 +218,7 @@ export function ChatWorkspacePage() {
     return (
       <div className="thread-state danger">
         {t('ai.chat.loadFailed')}
-        <Button variant="ghost" onClick={() => navigate('/chats')}>
+        <Button variant="secondary" onClick={() => navigate('/chats')}>
           {t('ai.chat.backToList')}
         </Button>
       </div>

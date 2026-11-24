@@ -144,7 +144,7 @@ describe('ResourceCard', () => {
             <Button size="compact" onClick={onEdit}>
               编辑
             </Button>
-            <Button variant="ghost" size="compact" danger disabled onClick={onDelete}>
+            <Button variant="secondary" size="compact" danger disabled onClick={onDelete}>
               删除
             </Button>
           </>

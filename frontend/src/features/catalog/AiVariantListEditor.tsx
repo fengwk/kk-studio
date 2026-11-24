@@ -104,7 +104,7 @@ export function VariantListEditor({
       <div className="structured-section-head">
         <h3>{label}</h3>
         <div className="structured-section-actions">
-          <Button variant="inline" onClick={addVariant}>
+          <Button variant="secondary" onClick={addVariant}>
             <Plus aria-hidden="true" />
             {t('ai.catalog.form.addVariant')}
           </Button>
@@ -114,7 +114,7 @@ export function VariantListEditor({
         <div>
           <p className="field-error" role="alert">{capabilitiesError}</p>
           {onRetryCapabilities ? (
-            <Button variant="inline" onClick={onRetryCapabilities}>
+            <Button variant="secondary" onClick={onRetryCapabilities}>
               {t('ai.catalog.form.retryModelCapabilities')}
             </Button>
           ) : null}
@@ -173,7 +173,7 @@ export function VariantListEditor({
                       <>
                         <span className="field-error">{t('ai.catalog.form.promptCacheLongUnavailable')}</span>
                         <div>
-                          <Button variant="inline" onClick={() => updateVariant(index, { promptCacheRetention: defaultRetention })}>
+                          <Button variant="secondary" onClick={() => updateVariant(index, { promptCacheRetention: defaultRetention })}>
                             {t('ai.catalog.form.usePromptCacheDefault', { retention: retentionLabel(defaultRetention) })}
                           </Button>
                         </div>
@@ -218,7 +218,7 @@ export function VariantListEditor({
 
               <div>
                 <Button
-                  variant="inline"
+                  variant="secondary"
                   danger
                   onClick={() => removeVariant(index)}
                   disabled={variants.length <= 1}

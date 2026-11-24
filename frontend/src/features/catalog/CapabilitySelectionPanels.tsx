@@ -65,10 +65,10 @@ export function CapabilitySelectionPanel({
             onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }}
           />
           <div className="capability-filter">
-            <Button size="compact" variant="ghost" aria-pressed={!selectedOnly} onClick={() => setSelectedOnly(false)}>
+            <Button size="compact" variant="secondary" aria-pressed={!selectedOnly} onClick={() => setSelectedOnly(false)}>
               {t('ai.catalog.form.allCapabilities')}
             </Button>
-            <Button size="compact" variant="ghost" aria-pressed={selectedOnly} onClick={() => setSelectedOnly(true)}>
+            <Button size="compact" variant="secondary" aria-pressed={selectedOnly} onClick={() => setSelectedOnly(true)}>
               {t('ai.catalog.form.selectedCapabilities')}
             </Button>
           </div>
@@ -76,7 +76,7 @@ export function CapabilitySelectionPanel({
           {status === 'error' ? (
             <div className="inline-hint" role="alert">
               {t('ai.common.resourceLoadFailed')}{' '}
-              <Button variant="inline" onClick={directory?.retry}>{t('shared.retry')}</Button>
+              <Button variant="secondary" onClick={directory?.retry}>{t('shared.retry')}</Button>
             </div>
           ) : null}
           {status === 'ready' && empty ? <div className="inline-hint" role="status">{emptyText}</div> : null}

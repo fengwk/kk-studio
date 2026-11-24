@@ -1,0 +1,71 @@
+.ui-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color var(--duration-base), background var(--duration-base);
+}
+
+.ui-switch[aria-checked='true'] {
+  border-color: var(--border);
+  background: var(--accent-deep);
+}
+
+.ui-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ui-switch-thumb {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform var(--duration-base), background var(--duration-base);
+}
+
+.ui-switch[aria-checked='true'] .ui-switch-thumb {
+  transform: translateX(18px);
+  background: var(--accent);
+}
+
+
+@media (max-width: 860px) {
+.modal-touch-target .ui-switch,
+  .modal-touch-target .ui-switch[aria-checked='true'] {
+    width: var(--touch-target);
+    height: var(--touch-target);
+    border: 0;
+    background: transparent;
+  }
+
+.modal-touch-target .ui-switch::before {
+    content: '';
+    position: absolute;
+    top: var(--space-3);
+    left: var(--space-1);
+    width: 40px;
+    height: 22px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--bg);
+  }
+
+.modal-touch-target .ui-switch[aria-checked='true']::before {
+    border-color: var(--border);
+    background: var(--accent-deep);
+  }
+
+.modal-touch-target .ui-switch-thumb {
+    top: var(--space-3);
+    left: var(--space-1);
+  }
+}

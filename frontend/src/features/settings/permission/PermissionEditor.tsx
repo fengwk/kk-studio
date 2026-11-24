@@ -97,7 +97,7 @@ export function PermissionEditor({
                 ) : null}
               </div>
               <Button
-                variant="ghost"
+                variant="secondary"
                 danger
                 size="compact"
                 className="permission-remove-tool"
@@ -186,7 +186,7 @@ export function PermissionEditor({
             </div>
 
             <Button
-              variant="ghost"
+              variant="secondary"
               onClick={() => onChange(addRule(groups, groupIndex))}
             >
               {t('settings.permission.addRule')}
@@ -195,7 +195,7 @@ export function PermissionEditor({
         )
       })}
 
-      <Button variant="ghost" onClick={() => onChange(addTool(groups))}>
+      <Button variant="secondary" onClick={() => onChange(addTool(groups))}>
         {t('settings.permission.addTool')}
       </Button>
     </div>

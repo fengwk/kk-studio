@@ -86,7 +86,7 @@ function ProviderEditor({ provider, onSave, onClose }: {
           {error && <p className="field-error" role="alert">{error}</p>}
         </div>
         <div className="modal-footer">
-          <Button variant="ghost" onClick={requestClose}>{t('shared.cancel')}</Button>
+          <Button variant="secondary" onClick={requestClose}>{t('shared.cancel')}</Button>
           <Button type="submit">{t('ai.catalog.action.saveChanges')}</Button>
         </div>
       </form>
@@ -123,7 +123,7 @@ function SkillPackageEditor({ title, onClose }: { title: string; onClose: () => 
     <div className="modal-body">
       <SkillPackageSourceFields form={form} setForm={setForm} busy={false} fileInputRef={fileInputRef} />
     </div>
-    <div className="modal-footer"><Button variant="ghost" onClick={onClose}>{t('shared.close')}</Button></div>
+    <div className="modal-footer"><Button variant="secondary" onClick={onClose}>{t('shared.close')}</Button></div>
   </Dialog>
 }
 

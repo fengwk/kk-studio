@@ -1,3 +1,4 @@
+import '@/shared/ui/cards/CreateCard.css'
 import { Plus } from 'lucide-react'
 
 /** 共享“新建”卡片：与资源卡同一尺寸语言的虚线入口，样式见 styles.css 的 .create-card。 */

@@ -96,7 +96,7 @@ export function AttachmentStrip({
                 <span className="attachment-reference-status">{status}</span>
                 {(upload.status === 'complete_unknown' || upload.status === 'failed') && onRetry ? (
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     className="attachment-reference-retry"
                     aria-label={t(upload.status === 'failed'
                       ? 'ai.runtime.composer.retryUpload'

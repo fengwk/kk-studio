@@ -12,10 +12,6 @@
   align-items: center;
 }
 
-.group-member-row .ui-select-value {
-  white-space: nowrap;
-}
-
 .group-member-index {
   color: var(--fg-muted);
   text-align: center;
@@ -37,10 +33,6 @@
 @media (max-width: 640px) {
   .group-member-row {
     grid-template-columns: 24px minmax(0, 1fr) auto;
-  }
-
-  .group-member-row > .ui-select {
-    grid-column: 2 / 3;
   }
 
   .group-member-actions {

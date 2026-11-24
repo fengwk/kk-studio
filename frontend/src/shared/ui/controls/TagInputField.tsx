@@ -49,6 +49,7 @@ export function TagInputField({
     <div className="ui-tag-input-container">
       <div
         className={containerClassName}
+        data-ui-focus="within"
         data-invalid={isInvalid || undefined}
         onClick={onContainerClick}
       >
@@ -76,6 +77,7 @@ export function TagInputField({
           id={inputId}
           type="text"
           className="ui-tag-input-field"
+          data-ui-focus="delegate"
           value={inputValue}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={onKeyDown}

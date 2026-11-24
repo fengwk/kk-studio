@@ -38,7 +38,7 @@
 
 .subagent-card:focus-visible,
 .subagent-tree-panel:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 

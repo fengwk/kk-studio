@@ -53,14 +53,14 @@ test.describe('Shared resource card foundation', () => {
     const metrics = await cardMetrics(card)
 
     expect(metrics.padding).toBe('16px')
-    expect(metrics.borderRadius).toBe('12px')
+    expect(metrics.borderRadius).toBe('8px')
     expect(metrics.iconWidth).toBe('40px')
     expect(metrics.iconHeight).toBe('40px')
     expect(metrics.iconRadius).toBe('8px')
     expect(metrics.titleFontSize).toBe('15px')
     expect(metrics.titleFontWeight).toBe('600')
     expect(metrics.subtitleFontSize).toBe('12px')
-    expect(metrics.labelFontSize).toBe('12px')
+    expect(metrics.labelFontSize).toBe('13px')
     expect(metrics.valueFontSize).toBe('13px')
     // 紧凑动作 = 28px（普通控件 32px 的紧凑档）。
     expect(metrics.actionHeight).toBe(28)
@@ -179,9 +179,8 @@ test.describe('Shared resource card foundation', () => {
       }
     }
     await expect(target).toBeFocused()
-    const focusShadow = await target.evaluate((element) => getComputedStyle(element).boxShadow)
-    expect(focusShadow).not.toBe('none')
-    expect(focusShadow).toContain(await tokenColor(page, '--focus-ring'))
+    await expect(target).toHaveCSS('outline-width', '1px')
+    await expect(target).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
 
     // 禁用动作：不可点击、视觉降透明度并显示禁用光标。
     const disabled = page.locator('#card-disabled-action')

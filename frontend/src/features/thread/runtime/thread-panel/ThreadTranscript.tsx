@@ -36,7 +36,7 @@ export function ThreadTranscript({
       {hasError && (
         <div className="thread-state danger" role="alert">
           {errorText ?? t('ai.runtime.thread.loadFailed')}
-          {onRetry ? <Button variant="ghost" onClick={onRetry}>{t('shared.conflict.retry')}</Button> : null}
+          {onRetry ? <Button variant="secondary" onClick={onRetry}>{t('shared.conflict.retry')}</Button> : null}
         </div>
       )}
       {empty && (

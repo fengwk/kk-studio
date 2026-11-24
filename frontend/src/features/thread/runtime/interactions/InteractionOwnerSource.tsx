@@ -44,7 +44,7 @@ export function InteractionOwnerSource({ item, showOwnerSource = true, showSubag
         ? <span className="interaction-task-source">{label}</span>
         : (
           <Button
-            variant="inline"
+            variant="secondary"
             onClick={() => navigate(`${url.pathname}${url.search}${url.hash}`)}
             title={t('ai.interaction.viewSource')}
           >

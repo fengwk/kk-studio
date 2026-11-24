@@ -1,0 +1,84 @@
+.ui-select {
+  position: relative;
+  width: 100%;
+}
+
+.ui-select.is-open {
+  z-index: var(--z-dropdown);
+}
+
+.ui-select.is-compact {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+}
+
+.ui-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-h);
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  text-align: left;
+}
+
+.ui-select.is-compact .ui-select-trigger {
+  display: inline-flex;
+  width: auto;
+  min-height: var(--control-h-compact);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.ui-select-trigger:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+.ui-select-trigger[aria-expanded='true'] {
+  background: var(--surface-active);
+}
+
+.ui-select-trigger[data-invalid='true'],
+.ui-select-trigger[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-select.is-placeholder .ui-select-value,
+.ui-select-trigger.is-placeholder .ui-select-value {
+  color: var(--fg-muted);
+}
+
+.ui-select-trigger:disabled {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+.ui-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-select-chevron {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--fg-muted);
+  transition: transform var(--duration-base);
+}
+
+.ui-select-chevron.is-open {
+  transform: rotate(180deg);
+}

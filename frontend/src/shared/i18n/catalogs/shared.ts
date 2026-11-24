@@ -1,6 +1,17 @@
 import type { LocaleCatalog } from '@/shared/i18n/types'
 
 export const sharedCatalog = {
+  'controls.fieldHelp': { 'en-US': 'Field help', 'zh-CN': '字段说明' },
+  'controls.name': { 'en-US': 'Name', 'zh-CN': '名称' },
+  'controls.nameRequired': { 'en-US': 'Enter a name.', 'zh-CN': '请输入名称' },
+  'controls.chooseDate': { 'en-US': 'Choose date', 'zh-CN': '选择日期' },
+  'controls.chooseTime': { 'en-US': 'Choose time', 'zh-CN': '选择时间' },
+  'controls.previousMonth': { 'en-US': 'Previous month', 'zh-CN': '上个月' },
+  'controls.nextMonth': { 'en-US': 'Next month', 'zh-CN': '下个月' },
+  'controls.today': { 'en-US': 'Today', 'zh-CN': '今天' },
+  'controls.clear': { 'en-US': 'Clear', 'zh-CN': '清除' },
+  'controls.hour': { 'en-US': 'Hour', 'zh-CN': '小时' },
+  'controls.minute': { 'en-US': 'Minute', 'zh-CN': '分钟' },
   'shared.searchResources': {
     'en-US': 'Search resources...',
     'zh-CN': '搜索资源...',

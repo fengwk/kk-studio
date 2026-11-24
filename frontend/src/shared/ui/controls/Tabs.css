@@ -1,0 +1,61 @@
+/* 无障碍 Tabs：roving tabindex + aria-selected/aria-controls；面板由 Tabs 统一包裹。 */
+.ui-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.ui-tab,
+.ui-tab > span:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ui-tab svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.ui-tab {
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ui-tab:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.ui-tab[aria-selected='true'] {
+  color: var(--fg);
+  background: var(--accent-soft);
+}
+
+.ui-tab[aria-selected='true']:hover:not(:disabled) {
+  background: var(--accent-soft-hover);
+}
+
+.ui-tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-tab-panel {
+  min-width: 0;
+  padding-top: var(--space-4);
+}

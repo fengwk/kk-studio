@@ -17,7 +17,7 @@ describe('Button', () => {
         <Button size="compact" onClick={onCompact}>
           紧凑
         </Button>
-        <Button variant="ghost" danger onClick={onDanger}>
+        <Button variant="secondary" danger onClick={onDanger}>
           删除
         </Button>
         <Button disabled>禁用</Button>
@@ -26,7 +26,7 @@ describe('Button', () => {
 
     expect(screen.getByRole('button', { name: '普通' })).not.toHaveClass('is-compact')
     expect(screen.getByRole('button', { name: '紧凑' })).toHaveClass('is-compact')
-    expect(screen.getByRole('button', { name: '删除' })).toHaveClass('ghost-btn', 'danger')
+    expect(screen.getByRole('button', { name: '删除' })).toHaveClass('btn-secondary', 'danger')
 
     await user.click(screen.getByRole('button', { name: '普通' }))
     await user.click(screen.getByRole('button', { name: '紧凑' }))

@@ -73,7 +73,7 @@ export function ResourceCardHarnessApp() {
                 <Pencil aria-hidden="true" />
                 编辑
               </Button>
-              <Button id="card-disabled-action" variant="ghost" size="compact" danger disabled>
+              <Button id="card-disabled-action" variant="secondary" size="compact" danger disabled>
                 <Trash2 aria-hidden="true" />
                 删除
               </Button>

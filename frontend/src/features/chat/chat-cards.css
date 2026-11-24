@@ -65,7 +65,7 @@
 }
 
 .catalog-setup-guide li[data-state='current'] {
-  border-color: var(--accent-border);
+  border-color: var(--border);
   background: var(--accent-soft);
 }
 

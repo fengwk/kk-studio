@@ -3,17 +3,13 @@
    外壳：标题与页脚固定，正文是唯一纵向滚动区；宽屏左侧是区块导航，窄屏改为正文顶部的
    横向区块跳转。区块本身只提供稳定跳转目标与标题，见 CatalogEditorSection.tsx。 */
 
-/* 带区块导航的表单需要更宽的卡片容纳导航列；选择器带上 .modal-card 覆盖弹窗默认宽度。 */
-.modal-card.catalog-editor-card {
+/* 带区块导航的表单需要更宽的卡片容纳导航列。 */
+.catalog-editor-card {
   width: min(920px, 100%);
 }
 
-.catalog-editor-card .modal-footer {
-  gap: var(--space-2);
-}
-
 /* 导航列 + 表单列：沿用正文自身的滚动，导航不单独滚动。 */
-.modal-body.catalog-editor-body.is-split {
+.catalog-editor-body.is-split {
   display: grid;
   grid-template-columns: 148px minmax(0, 1fr);
   align-items: start;
@@ -86,13 +82,7 @@
   min-height: 0;
 }
 
-/* tab 自带 12px 内边距，页签文字据此与正文（24px）左边缘对齐。 */
-.model-kind-tabs .ui-tabs {
-  flex: 0 0 auto;
-  padding: 0 var(--space-3);
-}
-
-.model-kind-tabs .ui-tab-panel {
+.catalog-editor-tab-panel {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -101,18 +91,14 @@
 }
 
 @media (max-width: 860px) {
-  .modal-card.catalog-editor-card {
+  .catalog-editor-card {
     width: 100%;
   }
 
-  .modal-body.catalog-editor-body.is-split {
+  .catalog-editor-body.is-split {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);
     padding-top: 0;
-  }
-
-  .model-kind-tabs .ui-tabs {
-    padding: 0 var(--space-1);
   }
 
   /* 窄屏单栏：跳转条停在正文顶部，横向滚动而不是换行，避免挤压表单首屏。 */

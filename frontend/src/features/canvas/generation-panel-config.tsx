@@ -242,7 +242,7 @@ export function ParameterJsonToggle({ draft }: { draft: FunctionConfigDraft }) {
   const { t } = useI18n()
   return (
     <div className="generation-json-toggle">
-      <Button variant="inline" size="compact" onClick={draft.toggleJsonEditor}>
+      <Button variant="secondary" size="compact" onClick={draft.toggleJsonEditor}>
         {t(draft.showJsonArgs
           ? 'canvas.generation.jsonCollapse'
           : 'canvas.generation.jsonEdit')}

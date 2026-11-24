@@ -2,7 +2,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useId } from 'react'
 import { sanitizeIntegerInput } from '@/shared/lib/numeric-input'
 import { useI18n } from '@/shared/i18n'
-import './controls.css'
+import './NumberInput.css'
 
 /**
  * 整数输入：文本框 + 自定义步进，不使用浏览器原生 number spinner。

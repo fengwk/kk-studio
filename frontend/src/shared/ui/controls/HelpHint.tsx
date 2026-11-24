@@ -1,7 +1,7 @@
 import { HelpCircle } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import './controls.css'
+import './HelpHint.css'
 
 export interface HelpHintProps {
   /** `?` 按钮的无障碍名称，例如“帮助：YOLO 执行方式”。 */

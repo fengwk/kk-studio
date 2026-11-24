@@ -145,7 +145,7 @@ export function PluginsTab() {
         action={
           <Button
             size="compact"
-            variant="ghost"
+            variant="secondary"
             disabled={pluginsQuery.isFetching}
             onClick={() => void pluginsQuery.refetch()}
           >

@@ -24,7 +24,7 @@ export function CopyTextButton({
   copiedLabel,
   failedLabel,
   className,
-  variant = 'ghost',
+  variant = 'secondary',
   size = 'compact',
   ...rest
 }: CopyTextButtonProps) {

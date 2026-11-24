@@ -109,7 +109,7 @@ export function SkillPackageDetailModal({
       <div className="modal-footer modal-footer-with-leading-action">
         <div className="modal-footer-leading-action">
           <Button
-            variant="ghost"
+            variant="secondary"
             danger
             disabled={!detail}
             aria-label={`${t('ai.skillPackages.delete')} ${packageName}`}
@@ -119,7 +119,7 @@ export function SkillPackageDetailModal({
             {t('ai.skillPackages.delete')}
           </Button>
         </div>
-        <Button variant="inline" onClick={onClose}>
+        <Button variant="secondary" onClick={onClose}>
           {t('shared.close')}
         </Button>
       </div>

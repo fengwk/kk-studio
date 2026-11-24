@@ -67,7 +67,7 @@ export function SkillPackageEditModal({
             )}
           </div>
           <div className="modal-footer">
-            <Button variant="inline" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose}>
               {t('shared.close')}
             </Button>
           </div>
@@ -212,7 +212,7 @@ function EditPackageForm({
         </div>
 
         <div className="modal-footer">
-          <Button variant="inline" onClick={onClose} disabled={pending}>
+          <Button variant="secondary" onClick={onClose} disabled={pending}>
             {t('shared.cancel')}
           </Button>
           <Button type="submit" loading={pending}>

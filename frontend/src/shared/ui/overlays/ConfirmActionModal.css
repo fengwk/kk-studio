@@ -1,0 +1,46 @@
+.confirm-modal-card {
+  width: min(480px, 100%);
+}
+
+.confirm-modal-body {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-3);
+  /* 失败原因需要独占一整行，图标与描述保持首行。 */
+  flex-wrap: wrap;
+}
+
+.confirm-modal-error {
+  flex: 1 0 100%;
+}
+
+.confirm-modal-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+}
+
+.confirm-modal-icon.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.confirm-modal-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.confirm-modal-description {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}

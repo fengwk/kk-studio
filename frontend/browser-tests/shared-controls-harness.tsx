@@ -1,17 +1,22 @@
 import { useState, type ReactNode } from 'react'
+import { Plus, Ellipsis } from 'lucide-react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
+import { setLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { SearchField } from '@/shared/ui/controls/SearchField'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { installFocusModality } from '@/shared/ui/focus-modality'
+import { DateInput } from '@/shared/ui/controls/DateInput'
+import { TimeInput } from '@/shared/ui/controls/TimeInput'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { Menu } from '@/shared/ui/overlays/Menu'
+import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 
 const OPTIONS = [
   { value: 'alpha', label: '选项 A' },
@@ -244,10 +249,7 @@ function PageSection() {
         <SearchField value={search} onChange={setSearch} aria-label="页级搜索框" />
       </div>
       <div className="form-group" style={{ width: 320 }}>
-        <div className="field-label-row">
-          <FieldLabel required>必填资源名称</FieldLabel>
-          <HelpHint label="帮助：资源名称">用于识别该资源。</HelpHint>
-        </div>
+        <FieldLabel htmlFor="required-resource-name" required help="用于识别该资源。">资源名称</FieldLabel>
         <TextInput id="required-resource-name" required aria-label="资源名称" value="" readOnly />
       </div>
       <FormControls scope="页内" />
@@ -278,17 +280,48 @@ function ModalSection() {
   )
 }
 
+function PickerAndActions() {
+  const [date, setDate] = useState('2027-06-01')
+  const [time, setTime] = useState('23:30')
+  const [menuAnchor, setMenuAnchor] = useState<HTMLButtonElement | null>(null)
+  const [nameDialog, setNameDialog] = useState(false)
+
+  return (
+    <section style={{ padding: 24, display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <Button>保存</Button>
+        <Button variant="secondary"><Plus size={16} /> 添加模型</Button>
+        <Button variant="secondary" size="compact">复制</Button>
+        <Button variant="secondary" danger>删除</Button>
+        <Button danger>确认删除</Button>
+        <Button loading>保存中</Button>
+        <Button variant="secondary" onClick={() => setNameDialog(true)}>新建空间</Button>
+        <div style={{ position: 'relative' }}>
+          <IconButton label="操作" aria-haspopup="menu" aria-expanded={Boolean(menuAnchor)} onClick={(event) => setMenuAnchor(menuAnchor ? null : event.currentTarget)}><Ellipsis /></IconButton>
+          {menuAnchor && <Menu onClose={() => setMenuAnchor(null)} returnFocusTo={menuAnchor}
+            items={[{ label: 'Rename', onSelect: () => setNameDialog(true) }, { label: 'Delete', onSelect: () => undefined }]} />}
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxWidth: 320 }}>
+        <DateInput aria-label="日期" value={date} onChange={setDate} />
+        <TimeInput aria-label="结束时间" value={time} onChange={setTime} allow24 />
+      </div>
+      {nameDialog && <NameDialog title="新建空间" onCancel={() => setNameDialog(false)} onConfirm={() => setNameDialog(false)} />}
+    </section>
+  )
+}
+
 export function SharedControlsHarnessApp() {
   return (
-    <div className="harness-root">
+    <div className="harness-root" style={{ height: '100%', overflow: 'auto' }}>
+      <PickerAndActions />
       <PageSection />
       <ModalSection />
     </div>
   )
 }
 
-installFocusModality()
-
+setLocale('zh-CN')
 const rootEl = document.getElementById('root')
 if (rootEl) {
   createRoot(rootEl).render(<SharedControlsHarnessApp />)

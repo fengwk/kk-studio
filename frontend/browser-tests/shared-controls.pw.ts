@@ -15,26 +15,11 @@ async function expectHeight(locator: Locator, expected: number) {
   expect(Math.round(box?.height ?? 0)).toBe(expected)
 }
 
-/**
- * :focus-visible 只在键盘模态下生效：先按一个不动焦点的键建立键盘模态，再聚焦目标控件。
- * ringOn 指定承载焦点环的元素（Checkbox 的环在其兄弟节点上）。
- */
-async function targetFocusRing(page: Page, target: Locator, ringOn: Locator, borderColor: string) {
-  await page.keyboard.press('Tab')
-  await target.focus()
-  await expect(page.locator(':focus-visible')).toHaveCount(1)
-  // 部分控件对 box-shadow 有过渡，需等到过渡收敛。
-  await expect
-    .poll(async () => ringOn.evaluate((el) => getComputedStyle(el).boxShadow))
-    .toContain(await tokenColor(page, '--focus-ring'))
-  await expect(ringOn).toHaveCSS('border-color', borderColor)
-}
-
-async function expectPointerFocusIsNeutral(page: Page, locator: Locator) {
-  await locator.click()
-  await expect(locator).toHaveCSS('border-color', await tokenColor(page, '--border-hover'))
+async function expectFocusOutline(page: Page, locator: Locator, offset = '1px') {
+  await expect(locator).toHaveCSS('outline-width', '1px')
+  await expect(locator).toHaveCSS('outline-offset', offset)
+  await expect(locator).toHaveCSS('outline-color', await tokenColor(page, '--border'))
   await expect(locator).toHaveCSS('box-shadow', 'none')
-  await expect(locator).toHaveCSS('outline-style', 'none')
 }
 
 test.describe('shared form controls in real form contexts', () => {
@@ -90,28 +75,44 @@ test.describe('shared form controls in real form contexts', () => {
     ] as Array<[string, number]>) {
       await expectHeight(modal.locator(selector).first(), expected)
     }
+
+    // Options remain clickable above the dialog backdrop, including when portalled.
+    const trigger = modal.getByRole('button', { name: '弹层内 下拉' })
+    await trigger.click()
+    await page.getByRole('option', { name: '选项 B' }).click()
+    await expect(trigger).toHaveText('选项 B')
   })
 
   test('keeps focus rings and danger borders on shared controls', async ({ page }) => {
-    // 鼠标聚焦只改变中性边框，不显示白/绿焦点光晕。
-    await expectPointerFocusIsNeutral(page, page.locator('.control-text').first())
-    await expectPointerFocusIsNeutral(page, page.locator('.control-number').first())
+    const text = page.locator('.control-text').first()
+    await text.click()
+    await expectFocusOutline(page, text)
+    const search = page.getByRole('textbox', { name: '页级搜索框' })
+    await search.click()
+    await expectFocusOutline(page, page.locator('.harness-toolbar .searchbox'))
+    await expect(search).toHaveCSS('outline-style', 'none')
+    const number = page.getByRole('textbox', { name: '页内 数值输入', exact: true })
+    await number.click()
+    await expectFocusOutline(page, number)
 
-    // Select 触发按钮与 Checkbox 走 :focus-visible 语义：用真实键盘建立模态再聚焦。
-    const neutralBorder = await tokenColor(page, '--border-hover')
     const trigger = page.locator('.control-select .ui-select-trigger').first()
-    await targetFocusRing(page, trigger, trigger, neutralBorder)
-
-    const checkboxInput = page.locator('.control-checkbox .ui-checkbox-input').first()
-    const checkboxBox = page.locator('.control-checkbox .ui-checkbox-box').first()
-    await targetFocusRing(page, checkboxInput, checkboxBox, await tokenColor(page, '--accent'))
+    await trigger.click()
+    await expectFocusOutline(page, trigger)
+    await page.keyboard.press('Escape')
 
     await page.keyboard.press('Tab')
-    const textInput = page.locator('.control-text').first()
-    await textInput.focus()
-    await expect(textInput).toHaveCSS('outline-style', 'solid')
-    await expect(textInput).toHaveCSS('outline-width', '2px')
-    await expect(textInput).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
+    const checkboxInput = page.locator('.control-checkbox .ui-checkbox-input').first()
+    await checkboxInput.focus()
+    await expectFocusOutline(page, page.locator('.control-checkbox .ui-checkbox-box').first())
+    await text.focus()
+    await expectFocusOutline(page, text)
+
+    const button = page.getByRole('button', { name: '保存', exact: true })
+    await button.click()
+    await expect(button).toHaveCSS('outline-style', 'none')
+    await page.keyboard.press('Tab')
+    await button.focus()
+    await expectFocusOutline(page, button)
 
     // 校验失败：共享控件保持 danger 边框。
     for (const selector of [
@@ -237,6 +238,64 @@ test.describe('shared form controls in real form contexts', () => {
       .evaluate((el) => getComputedStyle(el).opacity)
     expect(inputOpacity).toBe('1')
 
-    await expect(page.locator('.control-checkbox-disabled')).toHaveCSS('cursor', 'not-allowed')
+    await expect(page.locator('.control-checkbox-disabled').first()).toHaveCSS('cursor', 'not-allowed')
   })
 })
+
+for (const width of [1440, 390]) {
+  test(`renders shared control states at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/browser-tests/shared-controls-harness.html')
+    const capture = (state: string) => page.screenshot({ path: `../reports/r130-visual/shared-${state}-${width}.png`, animations: 'disabled' })
+
+    const text = page.getByRole('textbox', { name: '页内 文本输入' })
+    await text.click()
+    await expectFocusOutline(page, text)
+    await capture('controls')
+
+    const select = page.getByRole('button', { name: '页内 下拉' })
+    await select.click()
+    await expect(page.getByRole('option', { name: '选项 A' })).toBeVisible()
+    await capture('select')
+    await page.keyboard.press('Escape')
+
+    const date = page.getByRole('button', { name: '日期' })
+    await date.click()
+    await expect(page.getByRole('grid')).toBeVisible()
+    await expect(date).toBeFocused()
+    await capture('date')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('Enter')
+    await expect(date).toHaveAttribute('value', '2027-06-02')
+
+    const time = page.getByRole('button', { name: '结束时间' })
+    await time.click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await expect(time).toHaveText('24:00')
+    await expect(page.getByRole('listbox', { name: '分钟' }).getByRole('option', { name: '30' })).toBeDisabled()
+    await capture('time')
+    await page.keyboard.press('Escape')
+    await expect(time).toBeFocused()
+
+    const menu = page.getByRole('button', { name: '操作' })
+    await menu.focus()
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('End')
+    const item = page.getByRole('menuitem', { name: 'Delete' })
+    await expect(item).toBeFocused()
+    await expect(item).toHaveCSS('outline-offset', '-1px')
+    const menuBox = await page.getByRole('menu').boundingBox()
+    expect(menuBox!.x).toBeGreaterThanOrEqual(0)
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(width)
+    await capture('menu')
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeFocused()
+
+    await page.getByRole('button', { name: '新建空间' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建空间' })
+    await dialog.getByRole('button', { name: '确认' }).click()
+    await expect(dialog.getByRole('alert')).toHaveText('请输入名称')
+    await capture('name-dialog')
+  })
+}

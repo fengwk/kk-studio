@@ -313,7 +313,7 @@ export function EnvironmentConfigModal({
           ) : null}
         </div>
         <div className="modal-footer">
-          <Button variant="ghost" onClick={onClose} disabled={saveMutation.isPending}>
+          <Button variant="secondary" onClick={onClose} disabled={saveMutation.isPending}>
             {t('shared.cancel')}
           </Button>
           <Button type="submit" loading={saveMutation.isPending}>

@@ -119,14 +119,14 @@ export function HarnessApp() {
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
           <Button
             id="toggle-locale-btn"
-            variant="ghost"
+            variant="secondary"
             onClick={() => switchLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
           >
             Locale: {locale}
           </Button>
           <Button
             id="toggle-dirty-btn"
-            variant="ghost"
+            variant="secondary"
             onClick={() => setDirty((prev) => !prev)}
           >
             Dirty draft: {String(dirty)}

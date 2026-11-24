@@ -1,0 +1,21 @@
+.field-label-row {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  gap: var(--space-1);
+}
+
+
+.field-label { display: inline-flex; align-items: baseline; gap: 0; }
+.field-required { color: var(--danger); font-weight: 600; margin-left: 1px; }
+
+.form-group.is-error > span:first-child,
+.form-group.is-error > .field-label,
+.form-group.is-error > legend {
+  color: var(--danger);
+}
+
+.form-group.is-error > .field-label .field-required,
+.form-group.is-error > legend .field-required {
+  color: var(--danger);
+}

@@ -22,7 +22,7 @@
 }
 
 .thread-block.thread-disclosure.is-success {
-  border-color: var(--accent-border);
+  border-color: var(--border);
   background:
     linear-gradient(var(--accent-soft), var(--accent-soft)),
     var(--surface);
@@ -103,7 +103,7 @@
 }
 
 .thread-disclosure-toggle:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -139,7 +139,7 @@ button.thread-disclosure-hint:hover {
 }
 
 .thread-disclosure-hint:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--focus);
   outline-offset: 2px;
 }
 

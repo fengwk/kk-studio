@@ -101,7 +101,7 @@ export function SystemSettingsPreview({ sectionKey, form }: { sectionKey?: Syste
         {form.error && <div className="settings-error-banner" role="alert">{form.error}</div>}
         <Toolbar>
           <Button disabled={!form.dirty} onClick={form.save}>保存示例</Button>
-          <Button variant="ghost" disabled={!form.dirty} onClick={() => { void form.reloadSettings() }}>{t('settings.reset')}</Button>
+          <Button variant="secondary" disabled={!form.dirty} onClick={() => { void form.reloadSettings() }}>{t('settings.reset')}</Button>
           <span className="settings-dirty" data-dirty={form.dirty} role="status">
             {form.dirty ? t('settings.unsavedChanges') : ''}
           </span>

@@ -126,7 +126,7 @@ export function SkillPackageSourceFields({
           <div className="form-group">
             <FieldLabel required>{t('ai.skillPackages.archiveFile')}</FieldLabel>
             <div className="skill-file-picker">
-              <Button variant="ghost" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+              <Button variant="secondary" disabled={busy} onClick={() => fileInputRef.current?.click()}>
                 {t('ai.skillPackages.chooseFile')}
               </Button>
               <span className="skill-file-name" title={form.file?.name}>

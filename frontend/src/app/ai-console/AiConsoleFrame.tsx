@@ -51,7 +51,7 @@ export function AiConsoleFrame({
             tone="danger"
             action={
               onRetry ? (
-                <Button size="compact" variant="ghost" onClick={onRetry}>
+                <Button size="compact" variant="secondary" onClick={onRetry}>
                   {t('shared.retry')}
                 </Button>
               ) : undefined

@@ -18,7 +18,7 @@
   justify-content: flex-start;
   align-items: stretch;
   padding: 0 clamp(16px, 3vw, 28px);
-  background: var(--topbar-bg);
+  background: var(--surface-glass);
   backdrop-filter: blur(14px);
   flex-shrink: 0;
 }
@@ -133,7 +133,6 @@
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
-  box-shadow: var(--glow-accent);
   content: "";
 }
 
@@ -157,7 +156,7 @@
   flex-shrink: 0;
 }
 
-.icon-button.nav-toggle {
+.nav-toggle {
   display: none;
   align-items: center;
   justify-content: center;
@@ -165,9 +164,6 @@
   height: 34px;
   flex-basis: 34px;
   margin: auto 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
 }
 
 .nav-toggle svg {
@@ -179,7 +175,7 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--accent-border);
+  background: var(--border);
   border: 1px solid transparent;
   display: flex;
   align-items: center;
@@ -203,7 +199,7 @@
     font-size: var(--font-size-sm);
   }
 
-  .icon-button.nav-toggle {
+  .nav-toggle {
     display: inline-flex;
     order: 3;
     width: 38px;
@@ -307,29 +303,6 @@
     margin-top: 4px;
     padding-top: 7px;
     border-top: 1px solid var(--wash-3);
-  }
-
-  .topnav .locale-selector .ui-select-trigger {
-    display: flex;
-    width: 100%;
-    min-height: 42px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 0 0 7px 7px;
-    background: transparent;
-    font-size: var(--font-size-sm);
-  }
-
-  .ui-select-menu.locale-selector {
-    width: var(--ui-select-trigger-width);
-    min-width: var(--ui-select-trigger-width);
-    max-width: none;
-  }
-
-  .ui-select-menu.locale-selector .ui-select-option {
-    min-height: 38px;
-    padding: 0 12px;
-    font-size: var(--font-size-sm);
   }
 }
 

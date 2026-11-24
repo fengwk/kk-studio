@@ -1,0 +1,73 @@
+.number-input {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.number-input-field {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 var(--space-8) 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.number-input[data-invalid='true'] .number-input-field {
+  border-color: var(--danger);
+}
+
+.number-input-steppers {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  flex-direction: column;
+  width: 26px;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.number-input-step {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--surface);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.number-input-step + .number-input-step {
+  border-top: 1px solid var(--border);
+}
+
+.number-input-step:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.number-input-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.number-input-step svg {
+  width: 12px;
+  height: 12px;
+}
+
+.number-input.is-disabled .number-input-field {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}

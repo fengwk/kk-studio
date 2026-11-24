@@ -7,18 +7,4 @@
 }
 
 @container (max-width: 440px) {
-  .plugin-card .resource-card-head {
-    display: grid;
-    /* 图标列沿用卡片图标自身的尺寸，这里不自带新的固定宽度。 */
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: start;
-    column-gap: var(--space-3);
-    row-gap: var(--space-2);
-  }
-
-  .plugin-card .resource-card-badge {
-    grid-column: 2;
-    margin-left: 0;
-    flex-wrap: wrap;
-  }
 }

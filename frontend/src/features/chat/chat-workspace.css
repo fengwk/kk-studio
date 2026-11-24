@@ -39,7 +39,7 @@
 
 .chat-workspace-back:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .chat-workspace-back svg {
@@ -223,23 +223,12 @@
 }
 
 /* 紧凑布局下拉：尺寸只作用于 .ui-select 根，portal 菜单保持自身 display:grid。 */
-.ui-select.chat-layout-selector .ui-select-trigger {
-  height: 28px;
-  min-height: 28px;
-  min-width: 52px;
-  padding: 0 8px;
-}
 
-.ui-select-menu.chat-layout-selector.is-compact {
+.chat-layout-selector.is-compact {
   width: 80px;
   min-width: 80px;
   max-width: 80px;
   max-height: min(290px, calc(100dvh - 48px), var(--ui-select-available-height));
-}
-
-.ui-select-menu.chat-layout-selector.is-compact .ui-select-option {
-  min-height: 28px;
-  padding: 0 8px;
 }
 
 /*

@@ -274,7 +274,7 @@ export function PluginConfigModal({
         {schemaResult.ok ? (
           <div className="plugin-config-mode-switch">
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               disabled={pending || formModeBlockedByDrafts}
               aria-describedby={formModeBlockedByDrafts ? 'plugin-config-mode-blocked' : undefined}
@@ -492,7 +492,7 @@ export function PluginConfigModal({
       <div className="modal-footer">
         <Button
           type="button"
-          variant="ghost"
+          variant="secondary"
           disabled={pending}
           onClick={handleClose}
         >

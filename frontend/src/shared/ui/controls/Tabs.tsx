@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import './controls.css'
+import './Tabs.css'
 
 export interface TabItem {
   id: string
@@ -117,6 +117,7 @@ export function Tabs({
                 id={tabId(tab.id)}
                 type="button"
                 role="tab"
+                data-ui-focus="row"
                 className="ui-tab"
                 disabled={tab.disabled}
                 aria-selected={selected}

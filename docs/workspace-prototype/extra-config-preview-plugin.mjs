@@ -63,7 +63,7 @@ export function extraConfigPreviewPlugin(sourceRoot) {
           replace(/import \{ StateBlock \}[^\n]*\n/)
           replace(/        \{form.loading \? \([\s\S]*?        \) : \(\n/)
           replace('          </form>\n        )}', '          </form>')
-          replace(/              <Button\n                variant="ghost"\n                className="modal-footer-leading-action"[\s\S]*?<\/Button>\n/)
+          replace(/              <Button\n                variant="secondary"\n                className="modal-footer-leading-action"[\s\S]*?<\/Button>\n/)
           replace('modal-footer modal-footer-with-leading-action', 'modal-footer')
           replace('  onDiscover,\n  onRetryLoad,\n')
           localMcpFields()

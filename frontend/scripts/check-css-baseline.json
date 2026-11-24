@@ -1,0 +1,223 @@
+{
+  "src/features/canvas/canvas.css": {
+    "spacing": 92,
+    "box-shadow": 5,
+    "outline": 3,
+    "important": 5
+  },
+  "src/features/catalog/ai-console-resource-editor.css": {
+    "spacing": 2
+  },
+  "src/features/catalog/ai-model-catalog-picker.css": {
+    "spacing": 9
+  },
+  "src/features/catalog/ai-model-group-resource-form.css": {
+    "spacing": 4
+  },
+  "src/features/catalog/ai-model-resource-form.css": {
+    "spacing": 2
+  },
+  "src/features/catalog/ai-pricing.css": {
+    "spacing": 9
+  },
+  "src/features/catalog/capability-picker.css": {
+    "spacing": 15,
+    "box-shadow": 1
+  },
+  "src/features/catalog/catalog-form-layout.css": {
+    "spacing": 10,
+    "box-shadow": 1
+  },
+  "src/features/catalog/mcp/mcp-servers.css": {
+    "important": 1
+  },
+  "src/features/catalog/skills/skill-packages.css": {
+    "spacing": 7
+  },
+  "src/features/chat/chat-cards.css": {
+    "spacing": 1
+  },
+  "src/features/chat/chat-workspace.css": {
+    "spacing": 8,
+    "box-shadow": 1,
+    "outline": 1
+  },
+  "src/features/chat/new-branch-dialog.css": {
+    "spacing": 1
+  },
+  "src/features/environment/environment-config.css": {
+    "spacing": 1
+  },
+  "src/features/environment/environment-install.css": {
+    "spacing": 2
+  },
+  "src/features/environment/environment-management.css": {
+    "spacing": 18
+  },
+  "src/features/environment/environment-page.css": {
+    "spacing": 4
+  },
+  "src/features/environment/ide/ide-overlay-panel.css": {
+    "spacing": 17,
+    "outline": 4,
+    "important": 3
+  },
+  "src/features/extensions/plugin-config.css": {
+    "spacing": 1
+  },
+  "src/features/extensions/plugin-connection-check.css": {
+    "spacing": 1
+  },
+  "src/features/settings/permission/permission-editor.css": {
+    "spacing": 9
+  },
+  "src/features/settings/settings.css": {
+    "spacing": 35
+  },
+  "src/features/thread/composer/attachment-strip.css": {
+    "spacing": 6
+  },
+  "src/features/thread/history-tree.css": {
+    "spacing": 10
+  },
+  "src/features/thread/runtime/interactions/interaction-card-content.css": {
+    "spacing": 30,
+    "box-shadow": 1,
+    "outline": 1
+  },
+  "src/features/thread/runtime/interactions/interaction-owner-source.css": {
+    "spacing": 1,
+    "box-shadow": 1,
+    "outline": 1
+  },
+  "src/features/thread/runtime/interactions/interactions-page.css": {
+    "spacing": 13
+  },
+  "src/features/thread/runtime/panes/agent-pane.css": {
+    "spacing": 3
+  },
+  "src/features/thread/runtime/panes/child-thread-view.css": {
+    "spacing": 3
+  },
+  "src/features/thread/runtime/panes/compaction-branch-view.css": {
+    "spacing": 1
+  },
+  "src/features/thread/runtime/panes/root-thread-control-area.css": {
+    "spacing": 10
+  },
+  "src/features/thread/runtime/panes/subagent-tree-panel.css": {
+    "spacing": 3,
+    "outline": 2
+  },
+  "src/features/thread/runtime/panes/unconfirmed-executions.css": {
+    "spacing": 7
+  },
+  "src/features/thread/runtime/thread-panel/composer-editor.css": {
+    "spacing": 3
+  },
+  "src/features/thread/runtime/thread-panel/messages/message-blocks.css": {
+    "spacing": 5,
+    "important": 4
+  },
+  "src/features/thread/runtime/thread-panel/messages/resource-attachments.css": {
+    "spacing": 3
+  },
+  "src/features/thread/runtime/thread-panel/messages/subagent-receipt.css": {
+    "spacing": 3
+  },
+  "src/features/thread/runtime/thread-panel/messages/thinking-block.css": {
+    "spacing": 2,
+    "outline": 2
+  },
+  "src/features/thread/runtime/thread-panel/messages/thread-disclosure.css": {
+    "spacing": 8,
+    "outline": 4
+  },
+  "src/features/thread/runtime/thread-panel/messages/tool-card.css": {
+    "spacing": 25,
+    "outline": 10
+  },
+  "src/features/thread/runtime/thread-panel/name-rename-panel.css": {
+    "spacing": 5
+  },
+  "src/features/thread/runtime/thread-panel/thread-command-palette.css": {
+    "spacing": 6
+  },
+  "src/features/thread/runtime/thread-panel/thread-composer-controls.css": {
+    "spacing": 10,
+    "outline": 1
+  },
+  "src/features/thread/runtime/thread-panel/thread-composer.css": {
+    "spacing": 7,
+    "important": 1
+  },
+  "src/features/thread/runtime/thread-panel/thread-conversation.css": {
+    "spacing": 50,
+    "outline": 1,
+    "transition-all": 1
+  },
+  "src/features/thread/runtime/thread-panel/thread-error-panel.css": {
+    "spacing": 4
+  },
+  "src/features/thread/runtime/thread-panel/thread-interaction-panel.css": {
+    "spacing": 6
+  },
+  "src/features/thread/runtime/thread-panel/thread-shortcuts-panel.css": {
+    "spacing": 2
+  },
+  "src/features/thread/runtime/thread-panel/thread-status-footer.css": {
+    "spacing": 1
+  },
+  "src/features/thread/runtime/thread-panel/thread-tree.css": {
+    "spacing": 6
+  },
+  "src/features/thread/runtime/thread-panel/thread-widgets.css": {
+    "spacing": 9
+  },
+  "src/features/thread/thread-selection.css": {
+    "spacing": 13,
+    "outline": 4
+  },
+  "src/features/thread/thread-state.css": {
+    "spacing": 2
+  },
+  "src/platform/shell/app-shell.css": {
+    "spacing": 22
+  },
+  "src/platform/shell/list-page-header.css": {
+    "spacing": 1
+  },
+  "src/shared/ui/cards/cards.css": {
+    "spacing": 10
+  },
+  "src/shared/ui/feedback/feedback.css": {
+    "spacing": 4
+  },
+  "src/shared/ui/layout/layout.css": {
+    "spacing": 1
+  },
+  "src/shared/ui/markdown/code-block.css": {
+    "spacing": 2,
+    "important": 5
+  },
+  "src/shared/ui/markdown/markdown-table.css": {
+    "spacing": 2
+  },
+  "src/shared/ui/markdown/markdown.css": {
+    "spacing": 15
+  },
+  "src/shared/ui/markdown/mermaid-block.css": {
+    "spacing": 3
+  },
+  "src/shared/ui/media/media.css": {
+    "spacing": 2
+  },
+  "src/shared/ui/overlays/overlays.css": {
+    "spacing": 10
+  },
+  "src/styles.css": {
+    "spacing": 29,
+    "box-shadow": 2,
+    "important": 2
+  }
+}

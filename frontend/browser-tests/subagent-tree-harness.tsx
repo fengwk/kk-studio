@@ -1,3 +1,4 @@
+import { Button } from '@/shared/ui/controls/Button'
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
@@ -53,7 +54,7 @@ export function Harness() {
   }
   return <MemoryRouter><ThreadNavigationContext.Provider value={setSelected}>
     <main style={{ maxWidth: 760, margin: '20px auto', padding: 8 }}>
-      <button className="ghost-btn" onClick={() => setActive(false)}>finish</button>
+      <Button variant="secondary" onClick={() => setActive(false)}>finish</Button>
       <output aria-label="selected">{selected}</output>
       <ActiveThreadTree tree={tree} currentThreadId={selected} />
       <SubagentTreePanel tree={tree} currentThreadId={selected} />

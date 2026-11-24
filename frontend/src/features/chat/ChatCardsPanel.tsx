@@ -64,7 +64,7 @@ export function ChatCardsPanel({
               {loadMoreError}
             </p>
           ) : null}
-          <Button variant="ghost" loading={loadingMore} onClick={onLoadMore}>
+          <Button variant="secondary" loading={loadingMore} onClick={onLoadMore}>
             {loadMoreError ? t('shared.retry') : t('ai.chat.loadMore')}
           </Button>
         </div>

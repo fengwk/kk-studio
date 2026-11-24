@@ -37,7 +37,7 @@ export function ActiveThreadTree({
       {isError ? (
         <div className="thread-tree-state is-error" role="alert">
           <p>{refreshFailed ? t('ai.runtime.agentTree.refreshFailed') : t('ai.runtime.agentTree.error')}</p>
-          <Button variant="ghost" onClick={refetch}>
+          <Button variant="secondary" onClick={refetch}>
             {t('ai.runtime.agentTree.retry')}
           </Button>
         </div>

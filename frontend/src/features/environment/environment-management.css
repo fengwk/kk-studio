@@ -1,7 +1,7 @@
 /* 环境管理弹窗：运行宿主信息、事件与操作。 */
 
 /* --- Environment Management Modal & Sections --- */
-.modal-card.env-management-modal-card {
+.env-management-modal-card {
   width: min(860px, 100%);
   max-height: calc(100vh - 48px);
   display: flex;

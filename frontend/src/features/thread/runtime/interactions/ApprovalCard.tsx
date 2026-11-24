@@ -149,7 +149,7 @@ export function ApprovalCard({
 
         <div className="interaction-actions-bar">
           <Button
-            variant="ghost"
+            variant="secondary"
             danger
             size="compact"
             className="interaction-deny-btn"

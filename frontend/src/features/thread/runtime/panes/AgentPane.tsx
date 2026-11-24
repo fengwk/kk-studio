@@ -235,7 +235,7 @@ export function AgentPane({
         }}
       >
         {onPresentation == null && (!needsControl || visiblePresentation?.parentThreadId || visiblePresentation?.mode === 'debug') ? <header className="agent-pane-thread-heading">
-          {visiblePresentation?.mode === 'debug' ? <Button variant="ghost"
+          {visiblePresentation?.mode === 'debug' ? <Button variant="secondary"
             onClick={() => visiblePresentation.act(visiblePresentation.viewKey, 'close-debug')}>
             {t('ai.runtime.debug.close')}
           </Button> : <ThreadPresentationActions view={visiblePresentation} />}

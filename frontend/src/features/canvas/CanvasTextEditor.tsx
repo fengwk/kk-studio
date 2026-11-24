@@ -123,7 +123,7 @@ export function CanvasTextEditor() {
         </span>
       </div>
       <footer className="canvas-text-editor-footer">
-        <Button variant="ghost" size="compact" onClick={closeTextEditor}>
+        <Button variant="secondary" size="compact" onClick={closeTextEditor}>
           {t('canvas.textEditor.cancel')}
         </Button>
         <Button

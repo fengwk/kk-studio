@@ -1,0 +1,20 @@
+.ui-time-panel {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  max-width: calc(100vw - var(--space-4));
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-md);
+  visibility: hidden;
+}
+
+.ui-time-panel { width: 176px; padding: var(--space-2); }
+.ui-time-columns { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); align-items: stretch; gap: var(--space-1); height: 224px; }
+.ui-time-column { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ui-time-separator { display: grid; place-items: center; color: var(--fg-muted); }
+.ui-time-option { display: grid; place-items: center; min-height: 32px; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.ui-time-option:hover, .ui-time-option.is-active { background: var(--hover); }
+.ui-time-option[aria-selected='true'] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ui-time-option[aria-disabled='true'] { opacity: .4; cursor: not-allowed; }

@@ -146,7 +146,7 @@ export function SkillPackageCreateModal({
         </div>
 
         <div className="modal-footer">
-          <Button variant="inline" disabled={pending} onClick={handleClose}>
+          <Button variant="secondary" disabled={pending} onClick={handleClose}>
             {t('shared.cancel')}
           </Button>
           <Button

@@ -166,7 +166,7 @@ export function SyncImportModal({
             <Button onClick={onClose}>{t('shared.close')}</Button>
           ) : (
             <>
-              <Button variant="ghost" onClick={onClose} disabled={pending}>
+              <Button variant="secondary" onClick={onClose} disabled={pending}>
                 {t('shared.cancel')}
               </Button>
               {executeButton()}
@@ -301,7 +301,7 @@ function ImportResult({
       {settingsDirty ? (
         <div className="settings-sync-result-dirty" role="status">
           <span>{t('settings.sync.import.dirtyHint')}</span>
-          <Button variant="ghost" onClick={onReloadSettings}>
+          <Button variant="secondary" onClick={onReloadSettings}>
             {t('settings.sync.import.reloadSettings')}
           </Button>
         </div>

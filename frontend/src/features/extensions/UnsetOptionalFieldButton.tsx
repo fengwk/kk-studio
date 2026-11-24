@@ -25,7 +25,7 @@ export function UnsetOptionalFieldButton({
   const { t } = useI18n()
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="compact"
       disabled={disabled}
       aria-label={t('plugins.configDialog.unsetOptionalField', { name })}

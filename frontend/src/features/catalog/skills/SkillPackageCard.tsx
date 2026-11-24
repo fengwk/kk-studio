@@ -179,7 +179,7 @@ export function SkillPackageCard({
           {/* Git 包的主操作不是详情，因此详情另给一个入口。 */}
           {gitPackage ? (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="compact"
               aria-label={`${t('ai.skillPackages.detail')} ${pkg.packageName}`}
               onClick={onDetails}

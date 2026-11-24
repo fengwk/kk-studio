@@ -239,6 +239,7 @@ function OpenResourceEditorModal({
           /* 资源类型就是当前表单的页签：选中项决定下面渲染哪一个表单。 */
           <Tabs
             className="model-kind-tabs"
+            panelClassName="catalog-editor-tab-panel"
             tabs={[
               {
                 id: 'MODEL',
@@ -261,7 +262,7 @@ function OpenResourceEditorModal({
           body
         )}
         <div className="modal-footer">
-          <Button variant="inline" disabled={pending} onClick={requestClose}>
+          <Button variant="secondary" disabled={pending} onClick={requestClose}>
             {t('shared.cancel')}
           </Button>
           <Button type="submit" disabled={pending}>

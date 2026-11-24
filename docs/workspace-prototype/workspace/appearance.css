@@ -32,7 +32,7 @@
 }
 
 /* Reused actions keep their existing sizing and use fills, not borders, for states. */
-html[data-scheme] :is(.btn-primary, .ghost-btn, .ghost-inline-btn, .create-card, .ui-tab, .interaction-option-btn, .capability-option) {
+html[data-scheme] :is(.btn-primary, .btn-secondary, .create-card, .ui-tab, .interaction-option-btn, .capability-option) {
   border: 0;
 }
 .btn-primary:not(.danger) { background: var(--accent); }
@@ -44,10 +44,10 @@ html[data-scheme] :is(.btn-primary, .ghost-btn, .ghost-inline-btn, .create-card,
   --x-control-hover: color-mix(in srgb, var(--palette-white) 12%, transparent);
   --x-control-danger-hover: color-mix(in srgb, var(--danger) 24%, transparent);
 }
-.x-prototype :is(.ghost-btn, .ghost-inline-btn):not([aria-pressed], .x-sch-disclosure, .x-sch-record) { background: var(--x-control); }
-.x-prototype :is(.ghost-btn, .ghost-inline-btn).danger { background: var(--danger-soft); color: var(--danger); }
-.x-prototype :is(.ghost-btn, .ghost-inline-btn, .icon-button):not(:disabled):is(:hover, :active) { background: var(--x-control-hover); }
-.x-prototype :is(.ghost-btn, .ghost-inline-btn).danger:not(:disabled):is(:hover, :active) { background: var(--x-control-danger-hover); }
+.x-prototype :is(.btn-secondary):not([aria-pressed], .x-sch-disclosure, .x-sch-record) { background: var(--x-control); }
+.x-prototype :is(.btn-secondary).danger { background: var(--danger-soft); color: var(--danger); }
+.x-prototype :is(.btn-secondary, .icon-button):not(:disabled):is(:hover, :active) { background: var(--x-control-hover); }
+.x-prototype :is(.btn-secondary).danger:not(:disabled):is(:hover, :active) { background: var(--x-control-danger-hover); }
 .x-prototype .icon-button:not(:hover, :active) { background: transparent; }
 .x-prototype :is(.form-group, .field, .settings-field) > :is(.field-label, .field-label-row, .settings-field-label, .x-sched-label) {
   display: flex; align-items: center; min-height: 20px; white-space: nowrap; flex-wrap: nowrap;

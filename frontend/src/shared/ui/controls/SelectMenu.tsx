@@ -2,8 +2,10 @@ import { Check } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties, RefObject } from 'react'
 import type { SelectOption } from './Select'
+import './SelectMenu.css'
 
 interface SelectMenuProps {
+  portalRoot: HTMLElement
   listboxId: string
   options: SelectOption[]
   value: string
@@ -21,11 +23,12 @@ interface SelectMenuProps {
 }
 
 /**
- * 下拉菜单本体：portal 到 body，避免被滚动容器或 overlay 裁剪。
+ * 下拉菜单本体：portal 到触发器所属弹层或 body，避免被滚动容器裁剪。
  *
  * <p>选项用 roving tabindex：只有 active 项可 Tab 进入，方向键在选项间移动。
  */
 export function SelectMenu({
+  portalRoot,
   listboxId,
   options,
   value,
@@ -67,6 +70,7 @@ export function SelectMenu({
             }}
             type="button"
             role="option"
+            data-ui-focus="row"
             tabIndex={activeIndex === index ? 0 : -1}
             disabled={option.disabled}
             aria-selected={isSelected}
@@ -89,6 +93,6 @@ export function SelectMenu({
         )
       })}
     </div>,
-    document.body,
+    portalRoot,
   )
 }

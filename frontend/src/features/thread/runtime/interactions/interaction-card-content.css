@@ -36,17 +36,13 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--fg);
   font: inherit;
   appearance: none;
-}
-.interaction-approval-deny-reason input:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 .interaction-approval-footer .interaction-actions-bar { flex: 0 0 auto; padding-top: 0; border-top: 0; }
 .interaction-actions-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
@@ -89,7 +85,7 @@
 .interaction-options-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; }
 .interaction-option-btn { display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); cursor: pointer; text-align: left; transition: border-color var(--duration-fast), background-color var(--duration-fast); }
 .interaction-option-btn:hover:not(:disabled):not(.is-selected) { border-color: var(--border-hover); background: var(--surface-hover); }
-.interaction-option-btn:focus-visible { outline: none; border-color: var(--border-hover); box-shadow: 0 0 0 2px var(--focus-ring); }
+.interaction-option-btn:focus-visible { outline: none; border-color: var(--border-hover); box-shadow: 0 0 0 2px var(--focus); }
 .interaction-option-btn.is-selected { border-color: var(--accent); background: var(--accent-soft); }
 .interaction-option-btn:disabled { cursor: not-allowed; opacity: .6; }
 .interaction-option-label-row { display: flex; align-items: center; gap: 8px; width: 100%; }

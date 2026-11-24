@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelPricingPlanEditor } from '@/features/catalog/ModelPricingPlanEditor'
@@ -74,6 +74,21 @@ function Harness({ initial = emptyModelPricingDraft() }: { initial?: ModelPricin
 beforeEach(() => setLocale('en-US'))
 afterEach(() => vi.unstubAllGlobals())
 
+// Choose the exact calendar day regardless of the month in which the suite runs.
+function chooseDate(trigger: HTMLElement, value: string) {
+  const wanted = new Date(`${value}T12:00:00`)
+  const currentValue = trigger.getAttribute('value')
+  const current = currentValue ? new Date(`${currentValue}T12:00:00`) : new Date()
+  const delta = (wanted.getFullYear() - current.getFullYear()) * 12 + wanted.getMonth() - current.getMonth()
+  fireEvent.click(trigger)
+  for (let i = 0; i < Math.abs(delta); i++) {
+    fireEvent.keyDown(trigger, { key: delta < 0 ? 'PageUp' : 'PageDown' })
+  }
+  fireEvent.click(screen.getByRole('gridcell', { name: new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
+    year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
+  }).format(wanted) }))
+}
+
 describe('ModelPricingPlanEditor', () => {
   it('presents unpriced rates and the fixed price sections', () => {
     render(<Harness />)
@@ -130,7 +145,7 @@ describe('ModelPricingPlanEditor', () => {
     expect(screen.getByLabelText('Input')).toHaveValue('7')
 
     fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
-    fireEvent.change(screen.getByLabelText('Effective from (UTC)'), { target: { value: '2027-06-01' } })
+    chooseDate(screen.getByLabelText('Effective from (UTC)'), '2027-06-01')
     fireEvent.click(screen.getByRole('button', { name: 'Create price change' }))
 
     // 克隆的是“早于新日期且最晚”的调价方案，而不是当前显示的历史方案或基础方案。
@@ -148,7 +163,7 @@ describe('ModelPricingPlanEditor', () => {
 
     // 早于全部调价的日期（早于当前生效的那条历史调价）从基础方案克隆。
     fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
-    fireEvent.change(screen.getByLabelText('Effective from (UTC)'), { target: { value: utcDate(-30) } })
+    chooseDate(screen.getByLabelText('Effective from (UTC)'), utcDate(-30))
     fireEvent.click(screen.getByRole('button', { name: 'Create price change' }))
     expect(screen.getByLabelText('Input')).toHaveValue('1')
   })
@@ -159,10 +174,10 @@ describe('ModelPricingPlanEditor', () => {
     // 新建调价：日期重复时不能创建，并就地提示。
     fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
     const createDate = screen.getByLabelText('Effective from (UTC)')
-    fireEvent.change(createDate, { target: { value: '2027-03-01' } })
+    chooseDate(createDate, '2027-03-01')
     expect(screen.getByRole('button', { name: 'Create price change' })).toBeDisabled()
     expect(screen.getByText('This effective date already has a plan.')).toBeInTheDocument()
-    fireEvent.change(createDate, { target: { value: '2027-09-01' } })
+    chooseDate(createDate, '2027-09-01')
     expect(screen.getByRole('button', { name: 'Create price change' })).toBeEnabled()
     expect(screen.queryByText('This effective date already has a plan.')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add price change' }))
@@ -171,8 +186,8 @@ describe('ModelPricingPlanEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Price plan' }))
     fireEvent.click(screen.getByRole('option', { name: '2027-06-01' }))
     const editDate = screen.getByLabelText('Effective from (UTC)')
-    expect(editDate).toHaveValue('2027-06-01')
-    fireEvent.change(editDate, { target: { value: '2027-03-01' } })
+    expect(editDate).toHaveAttribute('value', '2027-06-01')
+    chooseDate(editDate, '2027-03-01')
     expect(screen.getByText('This effective date already has a plan.')).toBeInTheDocument()
     expect(readDraft().changes.map(({ from }) => from)).toEqual(['2027-03-01', '2027-03-01'])
   })
@@ -253,7 +268,11 @@ describe('ModelPricingPlanEditor', () => {
     expect(screen.getByLabelText('Input')).toHaveValue('1')
 
     fireEvent.change(screen.getByLabelText('Input tokens'), { target: { value: '250000' } })
-    fireEvent.change(screen.getByLabelText('Request start time (UTC)'), { target: { value: '2027-01-05T02:00' } })
+    const [date, time] = screen.getAllByRole('button', { name: 'Request start time (UTC)' })
+    chooseDate(date!, '2027-01-05')
+    fireEvent.click(time!)
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Hour' })).getByRole('option', { name: '02' }))
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Minute' })).getByRole('option', { name: '00' }))
     fireEvent.change(screen.getByLabelText('Returned service tier'), { target: { value: 'priority' } })
     fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
 
@@ -338,7 +357,7 @@ describe('ModelPricingPlanEditor', () => {
     expect(await screen.findByText('Unable to determine rates.')).toBeInTheDocument()
     expect(screen.queryByText('Effective prices')).not.toBeInTheDocument()
 
-    const time = screen.getByLabelText('Request start time (UTC)')
+    const time = screen.getAllByRole('button', { name: 'Request start time (UTC)' })[0]
     const tier = screen.getByLabelText('Returned service tier')
     fireEvent.click(screen.getByRole('button', { name: 'Enter request time' }))
     expect(document.activeElement).toBe(time)

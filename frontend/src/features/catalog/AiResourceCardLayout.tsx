@@ -72,7 +72,7 @@ export function ResourceCardLayout({
             </Button>
           ) : null}
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             aria-label={editAriaLabel ?? `${t('ai.catalog.action.edit')} ${title}`}
             onClick={onEdit}
@@ -81,7 +81,7 @@ export function ResourceCardLayout({
             {t('ai.catalog.action.edit')}
           </Button>
           <Button
-            variant="ghost"
+            variant="secondary"
             size="compact"
             danger
             aria-label={deleteAriaLabel ?? `${t('ai.catalog.action.delete')} ${title}`}

@@ -24,7 +24,7 @@
 }
 
 .ui-toast-success {
-  border-color: var(--accent-border);
+  border-color: var(--border);
 }
 
 .ui-toast-success .ui-toast-icon {
@@ -53,13 +53,6 @@
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.icon-button.ui-toast-dismiss {
-  width: 22px;
-  height: 22px;
-  flex-basis: 22px;
-  border-radius: var(--radius-sm);
 }
 
 .ui-toast-dismiss svg {

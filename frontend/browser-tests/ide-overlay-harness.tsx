@@ -96,7 +96,7 @@ function ChatPage() {
         </span>
         <Button
           size="compact"
-          variant="ghost"
+          variant="secondary"
           data-testid="disconnect-events"
           onClick={() => {
             events.disconnect()
@@ -126,7 +126,7 @@ function ChatPage() {
               </Button>
               <Button
                 size="compact"
-                variant="ghost"
+                variant="secondary"
                 data-testid="pane-1-open-a-shell"
                 onClick={() => openEnvironment({
                   environment: { id: CARD_A.id, name: CARD_A.name, ready: CARD_A.ready },

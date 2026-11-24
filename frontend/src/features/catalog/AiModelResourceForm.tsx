@@ -198,7 +198,7 @@ export function ModelForm({
 
         <div className="catalog-picker-launcher">
           <Button
-            variant="inline"
+            variant="secondary"
             aria-expanded={catalogOpen}
             onClick={() => setCatalogOpen((current) => !current)}
           >

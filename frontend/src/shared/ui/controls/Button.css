@@ -1,0 +1,79 @@
+.btn-primary,
+.btn-secondary {
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--fg-on-accent);
+}
+
+.btn-primary.danger {
+  background: var(--danger-strong);
+  color: var(--fg);
+}
+
+.btn-secondary {
+  background: var(--control);
+  color: var(--fg-muted);
+}
+
+.btn-secondary.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+:is(.btn-primary, .btn-secondary):hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent), var(--control-hover) 12%);
+}
+
+.btn-primary.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-strong), var(--control-hover) 12%);
+}
+
+:is(.btn-primary, .btn-secondary):active:not(:disabled) {
+  background: var(--surface-active);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 80%, var(--surface-active));
+}
+
+.btn-primary.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-strong) 80%, var(--surface-active));
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary.is-compact,
+.btn-secondary.is-compact {
+  height: var(--control-h-compact);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+}
+
+.btn-primary.is-compact svg,
+.btn-secondary.is-compact svg {
+  width: 14px;
+  height: 14px;
+}

@@ -175,7 +175,7 @@ export function EnvironmentsPage() {
   const managedEnvironment = environments.find(({ id }) => id === manageId)
   const retryList = () => void environmentsQuery.refetch({ cancelRefetch: false })
   const retryButton = (
-    <Button size="compact" variant="ghost" disabled={environmentsQuery.isFetching} onClick={retryList}>
+    <Button size="compact" variant="secondary" disabled={environmentsQuery.isFetching} onClick={retryList}>
       {t('shared.retry')}
     </Button>
   )
@@ -309,7 +309,7 @@ export function EnvironmentsPage() {
                         </Button>
                       )}
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="compact"
                         aria-label={`${t('ai.environment.manage')} ${environment.name}`}
                         onClick={() => {

@@ -67,7 +67,7 @@ export function SubagentTreePanel({ tree, currentThreadId, onClose }: {
       {tree.isError ? (
         <div role="alert" className="thread-tree-state is-error">
           <p>{t(tree.refreshFailed ? 'ai.runtime.agentTree.refreshFailed' : 'ai.runtime.agentTree.error')}</p>
-          <Button variant="ghost" onClick={tree.refetch}>{t('ai.runtime.agentTree.retry')}</Button>
+          <Button variant="secondary" onClick={tree.refetch}>{t('ai.runtime.agentTree.retry')}</Button>
         </div>
       ) : null}
       {tree.isLoading ? <div role="status" className="thread-tree-state">{t('ai.runtime.thread.loading')}</div> : null}

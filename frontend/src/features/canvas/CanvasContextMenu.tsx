@@ -175,7 +175,7 @@ export function CanvasContextMenu({
           <div>
             <Button
               className="context-menu-cancel"
-              variant="ghost"
+              variant="secondary"
               size="compact"
               onClick={() => setMode('menu')}
             >

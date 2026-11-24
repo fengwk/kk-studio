@@ -82,7 +82,7 @@ export function ThreadModelRequestDebug({
       {debug.frozenInvocation ? (
         <div className="thread-debug-preview-actions">
           <Button
-            variant="inline"
+            variant="secondary"
             title={t('ai.runtime.debug.requestSnapshotTitle')}
             aria-label={t('ai.runtime.debug.requestSnapshotTitle')}
             onClick={() => onSelectInspector({ type: 'request' })}
@@ -123,7 +123,7 @@ export function ThreadModelRequestDebug({
         <div className="thread-debug-rail" data-testid="debug-tools-rail">
           {tools.map((tool) => (
             <Button
-              variant="inline"
+              variant="secondary"
               key={tool.name}
               className="thread-debug-chip"
               aria-label={`${t('ai.runtime.debug.toolAriaPrefix')} ${tool.name}`}
@@ -157,7 +157,7 @@ export function ThreadModelRequestDebug({
           <div className="thread-debug-rail" data-testid="debug-skills-rail">
             {debug.skills.map((skill) => (
               <Button
-                variant="inline"
+                variant="secondary"
                 key={`${skill.packageName}/${skill.name}`}
                 className="thread-debug-chip"
                 aria-label={`${t('ai.runtime.debug.skillAriaPrefix')} ${skill.name}`}
@@ -177,7 +177,7 @@ export function ThreadModelRequestDebug({
           {debug.subagents && debug.subagents.length > 0 ? (
             debug.subagents.map((subagent) => (
               <Button
-                variant="inline"
+                variant="secondary"
                 key={subagent.name}
                 className="thread-debug-chip"
                 aria-label={`${t('ai.runtime.debug.subagentAriaPrefix')} ${subagent.name}`}
@@ -193,7 +193,7 @@ export function ThreadModelRequestDebug({
         <div className="thread-debug-meta-item">
           <span className="thread-debug-meta-label">{t('ai.runtime.debug.cacheLabel')}</span>{' '}
           <Button
-            variant="inline"
+            variant="secondary"
             className="thread-debug-chip"
             aria-label={`${t('ai.runtime.debug.cacheAriaPrefix')} ${cacheSummary}`}
             onClick={() => onSelectInspector({ type: 'cache' })}
