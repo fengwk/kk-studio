@@ -11,8 +11,6 @@
   overflow-wrap: anywhere;
 }
 
-.interactions-page-content > .btn-primary { align-self: flex-start; }
-
 @keyframes interactions-spin {
   to { transform: rotate(360deg); }
 }

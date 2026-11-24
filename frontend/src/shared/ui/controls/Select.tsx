@@ -1,10 +1,10 @@
 import { ChevronDown } from 'lucide-react'
-import { useId, useRef } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { SelectMenu } from './SelectMenu'
 import { useSelectListbox } from './useSelectListbox'
 import { useSelectMenuPosition } from './useSelectMenuPosition'
-import './controls.css'
+import './Select.css'
 
 export interface SelectOption {
   value: string
@@ -58,6 +58,7 @@ export function Select({
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [menuRoot, setMenuRoot] = useState<HTMLElement | null>(null)
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const selectedIndex = Math.max(
     0,
@@ -86,6 +87,7 @@ export function Select({
 
   /** 打开前先按触发按钮定位，避免菜单首帧出现在未定位的位置。 */
   const handleOpen = () => {
+    setMenuRoot(triggerRef.current?.closest<HTMLElement>('.modal-backdrop, dialog:modal') ?? document.body)
     placeMenuBeforeOpen()
     openListbox()
   }
@@ -170,9 +172,10 @@ export function Select({
         <span className="ui-select-value">{triggerText}</span>
         <ChevronDown className={`ui-select-chevron${open ? ' is-open' : ''}`} aria-hidden="true" />
       </button>
-      {open
+      {open && menuRoot
         ? (
             <SelectMenu
+              portalRoot={menuRoot}
               listboxId={listboxId}
               options={options}
               value={value}

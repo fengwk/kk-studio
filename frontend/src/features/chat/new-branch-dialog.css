@@ -10,12 +10,6 @@
   flex-direction: column;
 }
 
-.new-branch-dialog .modal-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-
 .new-branch-overwrite {
   padding: 8px 10px;
   border: 1px solid var(--border-hover);

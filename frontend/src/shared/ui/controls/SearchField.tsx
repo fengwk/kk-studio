@@ -1,12 +1,14 @@
 import { Search } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
-import './controls.css'
+import './SearchField.css'
 
 export interface SearchFieldProps {
   value: string
   onChange: (value: string) => void
   /** 占位文案；省略时使用共享的“搜索资源”文案。 */
   placeholder?: string
+  invalid?: boolean
+  'aria-describedby'?: string
   'aria-label'?: string
 }
 
@@ -17,6 +19,8 @@ export function SearchField({
   value,
   onChange,
   placeholder,
+  invalid,
+  'aria-describedby': describedBy,
   'aria-label': ariaLabel,
 }: SearchFieldProps) {
   const { t } = useI18n()
@@ -30,6 +34,8 @@ export function SearchField({
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder ?? t('shared.searchResources')}
         aria-label={ariaLabel}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
       />
     </label>
   )

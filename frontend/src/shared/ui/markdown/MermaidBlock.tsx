@@ -17,7 +17,7 @@ const PALETTE_ROLES = {
   surface: '#101412', // --bg
   surface2: '#202723', // --surface-raised：节点填充
   line: '#2b342f', // --border
-  line2: '#355344', // --accent-border：节点描边
+  line2: '#355344', // 调色板苔绿：节点描边
   fg1: '#edf2ed', // --fg
   fg3: '#9aa59d', // --fg-muted
   accent: '#71e79a', // --accent

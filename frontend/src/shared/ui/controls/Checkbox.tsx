@@ -1,6 +1,6 @@
 import { Check, Minus } from 'lucide-react'
 import type { ReactNode } from 'react'
-import './controls.css'
+import './Checkbox.css'
 
 export interface CheckboxProps {
   id?: string

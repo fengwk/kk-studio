@@ -3,6 +3,7 @@ import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import { useI18n } from '@/shared/i18n'
+import './ConfirmActionModal.css'
 
 /**
  * 通用确认弹窗。焦点管理、Escape、遮罩关闭与 pending 守卫统一由 Dialog 提供。

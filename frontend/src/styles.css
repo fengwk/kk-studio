@@ -2,7 +2,7 @@
  * Design tokens, three layers. Components consume only layers 2 and 3.
  *   1. Palette   --palette-*   raw colors; the only place color literals are allowed.
  *   2. Semantic  surface / fg / border / accent / status / focus, plus the scales below.
- *   3. Component --topbar-bg and similar, only where a value is shared by several rules.
+ *   3. Component tokens, defined by their owning component.
  * Scales: space (4px step), font-size (12/13/15/20/24), radius, motion, z-index.
  * `npm run lint:css` enforces this contract.
  */
@@ -45,6 +45,9 @@
   --surface: var(--palette-ink-850);
   --surface-hover: var(--palette-ink-800);
   --surface-active: var(--palette-ink-750);
+  --hover: color-mix(in srgb, var(--fg) 6%, transparent);
+  --control: color-mix(in srgb, var(--palette-white) 8%, transparent);
+  --control-hover: color-mix(in srgb, var(--palette-white) 12%, transparent);
   --surface-raised: var(--palette-ink-750);
   /* Floating surfaces (menus, popovers, panels): fully opaque so underlying text never shows through. */
   --surface-overlay: var(--palette-ink-900);
@@ -68,14 +71,12 @@
 
   /* Accent and focus */
   --accent: var(--palette-green-400);
-  --accent-gradient: linear-gradient(180deg, var(--palette-green-300) 0%, var(--palette-green-400) 100%);
   --accent-soft: color-mix(in srgb, var(--palette-green-400) 13%, transparent);
   --accent-soft-hover: color-mix(in srgb, var(--palette-green-400) 25%, transparent);
-  --accent-glow: color-mix(in srgb, var(--palette-green-400) 20%, transparent);
-  --accent-border: var(--palette-moss-700);
   --accent-deep: var(--palette-green-900);
-  --focus: var(--palette-ink-50);
-  --focus-ring: color-mix(in srgb, var(--palette-ink-50) 24%, transparent);
+  --focus: var(--border);
+  --ui-focus-offset: 1px;
+  --focus-ring: var(--border);
 
   /* Status */
   --success: var(--palette-green-400);
@@ -86,7 +87,6 @@
   --danger-strong: var(--palette-red-500);
   --danger-soft: color-mix(in srgb, var(--palette-red-400) 15%, transparent);
   --danger-border: color-mix(in srgb, var(--palette-red-400) 35%, transparent);
-  --danger-gradient: linear-gradient(180deg, var(--palette-red-300) 0%, var(--palette-red-500) 100%);
   --success-soft: color-mix(in srgb, var(--palette-green-400) 14%, transparent);
   --success-border: color-mix(in srgb, var(--palette-green-400) 35%, transparent);
   --info: var(--palette-blue-400);
@@ -98,7 +98,6 @@
   --shadow-lg: 0 24px 80px color-mix(in srgb, var(--palette-black) 55%, transparent);
   --shadow-sm: 0 4px 16px color-mix(in srgb, var(--palette-black) 25%, transparent);
   --shadow-drawer: -22px 0 60px color-mix(in srgb, var(--palette-black) 38%, transparent);
-  --glow-accent: 0 0 12px color-mix(in srgb, var(--palette-green-400) 35%, transparent);
 
   /* Typography: monospace carries identifiers, ids and data values. */
   --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
@@ -108,6 +107,12 @@
   --font-size-md: 15px;
   --font-size-lg: 20px;
   --font-size-xl: 24px;
+  --line-height-body: 1.5;
+  --control-h: 32px;
+  --control-h-compact: 28px;
+  --row-h: 28px;
+  --touch-target: 44px;
+  --ease-standard: ease;
 
   /* Space (4px step), radius, motion, z-index */
   --space-1: 4px;
@@ -131,9 +136,6 @@
   --z-popover: 130;
   --z-toast: 200;
 
-  /* Component */
-  --topbar-bg: color-mix(in srgb, var(--palette-ink-900) 85%, transparent);
-
   font-family: var(--font);
   color: var(--fg);
   background: var(--bg);
@@ -143,16 +145,27 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Let the browser decide which focus is keyboard-visible; never suppress focus globally. */
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+/* Focus follows the visible control, never its hidden or nested input. */
+:where(.searchbox input, .ui-tag-input-field, .ui-checkbox-input, .composer-editor, .ui-native-select):focus {
+  outline: none;
 }
 
-input[data-pointer-focus='true']:focus-visible,
-textarea[data-pointer-focus='true']:focus-visible {
-  outline: none;
-  box-shadow: none;
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible:not(:where(.searchbox input, .ui-tag-input-field, .ui-checkbox-input, .composer-editor, .ui-native-select, .modal-card)),
+:where(input:not([type='checkbox'], [type='radio'], [type='range'], .searchbox input, .ui-tag-input-field, .ui-native-select), textarea, select, [data-ui-focus='control']):focus,
+:where(.ui-select-trigger, .thread-composer-control):is(:focus, [aria-expanded='true']),
+:where(.searchbox, .ui-tag-input):has(input:focus),
+:where(.thread-dock):has(.composer-editor:focus),
+:where(.ui-checkbox-input:focus-visible + .ui-checkbox-box) {
+  outline: 1px solid var(--focus);
+  outline-offset: var(--ui-focus-offset);
+}
+
+:where([data-ui-focus='row'], .ui-select-option, .ui-tab):focus-visible {
+  --ui-focus-offset: -1px;
+}
+
+@media (forced-colors: active) {
+  :root { --focus: Highlight; }
 }
 
 * {
@@ -191,7 +204,7 @@ body,
 body {
   background: var(--bg);
   font-size: var(--font-size-sm);
-  line-height: 1.5;
+  line-height: var(--line-height-body);
 }
 
 button,
@@ -217,10 +230,6 @@ select {
   background-size: 12px 12px;
 }
 
-select:focus {
-  outline: 0;
-  border-color: var(--border-hover);
-}
 
 select option {
   color: var(--fg);
@@ -290,7 +299,7 @@ a {
   font-weight: 500;
   text-decoration: none;
   white-space: nowrap;
-  transition: all var(--duration-fast);
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 
 .subnav a:hover {
@@ -314,80 +323,6 @@ textarea::placeholder {
   min-height: 0;
   overflow-y: auto;
   padding: 32px 32px 60px;
-}
-
-/* 新建入口卡：与资源卡同一尺寸语言的虚线边框卡片，整卡即创建动作。
-   内部元素各自控制间距，不依赖父级 gap。 */
-.create-card {
-  min-height: 280px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  padding: 16px;
-  text-align: center;
-  border: 1px dashed var(--border-hover);
-  border-radius: var(--radius-lg);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  box-shadow: none;
-  transition: border-color var(--duration-base), background var(--duration-base);
-}
-
-.create-card:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  background: var(--wash-1);
-}
-
-.create-card:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
-.create-card:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.create-card-icon {
-  align-self: center;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--surface-active);
-  color: var(--fg-muted);
-}
-
-.create-card-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-.create-card-text {
-  margin-top: 12px;
-  min-width: 0;
-}
-
-.create-card-text strong,
-.create-card-text small {
-  display: block;
-}
-
-.create-card-text strong {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-}
-
-.create-card-text small {
-  margin-top: 4px;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
 }
 
 .state-block {
@@ -416,29 +351,10 @@ textarea::placeholder {
   line-height: 1.4;
 }
 
-.form-group.is-error > span:first-child,
-.form-group.is-error > .field-label,
-.form-group.is-error > legend {
-  color: var(--danger);
-}
-
-.form-group.is-error > .field-label .field-required,
-.form-group.is-error > legend .field-required {
-  color: var(--danger);
-}
-
 .form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field),
 .form-group.is-error select,
 .form-group.is-error textarea:not(.ui-textarea) {
-  border-color: var(--danger) !important;
-  box-shadow: 0 0 0 1px var(--danger-border);
-}
-
-.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus,
-.form-group.is-error select:focus,
-.form-group.is-error textarea:not(.ui-textarea):focus {
-  border-color: var(--danger) !important;
-  box-shadow: 0 0 0 3px var(--danger-soft);
+  border-color: var(--danger);
 }
 
 div.is-error {
@@ -455,18 +371,6 @@ div.is-error {
   font-size: var(--font-size-xs);
   font-weight: 600;
   line-height: 1.35;
-}
-
-.field-label {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0;
-}
-
-.field-required {
-  color: var(--danger);
-  font-weight: 600;
-  margin-left: 0.15em;
 }
 
 .form-group {
@@ -493,7 +397,6 @@ div.is-error {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg);
-  outline: 0;
   padding: 0 12px;
 }
 
@@ -526,48 +429,6 @@ div.is-error {
   font: inherit;
 }
 
-.form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus,
-.form-group select:focus,
-.form-group textarea:not(.ui-textarea):focus {
-  border-color: var(--border-hover);
-}
-
-.form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus-visible,
-.form-group select:focus-visible,
-.form-group textarea:not(.ui-textarea):focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-
-.ghost-inline-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  padding: 0 10px;
-}
-
-.ghost-inline-btn:hover {
-  color: var(--fg);
-  border-color: var(--border-hover);
-}
-
-.ghost-inline-btn.danger {
-  color: var(--danger);
-  border-color: var(--danger-border);
-}
-
-.ghost-inline-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
 .inline-hint {
   margin: 0;
   color: var(--fg-muted);
@@ -585,89 +446,6 @@ div.is-error {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
-}
-
-.btn-primary,
-.ghost-btn {
-  height: 32px;
-  border-radius: var(--radius-sm);
-  padding: 0 14px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: var(--font-size-sm);
-  transition: background var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast);
-}
-
-.btn-primary {
-  background: var(--accent-gradient);
-  color: var(--fg-on-accent);
-  border-color: var(--accent-border);
-}
-
-.btn-primary.danger {
-  background: var(--danger-gradient);
-  color: var(--fg);
-  border-color: var(--danger-strong);
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.ghost-btn {
-  background: transparent;
-  color: var(--fg-muted);
-  border-color: var(--border);
-}
-
-.ghost-btn:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--border-hover);
-  color: var(--fg);
-}
-
-.ghost-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.ghost-btn.danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-color: var(--danger-border);
-  color: var(--danger);
-}
-
-.btn-primary:focus-visible,
-.ghost-btn:focus-visible,
-.ghost-inline-btn:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
-/* 紧凑尺寸：普通控件 32px，紧凑控件 28px；由共享 Button 的 size="compact" 选择。 */
-.btn-primary.is-compact,
-.ghost-btn.is-compact,
-.ghost-inline-btn.is-compact {
-  height: 28px;
-  padding: 0 10px;
-  gap: 4px;
-  font-size: var(--font-size-xs);
-}
-
-.btn-primary.is-compact svg,
-.ghost-btn.is-compact svg,
-.ghost-inline-btn.is-compact svg {
-  width: 14px;
-  height: 14px;
 }
 
 /* 共享 KeyboardShortcutList：Settings 页与 Thread /shortcuts 面板复用同一事实源 */
@@ -799,4 +577,11 @@ div.is-error {
 
 .inline-hint.danger {
   color: var(--danger);
+}
+
+.model-selection-variant-label {
+  display: block;
+  margin-top: 8px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
 }

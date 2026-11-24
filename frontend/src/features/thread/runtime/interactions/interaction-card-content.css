@@ -36,17 +36,13 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--fg);
   font: inherit;
   appearance: none;
-}
-.interaction-approval-deny-reason input:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 .interaction-approval-footer .interaction-actions-bar { flex: 0 0 auto; padding-top: 0; border-top: 0; }
 .interaction-actions-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }

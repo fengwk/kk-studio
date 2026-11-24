@@ -225,8 +225,6 @@
   }
 
   .ide-toolbar .ide-toolbar-icon,
-  .ide-toolbar .ide-environment-selector.ui-select .ui-select-trigger,
-  .ui-select-menu.ide-environment-selector.is-compact .ui-select-option,
   .ide-workspace-tab > button,
   .ide-workspace-tabs .ide-open-workspace {
     height: auto;
@@ -339,11 +337,6 @@
 
 .ide-panel-recovery-banner span {
   min-width: 0;
-}
-
-.ide-panel-recovery-banner .ghost-btn {
-  flex-shrink: 0;
-  color: var(--danger);
 }
 
 @media (max-width: 760px) {

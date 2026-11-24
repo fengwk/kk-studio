@@ -56,9 +56,4 @@
     flex: 1 1 100%;
     justify-content: flex-start;
   }
-
-  .list-page-header-actions > .searchbox {
-    flex: 1 1 100%;
-    width: auto;
-  }
 }

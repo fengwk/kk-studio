@@ -103,38 +103,7 @@
   color: var(--danger);
 }
 
-/* 附件档位选择器嵌在附件卡片的状态行内，需要比通用紧凑下拉更矮更窄。 */
-.ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger {
-  min-height: 18px;
-  height: 18px;
-  padding: 0 4px;
-  gap: 3px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface-active);
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  line-height: 1.2;
-}
-
-.ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger:hover,
-.ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger:focus-visible {
-  border-color: var(--info);
-  color: var(--fg);
-}
-
-.ui-select.is-compact.attachment-reference-tier-select .ui-select-chevron {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 10px;
-}
-
-.ui-select.attachment-reference-tier-select .ui-select-option {
-  min-height: 28px;
-  font-size: var(--font-size-xs);
-}
-
-.icon-button.attachment-reference-remove {
+.attachment-reference-remove {
   width: 20px;
   height: 20px;
   flex-basis: 20px;

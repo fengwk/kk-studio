@@ -1,0 +1,39 @@
+.ui-date-panel {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  max-width: calc(100vw - var(--space-4));
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-md);
+  visibility: hidden;
+}
+
+.ui-date-panel { width: 296px; padding: var(--space-3) var(--space-3) var(--space-2); }
+.ui-date-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); }
+.ui-date-title { color: var(--fg); font-size: var(--font-size-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ui-date-nav {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--fg-muted); cursor: pointer;
+}
+.ui-date-nav:hover { background: var(--hover); color: var(--fg); }
+.ui-date-nav svg { width: 16px; height: 16px; }
+.ui-date-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: var(--space-1); }
+.ui-date-row { display: contents; }
+.ui-date-week { display: grid; place-items: center; height: 28px; color: var(--fg-muted); font-size: var(--font-size-xs); }
+.ui-date-day {
+  position: relative; display: grid; place-items: center; width: 36px; height: 36px; justify-self: center;
+  border-radius: 50%; color: var(--fg); font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.ui-date-day:hover, .ui-date-day.is-active { background: var(--hover); }
+.ui-date-day.is-outside { color: var(--fg-muted); }
+.ui-date-day.is-today { color: var(--accent); font-weight: 600; }
+.ui-date-day.is-today::after { position: absolute; bottom: var(--space-1); left: 50%; width: 4px; height: 4px; border-radius: 50%; background: currentColor; content: ''; transform: translateX(-50%); }
+.ui-date-day[aria-selected='true'] { background: var(--accent); color: var(--fg-on-accent); font-weight: 600; }
+.ui-date-day[aria-disabled='true'] { opacity: .4; text-decoration: line-through; cursor: not-allowed; }
+.ui-date-foot { display: flex; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+.ui-date-link { min-height: 32px; padding: 0 var(--space-3); border: 0; border-radius: 999px; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: var(--font-size-sm); font-weight: 600; }
+.ui-date-link:hover:not(:disabled) { background: var(--hover); }
+.ui-date-link:disabled { color: var(--fg-muted); cursor: not-allowed; }

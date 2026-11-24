@@ -30,10 +30,6 @@
   white-space: pre-wrap;
 }
 
-.icon-button.thread-error-dismiss {
-  color: var(--danger);
-}
-
 .thread-error-dismiss svg {
   width: 14px;
   height: 14px;

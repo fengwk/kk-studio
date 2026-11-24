@@ -1,7 +1,7 @@
 import { useId, useRef } from 'react'
 import { TagInputField } from './TagInputField'
 import { useTagInput } from './useTagInput'
-import './controls.css'
+import './TagInput.css'
 
 export interface TagInputProps {
   id?: string

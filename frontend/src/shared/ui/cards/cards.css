@@ -1,34 +1,19 @@
-/* 共享资源卡与资源栅格：全前端资源列表的共同视觉基座。
-   设计 token 仍由 src/styles.css 的 :root 唯一定义；本文件只描述资源卡自身布局，
-   不改写基础按钮/输入控件，也不依赖任何 feature 业务类名。 */
-
-.resource-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
-  gap: 16px;
-}
-
 .resource-card {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(120% 80% at 0% 0%, var(--accent-soft), transparent 55%),
-    linear-gradient(180deg, var(--wash-1) 0%, transparent 100%),
-    var(--surface);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface);
   text-align: left;
   overflow: hidden;
-  transition: border-color var(--duration-base), background var(--duration-base), box-shadow var(--duration-base);
+  transition: background var(--duration-base);
 }
 
 .resource-card:hover {
-  border-color: var(--border-hover);
   background: var(--surface-hover);
-  box-shadow: var(--shadow-md);
 }
 
 .resource-card-head {
@@ -118,7 +103,7 @@
 /* 同卡片共享标签列，窄空间只在词间换行，不拆分标签中的单词。 */
 .resource-card-meta-label {
   color: var(--fg-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: normal;
   word-break: keep-all;
@@ -126,7 +111,7 @@
 
 .resource-card-meta-value {
   min-width: 0;
-  color: var(--fg-muted);
+  color: var(--fg);
   font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: nowrap;
@@ -172,7 +157,7 @@
   max-width: 110px;
   height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-pill);
   background: var(--surface-raised);
   color: var(--fg-muted);
@@ -186,7 +171,6 @@
 
 .resource-card-tag.is-more {
   max-width: none;
-  border-style: dashed;
   background: transparent;
   color: var(--fg-muted);
 }
@@ -197,100 +181,4 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-/* 资源卡列表骨架屏：只覆盖没有缓存的首次读取，与真实卡共用同一栅格和卡片基础间距。
-   行结构（头部 / 核心行 / 元信息 / 动作位）由组件按形状决定，高度随内容自然撑开；
-   首行数量由栅格实际列数决定，因此这里不写死卡片高度，也不写死占位数量。 */
-.resource-skeleton-container {
-  width: 100%;
-}
-
-.resource-card.resource-card-skeleton {
-  cursor: default;
-  pointer-events: none;
-  user-select: none;
-  transition: none;
-}
-
-.resource-card-skeleton:hover {
-  border-color: var(--border);
-  background:
-    radial-gradient(120% 80% at 0% 0%, var(--accent-soft), transparent 55%),
-    linear-gradient(180deg, var(--wash-1) 0%, transparent 100%),
-    var(--surface);
-  box-shadow: none;
-}
-
-.resource-card-skeleton .skeleton-box {
-  border-radius: var(--radius-sm);
-  background: linear-gradient(
-    90deg,
-    var(--surface-raised) 0%,
-    var(--surface-hover) 50%,
-    var(--surface-raised) 100%
-  );
-  background-size: 200% 100%;
-  animation: resource-skeleton-shimmer 1.5s ease-in-out infinite;
-}
-
-.resource-card-skeleton .skeleton-icon {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  border-radius: var(--radius-md);
-}
-
-.resource-card-skeleton .skeleton-title {
-  height: 16px;
-  width: 55%;
-  margin-bottom: 8px;
-}
-
-.resource-card-skeleton .skeleton-subtitle {
-  height: 12px;
-  width: 85%;
-}
-
-/* 环境摘要卡的可用性徽标位。 */
-.resource-card-skeleton .skeleton-badge {
-  width: 64px;
-  height: 22px;
-  border-radius: var(--radius-pill);
-}
-
-/* 头部之下的一条核心状态行（环境摘要中需要处理的状态）。 */
-.resource-card-skeleton .skeleton-status {
-  height: 14px;
-  width: 70%;
-  max-width: 240px;
-}
-
-.resource-card-skeleton .resource-card-meta {
-  gap: 12px;
-}
-
-.resource-card-skeleton .skeleton-meta-row {
-  height: 14px;
-}
-
-.resource-card-skeleton .skeleton-action {
-  height: 28px;
-  border-radius: var(--radius-sm);
-}
-
-@keyframes resource-skeleton-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .resource-card-skeleton .skeleton-box {
-    animation: none;
-    background: var(--surface-raised);
-  }
 }

@@ -1,0 +1,29 @@
+/* 文本输入与多行文本：普通控件 32px；实际表单复用同一焦点/错误/禁用语义。 */
+.ui-text-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.ui-text-input {
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+}
+
+.ui-text-input[data-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-text-input:disabled {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+.ui-text-input::placeholder {
+  color: var(--fg-muted);
+}

@@ -1,5 +1,5 @@
 import type { HTMLAttributes } from 'react'
-import './data.css'
+import './Badge.css'
 
 /** 状态语义：success 真实成功/就绪，warning 等待/提醒，danger 失败/阻塞，info 进行中/信息，accent 身份标记。 */
 export type BadgeTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'info'

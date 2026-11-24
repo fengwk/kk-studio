@@ -410,23 +410,22 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       const allowStyle = await card.locator('.interaction-allow-btn').evaluate((el) => {
         const style = window.getComputedStyle(el)
         return {
+          background: style.backgroundColor,
           backgroundImage: style.backgroundImage,
           color: style.color,
-          border: style.borderTopColor,
+          border: style.borderTopWidth,
         }
       })
-      const referencePrimary = await page.locator('.interaction-submit-btn').evaluate(
-        (el) => window.getComputedStyle(el).backgroundImage,
-      )
-      expect(allowStyle.backgroundImage).toBe(referencePrimary)
+      expect(allowStyle.backgroundImage).toBe('none')
+      expect(allowStyle.background).toBe(await tokenColor(page, '--accent'))
       expect(allowStyle.color).toBe(await tokenColor(page, '--fg-on-accent'))
-      expect(allowStyle.border).toBe(await tokenColor(page, '--accent-border'))
+      expect(allowStyle.border).toBe('0px')
       const denyStyle = await card.locator('.interaction-deny-btn').evaluate((el) => {
         const style = getComputedStyle(el)
-        return { background: style.backgroundImage, border: style.borderTopColor, color: style.color }
+        return { background: style.backgroundColor, border: style.borderTopWidth, color: style.color }
       })
-      expect(denyStyle.background).toBe('none')
-      expect(denyStyle.border).toBe(await tokenColor(page, '--danger-border'))
+      expect(denyStyle.background).toBe(await tokenColor(page, '--danger-soft'))
+      expect(denyStyle.border).toBe('0px')
       expect(denyStyle.color).toBe(await tokenColor(page, '--danger'))
 
       await expectNoHorizontalOverflow(page)

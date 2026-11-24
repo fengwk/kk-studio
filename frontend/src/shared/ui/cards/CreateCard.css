@@ -1,0 +1,64 @@
+.create-card {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  padding: var(--space-4);
+  text-align: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background var(--duration-fast);
+}
+
+.create-card:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.create-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.create-card-icon {
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+}
+
+.create-card-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.create-card-text {
+  margin-top: var(--space-3);
+  min-width: 0;
+}
+
+.create-card-text strong,
+.create-card-text small {
+  display: block;
+}
+
+.create-card-text strong {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.create-card-text small {
+  margin-top: var(--space-1);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}

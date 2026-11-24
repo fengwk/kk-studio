@@ -13,11 +13,6 @@
   margin-bottom: 16px;
 }
 
-.resource-card.is-archived {
-  opacity: 0.7;
-  border-style: dashed;
-}
-
 .project-card-actions-right {
   display: flex;
   align-items: center;
@@ -67,11 +62,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-detail-toolbar .searchbox {
-  margin-left: 0;
-  flex: 0 1 260px;
 }
 
 .project-detail-body {
@@ -272,13 +262,6 @@
 }
 
 /* 目标阶段名称由项目配置，长名称在窄卡片内换行，不把操作挤出卡片。 */
-.issue-card-transitions .ghost-btn {
-  max-width: 100%;
-  height: auto;
-  min-height: 28px;
-  padding-block: 3px;
-  white-space: normal;
-}
 
 /* ---------- 反馈 ---------- */
 
@@ -297,12 +280,12 @@
 
 /* ---------- 弹窗（项目配置 / Issue 详情） ---------- */
 
-.modal-card.edit-project-modal-card {
+.edit-project-modal-card {
   width: 96vw;
   max-width: 1040px;
 }
 
-.modal-card.issue-detail-modal-card {
+.issue-detail-modal-card {
   width: 90vw;
   max-width: 960px;
   height: 85vh;
@@ -310,7 +293,7 @@
   flex-direction: column;
 }
 
-.modal-card.sub-card {
+.sub-card {
   max-width: 440px;
 }
 
@@ -342,13 +325,6 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
-}
-
-.edit-project-tabs .ui-tab-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 
 /* 正文统一交给共享 modal-body 承担内边距与滚动链。 */
@@ -483,13 +459,6 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
-}
-
-.issue-detail-tabs .ui-tab-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 
 .issue-detail-body {
@@ -726,11 +695,6 @@
   align-items: center;
   gap: 4px 8px;
   min-width: 0;
-}
-
-.run-card-facts .ui-badge {
-  max-width: 100%;
-  overflow-wrap: anywhere;
 }
 
 .run-ordinal {

@@ -1,0 +1,91 @@
+.ui-select-menu {
+  /* portal 到 body，用视口坐标固定定位，避免被滚动/裁剪容器截断。 */
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: grid;
+  gap: var(--space-1);
+  width: max-content;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(280px, calc(100dvh - 48px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-md);
+}
+
+.ui-select-menu.is-compact {
+  min-width: max(var(--ui-select-trigger-width), 148px);
+  max-height: min(280px, calc(100dvh - 48px), var(--ui-select-available-height));
+}
+
+.ui-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ui-select-option-label {
+  white-space: nowrap;
+}
+
+.ui-select-menu.is-compact .ui-select-option {
+  font-size: var(--font-size-xs);
+}
+
+.ui-select-option:hover,
+.ui-select-option.is-active {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.ui-select-option[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+
+.ui-select-option[aria-selected='true']:is(:hover, .is-active) {
+  background: var(--accent-soft-hover);
+}
+
+.ui-select-option:disabled,
+.ui-select-option[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-select-option-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.ui-select-option-indicator svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 860px) {
+  .modal-touch-options .ui-select-option {
+    min-height: var(--touch-target);
+  }
+}

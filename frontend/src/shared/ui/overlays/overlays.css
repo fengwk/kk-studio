@@ -12,12 +12,15 @@
   z-index: var(--z-modal);
 }
 
-.modal-card {
+:where(.modal-card) {
   width: min(440px, 100%);
+  max-height: calc(100dvh - var(--space-6) * 2);
+  display: flex;
+  flex-direction: column;
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: 0 24px 80px var(--scrim);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
@@ -51,12 +54,9 @@
   overflow-y: auto;
 }
 
-.confirm-modal-card {
-  width: min(480px, 100%);
-}
-
 .modal-header,
 .modal-footer {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -71,69 +71,12 @@
 }
 
 .modal-body {
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
   padding: 24px;
-}
-
-.confirm-modal-body {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 12px;
-  /* 失败原因需要独占一整行，图标与描述保持首行。 */
-  flex-wrap: wrap;
-}
-
-.confirm-modal-error {
-  flex: 1 0 100%;
-}
-
-.confirm-modal-icon {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  border-radius: var(--radius-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-active);
-  color: var(--fg-muted);
-}
-
-.confirm-modal-icon.danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.confirm-modal-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.confirm-modal-card .modal-header {
-  padding: 14px 16px;
-}
-
-.confirm-modal-card .modal-header h2 {
-  font-size: var(--font-size-sm);
-}
-
-.confirm-modal-card .modal-body {
-  padding: 18px 16px;
-}
-
-.confirm-modal-card .modal-footer {
-  padding: 12px 16px;
-}
-
-.confirm-modal-description {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-sm);
-  line-height: 1.6;
 }
 
 /* 弹窗正文段落：去掉浏览器默认 margin，长诊断串可自然换行。 */
@@ -146,6 +89,7 @@
 }
 
 .modal-footer {
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
   border-top: 1px solid var(--border);
@@ -215,49 +159,9 @@
   }
 
   .modal-touch-target button,
-  .modal-touch-target .ui-checkbox,
   .modal-touch-target input:not([type='checkbox']):not([type='radio']):not([type='hidden']) {
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  .modal-touch-target .icon-button {
-    flex-basis: 44px;
-  }
-
-  /* 扩大开关命中框，同时保持原有的轨道和滑块视觉尺寸。 */
-  .modal-touch-target .ui-switch,
-  .modal-touch-target .ui-switch[aria-checked='true'] {
-    width: 44px;
-    height: 44px;
-    border: 0;
-    background: transparent;
-  }
-
-  .modal-touch-target .ui-switch::before {
-    content: '';
-    position: absolute;
-    top: 11px;
-    left: 2px;
-    width: 40px;
-    height: 22px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    background: var(--bg);
-  }
-
-  .modal-touch-target .ui-switch[aria-checked='true']::before {
-    border-color: var(--accent-border);
-    background: var(--accent-deep);
-  }
-
-  .modal-touch-target .ui-switch-thumb {
-    top: 14px;
-    left: 5px;
-  }
-
-  .modal-touch-options .ui-select-option {
-    min-height: 44px;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
   }
 
   .modal-footer-with-leading-action .modal-footer-leading-action {

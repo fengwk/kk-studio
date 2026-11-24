@@ -129,16 +129,6 @@
   padding-bottom: 9px;
 }
 
-.capability-option-detailed > .ui-checkbox-box {
-  align-self: start;
-  margin-top: 2px;
-}
-
-.capability-option > .ui-checkbox-label {
-  display: block;
-  min-width: 0;
-}
-
 .capability-option-detailed .capability-option-body {
   display: flex;
   flex-direction: column;

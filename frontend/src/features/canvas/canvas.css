@@ -811,8 +811,8 @@
 }
 
 .canvas-feature .generation-reference.referenced .canvas-resource-thumbnail {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-border);
+  border-color: var(--border);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .canvas-feature .generation-reference > span:last-child {
@@ -834,7 +834,7 @@
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  border: 1px solid var(--accent-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--accent);
   background: var(--accent-soft);
@@ -940,66 +940,11 @@
   font-size: var(--font-size-xs);
 }
 
-.canvas-feature .generation-controls .ui-select {
-  min-width: 82px;
-  max-width: 190px;
-  width: auto;
-}
-
-.canvas-feature .generation-controls .ui-select-trigger {
-  height: 31px;
-  min-height: 31px;
-  min-width: 82px;
-  padding: 0 8px;
-  gap: 6px;
-  border: 1px solid var(--border-hover);
-  border-radius: 7px;
-  color: var(--fg);
-  background: var(--surface);
-  font-size: var(--font-size-xs);
-}
-
-.canvas-feature .generation-controls .ui-select-chevron {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 12px;
-}
-
 /* 整数参数使用共享 NumberInput：在紧凑控制条内保持既有 31px/8px 视觉。 */
-.canvas-feature .generation-controls .number-input {
-  width: 72px;
-  min-width: 72px;
-}
-
-.canvas-feature .generation-controls .number-input-field {
-  height: 31px;
-  min-width: 0;
-  padding: 0 24px 0 8px;
-  border: 1px solid var(--border-hover);
-  border-radius: 7px;
-  color: var(--fg);
-  background: var(--surface);
-  font-size: var(--font-size-xs);
-}
-
-.canvas-feature .generation-controls .number-input-steppers {
-  width: 20px;
-}
 
 .canvas-feature .generation-controls .number-input-step svg {
   width: 10px;
   height: 10px;
-}
-
-.canvas-feature .generation-unknown-resolution .ui-select {
-  width: auto;
-  min-width: 150px;
-}
-
-.canvas-feature .generation-unknown-resolution .ui-select-trigger {
-  min-height: 28px;
-  padding: 0 8px;
-  font-size: var(--font-size-xs);
 }
 
 .canvas-feature .generation-controls input[type="number"] {
@@ -1492,7 +1437,7 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   padding: 9px 13px;
-  border: 1px solid var(--accent-border);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--accent);
   background: var(--accent-deep);
@@ -1586,15 +1531,6 @@
   }
 
   .canvas-feature .generation-controls input {
-    height: 28px;
-  }
-
-  .canvas-feature .generation-controls .ui-select-trigger {
-    height: 28px;
-    min-height: 28px;
-  }
-
-  .canvas-feature .generation-controls .number-input-field {
     height: 28px;
   }
 

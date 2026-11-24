@@ -64,7 +64,7 @@ export function PricingTtlInputs({ rows, onChange }: {
             </div>
             <button
               type="button"
-              className="ghost-inline-btn"
+              className="ghost-btn"
               aria-label={t('ai.catalog.form.removePricingRule')}
               onClick={() => onChange(rows.filter((candidate) => candidate.draftKey !== row.draftKey))}>×</button>
             {issue ? <FieldError id={errorId} role="alert">{t(ISSUE_KEYS[issue])}</FieldError> : null}
@@ -73,7 +73,7 @@ export function PricingTtlInputs({ rows, onChange }: {
       })}
       <button
         type="button"
-        className="ghost-inline-btn"
+        className="ghost-btn"
         onClick={() => onChange([...rows, { draftKey: createPricingDraftKey(), seconds: '', rate: '' }])}>
         {t('ai.catalog.form.addPricingTtl')}
       </button>

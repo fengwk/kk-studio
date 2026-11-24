@@ -177,7 +177,7 @@ export function HarnessApp() {
           <button
             type="button"
             id="toggle-locale-btn"
-            className="ghost-inline-btn"
+            className="ghost-btn"
             onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
           >
             Locale: {locale} (Click to switch)
@@ -186,7 +186,7 @@ export function HarnessApp() {
             <button
               type="button"
               id="tab-model-btn"
-              className={tab === 'model' ? 'btn-primary' : 'ghost-inline-btn'}
+              className={tab === 'model' ? 'btn-primary' : 'ghost-btn'}
               onClick={() => setTab('model')}
             >
               Model Form
@@ -194,7 +194,7 @@ export function HarnessApp() {
             <button
               type="button"
               id="tab-skills-btn"
-              className={tab === 'skills' ? 'btn-primary' : 'ghost-inline-btn'}
+              className={tab === 'skills' ? 'btn-primary' : 'ghost-btn'}
               onClick={() => setTab('skills')}
             >
               Skill Packages
@@ -202,7 +202,7 @@ export function HarnessApp() {
             <button
               type="button"
               id="tab-nav-btn"
-              className={tab === 'nav' ? 'btn-primary' : 'ghost-inline-btn'}
+              className={tab === 'nav' ? 'btn-primary' : 'ghost-btn'}
               onClick={() => setTab('nav')}
             >
               Ai Navigation

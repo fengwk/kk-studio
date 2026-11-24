@@ -1,3 +1,4 @@
+import './Button.css'
 import type { ButtonHTMLAttributes } from 'react'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 
@@ -9,7 +10,7 @@ type ButtonSize = 'normal' | 'compact'
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary: 'btn-primary',
   ghost: 'ghost-btn',
-  inline: 'ghost-inline-btn',
+  inline: 'ghost-btn',
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

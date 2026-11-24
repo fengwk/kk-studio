@@ -22,7 +22,7 @@
 }
 
 .thread-block.thread-disclosure.is-success {
-  border-color: var(--accent-border);
+  border-color: var(--border);
   background:
     linear-gradient(var(--accent-soft), var(--accent-soft)),
     var(--surface);

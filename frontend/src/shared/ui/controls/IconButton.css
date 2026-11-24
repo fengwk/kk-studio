@@ -1,0 +1,49 @@
+.icon-button {
+  width: var(--control-h);
+  height: var(--control-h);
+  flex: 0 0 var(--control-h);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.icon-button.is-compact {
+  width: var(--control-h-compact);
+  height: var(--control-h-compact);
+  flex: 0 0 var(--control-h-compact);
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+.icon-button.danger {
+  color: var(--danger);
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+
+@media (max-width: 860px) {
+.modal-touch-target .icon-button {
+    flex-basis: var(--touch-target);
+  }
+}

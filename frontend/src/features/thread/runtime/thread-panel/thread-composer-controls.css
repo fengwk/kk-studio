@@ -122,7 +122,6 @@
   background: transparent;
   color: var(--fg);
   font-size: var(--font-size-xs);
-  outline: 0;
 }
 
 .thread-composer-menu ul {

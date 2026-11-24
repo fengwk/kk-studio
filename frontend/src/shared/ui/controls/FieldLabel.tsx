@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
-import './controls.css'
+import { useI18n } from '@/shared/i18n'
+import { HelpHint } from './HelpHint'
+import './FieldLabel.css'
 
 /**
  * 表单标签；`required` 时追加红色 *（aria-hidden，语义仍靠控件 required）。
@@ -10,11 +12,14 @@ export function FieldLabel({
   children,
   required = false,
   htmlFor,
+  help,
 }: {
   children: ReactNode
   required?: boolean
   htmlFor?: string
+  help?: ReactNode
 }) {
+  const { t } = useI18n()
   const content = (
     <>
       {children}
@@ -26,11 +31,17 @@ export function FieldLabel({
       ) : null}
     </>
   )
-  return htmlFor
-    ? (
-        <label className="field-label" htmlFor={htmlFor}>
-          {content}
-        </label>
-      )
+  const label = htmlFor
+    ? <label className="field-label" htmlFor={htmlFor}>{content}</label>
     : <span className="field-label">{content}</span>
+  if (help == null) return label
+
+  return (
+    <span className="field-label-row">
+      {label}
+      <HelpHint label={typeof children === 'string' ? t('shared.helpAbout', { topic: children }) : t('controls.fieldHelp')}>
+        {help}
+      </HelpHint>
+    </span>
+  )
 }

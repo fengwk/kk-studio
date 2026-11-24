@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
+import './ResourceCardSkeleton.css'
 import './cards.css'
 
 /** 骨架形状：普通资源卡（头部 + 元信息 + 动作）与环境摘要卡（头部 + 状态行 + 动作）。 */

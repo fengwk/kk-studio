@@ -194,24 +194,16 @@
 .settings-input {
   width: 100%;
   min-width: 0;
-  height: 36px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  height: var(--control-h);
+  background: var(--surface-raised);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--fg);
-  outline: 0;
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   font-size: var(--font-size-sm);
 }
 
-.settings-input:focus {
-  border-color: var(--border-hover);
-}
 
-.settings-input:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
 
 .settings-input:disabled {
   color: var(--fg-muted);

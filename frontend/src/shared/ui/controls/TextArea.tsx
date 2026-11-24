@@ -1,5 +1,5 @@
 import type { TextareaHTMLAttributes } from 'react'
-import './controls.css'
+import './TextArea.css'
 
 export interface TextAreaProps
   extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'aria-invalid'> {

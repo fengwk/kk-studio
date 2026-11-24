@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from 'react'
-import './cards.css'
+import './ResourceGrid.css'
 
 export interface ResourceGridProps {
   children: ReactNode

@@ -1,4 +1,4 @@
-import './controls.css'
+import './Switch.css'
 
 export interface SwitchProps {
   checked: boolean
