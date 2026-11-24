@@ -178,7 +178,7 @@ class StudioAccountHttpIntegrationTest extends WebPostgresTestSupport {
                 .cookie(login.getResponse().getCookie("studio_session")))
         .andExpect(status().isNoContent());
     socket
-        .sendText("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}", true)
+        .sendText("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"interactions\"}}", true)
         .get(10, TimeUnit.SECONDS);
     assertEquals(4001, collector.nextCloseCode());
   }
