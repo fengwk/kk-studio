@@ -12,6 +12,9 @@ import java.util.UUID;
 /** Session 聚合的 PostgreSQL 实现。 */
 final class PostgresqlSessionStore implements SessionStore {
 
+  private static final String INSERT =
+      "insert into harness_session (id, name, created_at) values (?, ?, ?)";
+
   private final PostgresqlHarnessTransaction tx;
 
   PostgresqlSessionStore(PostgresqlHarnessTransaction tx) {
@@ -20,13 +23,19 @@ final class PostgresqlSessionStore implements SessionStore {
 
   @Override
   public void insert(Session session) {
+    insert(INSERT, session);
+  }
+
+  @Override
+  public boolean insertIfAbsent(Session session) {
+    return insert(INSERT + " on conflict (id) do nothing", session) == 1;
+  }
+
+  private int insert(String sql, Session session) {
     tx.checkOpen();
     Objects.requireNonNull(session, "session");
-    tx.updateJdbc(
-        "insert into harness_session (id, name, created_at) values (?, ?, ?)",
-        session.id(),
-        session.name(),
-        PostgresqlHarnessRows.timestamp(session.createdAt()));
+    return tx.updateJdbc(
+        sql, session.id(), session.name(), PostgresqlHarnessRows.timestamp(session.createdAt()));
   }
 
   @Override

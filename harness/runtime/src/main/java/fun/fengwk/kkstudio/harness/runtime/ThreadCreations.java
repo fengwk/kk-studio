@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 
@@ -426,15 +427,21 @@ final class ThreadCreations {
       UUID turnEndEntryId,
       UUID threadId,
       String threadName) {
-    ThreadState source = lockIdleSource(tx, sourceThreadId, threadId);
-    Entry cut = requireTurnEndCut(tx, source, turnEndEntryId);
     String name = Names.normalize(threadName);
+    String hash =
+        ThreadCreationRequestHash.forIdleRoot(sourceThreadId, turnEndEntryId, null, threadId, name);
+    ThreadState replay = lockAndReplayIdleRoot(tx, sourceThreadId, threadId, null, hash);
+    if (replay != null) {
+      return replay;
+    }
+    ThreadState source = lockIdleSource(tx, sourceThreadId);
+    Entry cut = requireTurnEndCut(tx, source, turnEndEntryId);
     if (tx.threads().listBySession(source.sessionId()).stream()
         .anyMatch(t -> t.parentThreadId() == null && t.name().equals(name))) {
       throw DomainException.conflict(
           HarnessConflictReason.THREAD_NAME_CONFLICT.name(), "thread name already exists");
     }
-    return insertIdleRoot(tx, source, source.sessionId(), threadId, cut.id(), name, tx.now());
+    return insertIdleRoot(tx, source, source.sessionId(), threadId, cut.id(), name, hash, tx.now());
   }
 
   static ThreadState createIdleFork(
@@ -445,10 +452,27 @@ final class ThreadCreations {
       UUID threadId,
       String sessionName,
       BiConsumer<UUID, List<Entry>> retainCopiedResources) {
-    ThreadState source = lockIdleSource(tx, sourceThreadId, threadId);
+    String name = Names.normalize(sessionName);
+    String hash =
+        ThreadCreationRequestHash.forIdleRoot(
+            sourceThreadId,
+            turnEndEntryId,
+            Objects.requireNonNull(sessionId, "sessionId"),
+            threadId,
+            name);
+    ThreadState replay = lockAndReplayIdleRoot(tx, sourceThreadId, threadId, sessionId, hash);
+    if (replay != null) {
+      return replay;
+    }
+    if (tx.sessions().find(sessionId).isPresent()) {
+      throw idleRootIdReused();
+    }
+    ThreadState source = lockIdleSource(tx, sourceThreadId);
     Entry cut = requireTurnEndCut(tx, source, turnEndEntryId);
     Instant now = tx.now();
-    tx.sessions().insert(new Session(sessionId, Names.normalize(sessionName), now));
+    if (!tx.sessions().insertIfAbsent(new Session(sessionId, name, now))) {
+      throw idleRootIdReused();
+    }
     tx.sessions().lockForUpdate(sessionId).orElseThrow();
     Entry root =
         new Entry(
@@ -463,7 +487,14 @@ final class ThreadCreations {
             tx, sessionId, root.id(), tx.entries().loadPath(cut.id()), now);
     ThreadState fork =
         insertIdleRoot(
-            tx, source, sessionId, threadId, copied.getLast().id(), Names.rootThreadName(), now);
+            tx,
+            source,
+            sessionId,
+            threadId,
+            copied.getLast().id(),
+            Names.rootThreadName(),
+            hash,
+            now);
     retainCopiedResources.accept(sessionId, copied);
     return fork;
   }
@@ -475,6 +506,7 @@ final class ThreadCreations {
       UUID threadId,
       UUID headId,
       String name,
+      String hash,
       Instant now) {
     ThreadState thread =
         new ThreadState(
@@ -482,7 +514,7 @@ final class ThreadCreations {
             sessionId,
             null,
             headId,
-            ThreadCreationRequestHash.forIdleRoot(sessionId, threadId, headId, name),
+            hash,
             name,
             threadId,
             source.yoloEnabled(),
@@ -498,12 +530,30 @@ final class ThreadCreations {
     return thread;
   }
 
-  private static ThreadState lockIdleSource(
-      HarnessStore.Transaction tx, UUID sourceId, UUID targetId) {
+  private static ThreadState lockAndReplayIdleRoot(
+      HarnessStore.Transaction tx, UUID sourceId, UUID targetId, UUID sessionId, String hash) {
     List.of(sourceId, targetId).stream()
         .distinct()
         .sorted(UuidOrder.COMPARATOR)
         .forEach(tx.threads()::lockTree);
+    ThreadState existing = tx.threads().find(targetId).orElse(null);
+    if (existing == null) {
+      return null;
+    }
+    if (!existing.creationRequestHash().equals(hash)
+        || (sessionId != null && !sessionId.equals(existing.sessionId()))) {
+      throw idleRootIdReused();
+    }
+    tx.sessions().lockForKeyShare(existing.sessionId()).orElseThrow();
+    return tx.threads().lock(targetId).orElseThrow();
+  }
+
+  private static DomainException idleRootIdReused() {
+    return DomainException.conflict(
+        HarnessConflictReason.THREAD_ID_REUSED.name(), "thread or fork session id already exists");
+  }
+
+  private static ThreadState lockIdleSource(HarnessStore.Transaction tx, UUID sourceId) {
     ThreadState source =
         tx.threads()
             .find(sourceId)
@@ -511,10 +561,6 @@ final class ThreadCreations {
             .orElseThrow(
                 () -> DomainException.notFound("thread", "public source thread does not exist"));
     tx.sessions().lockForUpdate(source.sessionId()).orElseThrow();
-    if (tx.threads().find(targetId).isPresent()) {
-      throw DomainException.conflict(
-          HarnessConflictReason.THREAD_ID_REUSED.name(), "thread id already exists");
-    }
     return source;
   }
 

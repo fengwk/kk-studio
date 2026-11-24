@@ -92,6 +92,74 @@ class PostgresqlIdleExecutionIntegrationTest {
   }
 
   @Test
+  void idleCreationReplayReturnsCurrentRowsWithoutSourceOrCopySideEffects() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    var source = seedThreadBaseline(store);
+    UUID cut =
+        runtime
+            .stop(new StopCommand(source.threadId(), UUID.randomUUID(), 0))
+            .thread()
+            .headEntryId();
+    UUID branchId = UUID.randomUUID();
+    UUID forkId = UUID.randomUUID();
+    UUID forkSession = UUID.randomUUID();
+    runtime.createIdleBranch(source.threadId(), cut, branchId, "branch");
+    var stoppedBranch = runtime.stop(new StopCommand(branchId, UUID.randomUUID(), 0)).thread();
+    var fork =
+        runtime.createIdleFork(
+            source.threadId(), cut, forkSession, forkId, "fork", (id, entries) -> {});
+    runtime.deleteThread(source.threadId(), (id, removed, retained) -> {});
+
+    assertEquals(
+        stoppedBranch, runtime.createIdleBranch(source.threadId(), cut, branchId, " branch "));
+    assertEquals(
+        fork,
+        runtime.createIdleFork(
+            source.threadId(),
+            cut,
+            forkSession,
+            forkId,
+            "fork",
+            (id, entries) -> {
+              throw new AssertionError("replay must not retain resources");
+            }));
+
+    assertEquals(
+        "THREAD_ID_REUSED",
+        assertThrows(
+                DomainException.class,
+                () -> runtime.createIdleBranch(branchId, cut, branchId, "branch"))
+            .reason());
+    assertEquals(
+        "THREAD_ID_REUSED",
+        assertThrows(
+                DomainException.class,
+                () ->
+                    runtime.createIdleFork(
+                        source.threadId(),
+                        cut,
+                        forkSession,
+                        forkId,
+                        "another name",
+                        (id, entries) -> {}))
+            .reason());
+    assertEquals(
+        "THREAD_ID_REUSED",
+        assertThrows(
+                DomainException.class,
+                () ->
+                    runtime.createIdleFork(
+                        source.threadId(),
+                        cut,
+                        forkSession,
+                        UUID.randomUUID(),
+                        "fork",
+                        (id, entries) -> {}))
+            .reason());
+  }
+
+  @Test
   void openTurnRejectsBothDeletionEntrypointsBeforeCleanup() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
     HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);

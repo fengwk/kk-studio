@@ -29,6 +29,15 @@ final class InMemorySessionStore implements SessionStore {
   }
 
   @Override
+  public boolean insertIfAbsent(Session session) {
+    if (find(session.id()).isPresent()) {
+      return false;
+    }
+    insert(session);
+    return true;
+  }
+
+  @Override
   public void update(Session session) {
     tx.checkOpen();
     Objects.requireNonNull(session, "session");

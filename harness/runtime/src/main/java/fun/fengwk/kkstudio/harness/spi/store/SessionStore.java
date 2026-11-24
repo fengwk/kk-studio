@@ -15,6 +15,9 @@ public interface SessionStore {
   /** 插入新 Session；id 冲突抛 {@link IllegalArgumentException}。 */
   void insert(Session session);
 
+  /** 原子插入新 Session；id 已存在时返回 false，不修改现有行。 */
+  boolean insertIfAbsent(Session session);
+
   /** 按 id 读取 Session；不存在返回 {@link Optional#empty()}。 */
   Optional<Session> find(UUID id);
 
