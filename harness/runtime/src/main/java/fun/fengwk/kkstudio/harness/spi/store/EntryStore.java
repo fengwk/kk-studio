@@ -80,4 +80,7 @@ public interface EntryStore {
 
   /** 删除 Session 全部 Entry 并返回行数；以叶子优先顺序删除。 */
   int delete(UUID sessionId);
+
+  /** 删除已验证不可达的历史，ID 必须按叶子优先排序。 */
+  void deleteEntries(List<UUID> entryIds);
 }

@@ -67,6 +67,23 @@ public class SessionDeletionOrchestrator {
             ids -> ids.forEach(this::releaseSessionBlobRefs));
   }
 
+  /** 深删已结算的公开执行根；调用方负责产品归属和定时目标门禁。 */
+  @Transactional
+  public void deleteThread(UUID rootThreadId) {
+    requireRuntime()
+        .deleteThread(
+            rootThreadId,
+            (sessionId, removed, retained) -> {
+              Set<UUID> live = Set.copyOf(SessionEntryResources.blobIds(retained));
+              Set<UUID> held = Set.copyOf(refManager.listBlobIds(sessionId));
+              for (UUID blobId : SessionEntryResources.blobIds(removed)) {
+                if (!live.contains(blobId) && held.contains(blobId)) {
+                  refManager.releaseRef(sessionId, blobId);
+                }
+              }
+            });
+  }
+
   /** release Session 级 blob 引用（ref_count 对账 + 删除 session_blob_ref 行），先于 Session 删除。 */
   private void releaseSessionBlobRefs(UUID sessionId) {
     for (UUID blobId : refManager.listBlobIds(sessionId)) {

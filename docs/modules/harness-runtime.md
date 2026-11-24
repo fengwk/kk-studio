@@ -21,7 +21,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 ## 同步入口与事务边界
 
-[`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的同步命令与控制入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩，以及快照、执行树与 Join 查询。
+[`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的同步命令与控制入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩、从 `TURN_END` 创建空闲分支或分叉、已结算执行的深删除，以及快照、执行树与 Join 查询。`getExecutionRootFacts` 一次读取一组根的执行事实，由调用方投影状态。
 
 同一个门面还承担只读压缩事实，调用方无需接触实现类：`findCompactionTurnStart` 按结果 Entry 返回已关闭压缩 turn 冻结的元数据（缺失即 fail closed）。它是纯委托，不写 durable 状态，也不复制算法。请求输入 token 估算不经过门面：算法作为 [`runtime.compaction.TokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/TokenEstimator.java) 留在实现层，内核外部只经 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 端口消费，端口接收当前请求实际发送的 system message 列表（非增量协议为具名段落的当前值，增量协议为独立的 baseline / change messages），实现由组合根以方法引用绑定，因此既没有第二份口径，也不需要任何 Runtime bean 参与装配。
 

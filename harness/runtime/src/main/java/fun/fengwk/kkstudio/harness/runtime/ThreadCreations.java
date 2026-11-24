@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.Names;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
@@ -26,10 +28,12 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 
 /**
  * 三条“新建”路径：新执行根 Session、既有 Session 的 NEW_THREAD fork、跨 Session 的 fork 会话，以及同 Session 压缩分支。
@@ -414,6 +418,120 @@ final class ThreadCreations {
           return AcceptCommandsControl.acceptNewCommandsOnThread(
               tx, thread, commands, preflight, now, copiedEntries, rootSettings);
         });
+  }
+
+  static ThreadState createIdleBranch(
+      HarnessStore.Transaction tx,
+      UUID sourceThreadId,
+      UUID turnEndEntryId,
+      UUID threadId,
+      String threadName) {
+    ThreadState source = lockIdleSource(tx, sourceThreadId, threadId);
+    Entry cut = requireTurnEndCut(tx, source, turnEndEntryId);
+    String name = Names.normalize(threadName);
+    if (tx.threads().listBySession(source.sessionId()).stream()
+        .anyMatch(t -> t.parentThreadId() == null && t.name().equals(name))) {
+      throw DomainException.conflict(
+          HarnessConflictReason.THREAD_NAME_CONFLICT.name(), "thread name already exists");
+    }
+    return insertIdleRoot(tx, source, source.sessionId(), threadId, cut.id(), name, tx.now());
+  }
+
+  static ThreadState createIdleFork(
+      HarnessStore.Transaction tx,
+      UUID sourceThreadId,
+      UUID turnEndEntryId,
+      UUID sessionId,
+      UUID threadId,
+      String sessionName,
+      BiConsumer<UUID, List<Entry>> retainCopiedResources) {
+    ThreadState source = lockIdleSource(tx, sourceThreadId, threadId);
+    Entry cut = requireTurnEndCut(tx, source, turnEndEntryId);
+    Instant now = tx.now();
+    tx.sessions().insert(new Session(sessionId, Names.normalize(sessionName), now));
+    tx.sessions().lockForUpdate(sessionId).orElseThrow();
+    Entry root =
+        new Entry(
+            tx.nextId(),
+            sessionId,
+            null,
+            new RootPayload(tx.entries().loadBranchSettings(cut.id())),
+            now);
+    tx.entries().insert(root);
+    List<Entry> copied =
+        SessionForkCopy.copyEffectiveContext(
+            tx, sessionId, root.id(), tx.entries().loadPath(cut.id()), now);
+    ThreadState fork =
+        insertIdleRoot(
+            tx, source, sessionId, threadId, copied.getLast().id(), Names.rootThreadName(), now);
+    retainCopiedResources.accept(sessionId, copied);
+    return fork;
+  }
+
+  private static ThreadState insertIdleRoot(
+      HarnessStore.Transaction tx,
+      ThreadState source,
+      UUID sessionId,
+      UUID threadId,
+      UUID headId,
+      String name,
+      Instant now) {
+    ThreadState thread =
+        new ThreadState(
+            threadId,
+            sessionId,
+            null,
+            headId,
+            ThreadCreationRequestHash.forIdleRoot(sessionId, threadId, headId, name),
+            name,
+            threadId,
+            source.yoloEnabled(),
+            ThreadKind.USER,
+            ThreadConstraints.NONE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0,
+            now,
+            now);
+    tx.threads().insert(thread);
+    return thread;
+  }
+
+  private static ThreadState lockIdleSource(
+      HarnessStore.Transaction tx, UUID sourceId, UUID targetId) {
+    List.of(sourceId, targetId).stream()
+        .distinct()
+        .sorted(UuidOrder.COMPARATOR)
+        .forEach(tx.threads()::lockTree);
+    ThreadState source =
+        tx.threads()
+            .find(sourceId)
+            .filter(t -> t.parentThreadId() == null && t.kind() == ThreadKind.USER)
+            .orElseThrow(
+                () -> DomainException.notFound("thread", "public source thread does not exist"));
+    tx.sessions().lockForUpdate(source.sessionId()).orElseThrow();
+    if (tx.threads().find(targetId).isPresent()) {
+      throw DomainException.conflict(
+          HarnessConflictReason.THREAD_ID_REUSED.name(), "thread id already exists");
+    }
+    return source;
+  }
+
+  private static Entry requireTurnEndCut(
+      HarnessStore.Transaction tx, ThreadState source, UUID cutId) {
+    return tx.entries()
+        .find(cutId)
+        .filter(
+            cut ->
+                cut.sessionId().equals(source.sessionId())
+                    && cut.payload() instanceof TurnEndPayload)
+        .filter(cut -> tx.entries().isAncestor(source.headEntryId(), cut.id()))
+        .orElseThrow(
+            () ->
+                DomainException.conflict(
+                    HarnessConflictReason.INVALID_TURN_END.name(),
+                    "entry is not a turn end on the source path"));
   }
 
   /**

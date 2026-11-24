@@ -30,6 +30,10 @@ public enum HarnessConflictReason {
   MANUAL_COMPACTION_UNAVAILABLE,
   /** 同一 Session 内已存在同名执行根 Thread。 */
   THREAD_NAME_CONFLICT,
+  /** 切点不是源 Thread 可见路径上的回合终点。 */
+  INVALID_TURN_END,
+  /** 删除范围内仍有未结算的执行义务。 */
+  EXECUTION_NOT_SETTLED,
   /** STOPPED Thread 的退出或递归委派尚未收敛。 */
   EXIT_UNCONFIRMED,
   /** 放弃退出确认的目标不适用。 */

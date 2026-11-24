@@ -23,6 +23,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -279,6 +280,43 @@ class PostgresqlHarnessTransactionNotificationTest {
     }
   }
 
+  @Test
+  void executionFactsAttributeHumanAndEnvironmentWaitsToTheRoot() {
+    JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+    seedEnvironmentConnection(jdbc, ENVIRONMENT, UUID.randomUUID());
+    SessionRoot session = seedSessionRoot(store);
+    ToolChain root = seedToolChain(store, session, null, null, ToolKind.BASH);
+    ToolChain child =
+        seedToolChain(store, session, root.threadId(), root.threadId(), ToolKind.BASH);
+    ToolChain question =
+        seedToolChain(store, seedSessionRoot(store), null, null, ToolKind.ASK_USER);
+    updateTool(store, child.toolId(), tool -> tool.requestApproval("needs approval", T2));
+    updateTool(store, question.toolId(), tool -> tool.requestInput(T2));
+    requestEnvironmentWork(
+        store, root.threadId(), new WorkTarget(WorkTargetType.TOOL, root.toolId()), ENVIRONMENT);
+    jdbc.update("delete from environment_connection where environment_id = ?", ENVIRONMENT.value());
+    var facts =
+        store.transaction(
+            tx -> tx.threads().findExecutionFacts(List.of(root.threadId(), question.threadId())));
+    assertEquals(2, facts.size());
+    var parent =
+        facts.stream()
+            .filter(f -> f.rootThreadId().equals(root.threadId()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(parent.waitingForHuman());
+    assertTrue(parent.blocked());
+    assertFalse(parent.hasWork());
+    assertEquals(T2, parent.lastActivityAt());
+    var input =
+        facts.stream()
+            .filter(f -> f.rootThreadId().equals(question.threadId()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(input.waitingForHuman());
+    assertFalse(input.blocked());
+  }
+
   /** 测试意图：人工输入等待（WAITING_INPUT）的进入、等待态内重写与离开都要失效交互列表。 */
   @Test
   void toolWaitingInputTransitionsPublishInteractionAtTrueRoot() throws SQLException {
@@ -312,6 +350,12 @@ class PostgresqlHarnessTransactionNotificationTest {
       listener.assertSilent();
       updateTool(store, chain.toolId(), tool -> tool.markRunning(T4));
       listener.assertSilent();
+      var facts =
+          store
+              .transaction(tx -> tx.threads().findExecutionFacts(List.of(chain.threadId())))
+              .getFirst();
+      assertTrue(facts.hasWork());
+      assertFalse(facts.waitingForHuman());
     }
   }
 

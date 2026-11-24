@@ -655,6 +655,16 @@ final class PostgresqlEntryStore implements EntryStore {
         invocationId.toString());
   }
 
+  @Override
+  public void deleteEntries(List<UUID> entryIds) {
+    tx.checkOpen();
+    tx.entryPathCache().clear();
+    for (UUID id : entryIds) {
+      tx.requireSingleUpdate(
+          tx.updateJdbc("delete from harness_entry where id = ?", id), "entry", id);
+    }
+  }
+
   /** 删除指定 Session 下的全部 Entry 节点（叶子优先逐层删除），并同步驱逐事务内缓存。 */
   @Override
   public int delete(UUID sessionId) {

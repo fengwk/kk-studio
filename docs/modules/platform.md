@@ -47,7 +47,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、结果观察与按 Thread 停止 |
-| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
+| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询、空闲分叉保留历史资源与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Environment CRUD、注册令牌、路由租约与宿主信息 |
@@ -114,7 +114,7 @@ Thread 快照按 Thread ID 定点失效，执行树与交互按真实执行根�
 行锁阶梯：Session -> Thread -> Command -> Driver 私有行 -> Tool -> Work
 ```
 
-advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 sequence、Tool siblings
+advisory 围栏与六级行锁分别记录，账本随物理事务跨 Store 回调复用、挂起和恢复。Thread 按 UUID、Command 按 sequence、Tool siblings
 按 assistantEntryId/callIndex、Work 按 type/UUID 排序；持有执行树锁时生命周期交付允许回写同树 Command。
 树根取自不可变的 `root_thread_id`，整树读写在根上取得 `pg_advisory_xact_lock`，
 多树按根 UUID 升序，`lockTree` 必须先于业务行锁。Join 交付与 Stop 只锁目标子树和直接父；

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,11 +38,16 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.IdleThreadOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
@@ -77,6 +84,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   @Autowired private ChatService chatService;
   @Autowired private HarnessCommandAcceptanceOrchestrator acceptanceService;
   @Autowired private HarnessRuntime harnessRuntime;
+  @Autowired private IdleThreadOrchestrator idleThreads;
+  @Autowired private SessionDeletionOrchestrator deletion;
   @Autowired private ChatSessionRepository chatSessionRepository;
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private InMemoryS3StorageService s3Storage;
@@ -268,8 +277,9 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   }
 
   /** Fork 把历史中的资源引用复制到新 Session，并使新 Session 成为独立持有者。 */
-  @Test
-  void forkedSessionRetainsCopiedResourceHistory() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void forkedSessionRetainsCopiedResourceHistory(boolean linkOnly) {
     UUID chatId = createChat("fork-resource");
     SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
     String uploadId =
@@ -295,7 +305,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
             UUID.class,
             sourceSessionId);
     UUID cutEntryId =
-        appendResourceTurn(sourceSessionId, sourceThreadId, source.rootEntry().id(), blobId);
+        appendResourceTurn(
+            sourceSessionId, sourceThreadId, source.rootEntry().id(), blobId, linkOnly);
     UUID forkSessionId = UUID.randomUUID();
     UUID forkThreadId = UUID.randomUUID();
 
@@ -313,6 +324,24 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
 
     assertEquals(1, count("session_blob_ref", "session_id", sourceSessionId));
     assertEquals(1, count("session_blob_ref", "session_id", forkSessionId));
+    UUID idleSession = UUID.randomUUID();
+    UUID idleThread = UUID.randomUUID();
+    idleThreads.createIdleFork(sourceThreadId, cutEntryId, idleSession, idleThread, "idle copy");
+    assertEquals(1, count("session_blob_ref", "session_id", idleSession));
+    assertEquals(0, count("harness_thread_command", "thread_id", idleThread));
+    assertEquals(0, count("durable_work", "target_id", idleThread));
+    assertEquals(
+        3L,
+        jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
+
+    harnessRuntime.stop(
+        new StopCommand(
+            sourceThreadId,
+            UUID.randomUUID(),
+            harnessRuntime.findThreadVersion(sourceThreadId).orElseThrow()));
+    deletion.deleteThread(sourceThreadId);
+    assertEquals(0, count("session_blob_ref", "session_id", sourceSessionId));
+    assertEquals(1, count("session_blob_ref", "session_id", idleSession));
     assertEquals(
         2L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
@@ -423,7 +452,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         null);
   }
 
-  private UUID appendResourceTurn(UUID sessionId, UUID threadId, UUID rootEntryId, UUID blobId) {
+  private UUID appendResourceTurn(
+      UUID sessionId, UUID threadId, UUID rootEntryId, UUID blobId, boolean linkOnly) {
     UUID turnStartId =
         insertEntry(
             sessionId,
@@ -436,9 +466,34 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
             new MessagePayload(
                 new AgentMessage(
                     AgentMessageRole.USER,
-                    List.of(ResourceMessageContent.media(blobId, "resource.txt", null))),
+                    linkOnly
+                        ? List.of(new TextMessageContent("hello"))
+                        : List.of(ResourceMessageContent.media(blobId, "resource.txt", null))),
                 null,
                 null));
+    if (linkOnly) {
+      String callId = "call-1";
+      UUID assistant = insertEntry(sessionId, messageId, StoreTestSupport.assistantPayload(callId));
+      MessagePayload result =
+          (MessagePayload)
+              StoreTestSupport.toolResultPayload(UUID.randomUUID(), assistant, 0, callId);
+      var content =
+          new ToolResultMessageContent(
+              callId,
+              "bash",
+              "bash",
+              List.of(new TextMessageContent("[resource](resource://files/" + blobId + ")")),
+              false,
+              "{}");
+      messageId =
+          insertEntry(
+              sessionId,
+              assistant,
+              new MessagePayload(
+                  new AgentMessage(AgentMessageRole.TOOL, List.of(content)),
+                  null,
+                  result.toolResultMetadata()));
+    }
     UUID turnEndId =
         insertEntry(
             sessionId,

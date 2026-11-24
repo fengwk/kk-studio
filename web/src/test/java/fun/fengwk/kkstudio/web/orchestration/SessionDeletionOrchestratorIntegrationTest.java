@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
@@ -43,6 +44,7 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
@@ -105,6 +107,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
   @Autowired private ChatRepository chatRepository;
   @Autowired private HarnessStore store;
   @Autowired private HarnessCommandAcceptanceOrchestrator acceptanceService;
+  @Autowired private HarnessRuntime runtime;
   @Autowired private SessionDeletionOrchestrator orchestrator;
   @Autowired private StorageUploadService storageUploadService;
   @MockitoBean private StorageMaintenance storageMaintenance;
@@ -146,6 +149,8 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
         2L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
 
+    stop(thread1);
+    stop(thread2);
     orchestrator.deleteSessionsByOwner(new SessionOwner("CHAT", chat1Id.toString()));
 
     assertEquals(0, count("chat_session", "session_id", session1));
@@ -188,6 +193,8 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID secondThread = new UUID(0L, 4L);
     acceptText(new SessionOwner("CHAT", chatId.toString()), firstSession, firstThread, "first");
     acceptText(new SessionOwner("CHAT", chatId.toString()), secondSession, secondThread, "second");
+    stop(firstThread);
+    stop(secondThread);
 
     jdbc.update(
         "update chat_session set created_at = ? where session_id = ?",
@@ -217,22 +224,26 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID sessionId = new UUID(0L, 21L);
     UUID threadId = new UUID(0L, 22L);
     acceptText(new SessionOwner("CHAT", chatId.toString()), sessionId, threadId, "hello");
+    stop(threadId);
     UUID turnStartEntryId =
         jdbc.queryForObject(
-            "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
+            "select (e.payload ->> 'turnStartEntryId')::uuid from harness_entry e join harness_thread t on t.head_entry_id = e.id where t.id = ?",
+            UUID.class,
+            threadId);
     UUID modelInvocationId = UUID.randomUUID();
     Timestamp now = Timestamp.from(Instant.now());
     String requestSpec = new ModelRequestSpecJsonCodec().encode(StoreTestSupport.modelRequest());
     jdbc.update(
         "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id,"
-            + " request_head_entry_id, request_spec, status, attempt, failed_attempts,"
-            + " created_at, updated_at) values (?, ?, ?, ?, ?::jsonb, 'READY', 0,"
-            + " '[]'::jsonb, ?, ?)",
+            + " request_head_entry_id, request_spec, status, attempt, failed_attempts, error,"
+            + " created_at, updated_at) values (?, ?, ?, ?, ?::jsonb, 'CANCELLED', 0,"
+            + " '[]'::jsonb, ?::jsonb, ?, ?)",
         modelInvocationId,
         threadId,
         turnStartEntryId,
         turnStartEntryId,
         requestSpec,
+        "{\"kind\":\"CANCELLED\",\"message\":\"stopped\",\"httpStatus\":null,\"providerErrorCode\":null}",
         now,
         now);
     assertEquals(1, count("builtin_model_invocation", "thread_id", threadId));
@@ -259,13 +270,10 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID childSessionFork =
         seedThreadIn(childSession, childSessionRoot, null, ThreadExecutionControl.RUNNABLE);
     UUID emptySession = ownedSession("owned-empty", owner);
-    // pending join（未匹配）：逐 child 删除会拒绝，闭包内两端同删必须允许。
-    UUID pendingJoin = seedJoin(sameSessionChild, ownedRoot, 1L, null, null);
-    // 已匹配并交付：父仍在删除集合内，同样一并回收。
+    // 两条已结算 Join 的父子均在删除闭包，其中一条跨 Session。
     UUID matchedDelivered =
         seedJoin(sameSessionChild, ownedRoot, 2L, headEntryOf(ownedSession), null);
-    // 跨 Session 子线程持有的 pending join：其 Session 由后代闭包覆盖。
-    UUID crossSessionJoin = seedJoin(crossSessionChild, ownedRoot, 1L, null, null);
+    UUID crossSessionJoin = seedJoin(crossSessionChild, ownedRoot, 1L, childSessionRoot, null);
 
     // 生存者：另一个 owner 的 Session + root + child + pending join。
     UUID survivorSession = ownedSession("survivor", otherOwner);
@@ -273,6 +281,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID survivorChild =
         seedChildThread(survivorSession, survivorRoot, ThreadExecutionControl.RUNNABLE);
     UUID survivorJoin = seedJoin(survivorChild, survivorRoot, 1L, null, null);
+    assertTrue(runtime.getExecutionRootFacts(List.of(survivorRoot)).getFirst().blocked());
 
     deleteSessions(new SessionOwner("CHAT", owner.toString()));
 
@@ -286,7 +295,6 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
       assertEquals(0L, threadRows(threadId), "thread " + threadId + " must be deleted");
       assertEquals(0L, commandRows(threadId), "commands of " + threadId + " must be deleted");
     }
-    assertEquals(0L, joinRows(pendingJoin));
     assertEquals(0L, joinRows(matchedDelivered));
     assertEquals(0L, joinRows(crossSessionJoin));
     assertEquals(0L, count("select count(*) from chat_session where chat_id = ?", owner));
@@ -298,6 +306,25 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     assertEquals(1L, joinRows(survivorJoin));
     assertEquals(1L, commandRows(survivorChild));
     assertEquals(1L, count("select count(*) from chat_session where chat_id = ?", otherOwner));
+  }
+
+  @Test
+  void singleRootDeletionRemovesCrossSessionChildButKeepsIndependentFork() {
+    UUID session = seedSession("single-root");
+    UUID root = seedRootThread(session, ThreadExecutionControl.RUNNABLE);
+    UUID childSession = seedSession("child");
+    UUID shared = seedRootEntry(childSession);
+    UUID child = seedThreadIn(childSession, shared, root, ThreadExecutionControl.RUNNABLE);
+    UUID fork = seedThreadIn(childSession, shared, null, ThreadExecutionControl.RUNNABLE);
+    UUID join = seedJoin(child, root, 1L, shared, null);
+
+    orchestrator.deleteThread(root);
+
+    assertEquals(0, threadRows(root));
+    assertEquals(0, threadRows(child));
+    assertEquals(0, joinRows(join));
+    assertEquals(1, threadRows(fork));
+    assertEquals(1, entryRows(childSession));
   }
 
   @Test
@@ -342,6 +369,11 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
   }
 
   /** 与生产调用方一致：深删除在调用方的事务内执行，失败整体回滚。 */
+  private void stop(UUID threadId) {
+    long version = runtime.findThreadVersion(threadId).orElseThrow();
+    runtime.stop(new StopCommand(threadId, UUID.randomUUID(), version));
+  }
+
   private void deleteSessions(SessionOwner owner) {
     transactions.executeWithoutResult(status -> orchestrator.deleteSessionsByOwner(owner));
   }
@@ -499,7 +531,13 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
           threadsToLock.forEach(id -> tx.threads().lock(id));
           tx.commands().insert(List.of(command(childThreadId, sequence)));
           if (terminalEntryId != null) {
-            tx.commands().insert(List.of(command(parentThreadId, 1L)));
+            if (tx.commands().find(parentThreadId, 1L).isEmpty()) {
+              tx.commands().insert(List.of(command(parentThreadId, 1L)));
+            }
+            for (UUID id : threadsToLock) {
+              var queued = tx.commands().loadQueued(id);
+              tx.commands().update(queued.stream().map(c -> c.cancel(invocationId, T1)).toList());
+            }
           }
           ThreadJoin join =
               new ThreadJoin(

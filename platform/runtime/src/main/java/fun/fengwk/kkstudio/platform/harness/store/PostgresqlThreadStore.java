@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
@@ -17,6 +19,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /** Thread 聚合的 PostgreSQL 实现。 */
 final class PostgresqlThreadStore implements ThreadStore {
@@ -116,6 +119,9 @@ final class PostgresqlThreadStore implements ThreadStore {
   @Override
   public Optional<ThreadState> lock(UUID id) {
     tx.checkOpen();
+    if (tx.isLocked(LockKey.thread(id))) {
+      return find(id);
+    }
     tx.requireCanLockThread(id);
     Optional<ThreadState> thread =
         tx.queryOne(
@@ -160,6 +166,84 @@ final class PostgresqlThreadStore implements ThreadStore {
         """,
         PostgresqlHarnessRows.THREAD,
         sessionId);
+  }
+
+  @Override
+  public List<ExecutionRootFacts> findExecutionFacts(List<UUID> rootThreadIds) {
+    tx.checkOpen();
+    Objects.requireNonNull(rootThreadIds, "rootThreadIds");
+    if (rootThreadIds.isEmpty()) {
+      return List.of();
+    }
+    return tx.queryList(
+        """
+        with requested(root_id) as (
+            select distinct unnest(string_to_array(?::text, ',')::uuid[])
+        ), tree as (
+            select t.*
+            from harness_thread t
+            join requested r on r.root_id = t.root_thread_id
+        ), tools as (
+            select t.root_thread_id, i.* from tree t join harness_tool_invocation i on i.thread_id = t.id
+        ), models as (
+            select t.root_thread_id, m.* from tree t join builtin_model_invocation m on m.thread_id = t.id
+        ), targets as (
+            select root_thread_id, 'THREAD' as kind, id from tree
+            union all select root_thread_id, 'TOOL', id from tools
+            union all select root_thread_id, 'MODEL', id from models
+        ), work as (
+            select t.root_thread_id,
+                   bool_or(coalesce(w.lease_until > statement_timestamp(), false) or
+                       (w.available_at <= statement_timestamp() and
+                           (w.required_environment_id is null or ec.environment_id is not null))) as runnable,
+                   bool_or(coalesce(w.lease_until <= statement_timestamp(), true) and
+                       (w.available_at > statement_timestamp() or
+                           (w.required_environment_id is not null and ec.environment_id is null))) as blocked
+            from targets t join durable_work w on w.target_type = t.kind and w.target_id = t.id
+            left join environment_connection ec on ec.environment_id = w.required_environment_id
+                and ec.status = 'READY' and ec.lease_until > statement_timestamp()
+            group by t.root_thread_id
+        ), facts as (
+            select t.root_thread_id,
+                   exists (select 1 from tools i where i.root_thread_id = t.root_thread_id
+                       and i.status in ('WAITING_APPROVAL', 'WAITING_INPUT')) as waiting_human,
+                   coalesce(w.runnable, false)
+                       or exists (select 1 from tools i where i.root_thread_id = t.root_thread_id and i.status = 'RUNNING')
+                       or exists (select 1 from models m where m.root_thread_id = t.root_thread_id and m.status = 'RUNNING') as has_work,
+                   coalesce(w.blocked, false)
+                       or exists (select 1 from tools i where i.root_thread_id = t.root_thread_id and i.status = 'WAITING_CHILD')
+                       or exists (select 1 from tree member join harness_thread_join j on j.child_thread_id = member.id
+                           where member.root_thread_id = t.root_thread_id and j.terminal_entry_id is null
+                               and j.superseded_by_invocation_id is null)
+                       or exists (select 1 from tree member join harness_execution_exit x on x.thread_id = member.id
+                           where member.root_thread_id = t.root_thread_id and x.state = 'UNCONFIRMED') as blocked,
+                   t.execution_control = 'STOPPED' as stopped,
+                   greatest((select max(member.updated_at) from tree member where member.root_thread_id = t.root_thread_id),
+                       (select max(i.updated_at) from tools i where i.root_thread_id = t.root_thread_id),
+                       (select max(m.updated_at) from models m where m.root_thread_id = t.root_thread_id)) as activity
+            from tree t left join work w on w.root_thread_id = t.id
+            where t.id = t.root_thread_id
+        )
+        select f.root_thread_id, f.waiting_human, f.has_work, f.blocked, f.stopped,
+               case when e.entry_type = 'TURN_END' then e.payload ->> 'outcome' end as outcome,
+               f.activity
+        from facts f
+        join harness_thread root on root.id = f.root_thread_id
+        join harness_entry e on e.id = root.head_entry_id
+        order by f.root_thread_id
+        """,
+        (rs, rowNum) ->
+            new ExecutionRootFacts(
+                rs.getObject("root_thread_id", UUID.class),
+                rs.getBoolean("waiting_human"),
+                rs.getBoolean("has_work"),
+                rs.getBoolean("blocked"),
+                rs.getBoolean("stopped"),
+                rs.getString("outcome") == null
+                    ? null
+                    : TurnEndOutcome.valueOf(rs.getString("outcome")),
+                rs.getTimestamp("activity").toInstant()),
+        rootThreadIds.stream().map(UUID::toString).collect(Collectors.joining(",")));
   }
 
   @Override
