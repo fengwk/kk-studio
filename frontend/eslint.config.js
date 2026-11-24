@@ -200,37 +200,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/features/{chat,catalog,environment,extensions}/**/*.{ts,tsx}'],
-    ignores: [
-      'src/features/{chat,catalog,environment,extensions}/**/*.test.{ts,tsx}',
-      'src/features/{chat,catalog,environment,extensions}/**/__tests__/**',
-    ],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: [
-                '@/features/projects',
-                '@/features/projects/*',
-                '../projects',
-                '../projects/*',
-                '../../projects',
-                '../../projects/*',
-                '../../../projects',
-                '../../../projects/*',
-                '../*/projects',
-                '../*/projects/*',
-              ],
-              message: 'AI console features must not depend on projects feature.',
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
     files: ['src/shared/api/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',

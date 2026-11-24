@@ -11,7 +11,6 @@ type Translate = typeof translate
 /** 会话归属的产品类型标签；新增 kind 必须同时提供标签，未知 kind 原样显示不猜测。 */
 const OWNER_KIND_KEYS = {
   CHAT: 'ai.interaction.ownerKind.CHAT',
-  ISSUE_AGENT: 'ai.interaction.ownerKind.ISSUE_AGENT',
   AGENT_TASK: 'ai.interaction.ownerKind.AGENT_TASK',
 } as const satisfies Record<string, TranslationKey>
 

@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
@@ -390,7 +390,8 @@ class ExecutionExitSettlementTest {
               new AcceptCommandsTarget.Thread(
                   parentId, current.headEntryId(), current.nextCommandSequence()),
               List.of(
-                  new NewThreadCommand(new SetAgentCommandPayload("assistant"), TestIds.id(92)))),
+                  new NewThreadCommand(
+                      new SetEnvironmentCommandPayload("assistant"), TestIds.id(92)))),
           AcceptancePreflight.IDENTITY);
       assertEquals(
           ThreadExecutionControl.STOPPED,

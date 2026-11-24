@@ -49,8 +49,8 @@ export function ChatCard({
       meta={[
         [t('ai.chat.agent'), agentLabel],
         [
-          t('projects.yolo'),
-          chat.yoloEnabled ? t('projects.yoloEnabled') : t('projects.yoloDisabled'),
+          t('ai.chat.yolo'),
+          chat.yoloEnabled ? t('ai.chat.yoloEnabled') : t('ai.chat.yoloDisabled'),
         ],
         [
           t('ai.chat.defaultEnvironment'),

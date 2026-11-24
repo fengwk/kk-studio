@@ -5,10 +5,6 @@ export const platformCatalog = {
     'en-US': 'AI',
     'zh-CN': '智能',
   },
-  'platform.nav.projects': {
-    'en-US': 'Projects',
-    'zh-CN': '项目',
-  },
   'platform.nav.canvas': {
     'en-US': 'Canvas',
     'zh-CN': '画布',
@@ -16,10 +12,6 @@ export const platformCatalog = {
   'platform.nav.aiAria': {
     'en-US': 'AI',
     'zh-CN': '智能',
-  },
-  'platform.nav.projectsAria': {
-    'en-US': 'Projects',
-    'zh-CN': '项目',
   },
   'platform.nav.canvasAria': {
     'en-US': 'Canvas',

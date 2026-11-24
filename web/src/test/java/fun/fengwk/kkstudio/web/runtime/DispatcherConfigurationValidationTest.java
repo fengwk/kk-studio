@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,11 +18,8 @@ import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileWorkHandler;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
@@ -33,7 +29,7 @@ class DispatcherConfigurationValidationTest {
   /** 默认部署值能够完成同一组装路径的 Spring 启动。 */
   @Test
   void defaultsStartSuccessfully() {
-    for (Class<?> beans : List.of(HarnessBeans.class, IssueBeans.class, CanvasBeans.class)) {
+    for (Class<?> beans : List.of(HarnessBeans.class, CanvasBeans.class)) {
       new ApplicationContextRunner()
           .withUserConfiguration(beans)
           .run(context -> assertNull(context.getStartupFailure()));
@@ -54,18 +50,6 @@ class DispatcherConfigurationValidationTest {
         "worker.concurrency=0",
         "worker.queue-capacity=0");
     check(
-        IssueBeans.class,
-        "kk-studio.project.reconcile.",
-        "lease-duration=0ms",
-        "poll-interval=PT0.0015S",
-        "rejection-delay=0ms",
-        "retry-delay=0ms",
-        "active-delay=PT0.0015S",
-        "blocked-delay=-1ms",
-        "max-dispatch-tasks=0",
-        "worker.concurrency=0",
-        "worker.queue-capacity=0");
-    check(
         CanvasBeans.class,
         "kk-studio.canvas.function.runtime.",
         "worker-concurrency=0",
@@ -76,21 +60,6 @@ class DispatcherConfigurationValidationTest {
         "heartbeat-interval-millis=30000",
         "poll-interval-millis=0",
         "rejection-delay-millis=0");
-  }
-
-  /** 项目 reconcile 的部署默认值在属性类精简后保持不变。 */
-  @Test
-  void issueDefaultsRemainStable() {
-    IssueReconcileProperties properties = new IssueReconcileProperties();
-    assertEquals(Duration.ofSeconds(30), properties.getLeaseDuration());
-    assertEquals(Duration.ofSeconds(1), properties.getPollInterval());
-    assertEquals(Duration.ofSeconds(1), properties.getRejectionDelay());
-    assertEquals(Duration.ofSeconds(5), properties.getRetryDelay());
-    assertEquals(Duration.ofSeconds(1), properties.getActiveDelay());
-    assertEquals(Duration.ofSeconds(60), properties.getBlockedDelay());
-    assertEquals(64, properties.getMaxDispatchTasks());
-    assertEquals(8, properties.getWorker().getConcurrency());
-    assertEquals(64, properties.getWorker().getQueueCapacity());
   }
 
   private static void check(Class<?> beans, String prefix, String... invalidValues) {
@@ -124,29 +93,6 @@ class DispatcherConfigurationValidationTest {
     @Bean(destroyMethod = "shutdown")
     ExecutorService worker(HarnessDispatcherProperties properties) {
       return new HarnessRuntimeConfiguration().harnessDispatcherWorkerExecutor(properties);
-    }
-  }
-
-  @Configuration(proxyBeanMethods = false)
-  @EnableConfigurationProperties(IssueReconcileProperties.class)
-  static class IssueBeans {
-    @Bean(destroyMethod = "shutdown")
-    ExecutorService worker(IssueReconcileProperties properties) {
-      return new IssueReconcileRuntimeConfiguration()
-          .issueReconcileDispatcherWorkerExecutor(
-              properties, ContextSnapshotFactory.builder().build());
-    }
-
-    @Bean
-    BoundedWorkDispatcher<?> dispatcher(
-        IssueReconcileProperties properties, ExecutorService worker) {
-      return new IssueReconcileRuntimeConfiguration()
-          .issueReconcileDispatcher(
-              mock(IssueReconcileWorkHandler.class),
-              properties,
-              Runnable::run,
-              worker,
-              mock(ScheduledExecutorService.class));
     }
   }
 

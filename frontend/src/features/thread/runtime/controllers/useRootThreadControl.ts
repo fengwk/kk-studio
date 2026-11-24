@@ -372,7 +372,7 @@ export function useRootThreadControl({
   const { pendingAcceptance, pendingAcceptanceBlocked } = acceptance
 
   function selectAgent(agentName: string): void {
-    if (capabilities?.allowSwitchAgent === false) {
+    if (isBoundTarget(target)) {
       setActionError(t('ai.runtime.action.agentSwitchDisabled'))
       return
     }
@@ -381,26 +381,19 @@ export function useRootThreadControl({
       setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
       return
     }
-    if (isBoundTarget(target)) {
-      if (!branchPanel.selectAgent(agentName)) {
-        setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
-        return
-      }
-    } else {
-      const nextDraft = materializeAgentBranchDraft(
-        agent,
-        models,
-        localDraft,
-        defaults.yoloEnabled ?? false,
-        defaults.environmentName,
-      )
-      if (nextDraft == null) {
-        setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
-        return
-      }
-      setLocalDraft(nextDraft)
-      setLocalDraftEdited(true)
+    const nextDraft = materializeAgentBranchDraft(
+      agent,
+      models,
+      localDraft,
+      defaults.yoloEnabled ?? false,
+      defaults.environmentName,
+    )
+    if (nextDraft == null) {
+      setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
+      return
     }
+    setLocalDraft(nextDraft)
+    setLocalDraftEdited(true)
     setInteraction(null)
     setActionError(null)
   }
@@ -510,7 +503,6 @@ export function useRootThreadControl({
       allowNewSession: capabilities?.allowNewSession,
       readOnly: capabilities?.readOnly,
       canBranchFromRoot,
-      allowSwitchAgent: capabilities?.allowSwitchAgent,
       allowBranching: capabilities?.allowBranching,
       ideAvailable: onOpenIde != null,
     },

@@ -6,7 +6,6 @@ org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration
 org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
 org.springframework.boot.transaction.autoconfigure.TransactionAutoConfiguration
 org.springframework.boot.transaction.autoconfigure.TransactionManagerCustomizationAutoConfiguration
-fun.fengwk.kkstudio.project.ProjectAutoConfiguration
 fun.fengwk.kkstudio.ide.IdeAutoConfiguration
 fun.fengwk.kkstudio.canvas.http.CanvasHttpAutoConfiguration
 fun.fengwk.kkstudio.canvas.infra.CanvasInfraAutoConfiguration

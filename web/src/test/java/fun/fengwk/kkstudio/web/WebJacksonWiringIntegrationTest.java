@@ -23,9 +23,6 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
-import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
-
-import java.lang.reflect.Field;
 
 /** 真实 Spring 容器验收：容器内只装配官方唯一 Jackson 3 mapper，classpath 无 Jackson 2 databind，MVC 直接写出资源响应。 */
 @AutoConfigureMockMvc
@@ -49,11 +46,6 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
             String.join(".", "com", "fasterxml", "jackson", "databind", "ObjectMapper"),
             WebJacksonWiringIntegrationTest.class.getClassLoader()),
         "Jackson 2 databind must not be present on the classpath");
-
-    // 自有代码只拿到该 Jackson 3 mapper，而不是构件内部或 Jackson 2 的副本。
-    Field field = ProjectDtoMapper.class.getDeclaredField("objectMapper");
-    field.setAccessible(true);
-    assertSame(jsonMapper, field.get(context.getBean(ProjectDtoMapper.class)));
 
     // 生产容器也注册 UUID binder，阻止 Spring 宽松的属性编辑器回退。
     context.getBean(HttpBoundaryConfiguration.CanonicalUuidBinding.class);

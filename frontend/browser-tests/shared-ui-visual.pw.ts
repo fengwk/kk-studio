@@ -1,19 +1,16 @@
-import { expect, test, type Locator, type Page } from './fixture'
+import { expect, test, type Locator } from './fixture'
 import {
-  routeApplicationEvents,
   shoot,
   spacingMetrics,
-  tabIconTextGaps,
   wordRectCounts,
 } from './visual-shots'
 import type { SpacingMetrics } from './visual-shots'
-import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 共享 UI 基元与全局页面的真实浏览器视觉回归：Select 下伸部、弹窗底栏间距、
  * Tabs 图标间距、资源卡元信息标签、Markdown 代码表面。
  *
- * 夹具全部是真实组件（layout-foundation / catalog-editor / project-workflow ?issue /
+ * 夹具全部是真实组件（layout-foundation / catalog-editor /
  * resource-card / markdown-table），在 1440×900 与 390×844 下分别以 zh-CN、en-US 渲染。
  * 截图只在设置 `KK_SHARED_UI_SHOTS_DIR` 时落盘，几何与样式断言始终执行。
  */
@@ -24,61 +21,6 @@ const VIEWPORTS = [
 ] as const
 
 const LOCALES = ['zh-CN', 'en-US'] as const
-
-const PROJECT_ID = 'a0000000-0000-0000-0000-000000000001'
-const ISSUE_ID = 'a0000000-0000-0000-0000-000000000002'
-const STAMP = Date.UTC(2026, 9, 1)
-
-/** 真实 IssueDetailModal 的最小快照：六个页签各拿到一份空数据。 */
-function issueDetail(): IssueDetailDTO {
-  return {
-    issue: {
-      id: ISSUE_ID,
-      projectId: PROJECT_ID,
-      number: '12',
-      title: 'Tab geometry issue',
-      description: 'Issue detail tabs at shared icon gap',
-      state: 'WORK',
-      blockedFromState: null,
-      blockReason: null,
-      pauseReason: null,
-      pauseDetail: null,
-      version: '1',
-      createdAt: STAMP,
-      updatedAt: STAMP,
-    },
-    activities: [],
-    nextActivityCursor: null,
-    agentThreads: [],
-    runs: [],
-    stageBudgets: [],
-  }
-}
-
-/** Issue 详情与全局壳层需要的离线传输：事件通道 + Issue 快照 + 空待处理计数。 */
-async function issueTransport(page: Page) {
-  await routeApplicationEvents(page)
-  await page.route('**/api/**', async (route) => {
-    const path = new URL(route.request().url()).pathname
-    if (path === `/api/project/issues/${ISSUE_ID}`) {
-      await route.fulfill({ json: issueDetail() })
-      return
-    }
-    if (path === `/api/project/issues/${ISSUE_ID}/evidence`) {
-      await route.fulfill({ json: [] })
-      return
-    }
-    if (path === '/api/harness/interactions') {
-      await route.fulfill({ json: { items: [], total: 0 } })
-      return
-    }
-    await route.fulfill({
-      status: 404,
-      contentType: 'application/problem+json',
-      json: { type: 'about:blank', status: 404, code: 'not_found', title: 'Not found' },
-    })
-  })
-}
 
 /** 弹窗底栏的关联动作间距：8–12px，使用共享间距 token，且按钮不重叠。 */
 function expectActionGap(metrics: SpacingMetrics, label: string) {
@@ -205,42 +147,6 @@ for (const viewport of VIEWPORTS) {
         await expect(editor).toBeVisible()
         expectActionGap(await spacingMetrics(editor.locator('.modal-footer')), 'resource editor footer')
         await shoot(page, testInfo, `resource-editor-modal-${suffix}`)
-      })
-
-      test('issue detail tabs give every icon the same shared text gap', async ({ page }, testInfo) => {
-        await issueTransport(page)
-        await page.goto(`/browser-tests/project-workflow-harness.html?issue&locale=${locale}`)
-
-        const tablist = page.locator('.issue-detail-tabs [role="tablist"]')
-        await expect(tablist).toBeVisible()
-        const tabs = tablist.getByRole('tab')
-        await expect(tabs).toHaveCount(6)
-
-        const gaps = await tabIconTextGaps(tablist)
-        expect(gaps).toHaveLength(6)
-        for (const gap of gaps) {
-          expect(Number.isNaN(gap), 'every tab must render an icon followed by text').toBe(false)
-          expect(gap).toBeGreaterThanOrEqual(3.5)
-          expect(gap).toBeLessThanOrEqual(8)
-        }
-        // 共享 .ui-tab 提供统一间距：各页签之间不得出现肉眼可见差异。
-        expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1)
-        await shoot(page, testInfo, `issue-detail-tabs-${suffix}`)
-
-        // 页签栏放不下时横向滚动：用键盘逐个切换，选中页签每次都完整位于页签栏可视区内。
-        await tabs.first().focus()
-        for (let index = 0; index < 6; index += 1) {
-          if (index > 0) {
-            await page.keyboard.press('ArrowRight')
-          }
-          const selected = tabs.nth(index)
-          await expect(selected).toHaveAttribute('aria-selected', 'true')
-          await expect.poll(() => selected.evaluate((tab) => {
-            const list = tab.parentElement!.getBoundingClientRect()
-            const rect = tab.getBoundingClientRect()
-            return rect.left >= list.left - 0.5 && rect.right <= list.right + 0.5
-          })).toBe(true)
-        }
       })
 
       test('resource card meta labels keep words intact and columns aligned', async ({ page }, testInfo) => {

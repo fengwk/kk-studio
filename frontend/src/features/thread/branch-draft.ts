@@ -124,7 +124,7 @@ export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolea
 }
 
 /**
- * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_AGENT/SET_EXECUTION/SET_ENVIRONMENT。
+ * 构建 effective base 与 draft 之间的最小执行与环境 settings command diff。
  */
 export function buildBranchDiffCommands(
   base: BranchDraft,
@@ -132,13 +132,6 @@ export function buildBranchDiffCommands(
   createCommandId: () => string,
 ): HarnessCommandCreateDTO[] {
   const commands: HarnessCommandCreateDTO[] = []
-  if (base.agentName !== draft.agentName) {
-    commands.push({
-      type: 'SET_AGENT',
-      idempotencyKey: createCommandId(),
-      agentName: draft.agentName,
-    })
-  }
   if (!isSameExecution(base.execution, draft.execution)) {
     commands.push({
       type: 'SET_EXECUTION',
@@ -181,10 +174,6 @@ export function projectPendingTarget(
 function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO): BranchDraft {
   const payload = asRecord(command.payload)
   switch (command.type) {
-    case 'SET_AGENT': {
-      const agentName = typeof payload.agentName === 'string' ? payload.agentName : base.agentName
-      return { ...base, agentName }
-    }
     case 'SET_EXECUTION': {
       const execution = payload.execution
       if (execution && typeof execution === 'object' && !Array.isArray(execution)) {

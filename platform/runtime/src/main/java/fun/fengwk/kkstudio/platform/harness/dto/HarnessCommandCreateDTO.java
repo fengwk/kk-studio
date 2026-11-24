@@ -18,7 +18,6 @@ import java.util.List;
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
   @JsonSubTypes.Type(value = HarnessCommandCreateDTO.UserMessageDTO.class, name = "USER_MESSAGE"),
-  @JsonSubTypes.Type(value = HarnessCommandCreateDTO.SetAgentDTO.class, name = "SET_AGENT"),
   @JsonSubTypes.Type(value = HarnessCommandCreateDTO.SetExecutionDTO.class, name = "SET_EXECUTION"),
   @JsonSubTypes.Type(
       value = HarnessCommandCreateDTO.SetEnvironmentDTO.class,
@@ -33,10 +32,6 @@ public sealed interface HarnessCommandCreateDTO {
   @JsonTypeName("USER_MESSAGE")
   record UserMessageDTO(String idempotencyKey, List<HarnessUserMessageContentDTO> contents)
       implements HarnessCommandCreateDTO {}
-
-  /** 切换目标 Agent。 */
-  @JsonTypeName("SET_AGENT")
-  record SetAgentDTO(String idempotencyKey, String agentName) implements HarnessCommandCreateDTO {}
 
   /** 切换目标执行配置。 */
   @JsonTypeName("SET_EXECUTION")

@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -173,16 +172,15 @@ class PostgresqlSubagentContinuationTest {
     AcceptedCommands accepted =
         SpawnTestSupport.acceptAndJoin(runtime, resume, request, AcceptancePreflight.IDENTITY);
     assertEquals(2L, accepted.acceptedCommands().getFirst().sequence());
-    assertEquals(4L, accepted.acceptedCommands().getLast().sequence());
+    assertEquals(3L, accepted.acceptedCommands().getLast().sequence());
     ThreadSnapshot queued = snapshot(childId);
     List<ThreadCommand> pendingBatch = queued.queuedCommands();
-    assertEquals(3, pendingBatch.size());
+    assertEquals(2, pendingBatch.size());
     assertEquals(accepted.acceptedCommands(), pendingBatch);
-    assertEquals(List.of(2L, 3L, 4L), pendingBatch.stream().map(ThreadCommand::sequence).toList());
+    assertEquals(List.of(2L, 3L), pendingBatch.stream().map(ThreadCommand::sequence).toList());
     BranchSettings settings = running.entryState().baseSettings();
     assertEquals(
         List.of(
-            new SetAgentCommandPayload(settings.agentName()),
             new SetExecutionCommandPayload(settings.execution()),
             new CustomMessageCommandPayload(AgentMessage.user("second task"))),
         pendingBatch.stream().map(ThreadCommand::payload).toList());
@@ -227,7 +225,7 @@ class PostgresqlSubagentContinuationTest {
     processNext(childId);
     ThreadSnapshot secondTurn = snapshot(childId);
     assertEquals(ThreadRuntimeStatus.RUNNING, secondTurn.runtimeStatus());
-    assertEquals(4L, secondTurn.thread().inputThroughSequence());
+    assertEquals(3L, secondTurn.thread().inputThroughSequence());
     assertEquals(settings, secondTurn.entryState().baseSettings());
     assertTrue(secondTurn.queuedCommands().isEmpty());
     assertNotEquals(running.generation().generationId(), secondTurn.generation().generationId());
@@ -253,7 +251,7 @@ class PostgresqlSubagentContinuationTest {
     assertTrue(second.matched());
     assertNull(second.supersededByInvocationId());
     assertEquals(1L, first.sourceCommandSequence());
-    assertEquals(4L, second.sourceCommandSequence());
+    assertEquals(3L, second.sourceCommandSequence());
     assertNotEquals(earlyTerminal, second.terminalEntryId());
     assertEquals(latest.thread().headEntryId(), second.terminalEntryId());
     assertNotNull(second.finalAnswerEntryId());
@@ -556,8 +554,6 @@ class PostgresqlSubagentContinuationTest {
     return new AcceptCommandsCommand(
         new AcceptCommandsTarget.Thread(childId, child.headEntryId(), child.nextCommandSequence()),
         List.of(
-            new NewThreadCommand(
-                new SetAgentCommandPayload(settings.agentName()), UUID.randomUUID()),
             new NewThreadCommand(
                 new SetExecutionCommandPayload(settings.execution()), UUID.randomUUID()),
             prompt));

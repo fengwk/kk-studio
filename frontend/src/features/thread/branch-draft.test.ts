@@ -381,30 +381,19 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
   })
 
-  it('emits SET_AGENT/SET_EXECUTION only for the actually changed field', () => {
+  it('emits only surviving durable settings in the branch diff', () => {
     const ids = (() => {
       let next = 0
       return () => `cid-${++next}`
     })()
-    const commands = buildBranchDiffCommands(
-      draftWith(),
-      draftWith({ agentName: 'coder' }),
-      ids,
-    )
-    expect(commands).toEqual([{
-      type: 'SET_AGENT',
-      idempotencyKey: 'cid-1',
-      agentName: 'coder',
-    }])
-
-    const modelChanged = buildBranchDiffCommands(
+    expect(buildBranchDiffCommands(draftWith(), draftWith({ agentName: 'coder' }), ids)).toEqual([])
+    expect(buildBranchDiffCommands(
       draftWith(),
       draftWith({ execution: createBuiltinExecution('MiniMax', 'pro') }),
       ids,
-    )
-    expect(modelChanged).toEqual([{
+    )).toEqual([{
       type: 'SET_EXECUTION',
-      idempotencyKey: 'cid-2',
+      idempotencyKey: 'cid-1',
       execution: createBuiltinExecution('MiniMax', 'pro'),
     }])
   })
@@ -458,13 +447,12 @@ describe('BranchDraft conversion and diff semantics', () => {
       ids,
     )
     expect(commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
       'SET_EXECUTION',
       'SET_ENVIRONMENT',
     ])
-    expect(commands[2]).toEqual({
+    expect(commands[1]).toEqual({
       type: 'SET_ENVIRONMENT',
-      idempotencyKey: 'cid-3',
+      idempotencyKey: 'cid-2',
       environmentName: 'new-env',
     })
     const commandTypes: string[] = commands.map((command) => command.type)
@@ -473,29 +461,29 @@ describe('BranchDraft conversion and diff semantics', () => {
 })
 
 describe('projectPendingTarget setting projection', () => {
-  it('projects queued SET_AGENT / SET_EXECUTION by sequence order', () => {
+  it('projects surviving settings by sequence order while preserving persistent agentName', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
-      queuedSettingCommand('2', 'SET_EXECUTION', {
-        execution: createBuiltinExecution('Other', 'v2'),
-      }),
-      queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' }),
+      queuedSettingCommand('2', 'SET_ENVIRONMENT', { environmentName: 'new-env' }),
+      queuedSettingCommand('1', 'SET_EXECUTION', { execution: createBuiltinExecution('Other', 'v2') }),
     ])
-    expect(projected.agentName).toBe('coder')
+    expect(projected.agentName).toBe(base.agentName)
     expect(projected.execution).toEqual(createBuiltinExecution('Other', 'v2'))
+    expect(projected.environmentName).toBe('new-env')
   })
 
   it('ignores non-SET_ and non-QUEUED commands while keeping base values', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
       queuedSettingCommand('1', 'USER_MESSAGE', { message: { role: 'USER' } }),
-      queuedSettingCommand('2', 'SET_AGENT', { agentName: 'coder' }),
+      queuedSettingCommand('2', 'SET_EXECUTION', { execution: createBuiltinExecution('Other', null) }),
       {
-        ...queuedSettingCommand('3', 'SET_AGENT', { agentName: 'applied' }),
+        ...queuedSettingCommand('3', 'SET_EXECUTION', { execution: createBuiltinExecution('applied', null) }),
         state: 'APPLIED',
       },
     ])
-    expect(projected.agentName).toBe('coder')
+    expect(projected.agentName).toBe(base.agentName)
+    expect(projected.execution).toEqual(createBuiltinExecution('Other', null))
   })
 
   it('keeps the base model fields when a SET_EXECUTION payload is not a record', () => {

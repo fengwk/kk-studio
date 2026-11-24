@@ -54,7 +54,6 @@ class ThreadSnapshotHubIntegrationTest {
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersions;
-  private NotificationInvalidationSource projects;
   private NotificationInvalidationSource environments;
   private ScheduledExecutorService scheduler;
   private AtomicReference<Consumer<HarnessInvalidationChanges.Event>> threadInvalidation;
@@ -68,7 +67,6 @@ class ThreadSnapshotHubIntegrationTest {
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersions = mock(CanvasVersionEventSource.class);
-    projects = mock(NotificationInvalidationSource.class);
     environments = mock(NotificationInvalidationSource.class);
     scheduler = Executors.newSingleThreadScheduledExecutor();
     threadInvalidation = new AtomicReference<>();
@@ -82,7 +80,6 @@ class ThreadSnapshotHubIntegrationTest {
             });
     when(realtimeSource.subscribe(eq(THREAD), any(), any())).thenReturn(() -> {});
     when(canvasVersions.subscribe(any(), any())).thenReturn(new SourceSubscribed(6L, () -> {}));
-    when(projects.subscribe(any(), any())).thenReturn(() -> {});
     when(environments.subscribe(any(), any()))
         .thenAnswer(
             invocation -> {
@@ -258,7 +255,6 @@ class ThreadSnapshotHubIntegrationTest {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersions,
-        projects,
         environments,
         capacity,
         null,

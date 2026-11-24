@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.Session;
@@ -144,7 +144,8 @@ class HarnessNamesTest {
             sessionId,
             threadId,
             List.of(
-                new NewThreadCommand(new SetAgentCommandPayload("assistant"), UUID.randomUUID()),
+                new NewThreadCommand(
+                    new SetEnvironmentCommandPayload("assistant"), UUID.randomUUID()),
                 userMessage("trailing user text"))),
         AcceptancePreflight.IDENTITY);
     Session stored = store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow());

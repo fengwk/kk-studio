@@ -6,11 +6,6 @@
  * 漂移门禁：TsContractArtifactTest（mvn verify 覆盖）
  */
 
-/** Java：fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO */
-export interface AddIssueEvidenceRequestDTO {
-  uploadId: string
-}
-
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO */
 export interface AgentConfigDTO {
   tools: string[]
@@ -48,25 +43,10 @@ export interface AgentUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO */
-export interface AppendIssueActivityRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  kind?: IssueActivityRequestKind | null
-  body: string
-}
-
 /** Java：fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO */
 export interface ApplyCanvasCommandsRequestDTO {
   idempotencyKey: string
   commands: CanvasCommandDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO */
-export interface BlockIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  reason: string
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.CreateNode */
@@ -655,19 +635,6 @@ export interface CreateCanvasRequestDTO {
   title: string
 }
 
-/** Java：fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO */
-export interface CreateIssueRequestDTO {
-  title: string
-  description?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO */
-export interface CreateProjectRequestDTO {
-  title: string
-  description?: string | null
-  yoloEnabled?: boolean | null
-}
-
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO */
 export interface DaemonConfigDTO {
   studioUrl: string
@@ -1083,13 +1050,6 @@ export interface HarnessCommandCreateUserMessageDTO {
   contents: HarnessUserMessageContentDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.SetAgentDTO */
-export interface HarnessCommandCreateSetAgentDTO {
-  type: 'SET_AGENT'
-  idempotencyKey: string
-  agentName: string
-}
-
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.SetExecutionDTO */
 export interface HarnessCommandCreateSetExecutionDTO {
   type: 'SET_EXECUTION'
@@ -1107,7 +1067,6 @@ export interface HarnessCommandCreateSetEnvironmentDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO */
 export type HarnessCommandCreateDTO =
   | HarnessCommandCreateUserMessageDTO
-  | HarnessCommandCreateSetAgentDTO
   | HarnessCommandCreateSetExecutionDTO
   | HarnessCommandCreateSetEnvironmentDTO
 
@@ -1655,163 +1614,6 @@ export const INVOCATION_RETRY_BACKOFF_STRATEGY_VALUES: readonly InvocationRetryB
   'EXPONENTIAL',
 ]
 
-/** Java：fun.fengwk.kkstudio.project.model.IssueActivityActorType */
-export type IssueActivityActorType =
-  | 'HUMAN'
-  | 'AGENT'
-  | 'SYSTEM'
-
-export const ISSUE_ACTIVITY_ACTOR_TYPE_VALUES: readonly IssueActivityActorType[] = [
-  'HUMAN',
-  'AGENT',
-  'SYSTEM',
-]
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueActivityDTO */
-export interface IssueActivityDTO {
-  issueId: string
-  sequence: string
-  kind: IssueActivityKind
-  actorType: IssueActivityActorType
-  actorAgentName: string | null
-  runId: string | null
-  body: string | null
-  data?: unknown | null
-  createdAt: number
-}
-
-/** Java：fun.fengwk.kkstudio.project.model.IssueActivityKind */
-export type IssueActivityKind =
-  | 'COMMENT'
-  | 'RUN'
-  | 'INSTRUCTION'
-  | 'SPEC_CHANGE'
-  | 'STATE_CHANGE'
-  | 'CONTROL'
-
-export const ISSUE_ACTIVITY_KIND_VALUES: readonly IssueActivityKind[] = [
-  'COMMENT',
-  'RUN',
-  'INSTRUCTION',
-  'SPEC_CHANGE',
-  'STATE_CHANGE',
-  'CONTROL',
-]
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueActivityRequestKind */
-export type IssueActivityRequestKind =
-  | 'COMMENT'
-  | 'INSTRUCTION'
-
-export const ISSUE_ACTIVITY_REQUEST_KIND_VALUES: readonly IssueActivityRequestKind[] = [
-  'COMMENT',
-  'INSTRUCTION',
-]
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueAgentThreadDTO */
-export interface IssueAgentThreadDTO {
-  issueId: string
-  agentName: string
-  threadId: string
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueDTO */
-export interface IssueDTO {
-  id: string
-  projectId: string
-  number: string
-  title: string
-  description: string
-  state: string
-  blockedFromState: string | null
-  blockReason: string | null
-  pauseReason: PauseReason | null
-  pauseDetail: string | null
-  version: string
-  createdAt: number
-  updatedAt: number
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueDetailDTO */
-export interface IssueDetailDTO {
-  issue: IssueDTO
-  activities: IssueActivityDTO[]
-  nextActivityCursor: string | null
-  runs: IssueRunDTO[]
-  stageBudgets: IssueStageBudgetDTO[]
-  agentThreads: IssueAgentThreadDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueEvidenceDTO */
-export interface IssueEvidenceDTO {
-  issueId: string
-  blobId: string
-  uri: string
-  name?: string | null
-  actorAgentName: string | null
-  runId: string | null
-  createdAt: number
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueRunDTO */
-export interface IssueRunDTO {
-  id: string
-  issueId: string
-  ordinal: string
-  state: string
-  agentName: string | null
-  sessionId: string
-  threadId: string
-  status: IssueRunStatus
-  startEntryId: string
-  endEntryId: string | null
-  finalAnswerEntryId: string | null
-  nextState: string | null
-  observedActivitySequence: string
-  remainingExecutionMs: string
-  error: string | null
-  version: string
-  startedAt: number
-  endedAt: number | null
-}
-
-/** Java：fun.fengwk.kkstudio.project.domain.IssueRunStatus */
-export type IssueRunStatus =
-  | 'RUNNING'
-  | 'WAITING'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED'
-
-export const ISSUE_RUN_STATUS_VALUES: readonly IssueRunStatus[] = [
-  'RUNNING',
-  'WAITING',
-  'COMPLETED',
-  'FAILED',
-  'CANCELLED',
-]
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueRunSummaryDTO */
-export interface IssueRunSummaryDTO {
-  id: string
-  issueId: string
-  ordinal: string
-  state: string
-  status: IssueRunStatus
-  agentName: string | null
-  startedAt: number
-  endedAt: number | null
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.IssueStageBudgetDTO */
-export interface IssueStageBudgetDTO {
-  state: string
-  maxRuns: number
-  budgetAfterOrdinal: string
-  usedRuns: string
-  remainingRuns: string
-}
-
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.LiveEnvironmentCapabilityDTO */
 export interface LiveEnvironmentCapabilityDTO {
   id: string
@@ -2125,16 +1927,6 @@ export interface ModelVariantDTO {
   protocolOptionsJson?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.project.model.PauseReason */
-export type PauseReason =
-  | 'USER'
-  | 'ERROR'
-
-export const PAUSE_REASON_VALUES: readonly PauseReason[] = [
-  'USER',
-  'ERROR',
-]
-
 /** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
   authAttemptId: string
@@ -2279,55 +2071,6 @@ export interface PluginSecretProjectionDTO {
   configured: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.project.dto.ProjectDTO */
-export interface ProjectDTO {
-  id: string
-  title: string
-  description: string
-  workflow: ProjectWorkflowDTO
-  yoloEnabled: boolean
-  nextIssueNumber: string
-  version: string
-  archivedAt: number | null
-  createdAt: number
-  updatedAt: number
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO */
-export interface ProjectIssueSnapshotDTO {
-  issue: IssueDTO
-  currentOrLatestRun: IssueRunSummaryDTO | null
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO */
-export interface ProjectSnapshotDTO {
-  project: ProjectDTO
-  issues: ProjectIssueSnapshotDTO[]
-  referencedStateCodes: string[]
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ProjectVersionRequestDTO */
-export interface ProjectVersionRequestDTO {
-  expectedVersion: string
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ProjectWorkflowDTO */
-export interface ProjectWorkflowDTO {
-  states: ProjectWorkflowStateDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ProjectWorkflowStateDTO */
-export interface ProjectWorkflowStateDTO {
-  state: string
-  name: string
-  agent: string | null
-  environment: string | null
-  instructions: string | null
-  maxRuns: string | null
-  enabled?: boolean | null
-  next?: string[] | null
-}
-
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.PromptCacheOptionDTO */
 export interface PromptCacheOptionDTO {
   retention: PromptCacheRetention
@@ -2412,32 +2155,6 @@ export interface ProviderUpdateDTO {
   modelCallIdleTimeoutMillis: string
   modelHttpRetryStatusCodes?: number[] | null
   expectedVersion: string
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO */
-export interface RecoverIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ReopenIssueRequestDTO */
-export interface ReopenIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ResetStageBudgetRequestDTO */
-export interface ResetStageBudgetRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  state: string
-  maxRuns: number
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ResumeIssueRequestDTO */
-export interface ResumeIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO */
@@ -2596,13 +2313,6 @@ export interface SkillPackageSummaryDTO {
 export interface SkillRefDTO {
   packageName: string
   name: string
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.StopIssueRequestDTO */
-export interface StopIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  detail?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO */
@@ -2840,7 +2550,6 @@ export const THREAD_COMMAND_STATE_VALUES: readonly ThreadCommandState[] = [
 export type ThreadCommandType =
   | 'USER_MESSAGE'
   | 'CUSTOM_MESSAGE'
-  | 'SET_AGENT'
   | 'SET_EXECUTION'
   | 'SET_ENVIRONMENT'
   | 'NOTIFICATION'
@@ -2848,7 +2557,6 @@ export type ThreadCommandType =
 export const THREAD_COMMAND_TYPE_VALUES: readonly ThreadCommandType[] = [
   'USER_MESSAGE',
   'CUSTOM_MESSAGE',
-  'SET_AGENT',
   'SET_EXECUTION',
   'SET_ENVIRONMENT',
   'NOTIFICATION',
@@ -2869,14 +2577,12 @@ export type ThreadKind =
   | 'USER'
   | 'SUBAGENT'
   | 'COMPACTION'
-  | 'CONTROLLER_TASK'
   | 'PLUGIN_TASK'
 
 export const THREAD_KIND_VALUES: readonly ThreadKind[] = [
   'USER',
   'SUBAGENT',
   'COMPACTION',
-  'CONTROLLER_TASK',
   'PLUGIN_TASK',
 ]
 
@@ -2974,13 +2680,6 @@ export const TOOL_PROVIDER_KIND_VALUES: readonly ToolProviderKind[] = [
   'MCP',
 ]
 
-/** Java：fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO */
-export interface TransitionIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  toState: string
-}
-
 /** Java：fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome */
 export type TurnEndOutcome =
   | 'COMPLETED'
@@ -2994,32 +2693,6 @@ export const TURN_END_OUTCOME_VALUES: readonly TurnEndOutcome[] = [
   'STOPPED',
   'CANCELLED',
 ]
-
-/** Java：fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO */
-export interface UpdateIssueRequestDTO {
-  expectedVersion: string
-  title: string
-  description?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO */
-export interface UpdateProjectRequestDTO {
-  expectedVersion: string
-  title: string
-  description?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectWorkflowRequestDTO */
-export interface UpdateProjectWorkflowRequestDTO {
-  expectedVersion: string
-  workflow: ProjectWorkflowDTO
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO */
-export interface UpdateProjectYoloRequestDTO {
-  expectedVersion: string
-  yoloEnabled: boolean
-}
 
 export interface ApiRoutes {
   'DELETE /api/chat/chats/{chatId}': {
@@ -3067,16 +2740,6 @@ export interface ApiRoutes {
   }
   'DELETE /api/platform/storage/uploads/{uploadId}': {
     path: { uploadId: string }
-    response: void
-  }
-  'DELETE /api/project/issues/{issueId}': {
-    path: { issueId: string }
-    query: { expectedVersion: string }
-    response: void
-  }
-  'DELETE /api/project/projects/{projectId}': {
-    path: { projectId: string }
-    query: { expectedVersion: string }
     response: void
   }
   'GET /api/canvas/canvases': {
@@ -3235,27 +2898,6 @@ export interface ApiRoutes {
   }
   'GET /api/platform/tools': {
     response: ToolCatalogEntryDTO[]
-  }
-  'GET /api/project/issues/{issueId}': {
-    path: { issueId: string }
-    query: { afterSequence?: string; limit?: number }
-    response: IssueDetailDTO
-  }
-  'GET /api/project/issues/{issueId}/evidence': {
-    path: { issueId: string }
-    response: IssueEvidenceDTO[]
-  }
-  'GET /api/project/projects': {
-    query: { includeArchived?: boolean }
-    response: ProjectDTO[]
-  }
-  'GET /api/project/projects/{projectId}': {
-    path: { projectId: string }
-    response: ProjectDTO
-  }
-  'GET /api/project/projects/{projectId}/snapshot': {
-    path: { projectId: string }
-    response: ProjectSnapshotDTO
   }
   'POST /api/canvas/canvases': {
     body: CreateCanvasRequestDTO
@@ -3473,70 +3115,6 @@ export interface ApiRoutes {
     path: { uploadId: string }
     response: StorageUploadDTO
   }
-  'POST /api/project/issues/{issueId}/activities': {
-    path: { issueId: string }
-    body: AppendIssueActivityRequestDTO
-    response: IssueActivityDTO
-  }
-  'POST /api/project/issues/{issueId}/block': {
-    path: { issueId: string }
-    body: BlockIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/issues/{issueId}/evidence': {
-    path: { issueId: string }
-    body: AddIssueEvidenceRequestDTO
-    response: IssueEvidenceDTO
-  }
-  'POST /api/project/issues/{issueId}/recover': {
-    path: { issueId: string }
-    body: RecoverIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/issues/{issueId}/reopen': {
-    path: { issueId: string }
-    body: ReopenIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/issues/{issueId}/reset-budget': {
-    path: { issueId: string }
-    body: ResetStageBudgetRequestDTO
-    response: IssueStageBudgetDTO
-  }
-  'POST /api/project/issues/{issueId}/resume': {
-    path: { issueId: string }
-    body: ResumeIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/issues/{issueId}/stop': {
-    path: { issueId: string }
-    body: StopIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/issues/{issueId}/transition': {
-    path: { issueId: string }
-    body: TransitionIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/projects': {
-    body: CreateProjectRequestDTO
-    response: ProjectDTO
-  }
-  'POST /api/project/projects/{projectId}/archive': {
-    path: { projectId: string }
-    body: ProjectVersionRequestDTO
-    response: ProjectDTO
-  }
-  'POST /api/project/projects/{projectId}/issues': {
-    path: { projectId: string }
-    body: CreateIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/project/projects/{projectId}/unarchive': {
-    path: { projectId: string }
-    body: ProjectVersionRequestDTO
-    response: ProjectDTO
-  }
   'PUT /api/chat/chats/{chatId}': {
     path: { chatId: string }
     body: ChatUpdateDTO
@@ -3610,26 +3188,6 @@ export interface ApiRoutes {
     path: { name: string }
     body: SkillPackageEditDTO
     response: SkillPackageDetailDTO
-  }
-  'PUT /api/project/issues/{issueId}': {
-    path: { issueId: string }
-    body: UpdateIssueRequestDTO
-    response: IssueDTO
-  }
-  'PUT /api/project/projects/{projectId}': {
-    path: { projectId: string }
-    body: UpdateProjectRequestDTO
-    response: ProjectDTO
-  }
-  'PUT /api/project/projects/{projectId}/workflow': {
-    path: { projectId: string }
-    body: UpdateProjectWorkflowRequestDTO
-    response: ProjectDTO
-  }
-  'PUT /api/project/projects/{projectId}/yolo': {
-    path: { projectId: string }
-    body: UpdateProjectYoloRequestDTO
-    response: ProjectDTO
   }
 }
 

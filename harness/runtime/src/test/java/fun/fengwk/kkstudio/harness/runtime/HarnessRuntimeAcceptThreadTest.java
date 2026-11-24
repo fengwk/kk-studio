@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -60,7 +59,7 @@ import java.util.UUID;
 
 /**
  * acceptCommands 的 THREAD target：cursor 原子接受、ordered exact replay（hash / partial / order）、
- * SET_AGENT 静止 admission 与 batch shape（steering vs user batch）。
+ * SET_ENVIRONMENT 静止 admission 与 batch shape（steering vs user batch）。
  */
 class HarnessRuntimeAcceptThreadTest {
 
@@ -89,8 +88,8 @@ class HarnessRuntimeAcceptThreadTest {
     return new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId), List.of(command));
   }
 
-  private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
-    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
+  private static NewThreadCommand setEnvironmentCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload("local"), idempotencyKey);
   }
 
   @Test
@@ -159,7 +158,7 @@ class HarnessRuntimeAcceptThreadTest {
                         baseline.rootEntryId(),
                         9,
                         List.of(
-                            setAgentCommand(TestIds.id(2)),
+                            setEnvironmentCommand(TestIds.id(2)),
                             userMessageCommand(TestIds.id(3), "next"))),
                     AcceptancePreflight.IDENTITY));
     assertConflict(HarnessConflictReason.STALE_COMMAND_CURSOR, error);
@@ -195,7 +194,8 @@ class HarnessRuntimeAcceptThreadTest {
                 new AcceptCommandsCommand(
                     new AcceptCommandsTarget.Thread(baseline.threadId(), null, null),
                     List.of(
-                        setAgentCommand(TestIds.id(3)), userMessageCommand(TestIds.id(4), "x"))),
+                        setEnvironmentCommand(TestIds.id(3)),
+                        userMessageCommand(TestIds.id(4), "x"))),
                 AcceptancePreflight.IDENTITY));
   }
 
@@ -204,7 +204,7 @@ class HarnessRuntimeAcceptThreadTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     // THREAD user batch 只能含恰一条 user-like：多命令 batch 用 SET_* 前缀 + 单条 user 构造。
     List<NewThreadCommand> batch =
-        List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"));
+        List.of(setEnvironmentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"));
     AcceptedCommands first =
         runtime.acceptCommands(
             thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
@@ -276,7 +276,7 @@ class HarnessRuntimeAcceptThreadTest {
   void orderedReplayRequiresFirstSequenceToMatchExpectedNext() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     List<NewThreadCommand> batch =
-        List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"));
+        List.of(setEnvironmentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"));
     runtime.acceptCommands(
         thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
         AcceptancePreflight.IDENTITY);
@@ -299,7 +299,7 @@ class HarnessRuntimeAcceptThreadTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"))),
+            List.of(setEnvironmentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"))),
         AcceptancePreflight.IDENTITY);
 
     DomainException partial =
@@ -312,7 +312,7 @@ class HarnessRuntimeAcceptThreadTest {
                         baseline.rootEntryId(),
                         1,
                         List.of(
-                            setAgentCommand(TestIds.id(9)),
+                            setEnvironmentCommand(TestIds.id(9)),
                             userMessageCommand(TestIds.id(1), "a"),
                             userMessageCommand(TestIds.id(2), "b"))),
                     AcceptancePreflight.IDENTITY));
@@ -328,18 +328,18 @@ class HarnessRuntimeAcceptThreadTest {
                         baseline.rootEntryId(),
                         1,
                         List.of(
-                            setAgentCommand(TestIds.id(9)),
+                            setEnvironmentCommand(TestIds.id(9)),
                             userMessageCommand(TestIds.id(1), "DIFFERENT"))),
                     AcceptancePreflight.IDENTITY));
     assertConflict(HarnessConflictReason.IDEMPOTENCY_KEY_REUSED, reused);
   }
 
   /**
-   * SET_AGENT 无 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_AGENT + 恰一条 user
-   * message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
+   * SET_ENVIRONMENT 无 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_ENVIRONMENT +
+   * 恰一条 user message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
    */
   @Test
-  void setAgentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
+  void setEnvironmentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
     // 场景一：Driver generation 活动（当前 open Turn 在跑）+ THREAD Work 行 —— 接受且只推进 cursor。
     HarnessRuntimeTestSupport.TurnBaseline live = seedOpenTurn(store);
     seedThreadWork(store, live.threadId());
@@ -358,7 +358,8 @@ class HarnessRuntimeAcceptThreadTest {
                 live.threadId(),
                 live.turnStartEntryId(),
                 1,
-                List.of(setAgentCommand(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hi"))),
+                List.of(
+                    setEnvironmentCommand(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(liveResult.replayed());
     assertEquals(
@@ -379,7 +380,8 @@ class HarnessRuntimeAcceptThreadTest {
                 idle.threadId(),
                 idle.rootEntryId(),
                 1,
-                List.of(setAgentCommand(TestIds.id(3)), userMessageCommand(TestIds.id(4), "hi"))),
+                List.of(
+                    setEnvironmentCommand(TestIds.id(3)), userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(idleResult.replayed());
     // 只入队 + 推进 cursor：version +1、nextSeq 1->3、head 不变。
@@ -433,7 +435,8 @@ class HarnessRuntimeAcceptThreadTest {
                     baseline.rootEntryId(),
                     2,
                     List.of(
-                        userMessageCommand(TestIds.id(5), "hi"), setAgentCommand(TestIds.id(4)))),
+                        userMessageCommand(TestIds.id(5), "hi"),
+                        setEnvironmentCommand(TestIds.id(4)))),
                 AcceptancePreflight.IDENTITY));
   }
 
@@ -528,7 +531,7 @@ class HarnessRuntimeAcceptThreadTest {
                 baseline.threadId(),
                 stopped.headEntryId(),
                 stopped.nextCommandSequence(),
-                List.of(setAgentCommand(TestIds.id(1)), setExecutionCommand(TestIds.id(2)))),
+                List.of(setExecutionCommand(TestIds.id(1)), setEnvironmentCommand(TestIds.id(2)))),
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
@@ -619,7 +622,7 @@ class HarnessRuntimeAcceptThreadTest {
   @Test
   void orderedReplayRejectsNonContiguousDurableSequences() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    NewThreadCommand first = setAgentCommand(TestIds.id(1));
+    NewThreadCommand first = setEnvironmentCommand(TestIds.id(1));
     NewThreadCommand second = userMessageCommand(TestIds.id(2), "hello");
     store.transaction(
         tx -> {

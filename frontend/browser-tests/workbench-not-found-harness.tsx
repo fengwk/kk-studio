@@ -2,7 +2,7 @@
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Bot, FolderKanban } from 'lucide-react'
+import { Bot } from 'lucide-react'
 import '@/styles.css'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
@@ -43,14 +43,6 @@ const NAV_ITEMS: readonly PrimaryNavItem[] = [
     labelKey: 'platform.nav.ai',
     ariaKey: 'platform.nav.aiAria',
     icon: Bot,
-  },
-  {
-    id: 'projects',
-    groupId: 'projects',
-    to: '/projects',
-    labelKey: 'platform.nav.projects',
-    ariaKey: 'platform.nav.projectsAria',
-    icon: FolderKanban,
   },
 ]
 

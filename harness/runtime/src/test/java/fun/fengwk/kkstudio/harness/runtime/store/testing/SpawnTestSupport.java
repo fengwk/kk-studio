@@ -178,7 +178,7 @@ public final class SpawnTestSupport {
         ThreadConstraints.NONE,
         ticket.delivery() == JoinDelivery.SETTLE_OWNER_TURN
             ? ThreadKind.COMPACTION
-            : subagent ? ThreadKind.SUBAGENT : ThreadKind.CONTROLLER_TASK,
+            : subagent ? ThreadKind.SUBAGENT : ThreadKind.PLUGIN_TASK,
         ticket.delivery(),
         new SpawnRequest.Budget(
             ticket.maxTurns(),
