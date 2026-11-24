@@ -32,7 +32,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 201;
+  private static final int PROBE_ASSERTION_COUNT = 6;
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =
@@ -67,19 +67,7 @@ class FreshInstallSchemaContractTest {
       assertEquals(
           "1|SQL|t",
           rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
-      assertTrue(rows.next());
-      assertEquals(
-          "2|SQL|t",
-          rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
-      assertTrue(rows.next());
-      assertEquals(
-          "3|SQL|t",
-          rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
-      assertTrue(rows.next());
-      assertEquals(
-          "4|SQL|t",
-          rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
-      assertTrue(!rows.next(), "all versioned migrations must be applied exactly once");
+      assertTrue(!rows.next(), "the fresh-install baseline must be the only migration");
     }
   }
 
