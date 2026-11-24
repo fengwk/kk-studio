@@ -10,9 +10,9 @@ import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
-import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchu
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
+import fun.fengwk.kkstudio.platform.harness.http.PublicExecutionTreeQuery;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationBinding;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
@@ -237,7 +238,8 @@ public class ApplicationEventConfiguration {
       Supplier<ApplicationEventSettings> settingsProvider,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
       ThreadSnapshotPublisher threadSnapshotPublisher,
-      HarnessThreadService threadService) {
+      HarnessThreadService threadService,
+      HarnessRuntime runtime) {
     return new ApplicationEventHub(
         harnessChanges,
         realtimeSource,
@@ -248,7 +250,17 @@ public class ApplicationEventConfiguration {
         () -> settingsProvider.get().queueCapacity(),
         threadTreeSnapshotPublisher,
         threadSnapshotPublisher,
-        threadService::requireExistingThread);
+        threadService::requireExistingThread,
+        threadId -> {
+          try {
+            PublicExecutionTreeQuery.get(runtime, threadId);
+          } catch (DomainException e) {
+            if (e.code() != DomainErrorCode.NOT_FOUND) {
+              throw e;
+            }
+            throw new IllegalArgumentException(e.getMessage(), e);
+          }
+        });
   }
 
   @Bean(name = "applicationEventTreeExecutor", destroyMethod = "shutdownNow")
@@ -276,20 +288,9 @@ public class ApplicationEventConfiguration {
       HarnessRuntime runtime, @Qualifier("applicationEventTreeExecutor") Executor executor) {
     return new ThreadTreeSnapshotPublisher(
         executor,
-        rootThreadId -> {
-          List<ThreadTreeNode> nodes = runtime.getThreadTree(rootThreadId);
-          if (nodes.stream()
-              .anyMatch(
-                  node ->
-                      node.thread().id().equals(rootThreadId)
-                          && node.thread().kind() == ThreadKind.COMPACTION)) {
-            throw new IllegalArgumentException("thread tree root is not publicly addressable");
-          }
-          return HarnessRuntimeResponseMapper.toThreadTreeDtos(
-              nodes.stream()
-                  .filter(node -> node.thread().kind() != ThreadKind.COMPACTION)
-                  .toList());
-        });
+        rootThreadId ->
+            HarnessRuntimeResponseMapper.toThreadTreeDtos(
+                PublicExecutionTreeQuery.get(runtime, rootThreadId)));
   }
 
   /** 全应用事件连接共享一个 heartbeat scheduler；每次 tick 只做异步发送队列入队。 */

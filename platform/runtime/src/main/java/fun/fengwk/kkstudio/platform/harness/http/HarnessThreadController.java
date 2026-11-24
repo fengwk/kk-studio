@@ -12,13 +12,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
-import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
@@ -69,16 +66,8 @@ public class HarnessThreadController {
    */
   @GetMapping("/{threadId}/tree")
   public List<HarnessThreadTreeNodeDTO> getTree(@PathVariable UUID threadId) {
-    List<ThreadTreeNode> nodes = runtime.getThreadTree(threadId);
-    if (nodes.stream()
-        .anyMatch(
-            node ->
-                node.thread().id().equals(threadId)
-                    && node.thread().kind() == ThreadKind.COMPACTION)) {
-      throw DomainException.notFound("thread", "thread " + threadId + " does not exist");
-    }
     return HarnessRuntimeResponseMapper.toThreadTreeDtos(
-        nodes.stream().filter(node -> node.thread().kind() != ThreadKind.COMPACTION).toList());
+        PublicExecutionTreeQuery.get(runtime, threadId));
   }
 
   /**

@@ -484,6 +484,40 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
+  void threadTreeAdmissionRejectsBeforeSubscription() throws Exception {
+    HarnessInvalidationChanges executionTree = mock(HarnessInvalidationChanges.class);
+    when(harnessChanges.executionTree()).thenReturn(executionTree);
+    hub.close();
+    hub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> 512,
+            null,
+            null,
+            null,
+            ignored -> {
+              throw new IllegalArgumentException("private execution tree");
+            });
+
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
+    handler.afterConnectionEstablished(springSession);
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    assertEquals(1, recorder.sent.size());
+    assertTrue(recorder.sent.getFirst().contains("RESOURCE_NOT_FOUND"));
+    verify(executionTree, never()).subscribe(any(), any());
+  }
+
+  @Test
   void refreshRejectsUnsupportedAndUnsubscribedResources() throws Exception {
     handler.afterConnectionEstablished(springSession);
 
