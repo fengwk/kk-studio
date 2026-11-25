@@ -296,8 +296,9 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals(
         TEST_HEARTBEAT_INTERVAL_MILLIS, connected.path("heartbeatIntervalMillis").asLong());
     assertTrue(recorder.sent.isEmpty(), "connected must be the first logical frame");
-    assertFalse(
-        browserUseRegistry.usage(new ConnectionIdentity(EVENT_NODE, connectionId)).isPresent());
+    ConnectionIdentity identity = new ConnectionIdentity(EVENT_NODE, connectionId);
+    assertEquals(EVENT_NODE, browserUseRegistry.userId(identity).orElseThrow());
+    assertFalse(browserUseRegistry.usage(identity).isPresent());
   }
 
   @Test

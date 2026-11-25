@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 
 /**
  * IDE 视图控制服务：把 Studio API 的 view 请求翻译为 {@code IDE_COMMAND}，经既有 lease/READY 围栏下发到 owner。
@@ -17,27 +18,45 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
  */
 public interface EnvironmentIdeService {
 
-  EnvironmentIdeViewDTO openView(EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request);
+  EnvironmentIdeViewDTO openView(
+      EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request, StudioPrincipal principal);
 
   EnvironmentIdeViewDTO changeDirectory(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeChangeDirectoryDTO request);
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeChangeDirectoryDTO request,
+      StudioPrincipal principal);
 
   void focusTerminal(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal);
 
   void openAttachment(
       EnvironmentId environmentId,
       String viewId,
       String sessionId,
       String resourceId,
+      StudioPrincipal principal,
       EnvironmentIdeViewBindingDTO request);
 
   void collapseMobile(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal);
 
-  void closeView(EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request);
+  void closeView(
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeCloseViewDTO request,
+      StudioPrincipal principal);
 
   /** 纯读单个视图：只返回当前 owner 的权威资源和绑定，不创建、不续租、不发票据。 */
   EnvironmentIdeViewSnapshotDTO readView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request);
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeReadViewDTO request,
+      StudioPrincipal principal);
 }

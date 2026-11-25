@@ -29,6 +29,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
@@ -58,6 +60,9 @@ import java.util.concurrent.CompletableFuture;
 /** 意图：组合服务按 owner 快照决定本地/远端交付；本地不触远端，远端恰好一次内部调用，read 也遵循同一路由。 */
 class ClusterEnvironmentIdeServiceTest {
 
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(
+          UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), "alice", StudioRole.USER);
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID NODE_A = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -95,10 +100,11 @@ class ClusterEnvironmentIdeServiceTest {
   void localOwnerDelegatesToTheLocalDelegate() {
     registry.current = Optional.of(ClusterOwnerRoute.local(NODE_A));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openViewRequest());
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openViewRequest(), PRINCIPAL);
 
     assertEquals(VIEW, dto.getViewId());
-    assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(0).getAction());
+    assertEquals(IdeAction.LIST_VIEWS, localTransport.commands.get(0).getAction());
+    assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(1).getAction());
     assertTrue(client.calls.isEmpty());
   }
 
@@ -113,30 +119,32 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
     EnvironmentIdeReadViewDTO read = readViewRequest();
 
-    service.changeDirectory(ENV, VIEW, directory);
-    service.focusTerminal(ENV, VIEW, binding);
+    service.changeDirectory(ENV, VIEW, directory, PRINCIPAL);
+    service.focusTerminal(ENV, VIEW, binding, PRINCIPAL);
     service.openAttachment(
         ENV,
         VIEW,
         "33333333-3333-4333-8333-333333333333",
         "55555555-5555-4555-8555-555555555555",
+        PRINCIPAL,
         binding);
-    service.collapseMobile(ENV, VIEW, binding);
-    service.closeView(ENV, VIEW, close);
-    service.readView(ENV, VIEW, read);
+    service.collapseMobile(ENV, VIEW, binding, PRINCIPAL);
+    service.closeView(ENV, VIEW, close, PRINCIPAL);
+    service.readView(ENV, VIEW, read, PRINCIPAL);
 
-    verify(delegate).changeDirectory(ENV, VIEW, directory);
-    verify(delegate).focusTerminal(ENV, VIEW, binding);
+    verify(delegate).changeDirectory(ENV, VIEW, directory, PRINCIPAL);
+    verify(delegate).focusTerminal(ENV, VIEW, binding, PRINCIPAL);
     verify(delegate)
         .openAttachment(
             ENV,
             VIEW,
             "33333333-3333-4333-8333-333333333333",
             "55555555-5555-4555-8555-555555555555",
+            PRINCIPAL,
             binding);
-    verify(delegate).collapseMobile(ENV, VIEW, binding);
-    verify(delegate).closeView(ENV, VIEW, close);
-    verify(delegate).readView(ENV, VIEW, read);
+    verify(delegate).collapseMobile(ENV, VIEW, binding, PRINCIPAL);
+    verify(delegate).closeView(ENV, VIEW, close, PRINCIPAL);
+    verify(delegate).readView(ENV, VIEW, read, PRINCIPAL);
     verifyNoInteractions(remote);
   }
 
@@ -145,7 +153,7 @@ class ClusterEnvironmentIdeServiceTest {
     registry.current =
         Optional.of(ClusterOwnerRoute.remote(NODE_B, URI.create("http://b.internal")));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openViewRequest());
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openViewRequest(), PRINCIPAL);
 
     assertSame(client.view, dto);
     assertEquals(List.of("openView"), client.calls);
@@ -157,7 +165,8 @@ class ClusterEnvironmentIdeServiceTest {
     registry.current =
         Optional.of(ClusterOwnerRoute.remote(NODE_B, URI.create("http://b.internal")));
 
-    EnvironmentIdeViewSnapshotDTO snapshot = service.readView(ENV, VIEW, readViewRequest());
+    EnvironmentIdeViewSnapshotDTO snapshot =
+        service.readView(ENV, VIEW, readViewRequest(), PRINCIPAL);
 
     assertSame(client.snapshot, snapshot);
     assertEquals(List.of("readView"), client.calls);
@@ -175,6 +184,7 @@ class ClusterEnvironmentIdeServiceTest {
         VIEW,
         "33333333-3333-4333-8333-333333333333",
         "55555555-5555-4555-8555-555555555555",
+        PRINCIPAL,
         binding);
 
     assertEquals(List.of("openAttachment"), client.calls);
@@ -182,7 +192,12 @@ class ClusterEnvironmentIdeServiceTest {
         DomainException.class,
         () ->
             service.openAttachment(
-                ENV, VIEW, "not-a-uuid", "55555555-5555-4555-8555-555555555555", binding));
+                ENV,
+                VIEW,
+                "not-a-uuid",
+                "55555555-5555-4555-8555-555555555555",
+                PRINCIPAL,
+                binding));
     assertEquals(1, registry.calls);
   }
 
@@ -192,10 +207,12 @@ class ClusterEnvironmentIdeServiceTest {
 
     // 没有 owner 时确定未派发，reason 必须允许客户端等 READY 而不是把结果当作未知。
     DomainException error =
-        assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest()));
+        assertThrows(
+            DomainException.class, () -> service.openView(ENV, openViewRequest(), PRINCIPAL));
     assertEquals("DAEMON_NOT_READY", error.reason());
     DomainException readError =
-        assertThrows(DomainException.class, () -> service.readView(ENV, VIEW, readViewRequest()));
+        assertThrows(
+            DomainException.class, () -> service.readView(ENV, VIEW, readViewRequest(), PRINCIPAL));
     assertEquals("DAEMON_NOT_READY", readError.reason());
     assertTrue(client.calls.isEmpty());
     assertTrue(localTransport.commands.isEmpty());
@@ -206,7 +223,9 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDirectory("/tmp");
 
-    assertThrows(DomainException.class, () -> service.changeDirectory(ENV, "not-a-uuid", request));
+    assertThrows(
+        DomainException.class,
+        () -> service.changeDirectory(ENV, "not-a-uuid", request, PRINCIPAL));
     assertEquals(0, registry.calls);
     assertTrue(client.calls.isEmpty());
   }
@@ -230,11 +249,11 @@ class ClusterEnvironmentIdeServiceTest {
     directory.setExpectedDaemonInstanceId(DAEMON_INSTANCE);
     directory.setDirectory("/tmp");
 
-    service.changeDirectory(ENV, VIEW, directory);
-    service.focusTerminal(ENV, VIEW, binding);
-    service.collapseMobile(ENV, VIEW, binding);
-    service.closeView(ENV, VIEW, close);
-    service.readView(ENV, VIEW, readViewRequest());
+    service.changeDirectory(ENV, VIEW, directory, PRINCIPAL);
+    service.focusTerminal(ENV, VIEW, binding, PRINCIPAL);
+    service.collapseMobile(ENV, VIEW, binding, PRINCIPAL);
+    service.closeView(ENV, VIEW, close, PRINCIPAL);
+    service.readView(ENV, VIEW, readViewRequest(), PRINCIPAL);
 
     assertEquals(
         List.of("changeDirectory", "focusTerminal", "collapseMobile", "closeView", "readView"),
@@ -308,7 +327,10 @@ class ClusterEnvironmentIdeServiceTest {
 
     @Override
     public EnvironmentIdeViewDTO openView(
-        EnvironmentId environmentId, ClusterOwnerRoute owner, EnvironmentIdeOpenViewDTO request) {
+        EnvironmentId environmentId,
+        ClusterOwnerRoute owner,
+        EnvironmentIdeOpenViewDTO request,
+        StudioPrincipal principal) {
       calls.add("openView");
       return view;
     }
@@ -318,7 +340,8 @@ class ClusterEnvironmentIdeServiceTest {
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
-        EnvironmentIdeChangeDirectoryDTO request) {
+        EnvironmentIdeChangeDirectoryDTO request,
+        StudioPrincipal principal) {
       calls.add("changeDirectory");
       return view;
     }
@@ -328,7 +351,8 @@ class ClusterEnvironmentIdeServiceTest {
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
-        EnvironmentIdeViewBindingDTO request) {
+        EnvironmentIdeViewBindingDTO request,
+        StudioPrincipal principal) {
       calls.add("focusTerminal");
     }
 
@@ -339,7 +363,8 @@ class ClusterEnvironmentIdeServiceTest {
         String viewId,
         String sessionId,
         String resourceId,
-        EnvironmentIdeViewBindingDTO request) {
+        EnvironmentIdeViewBindingDTO request,
+        StudioPrincipal principal) {
       calls.add("openAttachment");
     }
 
@@ -348,7 +373,8 @@ class ClusterEnvironmentIdeServiceTest {
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
-        EnvironmentIdeCloseViewDTO request) {
+        EnvironmentIdeCloseViewDTO request,
+        StudioPrincipal principal) {
       calls.add("closeView");
     }
 
@@ -357,7 +383,8 @@ class ClusterEnvironmentIdeServiceTest {
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
-        EnvironmentIdeViewBindingDTO request) {
+        EnvironmentIdeViewBindingDTO request,
+        StudioPrincipal principal) {
       calls.add("collapseMobile");
     }
 
@@ -366,7 +393,8 @@ class ClusterEnvironmentIdeServiceTest {
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
-        EnvironmentIdeReadViewDTO request) {
+        EnvironmentIdeReadViewDTO request,
+        StudioPrincipal principal) {
       calls.add("readView");
       return snapshot;
     }
@@ -379,15 +407,22 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     private final List<IdeCommand> commands = new ArrayList<>();
+    private long revision;
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
       CompletableFuture<IdeResult> reply = new CompletableFuture<>();
+      revision++;
+      if (command.getAction() == IdeAction.LIST_VIEWS) {
+        reply.complete(IdeResult.newBuilder().setOk(true).setRevision(revision).build());
+        return new IdeRequest(
+            new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE), UUID.randomUUID(), reply);
+      }
       IdeResult.Builder builder =
           IdeResult.newBuilder()
               .setOk(true)
-              .setRevision(1L)
+              .setRevision(revision)
               .addViews(
                   IdeViewSummary.newBuilder()
                       .setViewId(command.getViewId())
@@ -434,13 +469,14 @@ class ClusterEnvironmentIdeServiceTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       return true;
     }
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
       return Optional.empty();
     }
   }

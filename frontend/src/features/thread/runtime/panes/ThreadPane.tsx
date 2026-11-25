@@ -14,7 +14,7 @@ import { ResourceSessionContext } from '@/shared/ui/markdown/ResourceUriContext'
 import { useBoundThreadPanelLabels } from '@/features/thread/runtime/controllers/useBoundThreadPanelViews'
 import { UnconfirmedExecutionsPanel } from '@/features/thread/runtime/panes/UnconfirmedExecutionsPanel'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
-import { storageService } from '@/shared/api/storage-service'
+import { resolveSessionBlobUrls } from '@/shared/api/resource-service'
 import type { EnvironmentStatusIdentity } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
@@ -140,9 +140,11 @@ export function ThreadPane({
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,
   }
+  const sessionId = projection.sessionId || null
+  const resolveBlobUrls = useBlobUrlResolver(sessionId)
   return (
-    <ResourceSessionContext.Provider value={projection.sessionId ?? null}>
-      <ResourceBlobUrlContext.Provider value={useBlobUrlResolver()}>
+    <ResourceSessionContext.Provider value={sessionId}>
+      <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
         <ThreadPanel
           heading={heading}
           transcript={transcript}
@@ -156,25 +158,12 @@ export function ThreadPane({
   )
 }
 
-/** 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期解析。 */
-function useBlobUrlResolver() {
+/** 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期经当前 Session 解析。 */
+function useBlobUrlResolver(sessionId: string | null) {
   return useCallback(async (blobId: string): Promise<ResourceBlobUrls | null> => {
-    const [original, preview] = await Promise.all([
-      storageService.getBlobDownloadUrl(blobId).catch(() => null),
-      storageService.getBlobPreviewUrl(blobId).catch(() => null),
-    ])
-    if (
-      original == null
-      || !original.url.trim()
-      || !original.mediaType?.trim()
-    ) {
+    if (!sessionId) {
       return null
     }
-    return {
-      original: original.url,
-      preview: preview?.url?.trim() || null,
-      mediaType: original.mediaType,
-      sizeBytes: original.sizeBytes,
-    }
-  }, [])
+    return resolveSessionBlobUrls(sessionId, blobId)
+  }, [sessionId])
 }

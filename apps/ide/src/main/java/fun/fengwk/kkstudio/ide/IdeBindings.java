@@ -6,6 +6,8 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * IDE 视图绑定的授权边界：READY 实例、事件节点已确认的 claim 意图，以及权威快照中的 owner 绑定。
@@ -18,6 +20,7 @@ final class IdeBindings {
   private final IdeCommandTransport transport;
   private final IdeBrowserUseGateway browserUse;
   private final IdeSnapshots snapshots;
+  private final ConcurrentMap<UserBindingKey, UUID> userBindings = new ConcurrentHashMap<>();
 
   IdeBindings(
       IdeCommandTransport transport, IdeBrowserUseGateway browserUse, IdeSnapshots snapshots) {
@@ -42,12 +45,13 @@ final class IdeBindings {
       UUID browserSessionId,
       EnvironmentId environmentId,
       UUID viewId,
-      UUID claimId) {
+      UUID claimId,
+      UUID userId) {
     boolean matched;
     try {
       matched =
           browserUse.findExactIntent(
-              eventNodeId, connectionId, browserSessionId, environmentId, viewId, claimId);
+              eventNodeId, connectionId, browserSessionId, environmentId, viewId, claimId, userId);
     } catch (DomainException error) {
       if ("IDE_UNAVAILABLE".equals(error.reason()) || "DAEMON_NOT_READY".equals(error.reason())) {
         throw error;
@@ -69,7 +73,8 @@ final class IdeBindings {
       UUID viewId,
       UUID browserSessionId,
       long bindingEpoch,
-      String expectedDaemonInstanceId) {
+      String expectedDaemonInstanceId,
+      UUID userId) {
     DaemonConnectionIdentity identity = requireReady(environmentId);
     requireExpectedInstance(identity, expectedDaemonInstanceId);
     IdeViewSnapshotStore.View view = snapshots.cachedView(identity, viewId).orElse(null);
@@ -91,7 +96,8 @@ final class IdeBindings {
         browserSessionId,
         environmentId,
         viewId,
-        view.claimId());
+        view.claimId(),
+        userId);
     return new Binding(identity, view);
   }
 
@@ -100,6 +106,26 @@ final class IdeBindings {
     IdeInputs.requireCurrentInstance(
         expectedDaemonInstanceId, "expectedDaemonInstanceId is required", identity);
   }
+
+  void requireUser(UUID userId, EnvironmentId environmentId, UUID viewId) {
+    UUID boundUser = userBindings.get(new UserBindingKey(environmentId, viewId));
+    if (boundUser == null || !boundUser.equals(userId)) {
+      throw DomainException.notFoundReason("RESOURCE_NOT_FOUND", "Resource not found");
+    }
+  }
+
+  void bindUser(UUID userId, EnvironmentId environmentId, UUID viewId) {
+    UUID previous = userBindings.putIfAbsent(new UserBindingKey(environmentId, viewId), userId);
+    if (previous != null && !previous.equals(userId)) {
+      throw DomainException.notFoundReason("RESOURCE_NOT_FOUND", "Resource not found");
+    }
+  }
+
+  UUID boundUser(EnvironmentId environmentId, UUID viewId) {
+    return userBindings.get(new UserBindingKey(environmentId, viewId));
+  }
+
+  private record UserBindingKey(EnvironmentId environmentId, UUID viewId) {}
 
   /** 一条已确认的 owner 绑定：READY 实例与权威快照中的视图。 */
   record Binding(DaemonConnectionIdentity identity, IdeViewSnapshotStore.View view) {}

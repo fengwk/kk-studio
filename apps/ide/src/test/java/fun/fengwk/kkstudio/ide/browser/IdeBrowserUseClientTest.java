@@ -42,6 +42,7 @@ class IdeBrowserUseClientTest {
   private static final UUID LOCAL_NODE = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID REMOTE_NODE = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   private static final UUID CONNECTION = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
+  private static final UUID USER = UUID.fromString("88888888-8888-8888-8888-888888888888");
   private static final UUID DOCUMENT = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
@@ -62,7 +63,7 @@ class IdeBrowserUseClientTest {
   @Test
   void localNodeReadsOnlyTheLocalRegistry() {
     IdeBrowserUseRegistry registry = new IdeBrowserUseRegistry();
-    long generation = registry.register(new ConnectionIdentity(LOCAL_NODE, CONNECTION));
+    long generation = registry.register(new ConnectionIdentity(LOCAL_NODE, CONNECTION), USER);
     registry.accept(IDENTITY_LOCAL, generation, usage(1, boundView(5L)));
     ClusterNodeRegistry nodes = mock(ClusterNodeRegistry.class);
     IdeBrowserUseClient client = client(registry, nodes, null);
@@ -80,6 +81,9 @@ class IdeBrowserUseClientTest {
           verifyAuth("POST", exchange);
           assertEquals("POST", exchange.getRequestMethod());
           assertEquals(IdeBrowserUsePaths.intentPath(), exchange.getRequestURI().toString());
+          assertTrue(
+              new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)
+                  .contains("\"userId\":\"" + USER + "\""));
           respond(exchange, 200, "{\"matched\":true}");
         });
     IdeBrowserUseRegistry registry = new IdeBrowserUseRegistry();
@@ -87,7 +91,7 @@ class IdeBrowserUseClientTest {
     when(nodes.liveInternalOrigin(REMOTE_NODE)).thenReturn(Optional.of(origin()));
     IdeBrowserUseClient client = client(registry, nodes, authentication(REMOTE_NODE));
 
-    assertTrue(client.findExactIntent(IDENTITY_REMOTE, DOCUMENT, ENVIRONMENT, VIEW, CLAIM));
+    assertTrue(client.findExactIntent(IDENTITY_REMOTE, DOCUMENT, ENVIRONMENT, VIEW, CLAIM, USER));
   }
 
   @Test
@@ -95,10 +99,10 @@ class IdeBrowserUseClientTest {
     // 内部 HTTP 响应遵循统一 Long wire：revision 与 bindingEpoch 都是 canonical 十进制字符串。
     String payload =
         """
-        {"eventNodeId":"%s","connectionId":"%s","browserSessionId":"%s","revision":"7","views":[
+        {"eventNodeId":"%s","connectionId":"%s","browserSessionId":"%s","userId":"%s","revision":"7","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"12"}]}
         """
-            .formatted(REMOTE_NODE, CONNECTION, DOCUMENT, ENVIRONMENT, VIEW, CLAIM);
+            .formatted(REMOTE_NODE, CONNECTION, DOCUMENT, USER, ENVIRONMENT, VIEW, CLAIM);
     startServer(
         exchange -> {
           verifyAuth("GET", exchange);

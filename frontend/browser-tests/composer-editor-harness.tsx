@@ -94,8 +94,6 @@ function createFakeStorage(): StorageService {
       storedHeight: null,
     }),
     deleteUpload: async () => undefined,
-    getBlobDownloadUrl: async () => ({ url: 'https://s3.test/orig', expiresAt: null }),
-    getBlobPreviewUrl: async () => ({ url: 'https://s3.test/prev', expiresAt: null }),
     uploadFile: async (_put: Parameters<StorageService['uploadFile']>[0], file: Blob) => {
       window.imageUploadTestResult.uploaded = file
     },

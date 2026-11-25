@@ -472,7 +472,7 @@ export interface CanvasResourceInputText {
 export interface CanvasResourceInputBlob {
   type: 'BLOB'
   name: string
-  blobId: string
+  uploadId: string
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO */
@@ -1492,6 +1492,7 @@ export interface IdeBrowserUseSnapshot {
   eventNodeId: string
   connectionId: string
   browserSessionId: string
+  userId: string
   revision: string
   views: IdeBrowserUseSnapshotView[]
 }
@@ -3247,6 +3248,14 @@ export interface ApiRoutes {
   'POST /api/auth/logout': {
     response: void
   }
+  'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url': {
+    path: { blobId: string; canvasId: string }
+    response: CanvasPresignedUrlDTO
+  }
+  'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/preview-url': {
+    path: { blobId: string; canvasId: string }
+    response: CanvasPresignedUrlDTO
+  }
   'POST /api/canvas/canvases/{canvasId}/commands': {
     path: { canvasId: string }
     body: ApplyCanvasCommandsRequestDTO
@@ -3266,14 +3275,6 @@ export interface ApiRoutes {
     path: { canvasId: string; nodeId: string }
     body: CanvasFunctionUnknownResolutionDTO
     response: CanvasFunctionRunDTO
-  }
-  'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/download-url': {
-    path: { canvasId: string; resourceId: string }
-    response: CanvasPresignedUrlDTO
-  }
-  'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/preview-url': {
-    path: { canvasId: string; resourceId: string }
-    response: CanvasPresignedUrlDTO
   }
   'POST /api/chat-spaces': {
     body: ChatSpaceCreateDTO
@@ -3327,6 +3328,14 @@ export interface ApiRoutes {
     path: { threadId: string }
     body: HarnessThreadStreamCatchupDTO
     response: void
+  }
+  'POST /api/harness/sessions/{sessionId}/blobs/{blobId}/download-url': {
+    path: { blobId: string; sessionId: string }
+    response: StoragePresignedUrlDTO
+  }
+  'POST /api/harness/sessions/{sessionId}/blobs/{blobId}/preview-url': {
+    path: { blobId: string; sessionId: string }
+    response: StoragePresignedUrlDTO
   }
   'POST /api/harness/threads/{threadId}/command-batches': {
     path: { threadId: string }
@@ -3477,14 +3486,6 @@ export interface ApiRoutes {
     path: { name: string }
     body: SkillPackagePublishDTO
     response: SkillPackageDetailDTO
-  }
-  'POST /api/platform/storage/blobs/{blobId}/download-url': {
-    path: { blobId: string }
-    response: StoragePresignedUrlDTO
-  }
-  'POST /api/platform/storage/blobs/{blobId}/preview-url': {
-    path: { blobId: string }
-    response: StoragePresignedUrlDTO
   }
   'POST /api/platform/storage/uploads': {
     body: StorageUploadReserveRequestDTO

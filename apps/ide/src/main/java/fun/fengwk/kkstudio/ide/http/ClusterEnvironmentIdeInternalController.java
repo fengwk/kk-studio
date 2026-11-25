@@ -29,6 +29,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
@@ -81,10 +83,15 @@ public class ClusterEnvironmentIdeInternalController {
 
   @PostMapping("/views")
   public EnvironmentIdeViewDTO openView(
-      @PathVariable UUID environmentId, HttpServletRequest request) {
+      @PathVariable UUID environmentId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
+      HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeOpenViewDTO body = readBody(request, EnvironmentIdeOpenViewDTO.class);
-    return localEnvironmentIdeService.openView(environment, body);
+    return localEnvironmentIdeService.openView(
+        environment, body, principal(principalUserId, principalUsername, principalRole));
   }
 
   @GetMapping("/views/{viewId:" + VIEW_ID + "}")
@@ -97,6 +104,9 @@ public class ClusterEnvironmentIdeInternalController {
       @RequestParam("claimId") UUID claimId,
       @RequestParam(value = "expectedDaemonInstanceId", required = false)
           String expectedDaemonInstanceId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
       HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeReadViewDTO readView = new EnvironmentIdeReadViewDTO();
@@ -105,24 +115,40 @@ public class ClusterEnvironmentIdeInternalController {
     readView.setConnectionId(connectionId.toString());
     readView.setClaimId(claimId.toString());
     readView.setExpectedDaemonInstanceId(expectedDaemonInstanceId);
-    return localEnvironmentIdeService.readView(environment, viewId, readView);
+    return localEnvironmentIdeService.readView(
+        environment,
+        viewId,
+        readView,
+        principal(principalUserId, principalUsername, principalRole));
   }
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/apply-mobile-layout")
   public void collapseMobile(
-      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId,
+      @PathVariable String viewId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
+      HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
-    localEnvironmentIdeService.collapseMobile(environment, viewId, body);
+    localEnvironmentIdeService.collapseMobile(
+        environment, viewId, body, principal(principalUserId, principalUsername, principalRole));
   }
 
   @PutMapping("/views/{viewId:" + VIEW_ID + "}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
-      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId,
+      @PathVariable String viewId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
+      HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeChangeDirectoryDTO body =
         readBody(request, EnvironmentIdeChangeDirectoryDTO.class);
-    return localEnvironmentIdeService.changeDirectory(environment, viewId, body);
+    return localEnvironmentIdeService.changeDirectory(
+        environment, viewId, body, principal(principalUserId, principalUsername, principalRole));
   }
 
   @PostMapping(
@@ -138,27 +164,52 @@ public class ClusterEnvironmentIdeInternalController {
       @PathVariable String viewId,
       @PathVariable String sessionId,
       @PathVariable String resourceId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
       HttpServletRequest request) {
     UUID parsedEnvironmentId = IdeUuids.requireInput(environmentId, "environmentId");
     EnvironmentId environment = authenticateAndAuthorize(request, parsedEnvironmentId);
     EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
-    localEnvironmentIdeService.openAttachment(environment, viewId, sessionId, resourceId, body);
+    localEnvironmentIdeService.openAttachment(
+        environment,
+        viewId,
+        sessionId,
+        resourceId,
+        principal(principalUserId, principalUsername, principalRole),
+        body);
   }
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/focus-terminal")
   public void focusTerminal(
-      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId,
+      @PathVariable String viewId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
+      HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
-    localEnvironmentIdeService.focusTerminal(environment, viewId, body);
+    localEnvironmentIdeService.focusTerminal(
+        environment, viewId, body, principal(principalUserId, principalUsername, principalRole));
   }
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/close")
   public void closeView(
-      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId,
+      @PathVariable String viewId,
+      @RequestParam UUID principalUserId,
+      @RequestParam String principalUsername,
+      @RequestParam StudioRole principalRole,
+      HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeCloseViewDTO body = readBody(request, EnvironmentIdeCloseViewDTO.class);
-    localEnvironmentIdeService.closeView(environment, viewId, body);
+    localEnvironmentIdeService.closeView(
+        environment, viewId, body, principal(principalUserId, principalUsername, principalRole));
+  }
+
+  private static StudioPrincipal principal(UUID userId, String username, StudioRole role) {
+    return new StudioPrincipal(userId, username, role);
   }
 
   /** 认证 + owner 核对先于请求体读取；任一失败都不会有任何 daemon 副作用。 */

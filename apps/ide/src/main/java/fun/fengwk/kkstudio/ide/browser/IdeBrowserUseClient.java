@@ -97,6 +97,17 @@ public final class IdeBrowserUseClient {
       EnvironmentId environmentId,
       UUID viewId,
       UUID claimId) {
+    return findExactIntent(identity, browserSessionId, environmentId, viewId, claimId, null);
+  }
+
+  /** 精确查询并校验该物理 WebSocket 的认证用户。 */
+  public boolean findExactIntent(
+      ConnectionIdentity identity,
+      UUID browserSessionId,
+      EnvironmentId environmentId,
+      UUID viewId,
+      UUID claimId,
+      UUID userId) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(browserSessionId, "browserSessionId");
     Objects.requireNonNull(environmentId, "environmentId");
@@ -104,11 +115,18 @@ public final class IdeBrowserUseClient {
     Objects.requireNonNull(claimId, "claimId");
     if (isLocal(identity)) {
       return localRegistry
-          .findExactIntent(identity, browserSessionId, environmentId, viewId, claimId)
-          .isPresent();
+              .findExactIntent(identity, browserSessionId, environmentId, viewId, claimId)
+              .isPresent()
+          && (userId == null || localRegistry.userId(identity).filter(userId::equals).isPresent());
     }
     IdeBrowserUseIntentQuery query =
-        IdeBrowserUseIntentQuery.of(identity, browserSessionId, environmentId, viewId, claimId);
+        IdeBrowserUseIntentQuery.of(
+            identity,
+            browserSessionId,
+            environmentId,
+            viewId,
+            claimId,
+            userId == null ? new UUID(0, 0) : userId);
     String path = IdeBrowserUsePaths.intentPath();
     byte[] payload = writeJson(query);
     Response response = exchange("POST", path, identity.eventNodeId(), payload);
@@ -121,9 +139,18 @@ public final class IdeBrowserUseClient {
   /** 返回该连接/browser session 当前可续租的已绑定持有项；没有时返回空，不允许把缺失当成传输成功。 */
   public Optional<IdeBrowserUse> activeBoundProofs(
       ConnectionIdentity identity, UUID browserSessionId) {
+    return activeBoundProofs(identity, browserSessionId, null);
+  }
+
+  /** Returns proofs only when the registry's authenticated WebSocket user matches. */
+  public Optional<IdeBrowserUse> activeBoundProofs(
+      ConnectionIdentity identity, UUID browserSessionId, UUID userId) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(browserSessionId, "browserSessionId");
     if (isLocal(identity)) {
+      if (userId != null && localRegistry.userId(identity).filter(userId::equals).isEmpty()) {
+        return Optional.empty();
+      }
       return localRegistry.activeBoundProofs(identity, browserSessionId);
     }
     String path = IdeBrowserUsePaths.activeProofsPath(identity, browserSessionId);
@@ -138,7 +165,8 @@ public final class IdeBrowserUseClient {
     IdeBrowserUseSnapshot snapshot = readJson(response.body(), IdeBrowserUseSnapshot.class);
     if (!snapshot.eventNodeId().equals(identity.eventNodeId().toString())
         || !snapshot.connectionId().equals(identity.connectionId().toString())
-        || !snapshot.browserSessionId().equals(browserSessionId.toString())) {
+        || !snapshot.browserSessionId().equals(browserSessionId.toString())
+        || (userId != null && !snapshot.userId().equals(userId.toString()))) {
       throw DomainException.unavailable(
           "IDE_UNAVAILABLE", "browser event node returned a mismatched usage snapshot");
     }

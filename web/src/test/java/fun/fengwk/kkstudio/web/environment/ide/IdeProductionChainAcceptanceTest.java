@@ -397,7 +397,13 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     String uploadId =
         new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc)
             .completeUpload("source.txt", attachment);
+    UUID userId =
+        jdbc.queryForObject(
+            "select owner_user_id from storage_upload where id = ?",
+            UUID.class,
+            UUID.fromString(uploadId));
     commandAcceptance.createSession(
+        userId,
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewRootSession(
                 sessionId,

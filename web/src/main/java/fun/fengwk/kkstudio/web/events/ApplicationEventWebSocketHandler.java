@@ -184,7 +184,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       return;
     }
     ConnectionIdentity identity = new ConnectionIdentity(eventNodeId, UUID.randomUUID());
-    long generation = browserUseRegistry.register(identity);
+    long generation = browserUseRegistry.register(identity, principal.userId());
     ConnectionState state =
         new ConnectionState(
             hub,

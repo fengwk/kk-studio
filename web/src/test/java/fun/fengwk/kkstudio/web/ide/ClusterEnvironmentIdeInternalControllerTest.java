@@ -36,6 +36,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.http.ClusterEnvironmentIdeInternalController;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
@@ -58,6 +60,9 @@ import java.util.UUID;
  */
 class ClusterEnvironmentIdeInternalControllerTest {
 
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(
+          UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), "alice", StudioRole.USER);
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID NODE_A = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -89,7 +94,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void newEndpointsAuthenticateAndDelegate() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
-    String mobile = IdeInternalPaths.mobileLayoutPath(ENV, VIEW);
+    String mobile = internalPath(IdeInternalPaths.mobileLayoutPath(ENV, VIEW));
     mockMvc
         .perform(
             post(mobile)
@@ -98,7 +103,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .content(
                     "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}"))
         .andExpect(status().isOk());
-    verify(localEnvironmentIdeService).collapseMobile(eq(ENV), eq(VIEW), any());
+    verify(localEnvironmentIdeService).collapseMobile(eq(ENV), eq(VIEW), any(), eq(PRINCIPAL));
   }
 
   /** 目录枚举内部端点已删除：即使签名合法也只能得到 404，且不触达本地 delegate。 */
@@ -129,8 +134,9 @@ class ClusterEnvironmentIdeInternalControllerTest {
     EnvironmentIdeViewSnapshotDTO snapshot = new EnvironmentIdeViewSnapshotDTO();
     snapshot.setDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     snapshot.setRevision(3L);
-    when(localEnvironmentIdeService.readView(eq(ENV), eq(VIEW), any())).thenReturn(snapshot);
-    String path = IdeInternalPaths.viewPath(ENV, VIEW, read);
+    when(localEnvironmentIdeService.readView(eq(ENV), eq(VIEW), any(), eq(PRINCIPAL)))
+        .thenReturn(snapshot);
+    String path = internalPath(IdeInternalPaths.viewPath(ENV, VIEW, read));
 
     mockMvc
         .perform(
@@ -138,14 +144,14 @@ class ClusterEnvironmentIdeInternalControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.revision").value(3));
 
-    verify(localEnvironmentIdeService).readView(eq(ENV), eq(VIEW), any());
+    verify(localEnvironmentIdeService).readView(eq(ENV), eq(VIEW), any(), eq(PRINCIPAL));
   }
 
   /** 远端关闭的签名路径必须与实际内部 controller 路由一致。 */
   @Test
   void authenticatedCloseUsesViewsPath() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
-    String path = IdeInternalPaths.closePath(ENV, VIEW);
+    String path = internalPath(IdeInternalPaths.closePath(ENV, VIEW));
     mockMvc
         .perform(
             post(path)
@@ -154,7 +160,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .content(
                     "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\",\"discard\":false}"))
         .andExpect(status().isOk());
-    verify(localEnvironmentIdeService).closeView(eq(ENV), eq(VIEW), any());
+    verify(localEnvironmentIdeService).closeView(eq(ENV), eq(VIEW), any(), eq(PRINCIPAL));
   }
 
   /** 客户端契约路径经真实认证和 controller 路由解析，绑定字段不能丢失。 */
@@ -163,7 +169,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
     String body =
         "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}";
-    String directory = IdeInternalPaths.directoryPath(ENV, VIEW);
+    String directory = internalPath(IdeInternalPaths.directoryPath(ENV, VIEW));
     mockMvc
         .perform(
             put(directory)
@@ -171,7 +177,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body.substring(0, body.length() - 1) + ",\"directory\":\"/next\"}"))
         .andExpect(status().isOk());
-    String terminal = IdeInternalPaths.terminalPath(ENV, VIEW);
+    String terminal = internalPath(IdeInternalPaths.terminalPath(ENV, VIEW));
     mockMvc
         .perform(
             post(terminal)
@@ -179,7 +185,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isOk());
-    String mobile = IdeInternalPaths.mobileLayoutPath(ENV, VIEW);
+    String mobile = internalPath(IdeInternalPaths.mobileLayoutPath(ENV, VIEW));
     mockMvc
         .perform(
             post(mobile)
@@ -194,13 +200,20 @@ class ClusterEnvironmentIdeInternalControllerTest {
             argThat(
                 dto ->
                     "/next".equals(dto.getDirectory())
-                        && Long.valueOf(1L).equals(dto.getBindingEpoch())));
+                        && Long.valueOf(1L).equals(dto.getBindingEpoch())),
+            eq(PRINCIPAL));
     verify(localEnvironmentIdeService)
         .focusTerminal(
-            eq(ENV), eq(VIEW), argThat(dto -> Long.valueOf(1L).equals(dto.getBindingEpoch())));
+            eq(ENV),
+            eq(VIEW),
+            argThat(dto -> Long.valueOf(1L).equals(dto.getBindingEpoch())),
+            eq(PRINCIPAL));
     verify(localEnvironmentIdeService)
         .collapseMobile(
-            eq(ENV), eq(VIEW), argThat(dto -> Long.valueOf(1L).equals(dto.getBindingEpoch())));
+            eq(ENV),
+            eq(VIEW),
+            argThat(dto -> Long.valueOf(1L).equals(dto.getBindingEpoch())),
+            eq(PRINCIPAL));
   }
 
   /** 客户端通过真实 controller 与 advice 收到 problem，只允许已知取消原因穿透。 */
@@ -211,7 +224,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
         .doThrow(DomainException.validation("other_resource", "cancelled"))
         .doThrow(DomainException.unavailable("IDE_UNAVAILABLE", "cancelled"))
         .when(localEnvironmentIdeService)
-        .closeView(eq(ENV), eq(VIEW), any());
+        .closeView(eq(ENV), eq(VIEW), any(), eq(PRINCIPAL));
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/",
@@ -254,13 +267,16 @@ class ClusterEnvironmentIdeInternalControllerTest {
       request.setBindingEpoch(1L);
       request.setDiscard(false);
       DomainException cancelled =
-          assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
+          assertThrows(
+              DomainException.class, () -> client.closeView(ENV, owner, VIEW, request, PRINCIPAL));
       assertEquals("IDE_CLOSE_CANCELLED", cancelled.reason());
       assertEquals("validation", cancelled.code().code());
       DomainException other =
-          assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
+          assertThrows(
+              DomainException.class, () -> client.closeView(ENV, owner, VIEW, request, PRINCIPAL));
       assertEquals("environment", other.resource());
-      assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
+      assertThrows(
+          DomainException.class, () -> client.closeView(ENV, owner, VIEW, request, PRINCIPAL));
     } finally {
       server.stop(0);
     }
@@ -270,7 +286,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   void missingAuthenticationIsRejectedBeforeAnyLocalSideEffect() throws Exception {
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
         .andExpect(status().isUnauthorized())
@@ -283,11 +299,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void wrongAuthenticationTargetIsRejectedBeforeAnyLocalSideEffect() throws Exception {
     Map<String, String> headers =
-        authentication.sign("POST", IdeInternalPaths.viewsPath(ENV), NODE_A);
+        authentication.sign("POST", internalPath(IdeInternalPaths.viewsPath(ENV)), NODE_A);
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -303,7 +319,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -319,7 +335,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
@@ -335,11 +351,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
     dto.setViewId(VIEW);
     dto.setEnvironmentId(ENV.toString());
     dto.setDirectory("/home/dev/project");
-    when(localEnvironmentIdeService.openView(eq(ENV), any())).thenReturn(dto);
+    when(localEnvironmentIdeService.openView(eq(ENV), any(), eq(PRINCIPAL))).thenReturn(dto);
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -347,14 +363,14 @@ class ClusterEnvironmentIdeInternalControllerTest {
         .andExpect(jsonPath("$.viewId").value(VIEW))
         .andExpect(jsonPath("$.environmentId").value(ENV.toString()));
 
-    verify(localEnvironmentIdeService).openView(eq(ENV), any());
+    verify(localEnvironmentIdeService).openView(eq(ENV), any(), eq(PRINCIPAL));
   }
 
   @Test
   void unauthenticatedOversizedBodyIsRejectedWithoutParsingOrSideEffects() throws Exception {
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
         .andExpect(status().isUnauthorized());
@@ -371,7 +387,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(headers)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -385,7 +401,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
@@ -400,7 +416,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{not-json"))
@@ -415,7 +431,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(IdeInternalPaths.viewsPath(ENV))
+            post(internalPath(IdeInternalPaths.viewsPath(ENV)))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW + "\",\"directory\":\"/d\",\"extra\":1}"))
@@ -423,8 +439,12 @@ class ClusterEnvironmentIdeInternalControllerTest {
     verifyNoInteractions(localEnvironmentIdeService);
   }
 
+  private static String internalPath(String path) {
+    return IdeInternalPaths.withPrincipal(path, PRINCIPAL);
+  }
+
   private Map<String, String> validHeaders() {
-    return authentication.sign("POST", IdeInternalPaths.viewsPath(ENV), NODE_B);
+    return authentication.sign("POST", internalPath(IdeInternalPaths.viewsPath(ENV)), NODE_B);
   }
 
   private static HttpHeaders mockHeaders(Map<String, String> headers) {

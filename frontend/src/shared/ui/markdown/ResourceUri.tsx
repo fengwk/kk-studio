@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from 'react'
-import { fetchSessionResource } from '@/shared/api/resource-service'
 import { ApiError } from '@/shared/api/client'
+import { fetchSessionResource } from '@/shared/api/resource-service'
 import { useI18n } from '@/shared/i18n'
 import {
   ResourceOpenInIdeContext,
@@ -24,7 +24,7 @@ export function ResourceUri({ uri, label, image = false }: {
   if (uri.startsWith('resource://skills/')) {
     return <span className="md-resource-unavailable">{label ?? uri} — {t('ai.resource.unsupported')}</span>
   }
-  if (resourceId == null || sessionId == null) {
+  if (resourceId == null || !sessionId) {
     return <span className="md-resource-unavailable">{label ?? uri} — {t('ai.resource.unavailable')}</span>
   }
   return image
@@ -91,6 +91,7 @@ function ResourceLink({ sessionId, resourceId, label, openInIde }: {
       setBusy(false)
     }
   }
+
   async function openAttachmentInIde() {
     if (openInIde == null) return
     setOpeningInIde(true)

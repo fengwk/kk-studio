@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -33,11 +34,16 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.ModelImageCountLimitResolver;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -55,6 +61,8 @@ class HarnessAcceptanceProblemWireTest {
   private final UUID session = UUID.randomUUID();
   private final UUID thread = UUID.randomUUID();
   private final UUID upload = UUID.randomUUID();
+  private final StudioPrincipal actor =
+      new StudioPrincipal(UUID.randomUUID(), "wire-test", StudioRole.USER);
   private StorageUploadService uploads;
   private MockMvc mvc;
   private HarnessRuntime runtime;
@@ -98,9 +106,12 @@ class HarnessAcceptanceProblemWireTest {
             mock(StorageBlobManager.class),
             new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
             imageLimitResolver);
-    HarnessCommandBatchService service = new HarnessCommandBatchService(acceptance, runtime);
+    HarnessCommandBatchService service =
+        new HarnessCommandBatchService(acceptance, runtime, mock(ResourceAccess.class));
     mvc =
         MockMvcBuilders.standaloneSetup(new HarnessThreadCommandBatchController(service))
+            .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
+            .defaultRequest(get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, actor))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(
@@ -109,10 +120,10 @@ class HarnessAcceptanceProblemWireTest {
             .build();
   }
 
-  /** 附件不存在与跨 Session 资源是用户输入错误，未就绪附件则保留存储冲突原因。 */
+  /** 跨 Session 的 Blob 按不存在处理，未就绪上传仍保留存储冲突原因。 */
   @Test
   void userMessageRejectsInvalidContentsAndPropagatesStorageConflict() throws Exception {
-    when(uploads.lockReady(upload))
+    when(uploads.lockReady(upload, actor.userId()))
         .thenThrow(DomainException.notFound("upload"))
         .thenThrow(DomainException.conflict("STORAGE_VERIFICATION", "pending"));
     String attachment = "{\"type\":\"ATTACHMENT\",\"uploadId\":\"" + upload + "\"}";
@@ -124,8 +135,8 @@ class HarnessAcceptanceProblemWireTest {
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"));
     postMessage("{\"type\":\"RESOURCE\",\"blobId\":\"" + UUID.randomUUID() + "\",\"name\":\"x\"}")
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.reason").value("RESOURCE_NOT_FOUND"));
     postMessage("{\"type\":\"IMAGE\",\"source\":\"https://example.com/x\"}")
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));

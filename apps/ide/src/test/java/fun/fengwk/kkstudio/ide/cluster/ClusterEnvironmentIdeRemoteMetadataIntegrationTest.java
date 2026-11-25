@@ -31,6 +31,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
@@ -64,6 +66,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -75,6 +78,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(
+          UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), "alice", StudioRole.USER);
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID NODE_A = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -102,11 +108,13 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   private EnvironmentIdeServiceImpl nodeBLocal;
   private RecordingTransport transportB;
   private AtomicInteger received;
+  private final List<StudioPrincipal> forwardedPrincipals = new CopyOnWriteArrayList<>();
   private ClusterEnvironmentIdeService nodeAService;
 
   @BeforeEach
   void setUp() throws IOException {
     received = new AtomicInteger();
+    forwardedPrincipals.clear();
     nodeBAuthentication =
         new HmacClusterInternalAuthentication(
             SECRET, NODE_B, Clock.systemUTC(), Duration.ofSeconds(30), 1024);
@@ -141,7 +149,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
   @Test
   void remoteOpenViewIsOneHopAndTheOwnerIssuesTheViewScopedBootstrapEntry() {
-    EnvironmentIdeViewDTO dto = nodeAService.openView(ENV, openViewRequest("/home/dev/project"));
+    EnvironmentIdeViewDTO dto =
+        nodeAService.openView(ENV, openViewRequest("/home/dev/project"), PRINCIPAL);
 
     assertEquals(VIEW, dto.getViewId());
     assertEquals(ENV.toString(), dto.getEnvironmentId());
@@ -152,19 +161,23 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         dto.getEntryUrl().startsWith("/ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
+    assertEquals(received.get(), forwardedPrincipals.size());
+    assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
     assertTrue(localTransportA.commands.isEmpty());
-    assertEquals(IdeAction.OPEN_VIEW, transportB.commands.getFirst().getAction());
+    assertEquals(IdeAction.OPEN_VIEW, transportB.commands.getLast().getAction());
   }
 
   @Test
   void remoteBoundCommandsCarryDocumentAndEpochOverAuthenticatedHttp() {
-    nodeAService.openView(ENV, openViewRequest("/home/dev/project"));
+    nodeAService.openView(ENV, openViewRequest("/home/dev/project"), PRINCIPAL);
     EnvironmentIdeViewBindingDTO binding = binding(7L);
 
-    nodeAService.focusTerminal(ENV, VIEW, binding);
+    nodeAService.focusTerminal(ENV, VIEW, binding, PRINCIPAL);
 
     assertEquals(2, received.get());
-    assertEquals(2, transportB.commands.size());
+    assertEquals(received.get(), forwardedPrincipals.size());
+    assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
+    assertEquals(3, transportB.commands.size());
     IdeCommand focus = transportB.commands.getLast();
     assertEquals(IdeAction.FOCUS_TERMINAL, focus.getAction());
     assertEquals(DOCUMENT, focus.getBrowserSessionId());
@@ -175,7 +188,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   /** 零根视图：目录在 wire 上缺省，workspacePath 与正 epoch 仍是绑定权威。 */
   @Test
   void remoteZeroRootOpenKeepsWorkspaceAuthorityWithoutDirectory() {
-    EnvironmentIdeViewDTO dto = nodeAService.openView(ENV, openViewRequest(null));
+    EnvironmentIdeViewDTO dto = nodeAService.openView(ENV, openViewRequest(null), PRINCIPAL);
 
     assertEquals(VIEW, dto.getViewId());
     assertNull(dto.getDirectory(), "a zero-root view must not report a directory");
@@ -185,7 +198,9 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         dto.getEntryUrl().startsWith("/ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
-    IdeCommand sent = transportB.commands.getFirst();
+    assertEquals(received.get(), forwardedPrincipals.size());
+    assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
+    IdeCommand sent = transportB.commands.getLast();
     assertEquals(IdeAction.OPEN_VIEW, sent.getAction());
     assertFalse(sent.hasDirectory(), "zero roots must not be sent as a directory");
   }
@@ -193,8 +208,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   /** 编码查询参与签名，远端按解码后的原始路径发送命令。 */
   @Test
   void mobileCommandReachesRemoteOwner() {
-    nodeAService.openView(ENV, openViewRequest(null));
-    nodeAService.collapseMobile(ENV, VIEW, binding(7L));
+    nodeAService.openView(ENV, openViewRequest(null), PRINCIPAL);
+    nodeAService.collapseMobile(ENV, VIEW, binding(7L), PRINCIPAL);
     assertEquals(2, received.get());
     IdeCommand mobile = transportB.commands.getLast();
     assertEquals(IdeAction.COLLAPSE_MOBILE, mobile.getAction());
@@ -205,7 +220,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   void unavailableRouteFailsClosedWithoutContactingTheRemoteOwner() {
     registryA.current = Optional.empty();
 
-    assertThrows(DomainException.class, () -> nodeAService.openView(ENV, openViewRequest(null)));
+    assertThrows(
+        DomainException.class, () -> nodeAService.openView(ENV, openViewRequest(null), PRINCIPAL));
 
     assertEquals(0, received.get());
     assertTrue(localTransportA.commands.isEmpty());
@@ -215,7 +231,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   void invalidSignatureIsRejectedBeforeTheOwnerExecutes() {
     ClusterEnvironmentIdeService bad = serviceWithSecret("wrong-cluster-secret-0123456789abcdef");
 
-    assertThrows(DomainException.class, () -> bad.openView(ENV, openViewRequest(null)));
+    assertThrows(DomainException.class, () -> bad.openView(ENV, openViewRequest(null), PRINCIPAL));
 
     assertEquals(1, received.get());
     assertTrue(transportB.commands.isEmpty());
@@ -255,7 +271,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       ClusterEnvironmentIdeService service =
           new ClusterEnvironmentIdeService(registry, smallClient, localService());
 
-      assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest(null)));
+      assertThrows(
+          DomainException.class, () -> service.openView(ENV, openViewRequest(null), PRINCIPAL));
     } finally {
       oversizeServer.stop(0);
     }
@@ -300,7 +317,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
       close.setDiscard(false);
       CompletableFuture<Void> waiting =
-          CompletableFuture.runAsync(() -> client.closeView(ENV, owner, VIEW, close));
+          CompletableFuture.runAsync(() -> client.closeView(ENV, owner, VIEW, close, PRINCIPAL));
       assertTrue(receivedRequest.await(2, TimeUnit.SECONDS));
       assertThrows(TimeoutException.class, () -> waiting.get(450, TimeUnit.MILLISECONDS));
       sendHeaders.countDown();
@@ -336,7 +353,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
               NODE_B, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
       EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
       close.setDiscard(false);
-      assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, close));
+      assertThrows(
+          DomainException.class, () -> client.closeView(ENV, owner, VIEW, close, PRINCIPAL));
     } finally {
       server.stop(0);
     }
@@ -373,7 +391,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
               NODE_B, URI.create("http://127.0.0.1:" + delayed.getAddress().getPort()));
       EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
       close.setDiscard(true);
-      assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, close));
+      assertThrows(
+          DomainException.class, () -> client.closeView(ENV, owner, VIEW, close, PRINCIPAL));
     } finally {
       release.countDown();
       delayed.stop(0);
@@ -416,7 +435,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
           new ClusterEnvironmentIdeService(registry, shortDeadlineClient, localService());
 
       long start = System.nanoTime();
-      assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest(null)));
+      assertThrows(
+          DomainException.class, () -> service.openView(ENV, openViewRequest(null), PRINCIPAL));
       long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
       assertTrue(
           elapsedMillis < 2_000,
@@ -432,7 +452,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     EnvironmentIdeOpenViewDTO request = openViewRequest(null);
     request.setDirectory("x".repeat(20 * 1024));
 
-    assertThrows(DomainException.class, () -> nodeAService.openView(ENV, request));
+    assertThrows(DomainException.class, () -> nodeAService.openView(ENV, request, PRINCIPAL));
     assertEquals(0, received.get());
   }
 
@@ -477,6 +497,13 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       return;
     }
     EnvironmentId environmentId = environmentIdFrom(path);
+    Map<String, String> parameters = queryParameters(exchange.getRequestURI().getRawQuery());
+    StudioPrincipal principal =
+        new StudioPrincipal(
+            UUID.fromString(parameters.get("principalUserId")),
+            parameters.get("principalUsername"),
+            StudioRole.valueOf(parameters.get("principalRole")));
+    forwardedPrincipals.add(principal);
     String method = exchange.getRequestMethod();
     String[] segments = path.split("/");
     try {
@@ -486,11 +513,11 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         respond(
             exchange,
             200,
-            objectMapper.writeValueAsString(nodeBLocal.openView(environmentId, request)));
+            objectMapper.writeValueAsString(
+                nodeBLocal.openView(environmentId, request, principal)));
         return;
       }
       if ("GET".equals(method) && segments.length == 7 && "views".equals(segments[5])) {
-        Map<String, String> parameters = queryParameters(exchange.getRequestURI().getRawQuery());
         EnvironmentIdeReadViewDTO read = new EnvironmentIdeReadViewDTO();
         read.setBrowserSessionId(parameters.get("browserSessionId"));
         read.setEventNodeId(parameters.get("eventNodeId"));
@@ -500,7 +527,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         respond(
             exchange,
             200,
-            objectMapper.writeValueAsString(nodeBLocal.readView(environmentId, segments[6], read)));
+            objectMapper.writeValueAsString(
+                nodeBLocal.readView(environmentId, segments[6], read, principal)));
         return;
       }
       if ("PUT".equals(method) && segments.length == 8 && "directory".equals(segments[7])) {
@@ -511,13 +539,13 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             exchange,
             200,
             objectMapper.writeValueAsString(
-                nodeBLocal.changeDirectory(environmentId, segments[6], request)));
+                nodeBLocal.changeDirectory(environmentId, segments[6], request, principal)));
         return;
       }
       if ("POST".equals(method) && segments.length == 8 && "focus-terminal".equals(segments[7])) {
         EnvironmentIdeViewBindingDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
-        nodeBLocal.focusTerminal(environmentId, segments[6], request);
+        nodeBLocal.focusTerminal(environmentId, segments[6], request, principal);
         respond(exchange, 204, "");
         return;
       }
@@ -526,14 +554,14 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
           && "apply-mobile-layout".equals(segments[7])) {
         EnvironmentIdeViewBindingDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
-        nodeBLocal.collapseMobile(environmentId, segments[6], request);
+        nodeBLocal.collapseMobile(environmentId, segments[6], request, principal);
         respond(exchange, 204, "");
         return;
       }
       if ("POST".equals(method) && segments.length == 8 && "close".equals(segments[7])) {
         EnvironmentIdeCloseViewDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeCloseViewDTO.class);
-        nodeBLocal.closeView(environmentId, segments[6], request);
+        nodeBLocal.closeView(environmentId, segments[6], request, principal);
         respond(exchange, 204, "");
         return;
       }
@@ -724,13 +752,14 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       return true;
     }
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
       return Optional.empty();
     }
   }

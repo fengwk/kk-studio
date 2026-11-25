@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 
 /**
  * 内部 IDE REST 的路径契约，供跨节点客户端与内部 controller 共用，避免两侧路径漂移。
@@ -52,6 +53,25 @@ public final class IdeInternalPaths {
                       request.getExpectedDaemonInstanceId(), "expectedDaemonInstanceId")));
     }
     return path.toString();
+  }
+
+  /**
+   * Append authenticated caller identity to the canonical path so it is covered by the HMAC
+   * signature.
+   */
+  public static String withPrincipal(String path, StudioPrincipal principal) {
+    if (principal == null) {
+      throw new NullPointerException("principal");
+    }
+    String separator = path.contains("?") ? "&" : "?";
+    return path
+        + separator
+        + "principalUserId="
+        + UrlEncoding.encode(principal.userId().toString())
+        + "&principalUsername="
+        + UrlEncoding.encode(principal.username())
+        + "&principalRole="
+        + UrlEncoding.encode(principal.role().name());
   }
 
   private static String requireUuid(String value, String field) {

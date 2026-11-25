@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
@@ -94,10 +95,13 @@ public class IdeClusterClient {
   }
 
   public EnvironmentIdeViewDTO openView(
-      EnvironmentId environmentId, ClusterOwnerRoute owner, EnvironmentIdeOpenViewDTO request) {
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      EnvironmentIdeOpenViewDTO request,
+      StudioPrincipal principal) {
     return exchange(
         "POST",
-        IdeInternalPaths.viewsPath(environmentId),
+        IdeInternalPaths.withPrincipal(IdeInternalPaths.viewsPath(environmentId), principal),
         owner,
         request,
         EnvironmentIdeViewDTO.class);
@@ -107,10 +111,12 @@ public class IdeClusterClient {
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
       String viewId,
-      EnvironmentIdeChangeDirectoryDTO request) {
+      EnvironmentIdeChangeDirectoryDTO request,
+      StudioPrincipal principal) {
     return exchange(
         "PUT",
-        IdeInternalPaths.directoryPath(environmentId, viewId),
+        IdeInternalPaths.withPrincipal(
+            IdeInternalPaths.directoryPath(environmentId, viewId), principal),
         owner,
         request,
         EnvironmentIdeViewDTO.class);
@@ -120,10 +126,12 @@ public class IdeClusterClient {
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
       String viewId,
-      EnvironmentIdeReadViewDTO request) {
+      EnvironmentIdeReadViewDTO request,
+      StudioPrincipal principal) {
     return exchange(
         "GET",
-        IdeInternalPaths.viewPath(environmentId, viewId, request),
+        IdeInternalPaths.withPrincipal(
+            IdeInternalPaths.viewPath(environmentId, viewId, request), principal),
         owner,
         null,
         EnvironmentIdeViewSnapshotDTO.class,
@@ -135,8 +143,15 @@ public class IdeClusterClient {
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
       String viewId,
-      EnvironmentIdeViewBindingDTO request) {
-    exchange("POST", IdeInternalPaths.terminalPath(environmentId, viewId), owner, request, null);
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
+    exchange(
+        "POST",
+        IdeInternalPaths.withPrincipal(
+            IdeInternalPaths.terminalPath(environmentId, viewId), principal),
+        owner,
+        request,
+        null);
   }
 
   public void openAttachment(
@@ -145,10 +160,13 @@ public class IdeClusterClient {
       String viewId,
       String sessionId,
       String resourceId,
-      EnvironmentIdeViewBindingDTO request) {
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
     exchange(
         "POST",
-        IdeInternalPaths.attachmentPath(environmentId, viewId, sessionId, resourceId),
+        IdeInternalPaths.withPrincipal(
+            IdeInternalPaths.attachmentPath(environmentId, viewId, sessionId, resourceId),
+            principal),
         owner,
         request,
         null);
@@ -158,19 +176,27 @@ public class IdeClusterClient {
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
       String viewId,
-      EnvironmentIdeViewBindingDTO request) {
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
     exchange(
-        "POST", IdeInternalPaths.mobileLayoutPath(environmentId, viewId), owner, request, null);
+        "POST",
+        IdeInternalPaths.withPrincipal(
+            IdeInternalPaths.mobileLayoutPath(environmentId, viewId), principal),
+        owner,
+        request,
+        null);
   }
 
   public void closeView(
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
       String viewId,
-      EnvironmentIdeCloseViewDTO request) {
+      EnvironmentIdeCloseViewDTO request,
+      StudioPrincipal principal) {
     exchange(
         "POST",
-        IdeInternalPaths.closePath(environmentId, viewId),
+        IdeInternalPaths.withPrincipal(
+            IdeInternalPaths.closePath(environmentId, viewId), principal),
         owner,
         request,
         null,

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
@@ -237,24 +239,73 @@ class GlobalStorageToolResultHistoryMaterializerTest {
     verify(uploadService, never()).delete(any());
   }
 
-  /** 文本输出传递资源 URI 时，也为当前 Session 建立持有。 */
+  /** 文本输出传递资源 URI 时，只能复用当前 Session 已有持有。 */
   @Test
-  void retainsResourceReferencesMentionedInTextOutput() {
+  void acceptsResourceReferencesMentionedInTextOutputOnlyWhenAlreadyHeld() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     StorageUploadService uploads = mock(StorageUploadService.class);
     StorageBlobManager blobs = mock(StorageBlobManager.class);
     SessionBlobRefManager refs = mock(SessionBlobRefManager.class);
+    when(refs.contains(sessionId, blobId)).thenReturn(true);
     stubBlob(blobs, blobId, "image/png", 3L);
     String text = "See resource://files/" + blobId + " for the image.";
+    String json = "{\"ref\":\"resource://files/" + blobId + "\"}";
 
     materializer(uploads, blobs, refs)
         .materialize(
             sessionId,
             "tool",
-            new ToolResult("call", List.of(new TextResultContent(text)), false, "{}"));
+            new ToolResult(
+                "call",
+                List.of(new TextResultContent(text), new JsonResultContent(json)),
+                false,
+                "{}"));
 
-    verify(refs).retainRef(sessionId, blobId);
+    verify(refs, times(2)).contains(sessionId, blobId);
+    verify(refs, never()).retainRef(sessionId, blobId);
+  }
+
+  @Test
+  void rejectsUnheldTextReferenceBeforeBlobLookup() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    SessionBlobRefManager refs = mock(SessionBlobRefManager.class);
+    String text = "See resource://files/" + blobId;
+
+    assertThrows(
+        ToolOutcomeMaterializationException.class,
+        () ->
+            materializer(mock(StorageUploadService.class), blobs, refs)
+                .materialize(
+                    sessionId,
+                    "tool",
+                    new ToolResult("call", List.of(new TextResultContent(text)), false, "{}")));
+
+    verify(refs).contains(sessionId, blobId);
+    verifyNoInteractions(blobs);
+  }
+
+  @Test
+  void rejectsUnheldJsonReferenceBeforeBlobLookup() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    SessionBlobRefManager refs = mock(SessionBlobRefManager.class);
+    String json = "{\"resource\":\"resource://files/" + blobId + "\"}";
+
+    assertThrows(
+        ToolOutcomeMaterializationException.class,
+        () ->
+            materializer(mock(StorageUploadService.class), blobs, refs)
+                .materialize(
+                    sessionId,
+                    "tool",
+                    new ToolResult("call", List.of(new JsonResultContent(json)), false, "{}")));
+
+    verify(refs).contains(sessionId, blobId);
+    verifyNoInteractions(blobs);
   }
 
   private static GlobalStorageToolResultHistoryMaterializer materializer(

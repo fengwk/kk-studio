@@ -36,6 +36,7 @@ class IdeSnapshotsTest {
   private static final DaemonConnectionIdentity IDENTITY =
       new DaemonConnectionIdentity(ENV, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
   private static final UUID VIEW = UUID.fromString("11111111-2222-3333-4444-555555555555");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
   private static final UUID BROWSER_SESSION =
       UUID.fromString("66666666-7777-8888-9999-aaaaaaaaaaaa");
   private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
@@ -155,8 +156,8 @@ class IdeSnapshotsTest {
 
   @Test
   void replacedEpochTicketIsRevokedWhileTheCurrentEpochTicketSurvives() {
-    tickets.issue(IDENTITY, VIEW.toString(), 7L, "/ws");
-    tickets.issue(IDENTITY, VIEW.toString(), 8L, "/ws");
+    tickets.issue(IDENTITY, VIEW.toString(), 7L, "/ws", USER_ID);
+    tickets.issue(IDENTITY, VIEW.toString(), 8L, "/ws", USER_ID);
     assertEquals(2, tickets.pendingCount());
 
     transport.replies.add(snapshot(1L, summary(7L, "/dir")));

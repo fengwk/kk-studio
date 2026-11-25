@@ -55,6 +55,7 @@ class PlatformResourceContentReaderMediaTest {
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
     reader = new PlatformResourceContentReader(refs, blobManager, blobs);
+    when(refs.contains(any(), any())).thenReturn(true);
 
     sessionId = UUID.randomUUID();
     blobId = UUID.randomUUID();
@@ -122,9 +123,9 @@ class PlatformResourceContentReaderMediaTest {
     verifyNoInteractions(blobs);
   }
 
-  /** 首次读取即为当前 Session 建立持有，避免有效资源在 Session 删除前被回收。 */
+  /** 读取只复用 Session 已有持有，不在读取路径建立新关系。 */
   @Test
-  void readingResourceRetainsItForTheSession() {
+  void readingResourceRequiresExistingSessionHold() {
     stubBlob("image/png", 3L);
     TurnMediaCapabilities capabilities =
         capabilities(
@@ -132,7 +133,7 @@ class PlatformResourceContentReaderMediaTest {
 
     read(capabilities, "resource://files/" + blobId, deadline());
 
-    verify(refs).retainRef(sessionId, blobId);
+    verify(refs).contains(sessionId, blobId);
   }
 
   /** 冻结能力快照不含该模态时即拒绝，即使同一 Blob 的 MIME 在别处被声明为媒体：绝不反查实时模型。 */

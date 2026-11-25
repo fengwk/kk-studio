@@ -136,6 +136,11 @@ describe('Canvas lazy resource media', () => {
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
     revealPreview()
     const image = await screen.findByRole('img', { name: 'image.asset' })
+    expect(getCanvasResourcePreviewUrl).toHaveBeenCalledWith(
+      CANVAS_ID,
+      BLOB_ASSET,
+      { signal: expect.any(AbortSignal) },
+    )
     expect(image).toHaveAttribute('src', 'https://s3.example/preview.webp')
     expect(image).toHaveAttribute('width', '1122')
     expect(image).toHaveAttribute('height', '1402')
@@ -352,6 +357,11 @@ describe('Canvas lazy resource media', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '播放音频 audio.asset' }))
     await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce())
+    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(
+      CANVAS_ID,
+      BLOB_ASSET,
+      { signal: expect.any(AbortSignal) },
+    )
     const audio = await waitFor(() => {
       const element = document.querySelector('audio')
       expect(element).not.toBeNull()

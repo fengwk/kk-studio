@@ -19,12 +19,15 @@ export function useCanvasResourceActions(resource: Resource) {
   }, [])
 
   const ensureSigned = useCallback((intent: OriginalIntent) => {
+    if (!resource.blobId) {
+      return
+    }
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     setLoading(true)
     setError(null)
     setFulfilled(false)
-    void getCanvasResourceOriginalUrl(resource.canvasId, resource.id)
+    void getCanvasResourceOriginalUrl(resource.canvasId, resource.blobId)
       .then(({ url }) => {
         if (requestIdRef.current !== requestId) {
           return
@@ -42,7 +45,7 @@ export function useCanvasResourceActions(resource: Resource) {
           setLoading(false)
         }
       })
-  }, [resource.canvasId, resource.id, resource.name])
+  }, [resource.blobId, resource.canvasId, resource.name])
 
   return { loading, error, fulfilled, ensureSigned }
 }

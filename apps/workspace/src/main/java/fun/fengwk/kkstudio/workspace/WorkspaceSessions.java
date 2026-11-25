@@ -123,6 +123,7 @@ public class WorkspaceSessions {
             HarnessRuntimeRequestMapper.toUserMessageContents(request.message()));
     var accepted =
         acceptance.createSession(
+            actor.userId(),
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.NewRootSession(session, thread, branch, yolo),
                 List.of(new NewThreadCommand(new UserMessageCommandPayload(message), key))));
@@ -142,12 +143,13 @@ public class WorkspaceSessions {
     return new SessionCreatedDTO(session, thread, command, Long.toString(spaces.advance(spaceId)));
   }
 
-  void submitScheduledMessage(UUID thread, String text, UUID key) {
+  void submitScheduledMessage(UUID userId, UUID thread, String text, UUID key) {
     var message =
         new AgentMessage(
             AgentMessageRole.USER,
             HarnessRuntimeRequestMapper.toUserMessageContents(List.of(new TextDTO(text))));
     acceptance.acceptOnThread(
+        userId,
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(thread),
             List.of(new NewThreadCommand(new UserMessageCommandPayload(message), key))));

@@ -17,7 +17,8 @@ public record IdeBrowserUseIntentQuery(
     String browserSessionId,
     String environmentId,
     String viewId,
-    String claimId) {
+    String claimId,
+    String userId) {
 
   public ConnectionIdentity identity() {
     return ConnectionIdentity.parse(eventNodeId, connectionId);
@@ -39,23 +40,30 @@ public record IdeBrowserUseIntentQuery(
     return Uuids.parseCanonical(claimId, "claimId");
   }
 
+  public UUID user() {
+    return Uuids.parseCanonical(userId, "userId");
+  }
+
   public static IdeBrowserUseIntentQuery of(
       ConnectionIdentity identity,
       UUID browserSessionId,
       EnvironmentId environmentId,
       UUID viewId,
-      UUID claimId) {
+      UUID claimId,
+      UUID userId) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(browserSessionId, "browserSessionId");
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(claimId, "claimId");
+    Objects.requireNonNull(userId, "userId");
     return new IdeBrowserUseIntentQuery(
         identity.eventNodeId().toString(),
         identity.connectionId().toString(),
         browserSessionId.toString(),
         environmentId.toString(),
         viewId.toString(),
-        claimId.toString());
+        claimId.toString(),
+        userId.toString());
   }
 }

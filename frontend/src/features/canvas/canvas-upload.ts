@@ -140,7 +140,6 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
       // 交由存储过期回收；绝不删除已消费（complete）的句柄。
       const alias = reserveNodeAlias(file.name)
-      const blobId = completed.type === 'READY' ? completed.blobId : uploadId
       try {
         await executeCommands([{
           type: 'CREATE_NODE',
@@ -150,7 +149,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
           resources: [{
             type: 'BLOB',
             name: file.name,
-            blobId,
+            uploadId,
           }],
         }])
         if (!active()) {

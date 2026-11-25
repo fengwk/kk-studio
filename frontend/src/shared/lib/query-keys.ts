@@ -72,11 +72,11 @@ export const queryKeys = {
     canvases: ['studio', 'canvases'] as const,
     canvas: (canvasId: string) => ['studio', 'canvas', canvasId] as const,
     canvasFunctions: ['studio', 'canvas-functions'] as const,
-    canvasResourcePreview: (canvasId: string, resourceId: string) => (
-      ['studio', 'canvas-resource', canvasId, resourceId, 'preview'] as const
+    canvasResourcePreview: (canvasId: string, blobId: string) => (
+      ['studio', 'canvas-blob', canvasId, blobId, 'preview'] as const
     ),
-    canvasResourceOriginal: (canvasId: string, resourceId: string) => (
-      ['studio', 'canvas-resource', canvasId, resourceId, 'original'] as const
+    canvasResourceOriginal: (canvasId: string, blobId: string) => (
+      ['studio', 'canvas-blob', canvasId, blobId, 'original'] as const
     ),
   },
   interactions: {

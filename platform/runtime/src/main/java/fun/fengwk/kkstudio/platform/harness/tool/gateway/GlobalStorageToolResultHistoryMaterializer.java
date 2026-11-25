@@ -68,10 +68,10 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     List<ResultContent> stable = new ArrayList<>(source.size());
     for (ResultContent content : source) {
       if (content instanceof TextResultContent text) {
-        retainReferencedResources(sessionId, text.text());
+        requireExistingReferencedResources(sessionId, text.text());
         stable.add(content);
       } else if (content instanceof JsonResultContent json) {
-        retainReferencedResources(sessionId, json.json());
+        requireExistingReferencedResources(sessionId, json.json());
         stable.add(content);
       } else if (content instanceof ResourceResultContent resource) {
         stable.add(stableResource(sessionId, resource, maxOutputBytes));
@@ -85,14 +85,19 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
         result.toolCallId(), List.copyOf(stable), result.error(), result.detailsJson());
   }
 
-  private void retainReferencedResources(UUID sessionId, String text) {
+  private void requireExistingReferencedResources(UUID sessionId, String text) {
     for (UUID blobId : ResourceUri.referencedFiles(text)) {
+      // Text/JSON tool output may reference only resources this session already owns. Do not
+      // turn arbitrary global blob IDs into new session references during materialization.
+      if (!refManager.contains(sessionId, blobId)) {
+        throw new ToolOutcomeMaterializationException(
+            "tool output references a resource not owned by this session");
+      }
       StorageBlob blob = blobManager.getBlob(blobId);
       if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
         throw new ToolOutcomeMaterializationException(
             "tool output references an unavailable resource");
       }
-      refManager.retainRef(sessionId, blobId);
     }
   }
 

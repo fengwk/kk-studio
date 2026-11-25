@@ -42,6 +42,7 @@ class IdeBrowserUseInternalControllerTest {
   private static final UUID VIEW = UUID.fromString("33333333-3333-3333-3333-333333333333");
   private static final UUID BOUND_VIEW = UUID.fromString("55555555-5555-5555-5555-555555555555");
   private static final UUID CLAIM = UUID.fromString("44444444-4444-4444-4444-444444444444");
+  private static final UUID USER = UUID.fromString("88888888-8888-8888-8888-888888888888");
   private static final String SECRET = "test-cluster-secret-0123456789abcdef";
 
   private HmacClusterInternalAuthentication authentication;
@@ -118,6 +119,7 @@ class IdeBrowserUseInternalControllerTest {
         .andExpect(jsonPath("$.eventNodeId").value(NODE.toString()))
         .andExpect(jsonPath("$.connectionId").value(CONNECTION.toString()))
         .andExpect(jsonPath("$.browserSessionId").value(BROWSER_SESSION.toString()))
+        .andExpect(jsonPath("$.userId").value(USER.toString()))
         .andExpect(jsonPath("$.revision").value("1"))
         .andExpect(jsonPath("$.views.length()").value(1))
         .andExpect(jsonPath("$.views[0].viewId").value(BOUND_VIEW.toString()))
@@ -220,7 +222,7 @@ class IdeBrowserUseInternalControllerTest {
   }
 
   private long registerUsage(long revision, IdeBrowserUseView... views) {
-    long generation = registry.register(identity());
+    long generation = registry.register(identity(), USER);
     registry.accept(
         identity(), generation, new IdeBrowserUse(BROWSER_SESSION, revision, List.of(views)));
     return generation;
@@ -229,9 +231,9 @@ class IdeBrowserUseInternalControllerTest {
   private String intentBody() {
     return """
         {"eventNodeId":"%s","connectionId":"%s","browserSessionId":"%s","environmentId":"%s",
-         "viewId":"%s","claimId":"%s"}
+         "viewId":"%s","claimId":"%s","userId":"%s"}
         """
-        .formatted(NODE, CONNECTION, BROWSER_SESSION, ENVIRONMENT, VIEW, CLAIM);
+        .formatted(NODE, CONNECTION, BROWSER_SESSION, ENVIRONMENT, VIEW, CLAIM, USER);
   }
 
   private static IdeBrowserUseView intent() {

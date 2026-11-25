@@ -165,7 +165,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 | `/api/chat-spaces/**` | 空间的所有者。 |
 | `/api/harness/**` | Thread 或 Session 所属空间的所有者；插件后台任务只限管理员。 |
 | `/api/canvas/canvases/{id}/**` | 画布所属空间的所有者；画布函数目录对所有用户开放。 |
-| `/api/ide/**`、`/ide/**` | 登录用户可为就绪的环境打开 VS Code。服务端将视图绑定到发起连接及其用户 ID；控制面与数据面都校验用户 ID 和已有的浏览器会话绑定，复用旧绑定时也校验。把文件发送到视图还须通过会话附件授权。 |
+| `/api/ide/**`、`/ide/**` | 登录用户可为就绪的环境打开 VS Code。控制面从认证 `StudioPrincipal` 取得用户 ID，并将视图绑定到该用户与发起连接的浏览器会话；控制面校验已认证用户、浏览器会话和绑定代次，复用旧绑定时也重新校验。数据面校验登录用户与 IDE Cookie 绑定的用户、视图和当前绑定代次，不另收浏览器会话 ID；恢复视图时更换绑定代次，使旧 Cookie 失效。把文件发送到视图还须通过会话附件授权。 |
 | `/api/platform/storage/uploads/**` | 预约记录上传者；完成、取消只限上传者。 |
 | `/api/platform/config-sync/**`、管理和配置接口 | 只限管理员，含读取配置、同步导出和导入预检；不按 HTTP 方法分类。 |
 | `/api/platform/agent-summaries`、`/api/platform/model-summaries`、`/api/platform/environment-summaries` | 登录用户可读。分别返回 Agent 的执行选择、模型及可选变体、环境的就绪状态和能力，不含凭据、请求头或配置原文。 |
@@ -194,7 +194,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 | `studio_user` | `id uuid PK`、`username varchar(32) UNIQUE`（CHECK 用户名规则）、`password_hash`、`profile jsonb NOT NULL DEFAULT '{}'`（CHECK 为 JSON 对象）、`role`（CHECK 为 `ADMIN` 或 `USER`）、可空 `disabled_at`、`created_at`、`updated_at`。V1 写入内置管理员 `kkstudio`，密码哈希预先算好。 |
 | `login_session` | `token_hash bytea PK`（登录令牌的 SHA-256）、`user_id FK → studio_user ON DELETE CASCADE`、`created_at`、`expires_at`；按 `user_id` 建索引。登录时顺带删除该用户已过期的记录。 |
 
-`storage_upload` 增加 `owner_user_id FK → studio_user RESTRICT`。
+`storage_upload` 增加 `owner_user_id FK → studio_user RESTRICT`，用户上传预约记录上传者；complete/delete 与资源引用只能作用于本人上传。可信服务端 staging 使用 NULL owner，并且只可由内部 ownerless 调用路径消费，不能作为用户上传的授权旁路。Canvas BLOB 命令的 HTTP 输入是 READY `uploadId`，服务端按已认证用户锁定上传、取权威文件事实并登记 Blob 持有边；持久资源仍保存 `blobId`。
 
 `position` 为各自同级序列内从 0 起的整数，使用可延迟唯一约束保证批量重排。所有目录结构写按 ChatSpace 行 `FOR UPDATE` 串行，在同一事务内更新两侧顺序、递增 `tree_version`、保留至少一个顶层目录并校验无环；改名不改变结构，不递增 `tree_version`。同一空间内移动只改归属边，历史 ID、Canvas revision、定时目标和深链不变；不能跨空间移动。删除先取 ChatSpace 行锁，再取 Harness 锁。已有 Thread 的发送、停止、审批和问卷回答不取 ChatSpace 锁：发送和停止与删除取同一 Harness 树锁；审批和问卷回答只锁目标 Thread 行，不锁执行根，删除同样锁住闭包内的全部 Thread 行。删除在锁内复验没有待处理命令、交互或执行，晚到的一方失败而不会穿透。运行状态更新不获取空间锁、不改目录顺序。同一 Session 内公开 Thread 名称唯一，分支和改名在 Session 行锁内校验。归档先锁所有者的 `studio_user` 行，再锁空间行，避免并发归档清空该用户的活跃列表；归档只改 `archived_at` 和版本。改变角色或账号启用状态时先取得同一把用户管理事务锁，再锁用户行，保证至少一名启用的管理员。登录签发令牌前在用户行锁内复验启用状态和密码哈希；禁用和重置在同一把用户行锁内撤销登录。
 
@@ -271,7 +271,7 @@ flowchart TB
 | `GET /schedules/{id}/runs?before={cursor}` | 展开时才查；省略游标取最新五条，`before` 取下一页较早记录，返回 `{items,olderCursor}`。游标是 `(scheduledAt,id)` 的不透明表示，同一任务内严格按该组合倒序，不查总数、不用偏移量。客户端保留本次展开的页游标以返回较新页，收起后丢弃。`ScheduleRun` 含 `id, scheduledAt, startedAt, timeZone, result, reason` 和可选的 `thread:{sessionId,id,title}`；只返回当前空间可读的公开 Thread，点击时仍按统一打开流程复验。未提交的记录显示调度原因；已提交但没有可读 Thread 时不返回链接。 |
 | `GET /api/harness/interactions`（保留） | 带 `rootThreadId` 时返回该根及子执行的待处理审批和问卷；不带时按当前用户可访问的全部空间查询，管理员另含插件后台任务。条目含执行根 ID、标题、最后活动时间及来源；空间来源另带空间 ID 和名称。「待处理」按执行根合并，同根最后一项处理完才移出。 |
 
-附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}` 或 `/api/canvas/canvases/{canvasId}/blobs/{blobId}` 下的 `POST /download-url`、`POST /preview-url`。Session 校验 `session_blob_ref`，画布校验该文档的资源引用。继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。
+附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url`、`preview-url` 和 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url`、`preview-url`，均为 POST。Session 取址校验当前用户对 Session 的资源访问权及 `session_blob_ref` 持有边；Canvas 取址校验 Canvas 归属与该画布对 Blob 的持有边。任一不满足均返回 404，不提供凭 Blob ID 的通用取址。接口继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 为 Markdown 资源链接提供同源预览与下载流，校验 Session 访问权、持有边和 Blob ACTIVE 状态。
 
 用户与登录接口不在空间路径下：
 

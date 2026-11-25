@@ -6,6 +6,7 @@ import { getCanvasResourceOriginalUrl } from '@/features/canvas/canvas-api'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const RESOURCE_ID = 'd5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a'
+const BLOB_ID = 'e5f6a7b8-9c0d-4e1f-8a2b-3c4d5e6f7a8b'
 
 vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
@@ -17,7 +18,7 @@ function resource(overrides: Partial<Resource> = {}): Resource {
     canvasId: CANVAS_ID,
     ownerNodeId: '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a',
     resourceIndex: 0,
-    blobId: 'blob-asset',
+    blobId: BLOB_ID,
     name: 'image.png',
     textContent: null,
     kind: 'IMAGE',
@@ -73,7 +74,7 @@ describe('useCanvasResourceActions', () => {
     act(() => result.current.ensureSigned('open'))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, RESOURCE_ID)
+    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, BLOB_ID)
     expect(result.current.fulfilled).toBe(true)
     expect(result.current.error).toBeNull()
     expect(clickSpy).toHaveBeenCalledOnce()
@@ -175,5 +176,18 @@ describe('useCanvasResourceActions', () => {
     })
 
     expect(clickSpy).not.toHaveBeenCalled()
+  })
+
+  it('skips signing when resource has no blobId (TEXT resource)', () => {
+    const { result } = renderHook(() => useCanvasResourceActions(resource({
+      kind: 'TEXT',
+      blobId: null,
+      textContent: 'hello',
+    })))
+
+    act(() => result.current.ensureSigned('open'))
+
+    expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
+    expect(result.current.loading).toBe(false)
   })
 })

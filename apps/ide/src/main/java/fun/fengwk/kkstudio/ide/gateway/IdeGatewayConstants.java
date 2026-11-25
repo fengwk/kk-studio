@@ -6,6 +6,7 @@ import java.time.Duration;
 public final class IdeGatewayConstants {
 
   public static final String SESSION_COOKIE_NAME = "kk_ide_session";
+  public static final String INTERNAL_USER_ID_ATTRIBUTE = "kkIdeInternalUserId";
   public static final Duration DEFAULT_SESSION_TTL = Duration.ofHours(12);
   public static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofMinutes(5);
   public static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(10);

@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
 import javax.net.ssl.SNIHostName;
@@ -89,7 +91,8 @@ public class IdeRemoteDataPlaneForwarder {
       boolean management)
       throws IOException {
     Objects.requireNonNull(owner, "owner");
-    String targetPath = IdeDataPaths.dataHttpPath(environmentId, viewId, rawPathAndQuery);
+    UUID userId = authenticatedUserId(request);
+    String targetPath = IdeDataPaths.dataHttpPath(environmentId, viewId, rawPathAndQuery, userId);
     URI targetUri = owner.internalUrl().resolve(targetPath);
     Map<String, String> authHeaders =
         clusterClient.signHeaders(request.getMethod(), targetPath, owner);
@@ -132,7 +135,8 @@ public class IdeRemoteDataPlaneForwarder {
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       log.info(
-          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD_INTERRUPTED; environmentId={}; viewId={}; exception={}",
+          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD_INTERRUPTED;"
+              + " environmentId={}; viewId={}; exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -141,7 +145,8 @@ public class IdeRemoteDataPlaneForwarder {
       }
     } catch (Exception error) {
       log.info(
-          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD; environmentId={}; viewId={}; exception={}",
+          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD; environmentId={};"
+              + " viewId={}; exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -191,6 +196,15 @@ public class IdeRemoteDataPlaneForwarder {
     }
   }
 
+  private static UUID authenticatedUserId(HttpServletRequest request) {
+    Object principal = request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE);
+    if (!(principal instanceof StudioPrincipal studioPrincipal)) {
+      throw new IllegalStateException(
+          "authenticated Studio principal is required for IDE forwarding");
+    }
+    return Objects.requireNonNull(studioPrincipal.userId(), "principal.userId");
+  }
+
   static String ideCookie(HttpServletRequest request, String cookieName) {
     Cookie[] cookies = request.getCookies();
     if (cookies == null) {
@@ -228,7 +242,9 @@ public class IdeRemoteDataPlaneForwarder {
       String rawPathAndQuery)
       throws IOException {
     Objects.requireNonNull(owner, "owner");
-    String targetPath = IdeDataPaths.dataWebSocketPath(environmentId, viewId, rawPathAndQuery);
+    UUID userId = authenticatedUserId(request);
+    String targetPath =
+        IdeDataPaths.dataWebSocketPath(environmentId, viewId, rawPathAndQuery, userId);
     URI uri = owner.internalUrl();
     boolean secure = "https".equalsIgnoreCase(uri.getScheme());
     String host = uri.getHost();
@@ -313,7 +329,8 @@ public class IdeRemoteDataPlaneForwarder {
         Thread.currentThread().interrupt();
       }
       log.info(
-          "remote ide data plane forward failed; phase=IDE_REMOTE_WS_FORWARD; environmentId={}; viewId={}; exception={}",
+          "remote ide data plane forward failed; phase=IDE_REMOTE_WS_FORWARD; environmentId={};"
+              + " viewId={}; exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());

@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
@@ -41,34 +42,40 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
 
   @Override
   public EnvironmentIdeViewDTO openView(
-      EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request) {
+      EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request, StudioPrincipal principal) {
     Objects.requireNonNull(request, "request");
     return route(
         environmentId,
-        () -> local.openView(environmentId, request),
-        owner -> client.openView(environmentId, owner, request));
+        () -> local.openView(environmentId, request, principal),
+        owner -> client.openView(environmentId, owner, request, principal));
   }
 
   @Override
   public EnvironmentIdeViewDTO changeDirectory(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeChangeDirectoryDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeChangeDirectoryDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     return route(
         environmentId,
-        () -> local.changeDirectory(environmentId, parsedViewId, request),
-        owner -> client.changeDirectory(environmentId, owner, parsedViewId, request));
+        () -> local.changeDirectory(environmentId, parsedViewId, request, principal),
+        owner -> client.changeDirectory(environmentId, owner, parsedViewId, request, principal));
   }
 
   @Override
   public void focusTerminal(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     routeAction(
         environmentId,
-        () -> local.focusTerminal(environmentId, parsedViewId, request),
-        owner -> client.focusTerminal(environmentId, owner, parsedViewId, request));
+        () -> local.focusTerminal(environmentId, parsedViewId, request, principal),
+        owner -> client.focusTerminal(environmentId, owner, parsedViewId, request, principal));
   }
 
   @Override
@@ -77,6 +84,7 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
       String viewId,
       String sessionId,
       String resourceId,
+      StudioPrincipal principal,
       EnvironmentIdeViewBindingDTO request) {
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
@@ -86,43 +94,58 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
         environmentId,
         () ->
             local.openAttachment(
-                environmentId, parsedViewId, parsedSessionId, parsedResourceId, request),
+                environmentId, parsedViewId, parsedSessionId, parsedResourceId, principal, request),
         owner ->
             client.openAttachment(
-                environmentId, owner, parsedViewId, parsedSessionId, parsedResourceId, request));
+                environmentId,
+                owner,
+                parsedViewId,
+                parsedSessionId,
+                parsedResourceId,
+                request,
+                principal));
   }
 
   @Override
   public void collapseMobile(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     routeAction(
         environmentId,
-        () -> local.collapseMobile(environmentId, parsedViewId, request),
-        owner -> client.collapseMobile(environmentId, owner, parsedViewId, request));
+        () -> local.collapseMobile(environmentId, parsedViewId, request, principal),
+        owner -> client.collapseMobile(environmentId, owner, parsedViewId, request, principal));
   }
 
   @Override
   public void closeView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeCloseViewDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     routeAction(
         environmentId,
-        () -> local.closeView(environmentId, parsedViewId, request),
-        owner -> client.closeView(environmentId, owner, parsedViewId, request));
+        () -> local.closeView(environmentId, parsedViewId, request, principal),
+        owner -> client.closeView(environmentId, owner, parsedViewId, request, principal));
   }
 
   @Override
   public EnvironmentIdeViewSnapshotDTO readView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeReadViewDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     return route(
         environmentId,
-        () -> local.readView(environmentId, parsedViewId, request),
-        owner -> client.readView(environmentId, owner, parsedViewId, request));
+        () -> local.readView(environmentId, parsedViewId, request, principal),
+        owner -> client.readView(environmentId, owner, parsedViewId, request, principal));
   }
 
   private <T> T route(
