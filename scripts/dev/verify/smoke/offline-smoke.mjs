@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Container Canvas and offline Chat smoke against a running application.
+ * Container Canvas and offline Workspace smoke against a running application.
  *
- * Driven by `offline-chat.sh --with-app`; reads `CANVAS_TEST_APP_URL` and `CANVAS_TEST_IMAGE_FIXTURE`.
+ * Driven by `offline-workspace.sh --with-app`; reads `CANVAS_TEST_APP_URL` and `CANVAS_TEST_IMAGE_FIXTURE`.
  * The reusable steps take an injectable client (`jsonCall`, `newId`, `sleep`) so their wire payloads,
  * revision progression and replay idempotency are exercised for real by the contract tests.
  */
@@ -23,7 +23,7 @@ import {
   functionBatch,
   resourceBatch,
 } from './offline-canvas-contract.mjs'
-import { buildOfflineSessionRequest } from './offline-chat-payload.mjs'
+import { buildOfflineSessionRequest } from './offline-workspace-payload.mjs'
 import { createHttpClient } from '../e2e/lib/http.mjs'
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -237,9 +237,9 @@ const isMessage = (entry, role) =>
   entry.entryType.toUpperCase() === 'MESSAGE' && entryPayload(entry).message.role === role
 
 /** Offline Chat Space smoke: create a session with its first user message, then wait for quiescence. */
-async function offlineChat(client, spaceId) {
+async function offlineWorkspaceSession(client, spaceId) {
   const { jsonCall, sleep: wait } = client
-  const marker = `offline-chat-smoke-${randomUUID().replaceAll('-', '').slice(0, 8)}`
+  const marker = `offline-workspace-smoke-${randomUUID().replaceAll('-', '').slice(0, 8)}`
   const accepted = await jsonCall(
     'POST',
     `/api/chat-spaces/${spaceId}/sessions`,
@@ -262,7 +262,7 @@ async function offlineChat(client, spaceId) {
       await wait(250)
     }
   }
-  assert.ok(quiescent, `offline Chat thread did not become quiescent: ${JSON.stringify(current)}`)
+  assert.ok(quiescent, `offline workspace thread did not become quiescent: ${JSON.stringify(current)}`)
   assert.equal(current.thread.status, 'IDLE', JSON.stringify(current))
   assert.ok(
     !current.entries.some((entry) => entry.entryType.toUpperCase() === 'ASSISTANT_ERROR'),
@@ -398,7 +398,7 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.equal(seedanceNode.resources.length, 1)
   assert.equal(seedanceNode.resources[0].kind, 'VIDEO')
 
-  await offlineChat(client, space.id)
+  await offlineWorkspaceSession(client, space.id)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

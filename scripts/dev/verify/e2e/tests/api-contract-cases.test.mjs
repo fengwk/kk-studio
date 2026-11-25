@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
-import { problemError } from './fixtures/problem.mjs'
 import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
@@ -16,109 +15,6 @@ const FREE_L1_CASES = [
   'crud.provider.http_retry_override',
   'settings.system_contract_cas',
 ]
-
-/**
- * 只 fake HTTP 的 Chat + Environment 有状态后端：按当前契约建模 required-nullable 默认环境、
- * 整体替换（title/agentName/environmentName 全量）与未知/非 canonical Environment 的 400 拒绝，用来真实执行
- * `crud.chat.default_environment` case 并断言它发出的 method/path/body。
- */
-function chatDefaultEnvironmentFixture() {
-  const agent = {
-    name: 'fixture-agent',
-    execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: 'default' } },
-  }
-  const environments = new Map()
-  const chats = new Map()
-  const requests = []
-  let seq = 0
-  const nextId = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`
-  const call = async (method, path, body) => {
-    requests.push({ method, path, body })
-    const pathname = new URL(path, 'http://fixture.local').pathname
-    if (method === 'GET' && pathname === '/api/platform/agents') {
-      return { status: 200, json: [agent] }
-    }
-    if (method === 'POST' && pathname === '/api/platform/environments') {
-      const environment = {
-        id: nextId(),
-        name: body.name,
-        note: body.note,
-        daemonConfig: body.daemonConfig,
-        version: '0',
-        registrationToken: `tok-${body.name}`,
-      }
-      environments.set(environment.id, environment)
-      return { status: 201, json: environment }
-    }
-    if (method === 'POST' && pathname === '/api/chat/chats') {
-      const chat = {
-        id: nextId(),
-        title: body.title,
-        agentName: body.agentName,
-        environmentName: body.environmentName ?? null,
-        yoloEnabled: body.yoloEnabled === true,
-        version: '0',
-      }
-      chats.set(chat.id, chat)
-      return { status: 201, json: { ...chat } }
-    }
-    const chatMatch = pathname.match(/^\/api\/chat\/chats\/([^/]+)$/)
-    if (chatMatch) {
-      const id = decodeURIComponent(chatMatch[1])
-      const chat = chats.get(id)
-      if (method === 'GET') {
-        return { status: 200, json: { ...chat } }
-      }
-      if (method === 'PUT') {
-        if (body.expectedVersion !== chat.version) {
-          throw problemError(409, 'version_conflict', 'version conflict', pathname)
-        }
-        chat.title = body.title
-        chat.agentName = body.agentName
-        if (body.environmentName === null) {
-          chat.environmentName = null
-        } else {
-          if (String(body.environmentName).includes('/')) {
-            throw problemError(
-              400,
-              'validation',
-              "environmentName must not contain '/'",
-              pathname,
-            )
-          }
-          if (![...environments.values()].some((env) => env.name === body.environmentName)) {
-            throw problemError(
-              400,
-              'validation',
-              `unknown environment: ${body.environmentName}`,
-              pathname,
-            )
-          }
-          chat.environmentName = body.environmentName
-        }
-        chat.version = String(BigInt(chat.version) + 1n)
-        return { status: 200, json: { ...chat } }
-      }
-      if (method === 'DELETE') {
-        chats.delete(id)
-        return { status: 204, json: null }
-      }
-    }
-    const environmentMatch = pathname.match(/^\/api\/platform\/environments\/([^/]+)$/)
-    if (environmentMatch) {
-      const id = decodeURIComponent(environmentMatch[1])
-      if (method === 'GET') {
-        return { status: 200, json: { ...environments.get(id) } }
-      }
-      if (method === 'DELETE') {
-        environments.delete(id)
-        return { status: 204, json: null }
-      }
-    }
-    throw new Error(`unexpected call ${method} ${pathname}`)
-  }
-  return { ctx: { call }, requests }
-}
 
 test('provider HTTP retry and builtin Agent contracts are registered as free L1 cases', () => {
   // 测试意图：这些是零模型成本的 API 契约回归，必须注册为 L1 且无 real/tools 依赖，

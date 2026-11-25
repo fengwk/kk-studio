@@ -1,8 +1,8 @@
 # Canvas/Storage 隔离测试栈
 
-[compose.yaml](compose.yaml) 与 [scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 提供不依赖远端服务的容器测试底座：PostgreSQL、
+[compose.yaml](compose.yaml) 与 [scripts/dev/verify/smoke/offline-workspace.sh](../../scripts/dev/verify/smoke/offline-workspace.sh) 提供不依赖远端服务的容器测试底座：PostgreSQL、
 MinIO 与 bucket 初始化、一个可配置 HTTP mock，以及可选的当前 App 镜像。它用于 Canvas
-Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat 的确定性 smoke。
+Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线工作区的确定性 smoke。
 
 这个文件同时也是可靠性栈唯一的 Compose 定义，`canvas-test` / `app` profile 服务于本页的离线
 smoke，`reliability` profile 由
@@ -56,11 +56,11 @@ project 名：
 ## 一键验证
 
 ```bash
-./scripts/dev/verify/smoke/offline-chat.sh
-./scripts/dev/verify/smoke/offline-chat.sh --with-app
+./scripts/dev/verify/smoke/offline-workspace.sh
+./scripts/dev/verify/smoke/offline-workspace.sh --with-app
 ```
 
-[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 依次执行：
+[scripts/dev/verify/smoke/offline-workspace.sh](../../scripts/dev/verify/smoke/offline-workspace.sh) 依次执行：
 
 1. 以 `canvas-test` 和 `app` profile 分别校验 Compose 配置；
 2. 无确认提示地销毁同名隔离栈及其 PostgreSQL/MinIO volumes，从空数据启动；

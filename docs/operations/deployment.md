@@ -276,8 +276,8 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线工作区 smoke。�
 这个依赖条件，smoke 只等待常驻服务 `healthy`，再显式 `compose run --rm` 执行同一份初始化：
 
 ```bash
-./scripts/dev/verify/smoke/offline-chat.sh
-./scripts/dev/verify/smoke/offline-chat.sh --with-app
+./scripts/dev/verify/smoke/offline-workspace.sh
+./scripts/dev/verify/smoke/offline-workspace.sh --with-app
 ```
 
 完整步骤、mock routes 与真实 Seedance prepare-only 边界见
@@ -435,7 +435,7 @@ Canvas Function runtime 变量也只在启动期读取。
 
 构建代理与运行代理独立。App image build 支持
 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和
-`KK_STUDIO_MAVEN_BUILD_OPTS`；[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 与
+`KK_STUDIO_MAVEN_BUILD_OPTS`；[scripts/dev/verify/smoke/offline-workspace.sh](../../scripts/dev/verify/smoke/offline-workspace.sh) 与
 [scripts/dev/verify/performance/run.sh](../../scripts/dev/verify/performance/run.sh) 会从宿主 proxy 变量生成 build 参数，
 离线 smoke 对可解析的 HTTP(S) proxy 默认使用 host build network，performance 则只自动处理
 loopback proxy。供应链镜像扫描从宿主 `HTTP(S)_PROXY`/`ALL_PROXY`/`NO_PROXY`（含小写）生成 App 镜像的

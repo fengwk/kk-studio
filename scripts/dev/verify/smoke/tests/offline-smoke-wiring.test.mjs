@@ -188,7 +188,7 @@ test('test intent: createAndRun rejects revision or resource changes on replay',
 
 test('test intent: the smoke script lives outside the deploy runtime assets', () => {
   // Human host runners belong to scripts/; deploy/ keeps only compose/images/runtime assets.
-  assert.ok(existsSync(path.join(REPOSITORY_ROOT, 'scripts/dev/verify/smoke/offline-chat.sh')))
+  assert.ok(existsSync(path.join(REPOSITORY_ROOT, 'scripts/dev/verify/smoke/offline-workspace.sh')))
   assert.ok(!existsSync(path.join(REPOSITORY_ROOT, 'deploy/test/run.sh')))
 })
 

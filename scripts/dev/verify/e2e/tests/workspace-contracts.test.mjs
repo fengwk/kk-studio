@@ -115,6 +115,9 @@ function createSettingsPage(world) {
 
   const page = {
     getByRole(role, options = {}) {
+      if (role === 'link' && matchesName(options.name, 'AI 运行时')) {
+        return { click: async () => hydrate() }
+      }
       if (role === 'button' && matchesName(options.name, '保存')) {
         return {
           async click() {
@@ -140,7 +143,7 @@ function createSettingsPage(world) {
             return {
               async click() {
                 if (innerRole === 'button' && matchesName(innerOptions.name, '刷新')) {
-                  hydrate()
+                  view.draft = null
                   view.conflictVisible = false
                   resolveLoad()
                 }
@@ -181,14 +184,14 @@ function createSettingsPage(world) {
     },
   }
 
-  return { page, hydrate }
+  return page
 }
 
 function createHarness(world) {
   const pageErrors = []
   const consoleErrors = []
   const executed = []
-  const { page, hydrate } = createSettingsPage(world)
+  const page = createSettingsPage(world)
   const ui = {
     apiCtx: { call: (method, requestPath, body) => world.call(method, requestPath, body) },
     consoleErrors,
@@ -197,8 +200,7 @@ function createHarness(world) {
       assert.deepEqual(logs, [])
     },
     goto: async (requestPath) => {
-      assert.equal(requestPath, '/settings/aiRuntime')
-      hydrate()
+      assert.equal(requestPath, '/settings/preferences')
     },
     page,
     pageErrors,

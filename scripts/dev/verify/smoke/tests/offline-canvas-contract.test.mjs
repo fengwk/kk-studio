@@ -1,7 +1,7 @@
 /**
- * Contract regression for the offline chat and container Canvas smoke.
+ * Contract regression for the offline workspace and container Canvas smoke.
  *
- * 共享纯函数契约（offline-canvas-contract / offline-chat-payload）的成功与失败边界是这里的主回归面。
+ * 共享纯函数契约（offline-canvas-contract / offline-workspace-payload）的成功与失败边界是这里的主回归面。
  */
 
 import assert from 'node:assert/strict'
@@ -18,7 +18,7 @@ import {
   functionBatch,
   resourceBatch,
 } from '../offline-canvas-contract.mjs'
-import { buildOfflineSessionRequest } from '../offline-chat-payload.mjs'
+import { buildOfflineSessionRequest } from '../offline-workspace-payload.mjs'
 import {
   MARKER,
   REQUIRED_FUNCTIONS,
