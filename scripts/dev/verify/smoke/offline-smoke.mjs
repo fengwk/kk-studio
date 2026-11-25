@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Container Canvas and offline Chat smoke against a running application.
+ * Container Canvas and offline Workspace smoke against a running application.
  *
- * Driven by `offline-chat.sh --with-app`; reads `CANVAS_TEST_APP_URL` and `CANVAS_TEST_IMAGE_FIXTURE`.
+ * Driven by `offline-workspace.sh --with-app`; reads `CANVAS_TEST_APP_URL` and `CANVAS_TEST_IMAGE_FIXTURE`.
  * The reusable steps take an injectable client (`jsonCall`, `newId`, `sleep`) so their wire payloads,
  * revision progression and replay idempotency are exercised for real by the contract tests.
  */
@@ -23,7 +23,7 @@ import {
   functionBatch,
   resourceBatch,
 } from './offline-canvas-contract.mjs'
-import { buildOfflineSessionRequest } from './offline-chat-payload.mjs'
+import { buildOfflineSessionRequest } from './offline-workspace-payload.mjs'
 import { createHttpClient } from '../e2e/lib/http.mjs'
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i

@@ -90,7 +90,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | Daemon 单元测试与覆盖率 | `cd daemon && CGO_ENABLED=0 go test ./...`；行覆盖率可用 `go test -cover ./...`；IDE 扩展运行 `node --test daemon/ide-extension/extension.test.cjs`
 | Daemon 发行归档打包与验收 | `bash scripts/daemon/prepare-release.sh v<version> <os> <arch>`，再 `bash scripts/daemon/smoke-archive.sh <archive>`；归档只在同宿主平台上通过验收 |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
-| 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
+| 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-workspace.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
 | 确认矩阵有哪些 case | `./scripts/dev/verify/e2e/run.sh --list`、`./scripts/dev/verify/e2e/run.sh --docs` |
 | 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`node scripts/dev/verify/repository/check-sensitive-data.mjs` |
@@ -312,7 +312,7 @@ COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/t
 ```
 
 [`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
-[`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
+[`scripts/dev/verify/smoke/offline-workspace.sh`](../../scripts/dev/verify/smoke/offline-workspace.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
 `compose run --rm` 执行初始化。`--with-app` 验证 Canvas 持有的 Blob、Canvas revision 与 typed command
 变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线工作区。

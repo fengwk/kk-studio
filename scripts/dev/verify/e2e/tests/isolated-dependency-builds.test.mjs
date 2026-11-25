@@ -10,8 +10,8 @@ import test from 'node:test'
 import { REPOSITORY_ROOT } from '../../../tests/support/shell.mjs'
 
 const CASES = [
-  ['smoke/offline-chat.sh', [], 1],
-  ['smoke/offline-chat.sh', ['--with-app'], 1],
+  ['smoke/offline-workspace.sh', [], 1],
+  ['smoke/offline-workspace.sh', ['--with-app'], 1],
   ['performance/run.sh', [], 1],
   ['performance/run.sh', ['--skip-build'], 0],
   ['e2e/distributed.sh', ['up'], 2],
@@ -94,11 +94,11 @@ test('test intent: mc is built before start even when source builds are skipped'
     assert.deepEqual(calls[builds[0]].slice(-2), ['build', 'minio-init'], context)
     assert.ok(builds[0] < starts[0], context)
     assert.ok(!calls[starts[0]].includes('--build'), context)
-    if (script !== 'smoke/offline-chat.sh' || args.includes('--with-app')) {
+    if (script !== 'smoke/offline-workspace.sh' || args.includes('--with-app')) {
       assert.ok(calls[starts[0]].includes('--no-build'), context)
     }
     assert.equal(calls.filter((call) => call[0] === 'build').length, sourceBuilds, context)
-    if (script === 'smoke/offline-chat.sh') {
+    if (script === 'smoke/offline-workspace.sh') {
       const init = calls.findIndex((call) => call.includes('run') && call.at(-1) === 'minio-init')
       assert.ok(builds[0] < init, context)
     }

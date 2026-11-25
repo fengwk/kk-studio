@@ -14,7 +14,7 @@ WITH_APP=false
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev/verify/smoke/offline-chat.sh [--with-app]
+Usage: scripts/dev/verify/smoke/offline-workspace.sh [--with-app]
 
 Builds the current application image, starts the isolated test dependencies,
 waits for health checks, verifies ffmpeg/ffprobe and dependency reachability,
@@ -205,7 +205,7 @@ main().catch((error) => {
 '
 
 if [[ "$WITH_APP" == "true" ]]; then
-  step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Chat"
+  step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Workspace"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
   CANVAS_TEST_IMAGE_FIXTURE="$REPO_ROOT/platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/storage/media/tiny.png" \
     node "$SCRIPT_DIR/offline-smoke.mjs"
