@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -38,9 +39,31 @@ public class CanvasDocumentJdbcStore {
             """
             insert into canvas_document (id, title, revision, created_at, updated_at)
             values (:id, :title, 0, current_timestamp, current_timestamp)
+            on conflict (id) do nothing
             """)
         .param("id", document.getId())
         .param("title", document.getTitle())
+        .update();
+  }
+
+  List<CanvasDocumentDO> findByIds(Collection<UUID> ids) {
+    if (ids.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql("select " + COLUMNS + " from canvas_document where id in (:ids)")
+        .param("ids", ids)
+        .query(ROW_MAPPER)
+        .list();
+  }
+
+  int rename(UUID id, String title) {
+    return jdbc.sql(
+            """
+        update canvas_document set title = :title, updated_at = greatest(updated_at, clock_timestamp())
+        where id = :id
+        """)
+        .param("id", id)
+        .param("title", title)
         .update();
   }
 

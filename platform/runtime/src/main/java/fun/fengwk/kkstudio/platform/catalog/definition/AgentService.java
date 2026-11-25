@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.definition;
 
+import org.postgresql.util.PSQLException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -132,7 +134,21 @@ public class AgentService {
       throw DomainException.inUse(
           RESOURCE, RESOURCE + " is referenced by plugin configuration: " + name);
     }
-    if (!repository.deleteByName(name, expected)) {
+    boolean deleted;
+    try {
+      deleted = repository.deleteByName(name, expected);
+    } catch (DataIntegrityViolationException ex) {
+      if (ex.getMostSpecificCause() instanceof PSQLException postgres
+          && postgres.getServerErrorMessage() != null) {
+        String constraint = postgres.getServerErrorMessage().getConstraint();
+        if ("workspace_resource_agent_name_fkey".equals(constraint)
+            || "chat_space_default_agent_name_fkey".equals(constraint)) {
+          throw DomainException.conflict("RESOURCE_IN_USE", "Agent is referenced by a workspace");
+        }
+      }
+      throw ex;
+    }
+    if (!deleted) {
       Agent reread = repository.getByName(name);
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);

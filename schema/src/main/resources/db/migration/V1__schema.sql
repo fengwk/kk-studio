@@ -1562,3 +1562,112 @@ comment on column chat_session.chat_id is '所属 Chat（RESTRICT FK）';
 comment on column chat_session.created_at is '关联建立时间（毫秒精度）';
 
 create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
+
+create table chat_space (
+    id                     uuid          primary key,
+    owner_user_id          uuid          not null references studio_user (id) on delete restrict,
+    title                  varchar(256)  not null,
+    title_key              text          not null,
+    archived_at            timestamptz(3),
+    default_agent_name     varchar(64)   references agent (name) on delete restrict,
+    default_environment_id uuid          references environment (id) on delete set null,
+    default_yolo_enabled   boolean       not null default false,
+    version                bigint        not null default 0,
+    tree_version           bigint        not null default 0,
+    create_request_hash    text          not null,
+    constraint ck_chat_space_create_hash check (create_request_hash ~ '^[0-9a-f]{64}$'),
+    constraint uk_chat_space_owner_title unique (owner_user_id, title_key),
+    constraint ck_chat_space_versions check (version >= 0 and tree_version >= 0),
+    constraint ck_chat_space_title check (title <> '' and title_key <> '')
+);
+
+comment on table chat_space is '用户拥有的工作区边界；归档不移除目录、资源或执行历史';
+comment on column chat_space.id is '空间 ID，也是工作区树的标识';
+comment on column chat_space.owner_user_id is '空间所有者；管理员不能访问他人的空间';
+comment on column chat_space.title is '去除首尾空白后的空间名称';
+comment on column chat_space.title_key is '同一用户下忽略大小写的名称键，含归档空间';
+comment on column chat_space.archived_at is '归档时间；为空表示活跃';
+comment on column chat_space.default_agent_name is '默认 Agent，可为空；引用时不可删除 Agent';
+comment on column chat_space.default_environment_id is '默认环境，环境删除时清空';
+comment on column chat_space.default_yolo_enabled is '新建会话默认权限';
+comment on column chat_space.version is '空间配置版本，不因目录结构变化递增';
+comment on column chat_space.tree_version is '目录结构版本，结构写在空间行锁内递增';
+comment on column chat_space.create_request_hash is '原始创建参数的 SHA-256；配置变化不影响创建重放';
+
+create table workspace_folder (
+    id           uuid          primary key,
+    workspace_id uuid          not null references chat_space (id) on delete restrict,
+    parent_id    uuid,
+    name         varchar(256)  not null,
+    name_key     text          not null,
+    position     integer       not null,
+    create_request_hash text,
+    created_tree_version bigint,
+    constraint ck_workspace_folder_create check (
+        (create_request_hash is null and created_tree_version is null) or
+        (create_request_hash is not null and created_tree_version is not null
+            and create_request_hash ~ '^[0-9a-f]{64}$' and created_tree_version > 0)
+    ),
+    constraint uk_workspace_folder_id unique (workspace_id, id),
+    constraint fk_workspace_folder_parent foreign key (workspace_id, parent_id)
+        references workspace_folder (workspace_id, id) on delete restrict,
+    constraint uk_workspace_folder_name unique nulls not distinct (workspace_id, parent_id, name_key),
+    constraint uk_workspace_folder_position unique nulls not distinct (workspace_id, parent_id, position)
+        deferrable initially deferred,
+    constraint ck_workspace_folder_position check (position >= 0),
+    constraint ck_workspace_folder_parent check (parent_id <> id),
+    constraint ck_workspace_folder_name check (name <> '' and name_key <> '')
+);
+
+comment on table workspace_folder is '空间目录；跨空间父关系由复合外键禁止，事务持空间锁校验无环';
+comment on column workspace_folder.id is '目录 ID';
+comment on column workspace_folder.workspace_id is '所属 Chat Space';
+comment on column workspace_folder.parent_id is '同一空间的父目录；为空表示顶层';
+comment on column workspace_folder.name is '去除首尾空白后的目录名称';
+comment on column workspace_folder.name_key is '同级忽略大小写的目录名称键';
+comment on column workspace_folder.position is '同级目录中从零开始的顺序';
+comment on column workspace_folder.create_request_hash is '独立创建目录的原始请求摘要；空间自带的目录为空';
+comment on column workspace_folder.created_tree_version is '独立创建目录首次提交返回的树版本；重放不改变它';
+
+create table workspace_resource (
+    id           uuid        primary key,
+    workspace_id uuid        not null,
+    folder_id    uuid        not null,
+    position     integer     not null,
+    session_id   uuid        unique references harness_session (id) on delete restrict,
+    canvas_id    uuid        unique references canvas_document (id) on delete restrict,
+    agent_name   varchar(64) references agent (name) on delete restrict,
+    create_request_hash text,
+    created_tree_version bigint,
+    initial_command_id uuid,
+    constraint ck_workspace_resource_create check (
+        (create_request_hash is null and created_tree_version is null and initial_command_id is null) or
+        (create_request_hash is not null and created_tree_version is not null
+            and create_request_hash ~ '^[0-9a-f]{64}$' and created_tree_version > 0)
+    ),
+    constraint fk_workspace_resource_folder foreign key (workspace_id, folder_id)
+        references workspace_folder (workspace_id, id) on delete restrict,
+    constraint uk_workspace_resource_session unique (workspace_id, session_id),
+    constraint uk_workspace_resource_position unique (workspace_id, folder_id, position)
+        deferrable initially deferred,
+    constraint ck_workspace_resource_position check (position >= 0),
+    constraint ck_workspace_resource_kind check (num_nonnulls(session_id, canvas_id) = 1),
+    constraint ck_workspace_resource_id check (id = coalesce(session_id, canvas_id)),
+    constraint ck_workspace_resource_agent check ((session_id is null) = (agent_name is null))
+);
+
+comment on table workspace_resource is '目录与领域对象的唯一归属边，不保存领域对象的标题';
+comment on column workspace_resource.id is '领域对象 ID，与 Session 或 Canvas ID 相同';
+comment on column workspace_resource.workspace_id is '所属空间，由目录复合外键约束';
+comment on column workspace_resource.folder_id is '同一空间内放置该资源的目录';
+comment on column workspace_resource.position is '目录内资源序列中从零开始的顺序';
+comment on column workspace_resource.session_id is 'Session 资源 ID，与 canvas_id 互斥';
+comment on column workspace_resource.canvas_id is 'Canvas 资源 ID，与 session_id 互斥';
+comment on column workspace_resource.agent_name is 'Session 的固定 Agent；Canvas 不设置';
+comment on column workspace_resource.create_request_hash is '资源创建请求摘要，随归属边删除';
+comment on column workspace_resource.created_tree_version is '资源首次创建提交后的树版本';
+comment on column workspace_resource.initial_command_id is '首条消息接受结果的原始 Command ID；不是持有边';
+
+create index idx_chat_space_default_agent on chat_space (default_agent_name) where default_agent_name is not null;
+create index idx_chat_space_default_environment on chat_space (default_environment_id) where default_environment_id is not null;
+create index idx_workspace_resource_agent on workspace_resource (agent_name) where agent_name is not null;

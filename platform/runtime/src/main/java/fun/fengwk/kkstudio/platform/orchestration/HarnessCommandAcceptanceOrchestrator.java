@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
@@ -85,6 +86,19 @@ public class HarnessCommandAcceptanceOrchestrator {
     authorize(ownership, owner, command.target());
     AcceptancePreflight preflight = preflight(ownership, owner, command.target());
     return runtime.acceptCommands(command, preflight);
+  }
+
+  /** The caller locks the workspace and records the new placement in this physical transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public AcceptedCommands createSession(AcceptCommandsCommand command) {
+    if (!(command.target() instanceof AcceptCommandsTarget.NewRootSession)) {
+      throw new IllegalArgumentException("session creation requires a new root target");
+    }
+    return requireRuntime()
+        .acceptCommands(
+            command,
+            (session, commands, copiedEntries, branchSettings) ->
+                prepareUserContents(session.id(), commands, branchSettings));
   }
 
   /**

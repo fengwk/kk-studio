@@ -63,7 +63,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
   @BeforeEach
   void createRunningRequest() {
     s3.clear();
-    canvasId = commands.createCanvas("materialize-fence").id();
+    canvasId = commands.createCanvas(UUID.randomUUID(), "materialize-fence").id();
     nodeId = UUID.randomUUID();
     requestId = UUID.randomUUID();
     resourceId = UUID.randomUUID();
@@ -153,7 +153,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
   void textAndBlobWinnerRequireLiveOwnership(String change) {
     text("cached");
     if (change.equals("wrong-canvas")) {
-      canvasId = commands.createCanvas("other-canvas").id();
+      canvasId = commands.createCanvas(UUID.randomUUID(), "other-canvas").id();
     } else {
       invalidate(change);
     }

@@ -59,7 +59,8 @@ public class CanvasController {
 
   @PostMapping
   public ResponseEntity<CanvasDocumentDTO> create(@RequestBody CreateCanvasRequestDTO request) {
-    CanvasDocumentDTO created = mapper.toDto(canvasCommandService.createCanvas(request.getTitle()));
+    CanvasDocumentDTO created =
+        mapper.toDto(canvasCommandService.createCanvas(UUID.randomUUID(), request.getTitle()));
     return ResponseEntity.status(HttpStatus.CREATED).body(created);
   }
 

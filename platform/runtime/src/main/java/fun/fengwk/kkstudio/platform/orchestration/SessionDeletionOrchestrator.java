@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * 产品 owner 共享的 Harness Session 深删除：owner 删除在该 owner 对应仓库的排他行锁保护下（调用方已锁定或本服务自取），按归属枚举 Session，以
@@ -68,9 +69,15 @@ public class SessionDeletionOrchestrator {
   /** 深删已结算的公开执行根；调用方负责产品归属和定时目标门禁。 */
   @Transactional
   public void deleteThread(UUID rootThreadId) {
+    deleteThread(rootThreadId, null);
+  }
+
+  @Transactional
+  public void deleteThread(UUID rootThreadId, Long expectedVersion) {
     requireRuntime()
         .deleteThread(
             rootThreadId,
+            expectedVersion,
             (sessionId, removed, retained) -> {
               Set<UUID> live = Set.copyOf(SessionEntryResources.blobIds(retained));
               Set<UUID> held = Set.copyOf(refManager.listBlobIds(sessionId));
@@ -80,6 +87,13 @@ public class SessionDeletionOrchestrator {
                 }
               }
             });
+  }
+
+  @Transactional
+  public void deleteSession(UUID sessionId, Consumer<List<UUID>> removePlacement) {
+    requireRuntime()
+        .deleteSessions(
+            List.of(sessionId), removePlacement, ids -> ids.forEach(this::releaseSessionBlobRefs));
   }
 
   /** release Session 级 blob 引用（ref_count 对账 + 删除 session_blob_ref 行），先于 Session 删除。 */

@@ -118,7 +118,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   /** 空画布深删除后不留文档行。 */
   @Test
   void deleteEmptyCanvas() {
-    CanvasDocument canvas = commandService.createCanvas("empty");
+    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "empty");
     commandService.deleteCanvas(canvas.id(), canvas.revision());
     assertEquals(0L, count("canvas_document", "id = ?", canvas.id()));
   }
@@ -156,7 +156,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void deleteNodeReleasesBoundBlobReference() {
     UUID blobId = insertBlob("ACTIVE", 1L);
-    CanvasDocument canvas = commandService.createCanvas("blob-release");
+    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "blob-release");
     UUID nodeId = UUID.randomUUID();
     apply(
         canvas,
@@ -175,7 +175,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void failedBlobReleaseRollsBackNodeDeletion() {
     UUID blobId = insertBlob("DELETING", 0L);
-    CanvasDocument canvas = commandService.createCanvas("blob-release-failure");
+    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "blob-release-failure");
     UUID nodeId = UUID.randomUUID();
     apply(
         canvas,
@@ -200,7 +200,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   private Graph addGraph(CanvasFunctionRunStatus status) {
     // Blob 写入端已为两条资源边各持有一次引用。
     UUID blobId = insertBlob("ACTIVE", 2L);
-    CanvasDocument canvas = commandService.createCanvas("graph");
+    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "graph");
     UUID source = UUID.randomUUID();
     UUID function = UUID.randomUUID();
     UUID group = UUID.randomUUID();
@@ -345,12 +345,12 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
 
     @Transactional
     public CanvasDocument createAndCommit(String title) {
-      return commandService.createCanvas(title);
+      return commandService.createCanvas(UUID.randomUUID(), title);
     }
 
     @Transactional
     public UUID createAndRollback(String title) {
-      UUID id = commandService.createCanvas(title).id();
+      UUID id = commandService.createCanvas(UUID.randomUUID(), title).id();
       throw new RollbackAfterCreate(id);
     }
 

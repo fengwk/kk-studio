@@ -35,6 +35,7 @@ const moduleDocuments = [
   'schema.md',
   'web.md',
   'work.md',
+  'workspace.md',
 ]
 
 const documentPaths = [
@@ -434,6 +435,7 @@ const moduleDependencies = {
     'platform-runtime',
   ],
   'apps/chat': ['common', 'harness-runtime', 'platform-runtime'],
+  'apps/workspace': ['common', 'harness-runtime', 'platform-runtime', 'canvas-runtime', 'work'],
   'apps/ide': ['common', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
   'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   'plugins/media': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
@@ -447,6 +449,7 @@ const appArtifactProducts = {
   'canvas-runtime': 'canvas',
   chat: 'chat',
   ide: 'ide',
+  workspace: 'workspace',
 }
 
 /** 插件只经平台插件 SPI 接触宿主：Harness contributor/tool 契约、Canvas Function SPI 与共享值类型。 */
@@ -934,7 +937,9 @@ const tableOwners = [
   ['agent', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
   ['canvas_', 'apps/canvas'],
+  ['chat_space', 'apps/workspace'],
   ['chat', 'apps/chat'],
+  ['workspace_', 'apps/workspace'],
   ['cluster_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster'],
   ['durable_work', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness'],
   ['environment', 'platform/runtime'],
