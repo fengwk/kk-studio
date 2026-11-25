@@ -406,6 +406,9 @@ for (const vp of BROWSER_VIEWPORTS) {
     test('keeps a scrolled command menu stable across equivalent host command arrays; first mouse click runs the row', async ({
       page,
     }) => {
+      await page.goto('/browser-tests/composer-harness.html?commands=overflow')
+      await page.waitForSelector('[data-testid="pane-1"]')
+
       const pane = page.locator('[data-testid="pane-1"]')
       const editor = pane.locator('.composer-editor')
       await pane.locator('.thread-dock-add').click()
@@ -421,8 +424,8 @@ for (const vp of BROWSER_VIEWPORTS) {
       await expect(page.locator('.harness-container')).toHaveAttribute('data-command-revision', '1')
       await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(before)
 
-      await palette.locator('button[role="option"]').filter({ hasText: 'shell' }).click()
-      await expect(page.locator('#last-command-val')).toHaveText('shell')
+      await palette.locator('button[role="option"]').filter({ hasText: 'files' }).click()
+      await expect(page.locator('#last-command-val')).toHaveText('files')
       await expect(editor).toHaveText('')
     })
   })

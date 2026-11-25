@@ -15,7 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 统一的 Agent 创建请求（子代理 task、插件 Prompt 任务、Issue 任务与压缩共用）：一次「创建（或续用）Agent Thread + 首批输入 + 票据」的全部事实。
+ * 统一的 Agent 创建请求（子代理 task、插件 Prompt 任务与压缩共用）：一次「创建（或续用）Agent Thread + 首批输入 + 票据」的全部事实。
  *
  * <p>身份由调用方预分配以保证幂等：新建 Thread 需要 {@code sessionId} 与 {@code threadId}；续用既有 Thread（task 的 {@code
  * thread_id} 续接、控制器绑定的稳定 Thread）时 {@code sessionId} 为 null，{@code threadId} 指向既有 Thread 并由 {@code

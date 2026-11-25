@@ -29,7 +29,7 @@ test('provider and system settings retry controls render correct theme, borders,
         borderRightWidth: computed.borderRightWidth,
         borderBottomWidth: computed.borderBottomWidth,
         borderLeftWidth: computed.borderLeftWidth,
-        outlineWidth: computed.outlineWidth,
+        outlineStyle: computed.outlineStyle,
         boxShadow: computed.boxShadow,
       }
     })
@@ -38,7 +38,7 @@ test('provider and system settings retry controls render correct theme, borders,
     expect(providerInputStyles.borderRightWidth).toBe('0px')
     expect(providerInputStyles.borderBottomWidth).toBe('0px')
     expect(providerInputStyles.borderLeftWidth).toBe('0px')
-    expect(providerInputStyles.outlineWidth).toBe('0px')
+    expect(providerInputStyles.outlineStyle).toBe('none')
     expect(providerInputStyles.boxShadow).toBe('none')
 
     const settingsInputStyles = await settingsTagInputField.evaluate((el) => {
@@ -48,7 +48,7 @@ test('provider and system settings retry controls render correct theme, borders,
         borderRightWidth: computed.borderRightWidth,
         borderBottomWidth: computed.borderBottomWidth,
         borderLeftWidth: computed.borderLeftWidth,
-        outlineWidth: computed.outlineWidth,
+        outlineStyle: computed.outlineStyle,
         boxShadow: computed.boxShadow,
       }
     })
@@ -57,20 +57,19 @@ test('provider and system settings retry controls render correct theme, borders,
     expect(settingsInputStyles.borderRightWidth).toBe('0px')
     expect(settingsInputStyles.borderBottomWidth).toBe('0px')
     expect(settingsInputStyles.borderLeftWidth).toBe('0px')
-    expect(settingsInputStyles.outlineWidth).toBe('0px')
+    expect(settingsInputStyles.outlineStyle).toBe('none')
     expect(settingsInputStyles.boxShadow).toBe('none')
 
-    // 2. Tab from the last tag into each field: the keyboard focus ring belongs to the wrapper.
-    const focusedBorder = await tokenColor(page, '--border-hover')
+    // 2. Tab from the last tag into each field: the unified 1px focus ring belongs to the wrapper.
     const focus = await tokenColor(page, '--focus')
     for (const [wrapper, field] of [[providerTagInput, providerTagInputField], [settingsTagInput, settingsTagInputField]]) {
       await wrapper.getByRole('button', { name: /^移除 / }).last().press('Tab')
       await expect(field).toBeFocused()
-      await expect(wrapper).toHaveCSS('border-top-color', focusedBorder)
       await expect(wrapper).toHaveCSS('outline-style', 'solid')
-      await expect(wrapper).toHaveCSS('outline-width', '2px')
+      await expect(wrapper).toHaveCSS('outline-width', '1px')
+      await expect(wrapper).toHaveCSS('outline-offset', '1px')
       await expect(wrapper).toHaveCSS('outline-color', focus)
-      await expect(field).toHaveCSS('outline-width', '0px')
+      await expect(field).toHaveCSS('outline-style', 'none')
     }
 
     // 3. Verify tag Enter and X removal interactions in ProviderForm
@@ -93,10 +92,10 @@ test('provider and system settings retry controls render correct theme, borders,
     await inheritOption.click()
 
     await expect(retrySelectTrigger).toHaveAttribute('data-value', 'inherit')
-    await expect(providerSection.locator('.ui-tag-input')).not.toBeVisible()
+    await expect(providerSection.locator('.ui-tag-input')).toHaveCount(0)
     await expect(
       providerSection.getByText('当前提供商继承系统全局配置的 HTTP 重试状态码名单。'),
-    ).toBeVisible()
+    ).toHaveCount(0)
 
     // Switch back to custom
     await retrySelectTrigger.click()

@@ -339,32 +339,30 @@ test('test intent: distributed compose selects each seeded card by name and keep
 })
 
 test('test intent: UI smoke creates an agent without an implicit Environment', () => {
-  // UI smoke must verify creating a chat with an agent does not auto-assign a default Environment.
+  // UI smoke must verify choosing a Workspace default agent does not auto-assign a default Environment.
   const ui = readText(UI_SMOKE)
   const present = [
-    'ui.chat.create_agent_no_implicit_environment',
-    '{ requiresTools: true }',
+    'ui.workspace.smoke',
     'tempAgentName',
-    "execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID",
+    "execution: { driver: 'builtin', settings: { modelName: tempModelName",
     'agentCreateRes.status === 201',
     "!Object.hasOwn(agentCreateRes.json, 'environmentId')",
     "!Object.hasOwn(agentCreateRes.json, 'branchSettings')",
-    'button[aria-label="工作区路径"]',
-    'button.environment-binding-trigger',
-    'Create Chat still rendered a workspace path selector',
-    "environmentText === '未选择环境'",
-    // 当前契约：Create Chat 渲染默认 Environment 选择器，并显式投影 required-nullable environmentName。
-    "name: '默认环境', exact: true",
-    'created.environmentName === null',
-    'required-nullable environmentName:null',
-    "apiDeleteByName(args.backendUrl, 'chats', title)",
+    'selectAgentInSpaceDefaults',
+    'Default environment|默认环境',
+    'updatedSpace?.defaultAgentName === agentName && updatedSpace.defaultEnvironmentId == null',
+    'No environment|未选择环境',
+    'deleteWorkspaceSession(apiCtx, spaceId, createdSessionId)',
     "apiDeleteByName(args.backendUrl, 'agents', tempAgentName)",
   ]
   for (const expected of present) {
     assert.ok(ui.includes(expected), expected)
   }
   for (const absent of [
-    '选择 Environment',
+    '/chats',
+    '/api/chat/chats',
+    'ui.chat.create_flow',
+    'Create Chat',
     'ui.chat.create_agent_bound_environment',
     'environmentId: card.id',
     'modelProviderName',

@@ -160,6 +160,40 @@ class PostgresqlIdleExecutionIntegrationTest {
   }
 
   @Test
+  void sessionDeletionRemovesIdleBranchTreeAndExplicitForkWhilePreservingUnrelatedRoot() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    var source = seedThreadBaseline(store);
+    UUID cut =
+        runtime
+            .stop(new StopCommand(source.threadId(), UUID.randomUUID(), 0))
+            .thread()
+            .headEntryId();
+    var branch = runtime.createIdleBranch(source.threadId(), cut, UUID.randomUUID(), "branch");
+    UUID forkSessionId = UUID.randomUUID();
+    var fork =
+        runtime.createIdleFork(
+            source.threadId(), cut, forkSessionId, UUID.randomUUID(), "fork", (id, entries) -> {});
+    UUID forkHeadId = fork.headEntryId();
+    var survivor = seedThreadBaseline(store);
+
+    runtime.deleteSessions(List.of(source.sessionId(), forkSessionId), ids -> {}, ids -> {});
+
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(source.threadId()).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(branch.id()).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(fork.id()).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(source.sessionId()).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(forkSessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.entries().find(source.rootEntryId()).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.entries().find(cut).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.entries().find(forkHeadId).isEmpty()));
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.threads().find(survivor.threadId()).isPresent()));
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.sessions().find(survivor.sessionId()).isPresent()));
+  }
+
+  @Test
   void openTurnRejectsBothDeletionEntrypointsBeforeCleanup() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
     HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
@@ -232,6 +266,7 @@ class PostgresqlIdleExecutionIntegrationTest {
     var busy = seedThreadBaseline(store);
     var idle = seedThreadBaseline(store);
     List<UUID> roots = List.of(busy.threadId(), idle.threadId());
+    assertEquals(List.of(), runtime.getExecutionRootFacts(List.of()));
     store.transaction(
         tx -> {
           tx.threads().lock(busy.threadId()).orElseThrow();

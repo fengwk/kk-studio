@@ -15,8 +15,7 @@ import java.util.Objects;
 /**
  * 人工交互（问卷回答与工具审批）的统一事务写入口。写入前校验目标 Thread 存在，Runtime 写回来源 invocation 本身。
  *
- * <p>暂停（paused）与阻塞（BLOCKED）只阻止后续外部派发，不阻止人工回答/审批被记录：本入口照常落盘 durable 事实并登记 Work，是否继续 派发外部调用由 Issue
- * 工作流在消费 Work 时按当前 Run 身份与授权判定；本服务不代其判定，也不提供任何绕过该判定的通道。
+ * <p>人工回答与审批先落盘 durable 事实并登记 Work；后续是否派发外部调用由消费 Work 的执行流程按当前状态与授权判定，本服务不代其判定。
  */
 @Service
 public class InteractionService {
@@ -44,7 +43,7 @@ public class InteractionService {
   /**
    * 在单一物理事务内决策一次必需的 Tool approval。
    *
-   * <p>与问卷回答共用同一产品锁序与门禁：Issue+Agent Thread 先锁产品层级，再进入 Runtime 决策，因此审批不能绕过 Issue 的暂停与 归档约束去推进外部派发。
+   * <p>Runtime 在当前事务中完成审批决策；后续外部派发由消费 Work 的执行流程按当前状态与授权判定。
    */
   @Transactional
   public ToolInvocation decideApproval(ToolApprovalCommand command) {

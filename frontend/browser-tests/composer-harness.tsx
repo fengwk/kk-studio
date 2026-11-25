@@ -33,6 +33,13 @@ const INITIAL_MODELS: readonly ThreadComposerModelOption[] = [
   },
 ]
 
+const OVERFLOW_EXTRA_COMMANDS: ThreadCommand[] = Array.from({ length: 8 }, (_, index) => ({
+  id: `extra-${index + 1}`,
+  label: `extra-${index + 1}`,
+  description: `Extra command ${index + 1}`,
+}))
+const useOverflowCommands = new URLSearchParams(window.location.search).get('commands') === 'overflow'
+
 export function ComposerHarnessApp() {
   const [pane1Parts, setPane1Parts] = useState<ComposerPart[]>([])
   const [pane2Parts, setPane2Parts] = useState<ComposerPart[]>([])
@@ -51,7 +58,10 @@ export function ComposerHarnessApp() {
   const [lastCommand, setLastCommand] = useState<string | null>(null)
   const [submitPayloads, setSubmitPayloads] = useState<string[]>([])
   const [commandRevision, setCommandRevision] = useState(0)
-  const commands = THREAD_COMMANDS.map((command) => ({ ...command }))
+  const baseCommands = useOverflowCommands
+    ? [...OVERFLOW_EXTRA_COMMANDS, ...THREAD_COMMANDS]
+    : THREAD_COMMANDS
+  const commands = baseCommands.map((command) => ({ ...command }))
 
   const handleCommand = useCallback((cmd: ThreadCommand) => {
     setLastCommand(cmd.id)

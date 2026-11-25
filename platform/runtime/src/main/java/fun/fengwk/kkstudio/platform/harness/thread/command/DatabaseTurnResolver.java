@@ -43,9 +43,8 @@ import java.util.UUID;
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
  * {@link ModelRequestSpec}、contextWindow 与 outputTokens。
  *
- * <p>本解析器<strong>不反查 Thread 归属</strong>：Issue Run 的 Agent、Model、Environment、业务工具与身份上下文都在接受 Run
- * 时被显式提交或冻结到 branch state，普通 Thread 与 Issue Agent Thread 走同一条纯 branch 事实解析路径。Issue 语义由 {@code
- * project/run} contributor state 的 context projector 与运行期业务工具在自己的事务边界内校验。
+ * <p>本解析器<strong>不反查 Thread 归属</strong>：Agent、Model、Environment、工具与身份上下文都由 branch state 和运行时配置提供，所有
+ * Thread 都走同一条 branch 事实解析路径。领域专属上下文由相应 contributor state 的 context projector 与运行期工具在各自事务边界内校验。
  *
  * <p>普通 branch 的输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection} /
  * 可空 environmentName）。Agent 目录、Environment、tools/skills/subagents 与 system instruction 由 {@link

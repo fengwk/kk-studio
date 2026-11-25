@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * Playwright UI E2E 矩阵（L5，可选）。
+ * Playwright UI E2E smoke（L5，可选）。
  *
- * - 页面 smoke：路由可达、列表渲染、打开创建卡片、无致命 pageerror
- * - 交互矩阵：高价值用户路径、状态组合与浏览器布局/Selection 边界
+ * - 登录：通过登录表单使用 runner 种入的管理员账号登录（绝不打印密码）
+ * - 工作区：进入空间、必要时配置默认 Agent（不隐式绑定环境）、首条消息创建会话（离线 mock Provider）
+ * - 目录与窗格：校验目录出现会话且窗格标题切换为会话线程标题
+ * - 设置往返：打开设置路由（含环境动作契约校验）并返回工作区
  * - 截图/结果写入 --report-dir（通常是 reports/e2e/<runId>）
  *
  *   node scripts/dev/verify/e2e/ui-smoke.mjs --base-url http://127.0.0.1:5173 --report-dir reports/e2e/<run>
@@ -11,27 +13,19 @@
  */
 
 import { createRequire } from 'node:module'
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
-import { encodePathTail } from './lib/fixtures.mjs'
-import { listChats } from './lib/harness.mjs'
+import { baseModelConfig, encodePathTail } from './lib/fixtures.mjs'
+import { deleteWorkspaceSession } from './lib/harness.mjs'
+import { cid, httpJson, HttpError, loginStudio } from './lib/http.mjs'
 import { ENVIRONMENT_CARD_ACTIONS } from './ui/environment-actions.mjs'
-import {
-  assertReadOnlyZeroFooter,
-  waitForSettledAssistantText,
-} from './ui/assertions.mjs'
-import { runComposerMatrix } from './ui/composer-matrix.mjs'
+import { waitForSettledAssistantText } from './ui/assertions.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
 
 // Playwright 安装在 frontend/node_modules，直接 import 会找不到包。
@@ -39,18 +33,12 @@ const requireFromFrontend = createRequire(
   path.join(REPO_ROOT, 'frontend/package.json'),
 )
 const { chromium } = requireFromFrontend('@playwright/test')
-const PI_MODEL_NAMES = JSON.parse(
-  readFileSync(
-    path.join(
-      REPO_ROOT,
-      'platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/pi-model-catalog.json',
-    ),
-    'utf8',
-  ),
-).map((model) => model.name)
+
 const REAL_UI_MODEL = MINIMAX_ANTHROPIC_M3
 const REAL_UI_MODEL_ID = REAL_UI_MODEL.modelName
 const REAL_UI_MODEL_SELECTOR_LABEL = `${REAL_UI_MODEL_ID} (${REAL_UI_MODEL.variant})`
+const STUDIO_ADMIN_USER = process.env.E2E_STUDIO_USER || 'kkstudio'
+const STUDIO_ADMIN_CREDENTIAL = process.env.E2E_STUDIO_PASS || 'kkstudio'
 
 function parseArgs(argv) {
   const args = {
@@ -81,45 +69,44 @@ function parseArgs(argv) {
   return args
 }
 
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg || 'assertion failed')
+}
+
 async function apiJson(backendUrl, method, requestPath, body) {
-  const res = await fetch(`${backendUrl.replace(/\/$/, '')}${requestPath}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const text = await res.text()
-  let json = null
   try {
-    json = text ? JSON.parse(text) : null
-  } catch {
-    json = text
+    const { status, json } = await httpJson(backendUrl, method, requestPath, body)
+    return { status, json }
+  } catch (error) {
+    if (error instanceof HttpError) {
+      let json = error.body
+      if (typeof error.body === 'string' && error.body.trim()) {
+        try {
+          json = JSON.parse(error.body)
+        } catch {
+          json = error.body
+        }
+      }
+      return { status: error.status, json }
+    }
+    throw error
   }
-  return { status: res.status, json }
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const resourcePath = resource === 'chats' ? '/api/chat/chats' : `/api/platform/${resource}`
-  const list = resource === 'chats'
-    ? await listChats({ call: (method, requestPath) => apiJson(backendUrl, method, requestPath) })
-    : (await apiJson(backendUrl, 'GET', resourcePath)).json || []
-  const key = resource === 'chats' ? 'title' : 'name'
-  const hit = list.find((item) => item[key] === name)
+  const resourcePath = `/api/platform/${resource}`
+  const listRes = await apiJson(backendUrl, 'GET', resourcePath)
+  const list = Array.isArray(listRes.json) ? listRes.json : []
+  const hit = list.find((item) => item.name === name)
   if (!hit) return false
-  let deletePath
-  if (resource === 'chats') {
-    deletePath =
-      `${resourcePath}/${encodeURIComponent(hit.id)}`
-      + `?expectedVersion=${encodeURIComponent(hit.version)}`
-  } else if (resource === 'models') {
-    deletePath =
-      `${resourcePath}/${encodePathTail(hit.name)}`
-      + `?expectedVersion=${encodeURIComponent(hit.version)}`
-  } else {
-    deletePath =
-      `${resourcePath}/${encodeURIComponent(hit.name)}`
-      + `?expectedVersion=${encodeURIComponent(hit.version)}`
-  }
-  await apiJson(backendUrl, 'DELETE', deletePath)
+  const tail = resource === 'models'
+    ? encodePathTail(hit.name)
+    : encodeURIComponent(hit.name)
+  await apiJson(
+    backendUrl,
+    'DELETE',
+    `${resourcePath}/${tail}?expectedVersion=${encodeURIComponent(hit.version)}`,
+  )
   return true
 }
 
@@ -144,60 +131,14 @@ async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3)
 
 async function requireProviderExecutionBoundary(backendUrl, real) {
   if (real) return
-  const { json } = await apiJson(backendUrl, 'GET', '/api/platform/providers')
+  const { status, json } = await apiJson(backendUrl, 'GET', '/api/platform/providers')
+  assert(status === 200, `failed to query providers boundary: HTTP ${status}`)
   const providers = Array.isArray(json) ? json : []
   assertProviderExecutionBoundary({ real: false, providers })
   console.log('Provider boundary: free UI mode confirmed every provider is unconfigured')
 }
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg || 'assertion failed')
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function normalizeBox(box) {
-  if (!box) return null
-  return {
-    left: box.x,
-    top: box.y,
-    right: box.x + box.width,
-    bottom: box.y + box.height,
-  }
-}
-
-function assertBoxWithin(inner, outer, label) {
-  const tolerance = 0.5
-  const innerEdges = normalizeBox(inner)
-  const outerEdges = normalizeBox(outer)
-  assert(innerEdges && outerEdges, `${label} bounding box is missing`)
-  assert(
-    innerEdges.left >= outerEdges.left - tolerance
-      && innerEdges.top >= outerEdges.top - tolerance
-      && innerEdges.right <= outerEdges.right + tolerance
-      && innerEdges.bottom <= outerEdges.bottom + tolerance,
-    `${label} bounding box escapes its option card`,
-  )
-}
-
-function assertBoxesDoNotOverlap(left, right, label) {
-  const tolerance = 0.5
-  const leftEdges = normalizeBox(left)
-  const rightEdges = normalizeBox(right)
-  assert(leftEdges && rightEdges, `${label} bounding box is missing`)
-  const overlaps =
-    leftEdges.left < rightEdges.right - tolerance
-    && leftEdges.right > rightEdges.left + tolerance
-    && leftEdges.top < rightEdges.bottom - tolerance
-    && leftEdges.bottom > rightEdges.top + tolerance
-  assert(!overlaps, `${label} bounding boxes overlap`)
-}
-
 async function assertLeadingCreateCard(page, action, label, gridSelector = '.resource-grid') {
-  // Resource creation belongs to the first card in the content grid, not the subbar.
-  // 创建入口与资源卡共用同一网格，必须是网格中的首个可交互卡片。
   const layout = await action.evaluate((element, selector) => {
     const grid = element.closest(selector)
     const bounds = element.getBoundingClientRect()
@@ -211,8 +152,10 @@ async function assertLeadingCreateCard(page, action, label, gridSelector = '.res
         && bounds.right <= container.right + 1,
     }
   }, gridSelector)
-  assert(layout.first && layout.card && layout.visible && layout.contained,
-    `${label} must be the visible leading create card: ${JSON.stringify(layout)}`)
+  assert(
+    layout.first && layout.card && layout.visible && layout.contained,
+    `${label} must be the visible leading create card: ${JSON.stringify(layout)}`,
+  )
 }
 
 function listArtifacts(caseDir, reportDir) {
@@ -223,11 +166,7 @@ function listArtifacts(caseDir, reportDir) {
     .sort()
 }
 
-async function expectVisibleText(page, text) {
-  await page.getByText(text).first().waitFor({ state: 'visible', timeout: 30_000 })
-}
-
-/** 沿 aria-controls 定位展开的列表，再按可见标题选择；选项的可访问名还可能包含状态和描述。 */
+/** 沿 aria-controls 定位展开的列表，再按可见标题选择。 */
 async function selectCustomOption(page, trigger, optionName) {
   await trigger.click()
   const controlledId = await trigger.getAttribute('aria-controls')
@@ -238,14 +177,6 @@ async function selectCustomOption(page, trigger, optionName) {
   const option = listbox.getByRole('option').filter({ has: page.getByText(optionName, { exact: true }) })
   await option.waitFor({ state: 'visible', timeout: 10_000 })
   await option.click()
-}
-
-async function resourceCardTitle(page, name) {
-  const title = page.locator('.resource-card h3').filter({ hasText: name }).first()
-  await title.waitFor({ state: 'visible', timeout: 20_000 })
-  const text = (await title.textContent())?.trim()
-  assert(text, `resource card title is empty for ${name}`)
-  return text
 }
 
 function isIgnorableNoise(text) {
@@ -263,6 +194,156 @@ function expectNoFatal(pageErrors, consoleErrors) {
   assert(criticalConsole.length === 0, `console error: ${criticalConsole.join(' | ')}`)
 }
 
+function sseFrame(payload) {
+  return `data: ${JSON.stringify(payload)}\n\n`
+}
+
+async function readRequestBody(request) {
+  const chunks = []
+  for await (const chunk of request) chunks.push(chunk)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+/**
+ * 本地受控 OpenAI chat-completions mock：在 127.0.0.1 随机端口返回确定性回复，
+ * 不访问外网也不触碰真实模型 Provider。
+ */
+class MockCompletionsServer {
+  constructor(replyText) {
+    this.replyText = replyText
+    this.requests = []
+    this.sockets = new Set()
+    this.listening = false
+    this.base = null
+    this.server = createServer((request, response) => {
+      void this.handle(request, response)
+    })
+    this.server.on('connection', (socket) => {
+      this.sockets.add(socket)
+      socket.once('close', () => this.sockets.delete(socket))
+    })
+  }
+
+  async start() {
+    await new Promise((resolve, reject) => {
+      this.server.once('error', reject)
+      this.server.listen(0, '127.0.0.1', () => {
+        this.server.removeListener('error', reject)
+        resolve()
+      })
+    })
+    const address = this.server.address()
+    assert(address && typeof address === 'object', 'mock completions server failed to bind')
+    this.base = `http://127.0.0.1:${address.port}`
+    this.listening = true
+  }
+
+  baseUrl(suffix = '') {
+    assert(this.base, 'mock completions server is not started')
+    return `${this.base}${suffix}`
+  }
+
+  async handle(request, response) {
+    if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+      response.writeHead(request.method === 'POST' ? 404 : 405, { Connection: 'close' })
+      response.end()
+      return
+    }
+    let body = {}
+    try {
+      const raw = await readRequestBody(request)
+      body = raw ? JSON.parse(raw) : {}
+    } catch (error) {
+      response.writeHead(400, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: `invalid mock JSON: ${error.message}` } }))
+      return
+    }
+    const index = this.requests.length + 1
+    this.requests.push(body)
+    const model = body.model || 'e2e-mock-model'
+    if (body.stream === false) {
+      response.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' })
+      response.end(JSON.stringify({
+        id: `e2e-ui-mock-${index}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: this.replyText },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }))
+      return
+    }
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'close',
+    })
+    response.write(sseFrame({
+      id: `e2e-ui-mock-${index}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta: { role: 'assistant', content: this.replyText }, finish_reason: null }],
+    }))
+    response.write(sseFrame({
+      id: `e2e-ui-mock-stop-${index}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    }))
+    response.write(sseFrame({
+      id: `e2e-ui-mock-usage-${index}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }))
+    response.end('data: [DONE]\n\n')
+  }
+
+  async close() {
+    for (const socket of this.sockets) socket.destroy()
+    this.sockets.clear()
+    if (!this.listening) return
+    await new Promise((resolve, reject) => {
+      this.server.close((error) => (error ? reject(error) : resolve()))
+    })
+    this.listening = false
+  }
+}
+
+async function listSpaces(apiCtx) {
+  const { status, json } = await apiCtx.call('GET', '/api/chat-spaces')
+  assert(status === 200 && Array.isArray(json), `failed to list chat spaces: HTTP ${status}`)
+  return json
+}
+
+async function getSpaceTree(apiCtx, spaceId) {
+  const { status, json } = await apiCtx.call('GET', `/api/chat-spaces/${encodeURIComponent(spaceId)}/tree`)
+  assert(status === 200 && json && Array.isArray(json.folders), `failed to load workspace tree: HTTP ${status}`)
+  return json
+}
+
+function findSessionInTree(folders, titleQuery) {
+  for (const folder of folders || []) {
+    for (const resource of folder.resources || []) {
+      if (resource.kind === 'SESSION' && String(resource.title || '').includes(titleQuery)) {
+        return resource
+      }
+    }
+    const nested = findSessionInTree(folder.children, titleQuery)
+    if (nested) return nested
+  }
+  return null
+}
+
 async function main(argv) {
   const args = parseArgs(argv)
   if (args.help) {
@@ -273,6 +354,7 @@ async function main(argv) {
     return 0
   }
 
+  await loginStudio(args.backendUrl)
   await requireProviderExecutionBoundary(args.backendUrl, args.real)
 
   const reportDir = args.reportDir
@@ -281,6 +363,8 @@ async function main(argv) {
   mkdirSync(artRoot, { recursive: true })
   const apiCtx = {
     call: (method, requestPath, body) =>
+      apiJson(args.backendUrl, method, requestPath, body),
+    request: (requestPath, { method = 'GET', body } = {}) =>
       apiJson(args.backendUrl, method, requestPath, body),
   }
   if (args.real) await requireRealMiniMaxM3(args.backendUrl, MINIMAX_ANTHROPIC_M3)
@@ -295,11 +379,6 @@ async function main(argv) {
     env: browserEnv,
   })
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
-  await context.addInitScript(() => {
-    if (!localStorage.getItem('kk-studio.locale')) {
-      localStorage.setItem('kk-studio.locale', 'zh-CN')
-    }
-  })
   const page = await context.newPage()
   const pageErrors = []
   const consoleErrors = []
@@ -331,7 +410,7 @@ async function main(argv) {
           undefined,
           { timeout: 10_000 },
         )
-        await page.waitForTimeout(400)
+        await page.waitForTimeout(300)
         return
       } catch (error) {
         lastError = error
@@ -348,6 +427,79 @@ async function main(argv) {
   async function shot(caseArt, name) {
     const file = path.join(caseArt, `${name}.png`)
     await page.screenshot({ path: file, fullPage: true })
+  }
+
+  async function signInViaForm(caseArt = null) {
+    const signInGate = page.locator('main.account-gate form.sign-in-form')
+    if (await signInGate.count() === 0) return false
+    const usernameInput = signInGate.getByLabel(/^(?:Username|用户名)$/)
+    const passwordInput = signInGate.getByLabel(/^(?:Password|密码)$/)
+    await usernameInput.waitFor({ state: 'visible', timeout: 15_000 })
+    await usernameInput.fill(STUDIO_ADMIN_USER)
+    await passwordInput.fill(STUDIO_ADMIN_CREDENTIAL)
+    if (caseArt) await shot(caseArt, 'login-form')
+    await signInGate.getByRole('button', { name: /^(?:Sign in|登录)$/ }).click()
+    await signInGate.waitFor({ state: 'detached', timeout: 20_000 })
+    return true
+  }
+
+  async function landInWorkspaceSpace(spaceTitle) {
+    const newSpaceButton = page.getByRole('button', { name: /^(?:New Chat Space|新建 Chat Space)$/ })
+    const shell = page.locator('.workspace-shell')
+    await Promise.race([
+      shell.waitFor({ state: 'visible', timeout: 20_000 }),
+      newSpaceButton.waitFor({ state: 'visible', timeout: 20_000 }),
+    ])
+    let createdSpaceByUi = false
+    if (await shell.count() === 0) {
+      createdSpaceByUi = true
+      await newSpaceButton.click()
+      const dialog = page.getByRole('dialog', { name: /^(?:New Chat Space|新建 Chat Space)$/ })
+      await dialog.waitFor({ state: 'visible', timeout: 10_000 })
+      await dialog.getByRole('textbox', { name: /^(?:Name|名称)$/ }).fill(spaceTitle)
+      await dialog.getByRole('button', { name: /^(?:Confirm|确认)$/ }).click()
+      await dialog.waitFor({ state: 'detached', timeout: 15_000 })
+      await shell.waitFor({ state: 'visible', timeout: 20_000 })
+    }
+    await page.waitForURL(/\/chat-spaces\/[0-9a-f-]{36}/i, { timeout: 20_000 })
+    const spaceId = new URL(page.url()).pathname.split('/').pop()
+    assert(spaceId && /^[0-9a-f-]{36}$/i.test(spaceId), `unexpected workspace URL: ${page.url()}`)
+    return { spaceId, createdSpaceByUi }
+  }
+
+  async function selectAgentInSpaceDefaults(spaceId, agentName) {
+    const spaceSettingsButton = page.getByRole('button', { name: /^(?:Space settings|空间设置)$/ })
+    if (await spaceSettingsButton.count() > 0 && await spaceSettingsButton.first().isVisible()) {
+      await spaceSettingsButton.first().click()
+    } else {
+      const spaceTrigger = page.locator('.workspace-space-trigger')
+      await spaceTrigger.waitFor({ state: 'visible', timeout: 10_000 })
+      await spaceTrigger.click()
+      const spaceMenu = page.getByRole('menu', { name: /^(?:Chat Spaces|Chat Space)$/ })
+      await spaceMenu.waitFor({ state: 'visible', timeout: 10_000 })
+      await spaceMenu.getByRole('menuitem', { name: /^(?:Space defaults|空间默认配置)$/ }).click()
+    }
+    const defaultsDialog = page.getByRole('dialog', { name: /^(?:Space defaults|空间默认配置)$/ })
+    await defaultsDialog.waitFor({ state: 'visible', timeout: 10_000 })
+    await selectCustomOption(
+      page,
+      defaultsDialog.getByLabel(/^(?:Default agent|默认 Agent)$/),
+      agentName,
+    )
+    const envTrigger = defaultsDialog.getByLabel(/^(?:Default environment|默认环境)$/)
+    const envLabel = (await envTrigger.innerText()).trim()
+    assert(
+      /^(?:None|无)$/.test(envLabel),
+      `selecting default Agent must not implicitly assign a default Environment, got: ${envLabel}`,
+    )
+    await defaultsDialog.getByRole('button', { name: /^(?:Confirm|确认)$/ }).click()
+    await defaultsDialog.waitFor({ state: 'detached', timeout: 15_000 })
+
+    const updatedSpace = (await listSpaces(apiCtx)).find((item) => item.id === spaceId)
+    assert(
+      updatedSpace?.defaultAgentName === agentName && updatedSpace.defaultEnvironmentId == null,
+      `Space defaults did not keep null environmentId: ${JSON.stringify(updatedSpace)}`,
+    )
   }
 
   async function run(id, title, fn, options = {}) {
@@ -422,931 +574,258 @@ async function main(argv) {
     }
   }
 
-  await run('ui.i18n.language_switch', '右上角切换 English/中文并持久化', async (caseArt) => {
-    await goto('/chats')
-    await expectVisibleText(page, '新建 Chat')
-    const localeTrigger = page.locator('.topbar-right').getByRole('button', {
-      name: '语言: 中文',
-    })
-    await selectCustomOption(page, localeTrigger, 'English')
-    await expectVisibleText(page, 'Create Chat')
-    assert(
-      await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'en-US'),
-      'English locale was not persisted',
-    )
-
-    await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
-    await expectVisibleText(page, 'Create Chat')
-    await selectCustomOption(
-      page,
-      page.locator('.topbar-right').getByRole('button', {
-        name: 'Language: English',
-      }),
-      '中文',
-    )
-    await expectVisibleText(page, '新建 Chat')
-    assert(
-      await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'zh-CN'),
-      'Chinese locale was not persisted',
-    )
-    await shot(caseArt, 'language-selector')
-    expectNoFatal(pageErrors, consoleErrors)
-  })
-
-  await run('ui.chats.page_loads', 'Chats 页可打开且显示新建入口', async (caseArt) => {
-    await goto('/chats')
-    await shot(caseArt, 'chats')
-    expectNoFatal(pageErrors, consoleErrors)
-    await expectVisibleText(page, '新建 Chat')
-  })
-
-  await run('ui.models.page_loads', 'Models 页渲染全部 Pi seed 模型', async (caseArt) => {
-    await goto('/models')
-    expectNoFatal(pageErrors, consoleErrors)
-    await expectVisibleText(page, '新建 Model')
-    for (const modelName of PI_MODEL_NAMES) {
-      await expectVisibleText(page, modelName)
-    }
-    await shot(caseArt, 'models')
-  })
-
-  await run('ui.models.open_create_modal', '点击新建 Model 打开编辑模态', async (caseArt) => {
-    await goto('/models')
-    await page.getByText('新建 Model', { exact: true }).click()
-    await page.waitForTimeout(300)
-    await shot(caseArt, 'model-create-modal')
-    expectNoFatal(pageErrors, consoleErrors)
-    // 模态仍包含标题文案
-    await expectVisibleText(page, '新建 Model')
-  })
-
-  await run('ui.agents.page_loads', 'Agents 页渲染 default-assistant', async (caseArt) => {
-    await goto('/agents')
-    await shot(caseArt, 'agents')
-    expectNoFatal(pageErrors, consoleErrors)
-    await expectVisibleText(page, '新建 Agent')
-    await expectVisibleText(page, 'default-assistant')
-    await page.getByRole('button', { name: '编辑 default-assistant' }).click()
-    const agentModal = page.getByRole('dialog')
-    await agentModal.waitFor({ state: 'visible', timeout: 10_000 })
-    const detailedOptions = agentModal.locator('.capability-option-detailed')
-    await detailedOptions.first().waitFor({ state: 'visible', timeout: 10_000 })
-    const capabilityContainers = agentModal.locator('.capability-options')
-    const capabilityContainerCount = await capabilityContainers.count()
-    let detailedOptionCount = 0
-
-    for (let containerIndex = 0; containerIndex < capabilityContainerCount; containerIndex++) {
-      const container = capabilityContainers.nth(containerIndex)
-      const options = container.locator('.capability-option-detailed')
-      const optionCount = await options.count()
-      detailedOptionCount += optionCount
-      const optionBoxes = []
-
-      for (let optionIndex = 0; optionIndex < optionCount; optionIndex++) {
-        const option = options.nth(optionIndex)
-        const cardBox = await option.boundingBox()
-        const headingBox = await option.locator('.capability-option-heading').boundingBox()
-        assertBoxWithin(headingBox, cardBox, `capability option ${containerIndex}:${optionIndex} heading`)
-
-        const description = option.locator('.capability-option-description')
-        if (await description.count() > 0) {
-          const descriptionBox = await description.boundingBox()
-          assertBoxWithin(
-            descriptionBox,
-            cardBox,
-            `capability option ${containerIndex}:${optionIndex} description`,
-          )
-        }
-        optionBoxes.push(cardBox)
-      }
-
-      for (let optionIndex = 0; optionIndex < optionBoxes.length - 1; optionIndex++) {
-        assertBoxesDoNotOverlap(
-          optionBoxes[optionIndex],
-          optionBoxes[optionIndex + 1],
-          `adjacent capability options in container ${containerIndex} at indexes ${optionIndex} and ${optionIndex + 1}`,
-        )
-      }
-    }
-    assert(detailedOptionCount > 0, 'default-assistant edit modal has no detailed capability options')
-    await shot(caseArt, 'agent-capability-modal')
-    await agentModal.getByRole('button', { name: '关闭' }).click()
-    await agentModal.waitFor({ state: 'detached', timeout: 10_000 })
-  })
-
-  await run('ui.providers.page_loads', 'Providers 页可打开', async (caseArt) => {
-    await goto('/providers')
-    await shot(caseArt, 'providers')
-    expectNoFatal(pageErrors, consoleErrors)
-    await expectVisibleText(page, '新建 Provider')
-  })
-
-  await run('ui.environments.page_loads', 'Environments 页可打开', async (caseArt) => {
-    await goto('/environments')
-    await page.locator('.resource-grid').waitFor({
-      state: 'visible',
-      timeout: 15_000,
-    })
-    const createButton = page.getByRole('button', { name: /创建环境|Create Environment/ })
-    await createButton.waitFor({ state: 'visible' })
-    await assertLeadingCreateCard(page, createButton, 'Create Environment')
-    const environmentCards = page.locator('.environment-card')
-    assert(await environmentCards.count() > 0, 'environments page has no cards')
-    for (const card of await environmentCards.all()) {
-      const actions = card.locator('.resource-card-actions button')
-      // 环境卡能力集不得缺失或重复：安装、卸载、编辑、管理、更新、轮换 Token、删除。
-      assert(
-        await actions.count() === ENVIRONMENT_CARD_ACTIONS.length,
-        `environment card must expose exactly seven actions: ${ENVIRONMENT_CARD_ACTIONS.map(([name]) => name).join(', ')}`,
-      )
-      for (const [name, pattern] of ENVIRONMENT_CARD_ACTIONS) {
-        assert(
-          await actions.filter({ hasText: pattern }).count() === 1,
-          `environment card must expose exactly one ${name} action`,
-        )
-      }
-    }
-    await shot(caseArt, 'environments')
-    expectNoFatal(pageErrors, consoleErrors)
-    const body = await page.locator('body').innerText()
-    assert(body.trim().length > 20, 'environments page body empty')
-  })
-
-  await run('ui.canvas.page_loads', 'Canvas 库与编辑器可打开', async (caseArt) => {
-    await goto('/canvas')
-    await expectVisibleText(page, '你的画布')
-    // Library 路由保留全局顶栏与 library view 语义容器。
-    assert(
-      await page.locator('#libraryView').isVisible(),
-      'canvas library view must be visible',
-    )
-    assert(
-      await page.locator('.library-view').isVisible(),
-      'canvas library-view class must be visible',
-    )
-    assert(
-      await page.locator('.topbar').isVisible(),
-      'canvas library must keep the global topbar',
-    )
-    const createButton = page.getByRole('button', {
-      name: /^(Create a new canvas|Create new canvas|创建新画布)$/,
-    })
-    await createButton.waitFor({ state: 'visible' })
-    await assertLeadingCreateCard(page, createButton, 'Create Canvas', '.resource-grid')
-    await shot(caseArt, 'canvas-library')
-    let createRequests = 0
-    const countCreate = (request) => {
-      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/canvas/canvases') {
-        createRequests += 1
-      }
-    }
-    page.on('request', countCreate)
-    try {
-      // 新建入口只打开表单；取消不得创建或导航。
-      await createButton.click()
-      const dialog = page.getByRole('dialog', { name: /^(Create new canvas|创建新画布)$/ })
-      await dialog.waitFor({ state: 'visible' })
-      await dialog.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
-      await dialog.waitFor({ state: 'hidden' })
-      assert(createRequests === 0, 'cancelling canvas creation must not POST')
-      assert(new URL(page.url()).pathname === '/canvas', 'cancel must stay in the library')
-      await page.locator('#libraryView [role="status"]').waitFor({ state: 'hidden' })
-      assert(await page.locator('#libraryView [role="alert"]').count() === 0, 'canvas list must load successfully')
-      const existingCanvas = page.locator('#libraryView .resource-card-actions button').first()
-      if (await existingCanvas.count() > 0) {
-        await existingCanvas.click()
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        assert(createRequests === 0, 'opening an existing canvas must not create another')
-      } else {
-        await createButton.click()
-        await dialog.getByRole('textbox', { name: /^(Canvas name|画布名称)$/ }).fill('E2E canvas')
-        await dialog.getByRole('button', { name: /^(Create and open|创建并进入)$/ }).click()
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        assert(createRequests === 1, 'confirmed canvas creation must POST exactly once')
-      }
-    } finally {
-      page.off('request', countCreate)
-    }
-    // 创建路径在 mutation 成功后导航，因此先等编辑器挂载再断言 URL。
-    await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-    assert(
-      /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
-      `canvas editor pathname invalid: ${new URL(page.url()).pathname}`,
-    )
-
-    // 编辑器沉浸：无全局顶栏、挂 workspace-immersive 通用沉浸 class、返回键、保存状态与版本号。
-    assert(
-      await page.locator('#editorView').isVisible(),
-      'canvas editor view must be visible',
-    )
-    assert(
-      await page.locator('.topbar').count() === 0,
-      'canvas editor must not render the global topbar',
-    )
-    assert(
-      await page.locator('.app-frame.workspace-immersive').count() === 1,
-      'canvas editor must carry the shared workspace-immersive root class',
-    )
-    const backButton = page.locator('.canvas-back-button.sidebar-icon-btn')
-    assert(
-      await backButton.count() === 1,
-      'canvas back control must be rendered exactly once',
-    )
-    assert(
-      await backButton.getAttribute('href') === '/canvas',
-      'canvas back control href must point to /canvas',
-    )
-    assert(
-      await page.locator('#saveState').isVisible(),
-      'canvas editor save state indicator must be visible',
-    )
-    const versionText = (await page.locator('.version-pill').textContent())?.trim() ?? ''
-    assert(
-      /^v\d+$/.test(versionText),
-      `canvas editor version pill invalid: ${versionText}`,
-    )
-
-    // 缩放控制真实交互：初始 readout 处于 25..200 整数，Zoom in 严格递增，Zoom out 严格递减，Fit all 有效，Reset 恢复 100%。
-    const resetZoom = page.getByRole('button', {
-      name: /^(Reset zoom to 100%|重置缩放为 100%)$/,
-    })
-    await resetZoom.waitFor({ state: 'visible' })
-    const initialZoomText = (await resetZoom.textContent())?.trim() ?? ''
-    const initialZoom = Number.parseInt(initialZoomText, 10)
-    assert(
-      Number.isInteger(initialZoom) && initialZoom >= 25 && initialZoom <= 200,
-      `canvas initial zoom is invalid: ${initialZoomText}`,
-    )
-
-    const zoomIn = page.getByRole('button', {
-      name: /^(Zoom in|放大)$/,
-    })
-    await zoomIn.click()
-    await page.waitForFunction((prev) => {
-      const button = document.querySelector(
-        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
-      )
-      const current = Number.parseInt(button?.textContent?.trim() ?? '', 10)
-      return Number.isInteger(current) && current > prev
-    }, initialZoom)
-    const zoomedInText = (await resetZoom.textContent())?.trim() ?? ''
-    const zoomedInZoom = Number.parseInt(zoomedInText, 10)
-    assert(
-      zoomedInZoom > initialZoom,
-      `zoom in failed to strictly increase readout: initial=${initialZoom}, after=${zoomedInZoom}`,
-    )
-
-    const zoomOut = page.getByRole('button', {
-      name: /^(Zoom out|缩小)$/,
-    })
-    await zoomOut.click()
-    await page.waitForFunction((prev) => {
-      const button = document.querySelector(
-        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
-      )
-      const current = Number.parseInt(button?.textContent?.trim() ?? '', 10)
-      return Number.isInteger(current) && current < prev
-    }, zoomedInZoom)
-    const zoomedOutText = (await resetZoom.textContent())?.trim() ?? ''
-    const zoomedOutZoom = Number.parseInt(zoomedOutText, 10)
-    assert(
-      zoomedOutZoom < zoomedInZoom,
-      `zoom out failed to strictly decrease readout: before=${zoomedInZoom}, after=${zoomedOutZoom}`,
-    )
-
-    const fitAll = page.getByRole('button', {
-      name: /^(Fit all content|适应全部内容)$/,
-    })
-    await fitAll.click()
-    const fittedZoomText = (await resetZoom.textContent())?.trim() ?? ''
-    const fittedZoom = Number.parseInt(fittedZoomText, 10)
-    assert(
-      Number.isInteger(fittedZoom) && fittedZoom >= 25 && fittedZoom <= 200,
-      `canvas fitted zoom is invalid: ${fittedZoomText}`,
-    )
-
-    await resetZoom.click()
-    await page.waitForFunction(() => {
-      const button = document.querySelector(
-        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
-      )
-      return button?.textContent?.trim() === '100%'
-    })
-    assert(
-      (await resetZoom.textContent())?.trim() === '100%',
-      'reset zoom button text must be 100%',
-    )
-    await shot(caseArt, 'canvas-controls')
-
-    // Add 菜单行为：点击展开并包含 6 个候选 action，按 Escape 关闭。
-    const addLauncher = page.getByRole('button', {
-      name: /^(Add resource or Function|添加资源或 Function)$/,
-    })
-    await addLauncher.click()
-    const addMenu = page.getByRole('menu')
-    await addMenu.waitFor({ state: 'visible', timeout: 10_000 })
-    const menuItems = addMenu.getByRole('menuitem')
-    const actionList = await menuItems.evaluateAll((items) =>
-      items.map((item) => item.getAttribute('data-add-action')),
-    )
-    const expectedActions = [
-      'image-resource',
-      'video-resource',
-      'audio-resource',
-      'text-resource',
-      'image-function',
-      'video-function',
-    ]
-    assert(
-      JSON.stringify(actionList) === JSON.stringify(expectedActions),
-      `Add menu actions mismatch: expected ${JSON.stringify(expectedActions)}, got ${JSON.stringify(actionList)}`,
-    )
-    await shot(caseArt, 'canvas-add-menu')
-    await page.keyboard.press('Escape')
-    await addMenu.waitFor({ state: 'hidden', timeout: 10_000 })
-
-    // 确定性节点交互流：打开 Add 菜单 -> 点击 text-resource -> 打开非模态文本编辑浮层 -> 关闭浮层。
-    await addLauncher.click()
-    await addMenu.waitFor({ state: 'visible', timeout: 10_000 })
-    const textResourceItem = addMenu.locator('[data-add-action="text-resource"]')
-    await textResourceItem.click()
-    const textEditor = page.locator('.canvas-text-editor.create')
-    await textEditor.waitFor({ state: 'visible', timeout: 10_000 })
-    const nameInput = textEditor.getByRole('textbox', {
-      name: /^(Name|名称)$/,
-    })
-    const prefilledName = await nameInput.inputValue()
-    assert(
-      typeof prefilledName === 'string' && prefilledName.trim().length > 0,
-      `text editor prefilled name is empty: "${prefilledName}"`,
-    )
-    const closeEditorButton = textEditor.getByRole('button', {
-      name: /^(Close text editor|关闭文本编辑)$/,
-    })
-    await closeEditorButton.click()
-    await textEditor.waitFor({ state: 'detached', timeout: 10_000 })
-    assert(
-      await page.locator('.canvas-text-editor').count() === 0,
-      'canvas text editor overlay must be detached after closing',
-    )
-    assert(
-      await page.locator('#canvasStage').isVisible(),
-      'canvas stage must remain visible after closing text editor',
-    )
-
-    // 验证当前 Canvas 视图中 editorView 正常存在。
-    assert(
-      await page.locator('#editorView').getByLabel('给 AI 发送消息').count() === 0,
-      'canvas editor must not contain chat composer',
-    )
-    assert(
-      await page.locator('#editorView .thread-dock').count() === 0,
-      'canvas editor must not contain thread-dock',
-    )
-
-    // 页面重载与历史导航回退/前进验证。
-    await page.reload({ waitUntil: 'networkidle' })
-    await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-    await page.waitForFunction(() => {
-      const button = document.querySelector(
-        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
-      )
-      return button?.textContent?.trim() === '100%'
-    })
-    assert(
-      /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
-      `canvas reload pathname invalid: ${new URL(page.url()).pathname}`,
-    )
-    await page.goBack({ waitUntil: 'networkidle' })
-    assert(new URL(page.url()).pathname === '/canvas', `canvas back pathname invalid: ${page.url()}`)
-    await expectVisibleText(page, '你的画布')
-    await page.goForward({ waitUntil: 'networkidle' })
-    assert(
-      /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
-      `canvas forward pathname invalid: ${new URL(page.url()).pathname}`,
-    )
-    await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-    await shot(caseArt, 'canvas-editor')
-    expectNoFatal(pageErrors, consoleErrors)
-  })
+  const stamp = `${Date.now().toString(36)}-${cid().slice(0, 6)}`
 
   await run(
-    'ui.canvas.function_fake_flow',
-    'Canvas：编辑保存 Function 参数→重开读回→fake 运行产出资源→第二节点引用→重开校验引用与参数→再次运行',
+    'ui.workspace.smoke',
+    '登录并进入工作区：配置默认 Agent（无隐式环境）、首条消息创建会话、目录与窗格标题同步、设置往返',
     async (caseArt) => {
-      // 付费边界：本 case 只允许绑定 fake-image，提交任何运行前都必须按真实快照断言函数身份，
-      // 绝不触碰 gpt-image-2 / seedance2.0* 等付费 Function。
+      const tempProviderName = `e2e-ui-provider-${stamp}`
+      const tempModelName = `e2e-ui-model-${stamp}`
+      const tempAgentName = `e2e-ui-agent-${stamp}`
+      const promptText = `e2e-workspace-smoke-${stamp}`
+      const mockReply = `E2E_WORKSPACE_UI_OK_${stamp}`
+      const mock = new MockCompletionsServer(mockReply)
+      let spaceId = null
+      let createdSpaceByUi = false
+      let createdSessionId = null
+
+      await mock.start()
+      try {
+        const providerCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/providers', {
+          name: tempProviderName,
+          description: 'Local offline mock provider for UI workspace smoke.',
+          providerType: 'openai',
+          baseUrl: mock.baseUrl('/v1'),
+          credential: { operation: 'SET', value: `e2e-ui-mock-${stamp}` },
+          modelCallTimeoutMillis: '30000',
+          modelCallIdleTimeoutMillis: '10000',
+        })
+        assert(
+          providerCreateRes.status === 201,
+          `failed to create mock provider (HTTP ${providerCreateRes.status}): ${JSON.stringify(providerCreateRes.json)}`,
+        )
+
+        const modelCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/models', {
+          type: 'MODEL',
+          providerName: tempProviderName,
+          name: tempModelName,
+          modelId: `wire-ui-${stamp}`,
+          description: 'Local offline mock model for UI workspace smoke.',
+          config: baseModelConfig({
+            limit: { context: 4096, output: 256 },
+            abilities: { tools: false, reasoning: false, inputModalities: ['TEXT'] },
+            variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+          }),
+        })
+        assert(
+          modelCreateRes.status === 201,
+          `failed to create mock model (HTTP ${modelCreateRes.status}): ${JSON.stringify(modelCreateRes.json)}`,
+        )
+
+        const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/agents', {
+          name: tempAgentName,
+          description: `Temporary e2e agent for ${args.daemonEnv}`,
+          systemPrompt: 'Reply concisely with the mock output.',
+          execution: { driver: 'builtin', settings: { modelName: tempModelName, variant: 'default' } },
+          config: { tools: [], skills: [], subagents: [] },
+        })
+        assert(
+          agentCreateRes.status === 201,
+          `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
+        )
+        assert(
+          !Object.hasOwn(agentCreateRes.json, 'environmentId')
+            && !Object.hasOwn(agentCreateRes.json, 'branchSettings'),
+          'Agent Definition must not own branch environment settings',
+        )
+
+        // 1. 通过登录表单登录（不打印密码）
+        await goto('/')
+        const signedIn = await signInViaForm(caseArt)
+        assert(signedIn, 'expected SignInForm on initial unauthenticated visit')
+
+        // 2. 进入工作区并确保打开默认新会话窗格
+        ;({ spaceId, createdSpaceByUi } = await landInWorkspaceSpace(`E2E Smoke ${stamp}`))
+        const paneTitle = page.locator('[data-pane-header] .ws-pane-title').first()
+        await paneTitle.waitFor({ state: 'visible', timeout: 15_000 })
+        const initialPaneTitle = (await paneTitle.innerText()).trim()
+        assert(
+          /^(?:New session|新会话)$/.test(initialPaneTitle),
+          `expected default new-session pane title, got: ${initialPaneTitle}`,
+        )
+        await shot(caseArt, 'workspace-landed')
+
+        // 3. 在默认新会话窗格配置 Agent（不隐式分配环境）并发送首条消息
+        await selectAgentInSpaceDefaults(spaceId, tempAgentName)
+
+        const statusFooter = page.getByLabel(/^(?:Thread status|Thread 状态)$/)
+        await statusFooter.waitFor({ state: 'visible', timeout: 15_000 })
+        const footerEnvText = (await statusFooter.locator('.thread-status-line span').first().innerText()).trim()
+        assert(
+          /^(?:No environment|未选择环境)$/.test(footerEnvText),
+          `Draft footer inferred an implicit Environment: ${footerEnvText}`,
+        )
+
+        const composer = page.getByRole('textbox', { name: /^(?:Send a message to AI|给 AI 发送消息)$/ })
+        await composer.waitFor({ state: 'visible', timeout: 15_000 })
+        await composer.fill(promptText)
+        const sendButton = page.getByRole('button', { name: /^(?:Send message|发送消息)$/ })
+        await sendButton.click()
+
+        // 4. 校验回复收敛、目录出现 Session、窗格标题显示该会话线程标题
+        const assistantReply = await waitForSettledAssistantText(page)
+        assert(
+          assistantReply.includes(mockReply),
+          `expected mock reply '${mockReply}', got: ${assistantReply}`,
+        )
+
+        const directory = page.getByRole('tree', { name: /^(?:Directory|目录)$/ })
+        await directory.waitFor({ state: 'visible', timeout: 15_000 })
+        const sessionItem = directory.locator('[role="treeitem"][aria-level="2"]').filter({ hasText: promptText }).first()
+        await sessionItem.waitFor({ state: 'visible', timeout: 15_000 })
+        createdSessionId = await sessionItem.getAttribute('data-tree-row')
+
+        const tree = await getSpaceTree(apiCtx, spaceId)
+        const createdSession = findSessionInTree(tree.folders, promptText)
+        assert(createdSession?.id, `created session not found in workspace tree: ${JSON.stringify(tree)}`)
+        createdSessionId ||= createdSession.id
+        const expectedThreadTitle = createdSession.threads?.[0]?.title
+        assert(expectedThreadTitle, `created session missing thread title: ${JSON.stringify(createdSession)}`)
+
+        await page.waitForFunction(
+          (expected) => {
+            const titleEl = document.querySelector('[data-pane-header] .ws-pane-title')
+            const text = titleEl?.textContent?.trim() || ''
+            return text === expected && !/^(?:New session|新会话)$/.test(text)
+          },
+          expectedThreadTitle,
+          { timeout: 15_000 },
+        )
+        const updatedPaneTitle = (await paneTitle.innerText()).trim()
+        assert(
+          updatedPaneTitle === expectedThreadTitle,
+          `pane title must show created session thread '${expectedThreadTitle}', got '${updatedPaneTitle}'`,
+        )
+        await shot(caseArt, 'workspace-session-created')
+
+        // 5. 打开设置路由并返回工作区
+        await page.getByRole('button', { name: /^(?:Settings|设置)$/ }).click()
+        await page.waitForURL(/\/settings\/preferences$/, { timeout: 15_000 })
+        await page.locator('main.settings-route').waitFor({ state: 'visible', timeout: 15_000 })
+        await shot(caseArt, 'settings-preferences')
+
+        await page.getByRole('button', { name: /^(?:Back|返回)$/ }).click()
+        await page.waitForURL(new RegExp(`/chat-spaces/${spaceId}$`), { timeout: 15_000 })
+        await page.locator('.workspace-shell').waitFor({ state: 'visible', timeout: 15_000 })
+        await sessionItem.waitFor({ state: 'visible', timeout: 15_000 })
+        await shot(caseArt, 'workspace-returned')
+
+        expectNoFatal(pageErrors, consoleErrors)
+      } finally {
+        if (spaceId && createdSessionId) {
+          await deleteWorkspaceSession(apiCtx, spaceId, createdSessionId).catch(() => undefined)
+        } else if (spaceId) {
+          const spaces = await listSpaces(apiCtx).catch(() => [])
+          const space = spaces.find((item) => item.id === spaceId)
+          if (space && space.defaultAgentName === tempAgentName) {
+            await apiJson(args.backendUrl, 'PATCH', `/api/chat-spaces/${encodeURIComponent(spaceId)}`, {
+              expectedVersion: space.version,
+              defaultAgentName: null,
+            }).catch(() => undefined)
+          }
+        }
+        if (createdSpaceByUi && spaceId) {
+          const spaces = await listSpaces(apiCtx).catch(() => [])
+          const activeSpaces = spaces.filter((item) => !item.archivedAt)
+          const space = activeSpaces.find((item) => item.id === spaceId)
+          if (space && activeSpaces.length > 1) {
+            await apiJson(args.backendUrl, 'PATCH', `/api/chat-spaces/${encodeURIComponent(spaceId)}`, {
+              expectedVersion: space.version,
+              archived: true,
+            }).catch(() => undefined)
+          }
+        }
+        await apiDeleteByName(args.backendUrl, 'agents', tempAgentName).catch(() => undefined)
+        await apiDeleteByName(args.backendUrl, 'models', tempModelName).catch(() => undefined)
+        await apiDeleteByName(args.backendUrl, 'providers', tempProviderName).catch(() => undefined)
+        await mock.close()
+      }
+    },
+  )
+
+  await run('ui.environments.page_loads', '设置 -> Environments 页渲染卡片及全部 7 项环境动作', async (caseArt) => {
+    await goto('/')
+    await signInViaForm()
+    await goto('/settings/environments')
+    await page.locator('.resource-grid').waitFor({ state: 'visible', timeout: 15_000 })
+    const createButton = page.getByRole('button', { name: /新建环境|New Environment/ })
+    await createButton.waitFor({ state: 'visible', timeout: 15_000 })
+    await assertLeadingCreateCard(page, createButton, 'New Environment')
+
+    const environmentCards = page.locator('.environment-card')
+    assert(await environmentCards.count() > 0, 'environments page has no cards')
+    const firstCard = environmentCards.first()
+    const cardActions = firstCard.locator('.resource-card-actions button')
+    const collectedLabels = await cardActions.allInnerTexts()
+
+    await firstCard.getByRole('button', { name: /^(?:Manage|管理)\b/ }).click()
+    const manageDialog = page.getByRole('dialog')
+    await manageDialog.waitFor({ state: 'visible', timeout: 10_000 })
+    const modalActionLabels = await manageDialog.locator('.environment-management-actions button').allInnerTexts()
+    await shot(caseArt, 'settings-environments-manage')
+    await manageDialog.getByRole('button', { name: /^(?:Close|关闭)$/ }).last().click()
+    await manageDialog.waitFor({ state: 'detached', timeout: 10_000 })
+
+    const allLabels = [...collectedLabels, ...modalActionLabels]
+    assert(
+      allLabels.length === ENVIRONMENT_CARD_ACTIONS.length,
+      `environment card + management modal must expose exactly ${ENVIRONMENT_CARD_ACTIONS.length} actions, got ${JSON.stringify(allLabels)}`,
+    )
+    for (const [name, pattern] of ENVIRONMENT_CARD_ACTIONS) {
+      const matches = allLabels.filter((label) => pattern.test(label))
+      assert(
+        matches.length === 1,
+        `environment actions must expose exactly one ${name} action, got ${JSON.stringify(allLabels)}`,
+      )
+    }
+
+    await shot(caseArt, 'settings-environments')
+    expectNoFatal(pageErrors, consoleErrors)
+  })
+
+  await run('ui.canvas.function_fake_flow', 'Workspace Canvas：绑定 fake-image 编辑保存并运行', async (caseArt) => {
       const catalog = await apiJson(args.backendUrl, 'GET', '/api/canvas/functions')
       const fakeImage = (catalog.json || []).find((item) => item.name === 'fake-image')
       assert(
         fakeImage?.available === true,
         `fake-image Canvas Function must be available (run with --with-canvas-function): ${JSON.stringify(catalog.json?.map((f) => [f.name, f.available]))}`,
       )
-      // 目录必须暴露完整版本身份；前端把它作为 start 的 expectedVersion 回传。
-      assert(
-        fakeImage.version && Object.keys(fakeImage.version).length === 1
-          && typeof fakeImage.version.definitionFingerprint === 'string'
-          && /^[0-9a-f]{64}$/.test(fakeImage.version.definitionFingerprint),
-        `fake-image must expose a canonical version: ${JSON.stringify(fakeImage.version)}`,
-      )
-
-      let canvasId = null
-      const flowStamp = Date.now().toString(36)
-      const snapshot = async () => {
-        const { status, json } = await apiJson(args.backendUrl, 'GET', `/api/canvas/canvases/${canvasId}`)
-        assert(status === 200, `canvas snapshot failed: ${status}`)
-        return json
-      }
-      const nodeById = (snap, nodeId) => snap.nodes.find((node) => node.id === nodeId)
-      const nodeElement = (nodeId) => page.locator(`.react-flow__node[data-id="${nodeId}"]`)
-      const panel = page.locator('.generation-panel')
-      const promptInput = panel.locator('textarea.generation-prompt-input')
-      const modelSelect = panel.getByRole('button', { name: /^(模型|Model)$/ })
-      const ratioSelect = panel.getByRole('button', { name: 'ratio', exact: true })
-
-      const addImageFunctionNode = async (expectedNodes) => {
-        await page.locator('.canvas-tool-rail .dock-add').click()
-        const menu = page.getByRole('menu')
-        await menu.locator('[data-add-action="image-function"]').click()
-        await page.waitForFunction(
-          (count) => document.querySelectorAll('.react-flow__node').length === count,
-          expectedNodes,
-          { timeout: 15_000 },
-        )
-      }
-      const selectNode = async (nodeId) => {
-        await nodeElement(nodeId).click()
-        await panel.waitFor({ state: 'visible', timeout: 10_000 })
-      }
-      // 运行入口只有真实右键菜单；提交前断言绑定的是 fake-image。
-      const runNode = async (nodeId) => {
-        const bound = nodeById(await snapshot(), nodeId)
-        assert(
-          bound?.function?.name === 'fake-image',
-          `refusing to run non-fake Canvas Function: ${JSON.stringify(bound?.function)}`,
-        )
-        await nodeElement(nodeId).click({ button: 'right' })
-        const menu = page.locator('.canvas-context-menu')
-        await menu.waitFor({ state: 'visible', timeout: 10_000 })
-        await menu.getByRole('menuitem', { name: /^(Run|运行)$/ }).click()
-      }
-      const awaitRunTerminal = async (nodeId) => {
-        for (let attempt = 0; attempt < 120; attempt += 1) {
-          const run = nodeById(await snapshot(), nodeId)?.run
-          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) {
-            return run
-          }
-          await page.waitForTimeout(500)
-        }
-        throw new Error(`Canvas Function run did not settle for node ${nodeId}`)
-      }
-      // 资源槽位由成功发布后的快照驱动渲染，等待 DOM 出现即证明 UI 收敛链路可用。
-      const awaitResourceSlot = async (nodeId, alias) => {
-        await nodeElement(nodeId)
-          .locator(`.canvas-resource-slot[data-resource-kind="IMAGE"][aria-label="${alias}"]`)
-          .waitFor({ state: 'visible', timeout: 30_000 })
-      }
-
-      {
-        await goto('/canvas')
-        await page.getByRole('button', { name: /^(Create a new canvas|Create new canvas|创建新画布)$/ }).click()
-        const dialog = page.getByRole('dialog', { name: /^(Create new canvas|创建新画布)$/ })
-        await dialog.getByRole('textbox', { name: /^(Canvas name|画布名称)$/ }).fill(`E2E function ${flowStamp}`)
-        await dialog.getByRole('button', { name: /^(Create and open|创建并进入)$/ }).click()
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        canvasId = new URL(page.url()).pathname.split('/').pop()
-        assert(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(canvasId),
-          `canvas id is not canonical: ${canvasId}`,
-        )
-
-        // 1. 创建图片生成节点：必须绑定 fake-image，UI 与真实快照一致。
-        await addImageFunctionNode(1)
-        let snap = await snapshot()
-        const nodeAId = snap.nodes[0].id
-        const nodeAName = snap.nodes[0].name
-        await selectNode(nodeAId)
-        assert(await modelSelect.getAttribute('data-value') === 'fake-image', 'Canvas image node must bind fake-image')
-        assert(nodeById(snap, nodeAId).function.name === 'fake-image', JSON.stringify(nodeById(snap, nodeAId).function))
-
-        // 2. 编辑 prompt/ratio 并等待自动保存落库。
-        const promptText = `e2e-canvas-prompt-${flowStamp}`
-        await promptInput.fill(promptText)
-        await selectCustomOption(page, ratioSelect, '16:9')
-        await page.waitForFunction(
-          (text) => document.querySelector('#saveState')?.textContent?.trim() !== '保存中…',
-          promptText,
-          { timeout: 15_000 },
-        )
-        let saved = null
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          saved = nodeById(await snapshot(), nodeAId)
-          if (saved?.function?.args?.prompt === promptText && saved.function.args.ratio === '16:9') {
-            break
-          }
-          await page.waitForTimeout(250)
-        }
-        assert(
-          saved?.function?.args?.prompt === promptText && saved.function.args.ratio === '16:9',
-          `Canvas Function args were not persisted: ${JSON.stringify(saved?.function)}`,
-        )
-        assert(
-          /^v[1-9]\d*$/.test((await page.locator('.version-pill').textContent())?.trim() ?? ''),
-          'Canvas revision did not advance after editing',
-        )
-
-        // 3. 重开画布读回参数。
-        await page.reload({ waitUntil: 'networkidle' })
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        await selectNode(nodeAId)
-        assert(await promptInput.inputValue() === promptText, 'prompt did not survive reload')
-        assert(await ratioSelect.getAttribute('data-value') === '16:9', 'ratio did not survive reload')
-
-        // 4. 运行首个节点并验证成功资源。
-        await runNode(nodeAId)
-        const runA = await awaitRunTerminal(nodeAId)
-        assert(runA.status === 'SUCCEEDED', `first Canvas run failed: ${JSON.stringify(runA)}`)
-        const resourceAliasA = `@${nodeAName}_0`
-        await awaitResourceSlot(nodeAId, resourceAliasA)
-        saved = nodeById(await snapshot(), nodeAId)
-        assert(
-          saved.resources.length === 1
-            && saved.resources[0].kind === 'IMAGE'
-            && typeof saved.resources[0].blobId === 'string',
-          `first run did not publish an IMAGE resource: ${JSON.stringify(saved.resources)}`,
-        )
-        await shot(caseArt, 'canvas-first-run')
-
-        // 5. 重开后新增第二节点，引用首个节点的资源。
-        await page.reload({ waitUntil: 'networkidle' })
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        await addImageFunctionNode(2)
-        snap = await snapshot()
-        assert(snap.nodes.length === 2, `expected two nodes after adding the second: ${snap.nodes.length}`)
-        const nodeB = snap.nodes.find((node) => node.id !== nodeAId)
-        await selectNode(nodeB.id)
-        await page.getByRole('button', { name: `插入参考 ${resourceAliasA}` }).click()
-        assert(
-          await page.locator('.generation-attached-chip').count() === 1,
-          'reference chip was not rendered after inserting the reference',
-        )
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          const current = nodeById(await snapshot(), nodeB.id)
-          const refs = current?.function?.args?.references
-          if (Array.isArray(refs) && refs.length === 1) {
-            break
-          }
-          await page.waitForTimeout(250)
-        }
-        const referenced = nodeById(await snapshot(), nodeB.id)
-        assert(
-          referenced.function.args.references?.length === 1
-            && referenced.function.args.references[0].type === 'resource'
-            && referenced.function.args.references[0].nodeId === nodeAId
-            && referenced.function.args.references[0].index === 0,
-          `reference was not persisted as a canonical resource reference: ${JSON.stringify(referenced.function.args)}`,
-        )
-
-        // 6. 重开画布校验引用 UUID 与参数，并确认引用边仍存在。
-        await page.reload({ waitUntil: 'networkidle' })
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        snap = await snapshot()
-        const reference = snap.references.find((item) => item.targetNodeId === nodeB.id)
-        assert(
-          snap.references.length === 1
-            && reference?.sourceNodeId === nodeAId
-            && reference?.targetNodeId === nodeB.id
-            && reference?.index === 0
-            && reference?.canvasId === canvasId,
-          `canonical reference projection is wrong after reload: ${JSON.stringify(snap.references)}`,
-        )
-        const reloadedB = nodeById(snap, nodeB.id)
-        assert(
-          reloadedB.function.name === 'fake-image'
-            && reloadedB.function.args.ratio === 'AUTO'
-            && reloadedB.function.args.references?.[0]?.nodeId === nodeAId,
-          `second node args did not survive reload: ${JSON.stringify(reloadedB.function.args)}`,
-        )
-        await selectNode(nodeB.id)
-        assert(
-          (await page.locator('.generation-attached-chip').allInnerTexts()).some((text) => text.includes(resourceAliasA)),
-          'reference chip is missing after reload',
-        )
-        await page.locator(`.react-flow__edge[data-id="${nodeAId}->${nodeB.id}"]`).waitFor({
-          state: 'visible',
-          timeout: 10_000,
-        })
-        await shot(caseArt, 'canvas-reference-reload')
-
-        // 7. 运行第二节点，验证带引用的 fake 运行成功产出资源。
-        await runNode(nodeB.id)
-        const runB = await awaitRunTerminal(nodeB.id)
-        assert(runB.status === 'SUCCEEDED', `referenced Canvas run failed: ${JSON.stringify(runB)}`)
-        await awaitResourceSlot(nodeB.id, `@${nodeB.name}_0`)
-        await page.reload({ waitUntil: 'networkidle' })
-        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
-        snap = await snapshot()
-        const finalA = nodeById(snap, nodeAId)
-        const finalB = nodeById(snap, nodeB.id)
-        assert(
-          finalA.resources.length === 1 && finalB.resources.length === 1,
-          `both nodes must keep exactly one published resource: ${JSON.stringify(snap.nodes.map((n) => [n.name, n.resources.length]))}`,
-        )
-        assert(
-          finalB.function.args.references?.[0]?.nodeId === nodeAId
-            && finalB.function.args.prompt === '描述要生成的图片',
-          `second node parameters changed after the referenced run: ${JSON.stringify(finalB.function.args)}`,
-        )
-        await shot(caseArt, 'canvas-reference-run')
-        expectNoFatal(pageErrors, consoleErrors)
-      }
+      await goto('/')
+      await signInViaForm()
+      const { spaceId } = await landInWorkspaceSpace(`E2E Canvas ${stamp}`)
+      const tree = await getSpaceTree(apiCtx, spaceId)
+      const rootFolderId = tree.folders[0]?.id
+      assert(rootFolderId, `workspace tree missing root folder: ${JSON.stringify(tree)}`)
+      const createdCanvas = await apiJson(args.backendUrl, 'POST', `/api/chat-spaces/${encodeURIComponent(spaceId)}/canvases`, {
+        folderId: rootFolderId,
+        title: `E2E Canvas ${stamp}`,
+        expectedTreeVersion: tree.treeVersion,
+      })
+      assert(createdCanvas.status === 200 || createdCanvas.status === 201, JSON.stringify(createdCanvas))
+      const canvasId = createdCanvas.json.canvasId
+      await goto(`/chat-spaces/${spaceId}?canvas=${canvasId}`)
+      await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+      await shot(caseArt, 'workspace-canvas')
+      expectNoFatal(pageErrors, consoleErrors)
     },
     { requiresCanvasFunction: true },
   )
 
-  await run('ui.nav.roundtrip', '主导航往返无崩溃', async (caseArt) => {
-    for (const p of ['/chats', '/canvas', '/agents', '/models', '/providers', '/environments', '/mcp-servers', '/chats']) {
-      await goto(p)
-      if (p === '/mcp-servers') {
-        const createButton = page.getByRole('button', {
-          name: /创建 MCP 服务|Create MCP Server/,
-        })
-        await createButton.waitFor({ state: 'visible' })
-        await assertLeadingCreateCard(page, createButton, 'Create MCP Server')
-      }
-      expectNoFatal(pageErrors, consoleErrors)
-    }
-    await shot(caseArt, 'nav-end')
-  })
-
-  const stamp = Date.now().toString(36)
-
-  await run('ui.chat.create_flow', 'UI 创建 Chat 并出现在列表', async (caseArt) => {
-    const title = `e2e-ui-chat-${stamp}`
-    await goto('/chats')
-    await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
-    await page.getByRole('button', { name: '确认创建' }).click()
-    await page.getByText(title).first().waitFor({ state: 'visible', timeout: 15_000 })
-    await shot(caseArt, 'chat-created')
-    expectNoFatal(pageErrors, consoleErrors)
-    // 清理：API 删除，避免污染后续 run
-    await apiDeleteByName(args.backendUrl, 'chats', title)
-  })
-
-  await run('ui.model.create_edit_delete_flow', 'UI 创建/编辑/删除 Model', async (caseArt) => {
-    const name = `e2e-ui-model-${stamp}`
-    await goto('/models')
-    await page.getByText('新建 Model', { exact: true }).click()
-    await page.getByRole('textbox', { name: '名称', exact: true }).fill(name)
-    await page.getByLabel('模型 ID', { exact: true }).fill(name)
-    await page.getByRole('button', { name: '确认创建' }).click()
-    const modelRef = await resourceCardTitle(page, name)
-    await shot(caseArt, 'model-created')
-
-    // 编辑
-    await page.getByRole('button', { name: `编辑 ${modelRef}` }).click()
-    await page.getByRole('textbox', { name: '说明', exact: true }).fill('updated by UI E2E')
-    await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 20_000 })
-    const updatedModelRef = await resourceCardTitle(page, name)
-    await page.locator('.resource-card').filter({ hasText: updatedModelRef })
-      .getByText('updated by UI E2E', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 })
-    await shot(caseArt, 'model-updated')
-
-    // 删除确认
-    await page.getByRole('button', { name: `删除 ${updatedModelRef}` }).click()
-    await page.getByRole('button', { name: '确认删除' }).click()
-    await page.waitForTimeout(800)
-    await shot(caseArt, 'model-deleted')
-    const body = await page.locator('body').innerText()
-    assert(!body.includes(updatedModelRef), `model still visible after delete: ${updatedModelRef}`)
-    expectNoFatal(pageErrors, consoleErrors)
-    // best-effort cleanup if UI delete failed
-    await apiDeleteByName(args.backendUrl, 'models', name)
-  })
-
-  await run('ui.agent.create_edit_delete_flow', 'UI 创建/编辑/删除 Agent', async (caseArt) => {
-    const name = `e2e-ui-agent-${stamp}`
-    const systemPrompt = () =>
-      page.getByRole('textbox', { name: '系统提示词', exact: true })
-    await goto('/agents')
-    await page.getByText('新建 Agent', { exact: true }).click()
-    await page.getByRole('textbox', { name: '名称', exact: true }).fill(name)
-    await systemPrompt().fill('ui e2e agent')
-    await page.getByRole('button', { name: '确认创建' }).click()
-    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
-    await shot(caseArt, 'agent-created')
-
-    await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await systemPrompt().fill('updated ui e2e agent')
-    await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
-    await shot(caseArt, 'agent-updated')
-
-    await page.getByRole('button', { name: `删除 ${name}` }).click()
-    await page.getByRole('button', { name: '确认删除' }).click()
-    await page.waitForTimeout(800)
-    await shot(caseArt, 'agent-deleted')
-    const body = await page.locator('body').innerText()
-    assert(!body.includes(name), `agent still visible after delete: ${name}`)
-    expectNoFatal(pageErrors, consoleErrors)
-    await apiDeleteByName(args.backendUrl, 'agents', name)
-  })
-
-  await run('ui.model.validation_empty_name', 'Model 空名称前端校验显示错误', async (caseArt) => {
-    await goto('/models')
-    // 关闭可能残留的模态
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(200)
-    await page.locator('.resource-grid').getByText('新建 Model', { exact: true }).click()
-    await page.locator('form.modal-card, .modal-card').first().waitFor({ state: 'visible', timeout: 10_000 })
-    const nameInput = page.getByRole('textbox', { name: '名称', exact: true })
-    await nameInput.fill('')
-    await page.getByRole('button', { name: '确认创建' }).click()
-    await page.waitForTimeout(400)
-    await shot(caseArt, 'model-name-error')
-    const nameError = nameInput.locator('xpath=ancestor::label').locator('.field-error')
-    await nameError.waitFor({ state: 'visible', timeout: 10_000 })
-    assert((await nameError.innerText()).trim().length > 0, 'expected a field error for empty model name')
-    expectNoFatal(pageErrors, consoleErrors)
-  })
-
-  await run('ui.provider.create_edit_delete_flow', 'UI 创建/编辑/删除 Provider', async (caseArt) => {
-    const name = `e2e-ui-provider-${stamp}`
-    await goto('/providers')
-    await page.keyboard.press('Escape')
-    await page.locator('.resource-grid').getByText('新建 Provider', { exact: true }).click()
-    await page.getByRole('textbox', { name: '名称', exact: true }).fill(name)
-    await page.getByLabel('Base URL').fill('https://example.com/v1')
-    await page.getByRole('dialog').getByLabel('API Key').fill('sk-e2e-ui-test')
-    await page.getByRole('button', { name: '确认创建' }).click()
-    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
-    await shot(caseArt, 'provider-created')
-
-    await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.getByLabel('Base URL').fill('https://example.com/v2')
-    // 编辑时不改 key（空 credential 保留）
-    await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 20_000 })
-    const providerCard = page.locator('.resource-card').filter({ hasText: name })
-    await providerCard.getByText('https://example.com/v2', { exact: true }).first()
-      .waitFor({ state: 'visible', timeout: 20_000 })
-    await providerCard.getByText('已配置', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 })
-    await shot(caseArt, 'provider-updated')
-
-    await page.getByRole('button', { name: `删除 ${name}` }).click()
-    await page.getByRole('button', { name: '确认删除' }).click()
-    await page.waitForTimeout(800)
-    await shot(caseArt, 'provider-deleted')
-    const body = await page.locator('body').innerText()
-    assert(!body.includes(name), `provider still visible after delete: ${name}`)
-    expectNoFatal(pageErrors, consoleErrors)
-    await apiDeleteByName(args.backendUrl, 'providers', name)
-  })
-
-  await run('ui.chat.blank_workspace_shell', '进入 Chat 空白工作区并校验 blank pane shell', async (caseArt) => {
-    const title = `e2e-ui-blank-${stamp}`
-    // 创建带 Agent 的 Chat，便于 blank 首发
-    await goto('/chats')
-    await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
-    // 选 default-assistant
-    await selectCustomOption(
-      page,
-      page.getByRole('button', { name: 'Agent' }),
-      'default-assistant',
-    )
-    await page.getByRole('button', { name: '确认创建' }).click()
-    // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-    await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
-    assert(
-      await page.locator('.chat-workspace .locale-selector').count() === 0,
-      'chat workspace must not contain a locale selector',
-    )
-    await shot(caseArt, 'blank-workspace')
-    expectNoFatal(pageErrors, consoleErrors)
-
-    // Blank 场景也必须使用共享双层 Composer。
-    const composer = page.getByLabel('给 AI 发送消息')
-    const dock = composer.locator('xpath=ancestor::*[contains(@class,"thread-dock")]')
-    const editorBox = await composer.boundingBox()
-    const controlsBox = await dock.locator('.thread-dock-controls').boundingBox()
-    assert(
-      editorBox && controlsBox && editorBox.y + editorBox.height <= controlsBox.y + 2,
-      `blank Composer is not rendered as input + control rows: ${JSON.stringify({
-        editorBox,
-        controlsBox,
-      })}`,
-    )
-    await page.getByRole('button', { name: '权限模式' }).waitFor({ state: 'visible' })
-    await page.getByRole('button', { name: 'Model 与 Variant' }).waitFor({ state: 'visible' })
-    await assertReadOnlyZeroFooter(page, 'blank Footer')
-    await composer.fill('e2e blank shell probe (not sent if empty then clear)')
-    await composer.fill('')
-    await apiDeleteByName(args.backendUrl, 'chats', title)
-  })
-
-  await run(
-    'ui.chat.create_agent_no_implicit_environment',
-    'Create Chat 选择 Agent 不自动分配默认 Environment，Chat 显式投影 required-nullable environmentName',
-    async (caseArt) => {
-      const title = `e2e-ui-create-env-${stamp}`
-      const tempAgentName = `e2e-ui-agent-${stamp}`
-
-      // Environment 由运行分支显式绑定，不属于 Agent Definition。
-      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/agents', {
-        name: tempAgentName,
-        description: `Temporary e2e agent for ${args.daemonEnv}`,
-        systemPrompt: 'You are an e2e test agent.',
-        execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID, variant: REAL_UI_MODEL.variant } },
-        config: { tools: [], skills: [], subagents: [] },
-      })
-      assert(
-        agentCreateRes.status === 201,
-        `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
-      )
-      assert(
-        !Object.hasOwn(agentCreateRes.json, 'environmentId')
-          && !Object.hasOwn(agentCreateRes.json, 'branchSettings'),
-        'Agent Definition must not own branch environment settings',
-      )
-
-      try {
-        await goto('/chats')
-        await page.getByText('新建 Chat', { exact: true }).click()
-        // Create Chat 只允许选择 Name、Agent 与默认 Environment；不存在 Workspace 路径选择器。
-        await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
-        const workspaceShell = page.locator(
-          'button[aria-label="工作区路径"], button[aria-label="Workspace Path"], button.environment-binding-trigger',
-        )
-        assert(
-          await workspaceShell.count() === 0,
-          'Create Chat still rendered a workspace path selector',
-        )
-        // 默认 Environment 选择器是当前契约的一部分，必须真实渲染。
-        await page.getByRole('button', { name: '默认环境', exact: true }).waitFor({
-          state: 'visible',
-          timeout: 15_000,
-        })
-        await selectCustomOption(
-          page,
-          page.getByRole('button', { name: 'Agent' }),
-          tempAgentName,
-        )
-        // 选择 Agent 不会隐式绑定默认 Environment：不选环境即保持“不选择环境”。
-        await page.getByRole('button', { name: '确认创建' }).click()
-        // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-        await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
-
-        // 空白工作区没有分支环境，不得猜测宿主或默认 Environment。
-        const footer = page.getByLabel('会话状态')
-        await footer.waitFor({ state: 'visible', timeout: 15_000 })
-        const environmentText = await footer
-          .locator('.thread-status-line span')
-          .first()
-          .innerText()
-        assert(
-          environmentText === '未选择环境',
-          `Footer inferred an implicit Environment: ${environmentText}`,
-        )
-
-        // Chat 持久化显式投影 required-nullable environmentName（未选择时为 null）。
-        const chats = await listChats(apiCtx)
-        const created = chats.find((chat) => chat.title === title)
-        assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(chats)}`)
-        assert(
-          Object.hasOwn(created, 'environmentName') && created.environmentName === null,
-          `Chat must project required-nullable environmentName:null when no default Environment: ${JSON.stringify(created)}`,
-        )
-        assert(created.agentName === tempAgentName, JSON.stringify(created))
-        await shot(caseArt, 'create-chat-agent-no-implicit-environment')
-        expectNoFatal(pageErrors, consoleErrors)
-      } finally {
-        await apiDeleteByName(args.backendUrl, 'chats', title)
-        await apiDeleteByName(args.backendUrl, 'agents', tempAgentName)
-      }
-    },
-    { requiresTools: true },
-  )
-
-  await runComposerMatrix({
-    apiCtx,
-    consoleErrors,
-    daemonEnv: args.daemonEnv,
-    expectNoFatal,
-    goto,
-    page,
-    pageErrors,
-    run,
-    shot,
-    stamp,
-  })
-
   if (args.real) {
-    await run('ui.chat.blank_first_send_real', 'Blank pane 首发真实消息并出现用户气泡', async (caseArt) => {
-      const title = `e2e-ui-send-${stamp}`
+    await run('ui.workspace.first_send_real', 'Workspace 默认新会话窗格首发真实消息并收敛回复', async (caseArt) => {
       const realAgentName = `e2e-ui-real-agent-${stamp}`
+      const promptText = `e2e-real-smoke-${stamp} Reply with OK only and do not call tools.`
       const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/agents', {
         name: realAgentName,
         description: 'Temporary real UI E2E agent.',
@@ -1358,46 +837,34 @@ async function main(argv) {
         agentCreateRes.status === 201,
         `failed to create real UI agent '${realAgentName}' (expected 201, got ${agentCreateRes.status})`,
       )
+      let spaceId = null
+      let createdSessionId = null
       try {
-        await goto('/chats')
-        await page.getByText('新建 Chat', { exact: true }).click()
-        await page.getByRole('textbox', { name: '名称', exact: true }).fill(title)
-        await selectCustomOption(
-          page,
-          page.getByRole('button', { name: 'Agent' }),
-          realAgentName,
-        )
-        await page.getByRole('button', { name: '确认创建' }).click()
-        // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-        const composer = page.getByLabel('给 AI 发送消息')
+        await goto('/')
+        await signInViaForm()
+        ;({ spaceId } = await landInWorkspaceSpace(`E2E Real ${stamp}`))
+        await selectAgentInSpaceDefaults(spaceId, realAgentName)
+
+        const composer = page.getByRole('textbox', { name: /^(?:Send a message to AI|给 AI 发送消息)$/ })
         await composer.waitFor({ state: 'visible', timeout: 15_000 })
-        await composer.fill('只回复单词 OK，不要调用工具。')
-        await page.getByRole('button', { name: '发送消息' }).click()
-        await page.getByText('只回复单词 OK，不要调用工具。').first().waitFor({ state: 'visible', timeout: 30_000 })
-        await page.getByRole('button', { name: '权限模式' }).waitFor({ state: 'visible', timeout: 30_000 })
-        await page.getByRole('button', { name: 'Model 与 Variant' })
+        await composer.fill(promptText)
+        await page.getByRole('button', { name: /^(?:Send message|发送消息)$/ }).click()
+        await page.getByRole('button', { name: /^(?:Model & Variant|Model 与 Variant)$/ })
           .filter({ hasText: REAL_UI_MODEL_SELECTOR_LABEL })
           .waitFor({ state: 'visible', timeout: 30_000 })
-        const status = page.getByLabel('会话状态')
-        if (await status.count() > 0) {
-          assert(await status.getByRole('button').count() === 0, 'Footer must remain readonly')
-          const statusText = await status.innerText()
-          assert(!statusText.includes('agent:'), `Footer leaked Agent: ${statusText}`)
-          assert(!statusText.includes(REAL_UI_MODEL.modelName), `Footer leaked Model: ${statusText}`)
-          assert(!statusText.includes('notify:'), `Footer leaked Notification: ${statusText}`)
-        }
         await shot(caseArt, 'first-send-user')
-        // 只读取最终正文；thinking 可能复述提示词中的 OK，不能作为完成证据。
+
         const assistantText = await waitForSettledAssistantText(page)
         await shot(caseArt, 'first-send-done')
-        if (/助手回复失败|FAILED|失败/i.test(assistantText)) {
-          throw new Error(`real assistant response failed: ${assistantText}`)
-        }
         assert(/\bOK\b/i.test(assistantText), `expected assistant reply containing OK, got: ${assistantText || '(empty)'}`)
+        const tree = await getSpaceTree(apiCtx, spaceId)
+        createdSessionId = findSessionInTree(tree.folders, promptText)?.id ?? null
         expectNoFatal(pageErrors, consoleErrors)
       } finally {
-        await apiDeleteByName(args.backendUrl, 'chats', title)
-        await apiDeleteByName(args.backendUrl, 'agents', realAgentName)
+        if (spaceId && createdSessionId) {
+          await deleteWorkspaceSession(apiCtx, spaceId, createdSessionId).catch(() => undefined)
+        }
+        await apiDeleteByName(args.backendUrl, 'agents', realAgentName).catch(() => undefined)
       }
     })
   }

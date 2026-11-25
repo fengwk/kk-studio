@@ -1340,7 +1340,7 @@ alter table skill_package
     add constraint fk_skill_package_artifact
         foreign key (artifact_blob_id) references storage_blob (id) on delete restrict;
 
--- 4. Product tables: Canvas, Chat and Project
+-- 4. Product tables: Canvas and Workspace
 
 create table canvas_document (
     id uuid primary key,

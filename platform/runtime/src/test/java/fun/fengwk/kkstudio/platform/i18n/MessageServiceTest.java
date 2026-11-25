@@ -111,7 +111,13 @@ class MessageServiceTest {
     assertEquals("system settings", messageService.resourceDisplayName("system_settings"));
     assertEquals("MCP server", messageService.resourceDisplayName("mcp_server"));
     assertEquals("skill package", messageService.resourceDisplayName("skill_package"));
-    assertEquals("chat", messageService.resourceDisplayName("chat"));
+    assertEquals("space", messageService.resourceDisplayName("chat_space"));
+    assertEquals("folder", messageService.resourceDisplayName("folder"));
+    assertEquals("session", messageService.resourceDisplayName("session"));
+    assertEquals("thread", messageService.resourceDisplayName("thread"));
+    assertEquals("canvas", messageService.resourceDisplayName("canvas"));
+    assertEquals("schedule", messageService.resourceDisplayName("schedule"));
+    assertEquals("user", messageService.resourceDisplayName("user"));
     assertEquals(
         "some future resource", messageService.resourceDisplayName("some_future_resource"));
     assertNull(messageService.resourceDisplayName(null));
@@ -120,7 +126,32 @@ class MessageServiceTest {
     assertEquals("系统设置", messageService.resourceDisplayName("system_settings"));
     assertEquals("MCP 服务", messageService.resourceDisplayName("mcp_server"));
     assertEquals("技能包", messageService.resourceDisplayName("skill_package"));
-    assertEquals("对话", messageService.resourceDisplayName("chat"));
+    assertEquals("空间", messageService.resourceDisplayName("chat_space"));
+    assertEquals("文件夹", messageService.resourceDisplayName("folder"));
+    assertEquals("会话", messageService.resourceDisplayName("session"));
+    assertEquals("Thread", messageService.resourceDisplayName("thread"));
+    assertEquals("Canvas", messageService.resourceDisplayName("canvas"));
+    assertEquals("定时任务", messageService.resourceDisplayName("schedule"));
+    assertEquals("用户", messageService.resourceDisplayName("user"));
+  }
+
+  @Test
+  void localizesResourceNotFoundTitlesInEnglishAndChinese() {
+    LocaleContextHolder.setLocale(Locale.US);
+    assertEquals(
+        "The space was not found.",
+        messageService.domainMessage(DomainErrorCode.NOT_FOUND, Map.of("resource", "chat_space")));
+    assertEquals(
+        "The folder was not found.",
+        messageService.domainMessage(DomainErrorCode.NOT_FOUND, Map.of("resource", "folder")));
+
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    assertEquals(
+        "未找到空间。",
+        messageService.domainMessage(DomainErrorCode.NOT_FOUND, Map.of("resource", "chat_space")));
+    assertEquals(
+        "未找到文件夹。",
+        messageService.domainMessage(DomainErrorCode.NOT_FOUND, Map.of("resource", "folder")));
   }
 
   @Test

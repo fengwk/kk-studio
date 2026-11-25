@@ -31,7 +31,7 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(password).toHaveAttribute('autocomplete', 'off')
     await password.fill('fixture-value')
     await expect(password).toHaveValue('fixture-value')
-    const invalid = provider.getByPlaceholder('https://api.example.com/v1')
+    const invalid = provider.getByPlaceholder('https://api.example.invalid/v1')
     await expect(invalid).toHaveAttribute('aria-invalid', 'true')
     await invalid.focus()
     await expect(invalid).toHaveCSS('border-top-color', 'rgb(240, 133, 133)')
@@ -42,7 +42,13 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(model.getByLabel('提供商', { exact: true })).toBeDisabled()
     await expect(model.getByRole('textbox', { name: '模型 ID', exact: true }))
       .toHaveJSProperty('required', true)
-    await expect(model.getByLabel('思考强度 1', { exact: true })).toBeDisabled()
+    // 1.3.0 推理关闭时不渲染思考强度字段；开启推理后立即可编辑。
+    await expect(model.getByLabel('思考强度 1', { exact: true })).toHaveCount(0)
+    const reasoningToggle = model.locator('.ui-checkbox', { hasText: /^推理$/ })
+    await reasoningToggle.click()
+    await expect(model.getByLabel('思考强度 1', { exact: true })).toBeEnabled()
+    await reasoningToggle.click()
+    await expect(model.getByLabel('思考强度 1', { exact: true })).toHaveCount(0)
     await expect(model.getByRole('button', { name: '删除预设', exact: true })).toBeDisabled()
     // 提供商与 Agent 表单共用同一批目录标签。
     await expect(provider.getByRole('textbox', { name: '名称', exact: true }))
@@ -61,21 +67,20 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(price).toHaveValue('')
     await price.fill('1.2500')
     await expect(price).toHaveValue('1.2500')
-    await model.getByText('高级选项', { exact: true }).click()
     const protocol = model.getByLabel('原生协议选项 1', { exact: true })
     await protocol.fill('{\n  "temperature": 0.5\n}')
     await expect(protocol).toHaveValue('{\n  "temperature": 0.5\n}')
     const description = agent.getByPlaceholder('用途说明')
     await description.fill('第一行\n第二行')
     await expect(description).toHaveValue('第一行\n第二行')
-    // 不只检查 class：所有共享单行输入的实际高度、焦点环与禁用样式。
+    // 不只检查 class：所有共享单行输入的实际高度、统一 1px 焦点环与禁用样式。
     expect(await page.locator('.ui-text-input').evaluateAll((inputs) =>
       inputs.every((input) => input.getBoundingClientRect().height === 32))).toBe(true)
     await password.focus()
     await expect(password).toHaveCSS('outline-style', 'solid')
-    await expect(password).toHaveCSS('outline-width', '2px')
+    await expect(password).toHaveCSS('outline-width', '1px')
     await expect(password).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
-    await expect(model.getByLabel('思考强度 1', { exact: true })).toHaveCSS('cursor', 'not-allowed')
+    await expect(model.getByLabel('提供商', { exact: true })).toHaveCSS('cursor', 'not-allowed')
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.screenshot({ path: test.info().outputPath(`resource-forms-${width}.png`), fullPage: true })

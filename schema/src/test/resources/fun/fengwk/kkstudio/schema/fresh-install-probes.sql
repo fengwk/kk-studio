@@ -235,13 +235,22 @@ select pg_temp.assert_true('deleting a thread cascades its realtime subscription
     not exists(select 1 from realtime_subscription where thread_id = pg_temp.uid(306)));
 
 -- ---------------------------------------------------------------------------
--- Structure: exactly the 8 retained canvas/chat domain tables exist.
+-- Structure: the V1 Canvas, workspace and schedule tables exist exactly as defined.
 -- ---------------------------------------------------------------------------
-select pg_temp.assert_true('exactly the 8 retained domain tables exist',
-    (select count(*) = 8 from pg_tables where schemaname = 'public'
-        and (tablename like 'canvas_%' or tablename = 'chat_session')));
+select pg_temp.assert_true('Canvas, workspace and schedule tables match V1',
+    (select array_agg(tablename order by tablename) = array[
+        'canvas_command_dedup', 'canvas_document', 'canvas_function_resource_pin',
+        'canvas_function_run', 'canvas_group', 'canvas_node', 'canvas_resource',
+        'chat_space', 'workspace_folder', 'workspace_resource', 'workspace_schedule',
+        'workspace_schedule_run'
+    ]::name[] from pg_tables where schemaname = 'public'
+        and (tablename like 'canvas_%' or tablename = 'chat_space' or tablename like 'workspace_%')));
 select pg_temp.assert_true('removed product and runtime tables are gone',
-    to_regclass('public.harness_claude_execution') is null
+    to_regclass('public.chat') is null
+    and to_regclass('public.chat_session') is null
+    and to_regclass('public.issue') is null
+    and to_regclass('public.project') is null
+    and to_regclass('public.harness_claude_execution') is null
     and to_regclass('public.canvas_link') is null
     and to_regclass('public.session_owner') is null
     and to_regclass('public.human_question') is null
@@ -268,12 +277,6 @@ select pg_temp.assert_true('Harness Thread gained a same-Session composite key',
         where c.conrelid = 'harness_thread'::regclass
             and c.conname = 'uk_harness_thread_session'
             and c.contype = 'u'));
-select pg_temp.assert_true('chat_session keeps only the direct Session association',
-    (select count(*) = 3 from information_schema.columns where table_name = 'chat_session')
-    and not exists(select 1 from information_schema.columns
-        where table_name = 'chat_session'
-        and column_name in ('creation_request_hash', 'idempotency_key')));
-
 select pg_temp.assert_true('Harness may hold an unbound sibling Thread in the same Session',
     (select count(*) = 2 from harness_thread where session_id = pg_temp.uid(101)));
 
@@ -534,33 +537,6 @@ select pg_temp.assert_true('an accepted answer disappears from pending queries w
 select pg_temp.rejects('a JSON null input receipt is not a bypass',
     $$update harness_tool_invocation set input_receipt='null'::jsonb where id=pg_temp.uid(1200)$$, '23514',
     'ck_harness_tool_input_receipt');
-
--- ---------------------------------------------------------------------------
--- Chat: direct Session association.
--- ---------------------------------------------------------------------------
-insert into chat (id, title, agent_name) values (pg_temp.uid(1300), 'chat', 'designer');
-insert into chat_session (session_id, chat_id) values (pg_temp.uid(103), pg_temp.uid(1300));
-select pg_temp.rejects('a Chat Session must reference a real Session',
-    $$insert into chat_session(session_id,chat_id) values(pg_temp.uid(1400),pg_temp.uid(1300))$$, '23503',
-    'fk_chat_session_session');
-select pg_temp.assert_true('chat has no archive column or index',
-    not exists(select 1 from information_schema.columns
-        where table_name = 'chat' and column_name = 'archived_at')
-    and not exists(select 1 from pg_indexes
-        where schemaname = 'public' and indexname = 'idx_chat_archived'));
-select pg_temp.assert_true('chat environment_name is nullable with no default',
-    (select is_nullable = 'YES' and column_default is null
-        from information_schema.columns
-        where table_name = 'chat' and column_name = 'environment_name'));
-update chat set environment_name = 'install-fixture' where id = pg_temp.uid(1300);
-select pg_temp.assert_true('chat accepts a canonical environment name reference',
-    (select environment_name = 'install-fixture' from chat where id = pg_temp.uid(1300)));
-select pg_temp.assert_true('chat leaves Agent and Environment name canonicalization to the application',
-    not exists(select 1 from pg_constraint c
-        where c.conrelid = 'chat'::regclass
-            and c.conname in ('ck_chat_agent_name', 'ck_chat_environment_name')));
-select pg_temp.rejects('a Chat Session blocks deleting its Chat',
-    $$delete from chat where id=pg_temp.uid(1300)$$, '23503', 'fk_chat_session_chat');
 
 -- ---------------------------------------------------------------------------
 -- Execution tree and Thread Join: recursive lifecycle status, permanent parent
@@ -868,9 +844,11 @@ delete from canvas_command_dedup;
 delete from canvas_document;
 select pg_temp.assert_true('Canvas dependency-ordered deep delete completes',
     not exists(select 1 from canvas_document) and not exists(select 1 from canvas_resource));
-select pg_temp.assert_true('project tables absent', not exists (
+select pg_temp.assert_true('removed Project and Issue tables absent', not exists (
     select 1 from pg_tables where schemaname = 'public'
-      and (tablename = 'project' or tablename like 'project\_%' escape '\')
+      and (tablename in ('project', 'issue')
+          or tablename like 'project\_%' escape '\'
+          or tablename like 'issue\_%' escape '\')
 ));
 select pg_temp.assert_true('waiting child accepted by invocation status check', exists (
     select 1 from pg_constraint

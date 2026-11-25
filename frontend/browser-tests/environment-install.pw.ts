@@ -1207,8 +1207,9 @@ for (const [locale, labels] of Object.entries(environmentPageCopy)) {
       const cards = page.locator('.environment-card')
       await expect(cards).toHaveCount(2, { timeout: 15000 })
 
-      // 搜索是子导航右侧的页级搜索框；窄屏与共享子导航一致堆叠在导航之后。
-      const navBox = (await page.locator('.environment-toolbar .subnav').boundingBox())!
+      // 1.3.0 环境设置已进入带左侧分类栏的设置路由，工具栏不再渲染独立子导航，只保留搜索与刷新反馈。
+      await expect(page.locator('.environment-toolbar .subnav')).toHaveCount(0)
+      const toolbarBox = (await page.locator('.environment-toolbar').boundingBox())!
       const search = page.locator('.environment-toolbar input.ui-search-input')
       await expect(search).toBeVisible()
       await expect(search).toHaveAttribute('aria-label', labels.searchLabel)
@@ -1216,10 +1217,8 @@ for (const [locale, labels] of Object.entries(environmentPageCopy)) {
       // 占位文案完整放进搜索框：宽屏是固定宽度的页级搜索框，英文提示最容易在这里溢出。
       await expectPlaceholderFits(search)
       const searchBox = (await search.boundingBox())!
-      expect(
-        searchBox.x >= navBox.x + navBox.width - 1
-        || searchBox.y >= navBox.y + navBox.height - 1,
-      ).toBe(true)
+      expect(searchBox.x).toBeGreaterThanOrEqual(toolbarBox.x - 1)
+      expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(toolbarBox.x + toolbarBox.width + 1)
 
       // 只过滤卡片：名称匹配留下目标卡，另一张离开网格。
       await search.fill('alpha')
