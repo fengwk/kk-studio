@@ -369,6 +369,8 @@ export const chatCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
+  'ai.runtime.branch.suggestedTitle': { 'en-US': 'Branch {{number}}', 'zh-CN': '分支 {{number}}' },
+  'ai.runtime.branch.suggestedFork': { 'en-US': '{{title}} · Fork', 'zh-CN': '{{title}} · 分叉' },
   'ai.chat.branch.historyTree': {
     'en-US': 'History tree',
     'zh-CN': '历史树',

@@ -4,9 +4,8 @@ import { hasMessageContent, type ComposerPart } from '@/features/thread/composer
 
 export function usePaneDraft(scope: string, onUnsentChange: (unsent: boolean) => void) {
   const [parts, setParts] = useState(() => restoreComposerDraft(scope, []))
-  useLayoutEffect(() => {
-    onUnsentChange(hasMessageContent(parts))
-  }, [onUnsentChange, parts])
+  const unsent = hasMessageContent(parts)
+  useLayoutEffect(() => { onUnsentChange(unsent) }, [onUnsentChange, unsent])
 
   const changeParts = useCallback((next: ComposerPart[]) => {
     storeComposerDraft(scope, next)

@@ -10,6 +10,7 @@ import type { BranchRequestInput } from '@/features/thread/runtime/root-thread/t
 export type EntryBranchRequest = ((endEntryId: string) => void) | null
 
 export const EntryBranchContext = createContext<EntryBranchRequest>(null)
+export const EntryForkContext = createContext<EntryBranchRequest>(null)
 
 export function useEntryBranchRequest(): EntryBranchRequest {
   return useContext(EntryBranchContext)

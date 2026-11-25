@@ -5,19 +5,15 @@ import { getLocale, translate } from '@/shared/i18n'
 type JsonParser = (text: string) => unknown
 
 export interface RequestOptions {
-  idempotencyKey?: string
   signal?: AbortSignal
   timeoutMs?: number
   jsonParser?: JsonParser
+  idempotencyKey?: string
 }
 
-interface FetchRequestConfig {
-  idempotencyKey?: string
+interface FetchRequestConfig extends RequestOptions {
   method?: string
   body?: unknown
-  signal?: AbortSignal
-  timeoutMs?: number
-  jsonParser?: JsonParser
   responseType?: 'json' | 'text' | 'blob'
   readResponse?: (response: Response) => Promise<unknown>
 }
@@ -198,9 +194,7 @@ export async function executeFetch<T = unknown>(
     'Accept-Language': getLocale(),
     Accept: 'application/json, text/plain, */*',
   }
-  if (config.idempotencyKey !== undefined) {
-    headers['Idempotency-Key'] = config.idempotencyKey
-  }
+  if (config.idempotencyKey !== undefined) headers['Idempotency-Key'] = config.idempotencyKey
 
   let bodyPayload: BodyInit | undefined
   if (config.body !== undefined) {
@@ -368,9 +362,9 @@ export function request<R extends keyof ApiRoutes>(
     method,
     body: params.body,
     signal: options?.signal,
-    idempotencyKey: options?.idempotencyKey,
     timeoutMs: options?.timeoutMs,
     jsonParser: options?.jsonParser,
+    idempotencyKey: options?.idempotencyKey,
     responseType: API_RESPONSE_TYPES[route],
   })
 }

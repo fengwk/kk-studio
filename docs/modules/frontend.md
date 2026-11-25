@@ -176,6 +176,12 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。本地新建分支草稿进入 Debug 可只读检查已有事件与历史请求，
 绝不为此预创建 Thread。
 
+## 工作区 Thread 窗格
+
+应用从 `features/thread/workspace` 导入 `ThreadPaneRenderer` 和 `DraftPaneRenderer`，分别装配为工作区的 `thread` 与 `draft` renderer。窗格只持有目标与布局；renderer 以 Thread ID 读取共享快照和实时流，以目标 ID 恢复浏览器草稿。执行根复用 Composer 和审批/问卷控制区，子执行线在窗格内只读查看，不改变外层绑定。
+
+新会话采用空间默认 Agent。首条消息以草稿 ID 作为 `Idempotency-Key` 调用空间的 `/sessions`，成功后原窗格绑定返回的 Thread；后续消息仍进入该 Thread 的命令队列。`TURN_END` 的分支和分叉操作先确认名称，再调用空间的 `/branches` 或 `/forks`，成功后在原窗格打开结果。Session 与 Thread 的改名属于目录行操作，不改变窗格绑定。
+
 ## Chat 提交与控制
 
 Chat 局部组件树以 `chat.id` 为 key，切换 Chat 时重建局部状态。

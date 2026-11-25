@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAccount } from '@/features/account/account-context'
+import { clearStoredComposerDraft } from '@/features/thread/composer/composer-draft'
 import { partsToMessageContents, type ComposerPart } from '@/features/thread/composer/composer-parts'
 import { RootThreadControlArea } from '@/features/thread/runtime/panes/RootThreadControlArea'
 import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
@@ -42,7 +43,7 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     queryKey: queryKeys.environments.list,
     queryFn: () => request('GET /api/platform/environments', {}),
   })
-  const agent = agents.data?.find(({ name }) => name === space.defaultAgentName)
+  const agent = agents.data?.find(({ name, execution }) => name === space.defaultAgentName && execution != null)
   const modelSelection = model ?? (agent ? getBuiltinModelSelection(agent.execution) : null)
   const environment = environments.data?.find(({ id, name }) => environmentName == null
     ? id === space.defaultEnvironmentId : name === environmentName)
@@ -69,6 +70,7 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
       }, { idempotencyKey: target.draftId })
     },
     onSuccess: ({ threadId }) => {
+      clearStoredComposerDraft(scope)
       // 接受后读取服务端快照，不制造临时历史；首条命令在快照中是排队项或已物化的消息。
       void cache.prefetchQuery({
         queryKey: queryKeys.threads.snapshot(threadId),
