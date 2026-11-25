@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.CanvasCommandHash;
 import fun.fengwk.kkstudio.canvas.CanvasCommandPlan;
 import fun.fengwk.kkstudio.canvas.CanvasCommandPlanner;
@@ -22,8 +24,6 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -52,8 +52,7 @@ public class CanvasCommandService {
   private final PostgresqlCanvasFunctionRunRepository runRepository;
   private final CanvasResourceLifecycle resourceLifecycle;
   private final CanvasCommandPlanner planner;
-  private final StorageUploadService uploadService;
-  private final StorageBlobManager blobManager;
+  private final ObjectProvider<CanvasUploadOwnership> uploadOwnership;
 
   public CanvasCommandService(
       PostgresqlCanvasStore canvasStore,
@@ -62,16 +61,14 @@ public class CanvasCommandService {
       PostgresqlCanvasFunctionRunRepository runRepository,
       CanvasResourceLifecycle resourceLifecycle,
       CanvasCommandPlanner planner,
-      StorageUploadService uploadService,
-      StorageBlobManager blobManager) {
+      ObjectProvider<CanvasUploadOwnership> uploadOwnership) {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.planner = Objects.requireNonNull(planner, "planner");
-    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
-    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.uploadOwnership = Objects.requireNonNull(uploadOwnership, "uploadOwnership");
   }
 
   /** 创建文档并返回初始 revision；加入调用方事务。 */
@@ -215,22 +212,23 @@ public class CanvasCommandService {
       return new Accepted(CanvasPatch.receipt(dedup.acceptedRevision()));
     }
     List<CanvasCommand> resolved = new ArrayList<>(commands.size());
-    Map<UUID, StorageUploadService.ReadyUpload> uploads = new LinkedHashMap<>();
+    Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads = new LinkedHashMap<>();
     for (CanvasCommand command : commands) {
       resolved.add(resolveUploads(command, userId, uploads));
     }
     CanvasCommandResult result =
         applyCommandsWithHash(canvasId, idempotencyKey, resolved, requestHash);
     if (result instanceof Accepted accepted && !accepted.patch().isEmpty() && !uploads.isEmpty()) {
+      CanvasUploadOwnership owner = requireUploadOwnership();
       for (CanvasCommand command : resolved) {
         for (CanvasResourceInput input : resourceInputs(command)) {
           if (input instanceof CanvasResourceInput.Blob blob) {
-            blobManager.retain(blob.blobId());
+            owner.retain(blob.blobId());
           }
         }
       }
       for (UUID uploadId : uploads.keySet()) {
-        uploadService.delete(uploadId, userId);
+        owner.delete(uploadId, userId);
       }
     }
     return result;
@@ -239,7 +237,7 @@ public class CanvasCommandService {
   private CanvasCommand resolveUploads(
       CanvasCommand command,
       UUID userId,
-      Map<UUID, StorageUploadService.ReadyUpload> uploads) {
+      Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads) {
     if (command instanceof CanvasCommand.CreateNode create) {
       return new CanvasCommand.CreateNode(
           create.nodeId(),
@@ -257,19 +255,28 @@ public class CanvasCommandService {
   private List<CanvasResourceInput> resolveInputs(
       List<CanvasResourceInput> inputs,
       UUID userId,
-      Map<UUID, StorageUploadService.ReadyUpload> uploads) {
+      Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads) {
     List<CanvasResourceInput> resolved = new ArrayList<>(inputs.size());
     for (CanvasResourceInput input : inputs) {
       if (input instanceof CanvasResourceInput.Blob blob) {
-        StorageUploadService.ReadyUpload ready =
+        CanvasUploadOwnership owner = requireUploadOwnership();
+        CanvasUploadOwnership.ReadyUpload ready =
             uploads.computeIfAbsent(
-                blob.blobId(), uploadId -> uploadService.lockReady(uploadId, userId));
+                blob.blobId(), uploadId -> owner.lockReady(uploadId, userId));
         resolved.add(new CanvasResourceInput.Blob(ready.filename(), ready.blobId()));
       } else {
         resolved.add(input);
       }
     }
     return List.copyOf(resolved);
+  }
+
+  private CanvasUploadOwnership requireUploadOwnership() {
+    CanvasUploadOwnership owner = uploadOwnership.getIfAvailable();
+    if (owner == null) {
+      throw new IllegalStateException("Canvas upload references require platform Storage");
+    }
+    return owner;
   }
 
   private static List<CanvasResourceInput> resourceInputs(CanvasCommand command) {

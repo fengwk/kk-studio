@@ -4,6 +4,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
@@ -26,6 +27,12 @@ import java.time.Duration;
  */
 @AutoConfiguration
 public class CanvasPlatformAutoConfiguration {
+
+  @Bean
+  public CanvasUploadOwnership canvasUploadOwnership(
+      StorageUploadService uploadService, StorageBlobManager blobManager) {
+    return new PlatformCanvasUploadOwnership(uploadService, blobManager);
+  }
 
   @Bean
   public CanvasResourceUrlService canvasResourceUrlService(
