@@ -1,5 +1,4 @@
 import {
-  CreateChatDialog,
   ResourceDeleteDialog,
   ResourceEditorDialog,
 } from '@/app/ai-console/ai-extension'
@@ -10,7 +9,6 @@ import type { TrustedReactExtension } from '@/platform/extensions/types'
 export const aiExtension: TrustedReactExtension = {
   id: 'builtin.ai',
   dialogs: [
-    { id: 'ai.create-chat', component: CreateChatDialog },
     { id: 'ai.resource-editor', component: ResourceEditorDialog },
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },
   ],

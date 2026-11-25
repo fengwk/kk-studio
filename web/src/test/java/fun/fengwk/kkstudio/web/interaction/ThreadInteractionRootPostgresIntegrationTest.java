@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
@@ -90,20 +91,31 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.account.StudioAccountService;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadController;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.workspace.ChatSpaceService;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -115,6 +127,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -152,6 +165,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private static final String AGENT = "default-assistant";
   private static final String HASH = "a".repeat(64);
   private static final String ACTOR = "local-user";
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(
+          UUID.fromString("00000000-0000-0000-0000-000000000001"), "test", StudioRole.ADMIN);
   private static final int MAX_TURNS = 5;
   private static final int MAX_DEPTH = 3;
   private static final int MAX_CONCURRENT_CHILDREN = 2;
@@ -164,6 +180,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   @Autowired private InteractionService interactionService;
   @Autowired private EnvironmentWaitProjectionService environmentWaitProjectionService;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private ChatSpaceService chatSpaceService;
+  @Autowired private StudioAccountService accounts;
+  @LocalServerPort private int port;
   @Autowired private Clock clock;
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ModelProcessor modelProcessor;
@@ -206,7 +225,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     // 无产品归属的无关执行树：等待行存在但任何 owner 都无法解析，因此对任何查询都不可见。
     Seed ownerless = seedStandaloneRoot(false, "{}", true, true, false);
 
-    InteractionPageDTO page = queryService.listInteractions(tree.root(), null, 50);
+    InteractionPageDTO page = queryService.listInteractions(PRINCIPAL, tree.root(), null, 50);
     assertEquals(1, page.getItems().size(), "only the owner-bound grandchild row is visible");
     assertNull(page.getNextCursor());
     InteractionDTO.Input item = input(page.getItems().getFirst());
@@ -214,7 +233,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(tree.c().toString(), item.threadId(), "source thread stays the grandchild");
     assertEquals(tree.cSessionId().toString(), item.sessionId());
     assertEquals(tree.root().toString(), item.rootThreadId(), "root is the execution root");
-    assertEquals("CHAT", item.owner().getKind());
+    assertEquals("CHAT_SPACE", item.owner().getKind());
     assertEquals(chatId.toString(), item.owner().getId());
     assertEquals("ask_user", item.toolName());
     assertEquals(QUESTIONNAIRE, item.argumentsJson());
@@ -225,13 +244,156 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     // 非 canonical 执行根（中间父/自身）以 validation 拒绝，而不是静默返回别的树。
     DomainException notRoot =
         assertThrows(
-            DomainException.class, () -> queryService.listInteractions(tree.a(), null, 50));
+            DomainException.class,
+            () -> queryService.listInteractions(PRINCIPAL, tree.a(), null, 50));
     assertEquals(DomainErrorCode.VALIDATION, notRoot.code());
 
     // 无关执行根看不到本树的等待行。
-    assertTrue(
-        queryService.listInteractions(ownerless.threadId(), null, 50).getItems().isEmpty(),
-        "an ownerless root exposes nothing");
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> queryService.listInteractions(PRINCIPAL, ownerless.threadId(), null, 50))
+            .code());
+  }
+
+  /** HTTP lists and WebSocket hints share user visibility, including archived spaces. */
+  @Test
+  void interactionListsAndHintsAreIsolatedByUser() throws Exception {
+    var admin = accounts.login("kkstudio", "kkstudio");
+    accounts.create("interaction-viewer", "workspace-interaction-test", StudioRole.USER);
+    var viewer = accounts.login("interaction-viewer", "workspace-interaction-test");
+    var own = seedStandaloneRoot(false, "{}", true, true, false);
+    var other = seedStandaloneRoot(false, "{}", true, true, false);
+    var plugin = seedStandaloneRoot(false, "{}", true, true, false, null, ThreadKind.PLUGIN_TASK);
+    UUID archived = bindChat(own.sessionId());
+    var viewerPrincipal = accounts.authenticate(viewer.token()).orElseThrow();
+    UUID visible = bindChat(viewerPrincipal, other.sessionId());
+    jdbc.update(
+        "update chat_space set archived_at = now(), title = 'Archived interaction space' where id = ?",
+        archived);
+
+    try (var client = HttpClient.newHttpClient()) {
+      var adminPage = getInteractionPage(client, admin.token(), "", 200);
+      assertEquals(2, adminPage.get("total").asInt());
+      var archivedOwner =
+          adminPage
+              .get("items")
+              .valueStream()
+              .filter(item -> own.threadId().toString().equals(item.get("rootThreadId").asText()))
+              .findFirst()
+              .orElseThrow()
+              .get("owner");
+      assertEquals("CHAT_SPACE", archivedOwner.get("kind").asText());
+      assertEquals(archived.toString(), archivedOwner.get("id").asText());
+      assertEquals("Archived interaction space", archivedOwner.get("title").asText());
+      assertEquals(
+          "AGENT_TASK",
+          adminPage
+              .get("items")
+              .valueStream()
+              .filter(
+                  item -> plugin.threadId().toString().equals(item.get("rootThreadId").asText()))
+              .findFirst()
+              .orElseThrow()
+              .at("/owner/kind")
+              .asText());
+      var viewerPage = getInteractionPage(client, viewer.token(), "", 200);
+      assertEquals(1, viewerPage.get("total").asInt());
+      assertEquals(1, viewerPage.get("items").size());
+      assertEquals(visible.toString(), viewerPage.at("/items/0/owner/id").asText());
+      getInteractionPage(client, viewer.token(), "?rootThreadId=" + own.threadId(), 404);
+
+      var adminFrames = new InteractionFrames();
+      var viewerFrames = new InteractionFrames();
+      var adminSocket = subscribeInteractions(client, admin.token(), adminFrames);
+      var viewerSocket = subscribeInteractions(client, viewer.token(), viewerFrames);
+      try {
+        adminFrames.next("subscribed");
+        viewerFrames.next("subscribed");
+        // The listener preserves emission order. A visible marker after the two foreign hints
+        // proves those hints were filtered without a negative assertion based on sleep.
+        notifyInteractions(own.threadId());
+        notifyInteractions(plugin.threadId());
+        notifyInteractions(other.threadId());
+        assertEquals(
+            other.threadId().toString(),
+            viewerFrames.next("event").at("/data/rootThreadId").asText());
+        assertEquals(
+            own.threadId().toString(), adminFrames.next("event").at("/data/rootThreadId").asText());
+        assertEquals(
+            plugin.threadId().toString(),
+            adminFrames.next("event").at("/data/rootThreadId").asText());
+        notifyInteractions(own.threadId());
+        assertEquals(
+            own.threadId().toString(), adminFrames.next("event").at("/data/rootThreadId").asText());
+      } finally {
+        adminSocket.abort();
+        viewerSocket.abort();
+      }
+    }
+  }
+
+  private JsonNode getInteractionPage(HttpClient client, String token, String query, int expected)
+      throws Exception {
+    var request =
+        HttpRequest.newBuilder(
+                URI.create("http://localhost:" + port + "/api/harness/interactions" + query))
+            .header("Cookie", StudioBrowserSession.COOKIE + "=" + token)
+            .build();
+    var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+    assertEquals(expected, response.statusCode(), response.body());
+    return jsonMapper.readTree(response.body());
+  }
+
+  private WebSocket subscribeInteractions(HttpClient client, String token, InteractionFrames frames)
+      throws Exception {
+    var socket =
+        client
+            .newWebSocketBuilder()
+            .header("Origin", "http://localhost:" + port)
+            .header("Cookie", StudioBrowserSession.COOKIE + "=" + token)
+            .buildAsync(URI.create("ws://localhost:" + port + "/ws/events"), frames)
+            .get(10, TimeUnit.SECONDS);
+    socket
+        .sendText("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"interactions\"}}", true)
+        .get(10, TimeUnit.SECONDS);
+    return socket;
+  }
+
+  private void notifyInteractions(UUID root) {
+    jdbc.queryForList(
+        "select pg_notify(?, ?)", HarnessNotificationChannel.TOOL_INTERACTION, root.toString());
+  }
+
+  private final class InteractionFrames implements WebSocket.Listener {
+    private final LinkedBlockingQueue<JsonNode> frames = new LinkedBlockingQueue<>();
+    private final StringBuilder pending = new StringBuilder();
+
+    @Override
+    public CompletionStage<?> onText(WebSocket socket, CharSequence data, boolean last) {
+      pending.append(data);
+      if (last) {
+        frames.add(jsonMapper.readTree(pending.toString()));
+        pending.setLength(0);
+      }
+      socket.request(1);
+      return null;
+    }
+
+    JsonNode next(String type) throws InterruptedException {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+      while (System.nanoTime() < deadline) {
+        var frame = frames.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+        if (frame != null
+            && (type.equals(frame.path("type").asText())
+                || "error".equals(frame.path("type").asText()))) {
+          assertEquals(type, frame.path("type").asText(), frame.toString());
+          return frame;
+        }
+      }
+      throw new AssertionError("Missing " + type + " frame");
+    }
   }
 
   /** root 过滤 + keyset 分页：同一执行根下跨 C/B/A 三个节点的等待行必须全部收敛，即便每页只取一条也不能漏；插在中间的无归属等待行不得打乱游标。 */
@@ -429,13 +591,13 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertNull(frozen.result());
     assertTrue(threadState(seed.threadId()).yoloEnabled());
 
-    InteractionPageDTO page = queryService.listInteractions(seed.threadId(), null, 50);
+    InteractionPageDTO page = queryService.listInteractions(PRINCIPAL, seed.threadId(), null, 50);
     assertEquals(1, page.getItems().size());
     InteractionDTO.Input item = input(page.getItems().getFirst());
     assertEquals(seed.invocationId().toString(), item.toolInvocationId());
     assertEquals(seed.threadId().toString(), item.rootThreadId());
     assertEquals(seed.threadId().toString(), item.threadId());
-    assertEquals("CHAT", item.owner().getKind());
+    assertEquals("CHAT_SPACE", item.owner().getKind());
     assertEquals(chatId.toString(), item.owner().getId());
   }
 
@@ -515,10 +677,12 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         firstEnvironmentId,
         2,
         firstRepresentativeCreatedAt,
-        "CHAT",
+        "CHAT_SPACE",
         chatId.toString());
-    assertEnvironmentWait(all.get(1), second.threadId(), firstEnvironmentId, 1, null, "CHAT", null);
-    assertEnvironmentWait(all.get(2), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
+    assertEnvironmentWait(
+        all.get(1), second.threadId(), firstEnvironmentId, 1, null, "CHAT_SPACE", null);
+    assertEnvironmentWait(
+        all.get(2), third.threadId(), secondEnvironmentId, 1, null, "CHAT_SPACE", null);
     assertEquals(
         Set.of(tree.root().toString(), second.threadId().toString(), third.threadId().toString()),
         all.stream().map(InteractionDTO::rootThreadId).collect(Collectors.toSet()));
@@ -530,18 +694,18 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         firstEnvironmentId,
         2,
         firstRepresentativeCreatedAt,
-        "CHAT",
+        "CHAT_SPACE",
         chatId.toString());
     assertFalse(
         all.stream().anyMatch(item -> ownerless.threadId().toString().equals(item.rootThreadId())));
 
     // total 是同过滤条件下的真实可见分组数，而不是首页长度。
-    InteractionPageDTO firstPage = queryService.listInteractions(null, null, 2);
+    InteractionPageDTO firstPage = queryService.listInteractions(PRINCIPAL, null, null, 2);
     assertEquals(2, firstPage.getItems().size());
     assertEquals(3, firstPage.getTotal());
     assertNotNull(firstPage.getNextCursor());
     InteractionPageDTO secondPage =
-        queryService.listInteractions(null, firstPage.getNextCursor(), 2);
+        queryService.listInteractions(PRINCIPAL, null, firstPage.getNextCursor(), 2);
     assertEquals(1, secondPage.getItems().size());
     assertEquals(3, secondPage.getTotal());
     assertNull(secondPage.getNextCursor());
@@ -557,9 +721,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     List<InteractionDTO> afterReady = drain(null, 10);
     assertEquals(1, afterReady.size());
     assertEnvironmentWait(
-        afterReady.get(0), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
+        afterReady.get(0), third.threadId(), secondEnvironmentId, 1, null, "CHAT_SPACE", null);
     // limit=1 必须跨过多个在线候选分组，而不是在过滤后丢失后面的离线分组。
-    InteractionPageDTO filteredPage = queryService.listInteractions(null, null, 1);
+    InteractionPageDTO filteredPage = queryService.listInteractions(PRINCIPAL, null, null, 1);
     assertEquals(1, filteredPage.getTotal());
     assertEquals(third.threadId().toString(), filteredPage.getItems().getFirst().rootThreadId());
     assertEquals(
@@ -567,7 +731,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             "select lease_until from environment_connection where environment_id = ?",
             (rs, row) -> rs.getTimestamp(1).toInstant(),
             firstEnvironmentId),
-        queryService.listInteractions(null, null, 10).getFreshnessAt());
+        queryService.listInteractions(PRINCIPAL, null, null, 10).getFreshnessAt());
     assertTrue(
         runtime.listEnvironmentToolWaits(List.of(firstInvocationId)).getFirst().workAvailable());
 
@@ -575,11 +739,11 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     jdbc.update(
         "update environment_connection set status = 'CONNECTING' where environment_id = ?",
         firstEnvironmentId);
-    assertEquals(3, queryService.listInteractions(null, null, 1).getTotal());
+    assertEquals(3, queryService.listInteractions(PRINCIPAL, null, null, 1).getTotal());
     jdbc.update(
         "update environment_connection set status = 'READY' where environment_id = ?",
         firstEnvironmentId);
-    assertEquals(1, queryService.listInteractions(null, null, 1).getTotal());
+    assertEquals(1, queryService.listInteractions(PRINCIPAL, null, null, 1).getTotal());
 
     // 模拟已过期的租约：不写任何等待行，分组按原始事实重新出现。
     markEnvironmentOffline(firstEnvironmentId);
@@ -633,13 +797,13 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         environmentId,
         1,
         toolInvocation(due.invocationId()).createdAt(),
-        "CHAT",
+        "CHAT_SPACE",
         null);
     assertEquals(
         manual.invocationId().toString(),
         input(items.get(1)).toolInvocationId(),
         "the manual input keeps its operable tool invocation id");
-    assertEquals("CHAT", items.get(1).owner().getKind());
+    assertEquals("CHAT_SPACE", items.get(1).owner().getKind());
     assertEquals(manualChatId.toString(), items.get(1).owner().getId());
 
     // 真实 snapshot HTTP 不把聚合页的全局 freshnessAt 复制给每个调用。
@@ -718,7 +882,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(version, online.path("version").asText());
     var onlineTool = online.path("toolInvocations").get(0);
     assertFalse(onlineTool.path("waitingForEnvironment").asBoolean());
-    assertEquals(0, queryService.listInteractions(null, null, 1).getTotal());
+    assertEquals(0, queryService.listInteractions(PRINCIPAL, null, null, 1).getTotal());
     // 新字段与既有 Instant 用同一真实 HTTP mapper，epoch 时间戳而非独立字符串转换。
     assertTrue(onlineTool.path("environmentWaitFreshnessAt").isNumber());
     assertEquals(
@@ -732,7 +896,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                     Boolean.class,
                     environmentId)),
         "database environment lease must naturally expire");
-    assertEquals(1, queryService.listInteractions(null, null, 1).getTotal());
+    assertEquals(1, queryService.listInteractions(PRINCIPAL, null, null, 1).getTotal());
     var expired = snapshotHttp(mvc, seed.threadId());
     assertEquals(version, expired.path("version").asText());
     assertTrue(expired.path("toolInvocations").get(0).path("waitingForEnvironment").asBoolean());
@@ -742,7 +906,12 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   private JsonNode snapshotHttp(MockMvc mvc, UUID threadId) throws Exception {
-    var response = mvc.perform(get("/api/harness/threads/" + threadId)).andReturn().getResponse();
+    var response =
+        mvc.perform(
+                get("/api/harness/threads/" + threadId)
+                    .requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL))
+            .andReturn()
+            .getResponse();
     assertEquals(200, response.getStatus());
     return jsonMapper.readTree(response.getContentAsString());
   }
@@ -911,16 +1080,32 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         new UserMessageCommandPayload(AgentMessage.user(prompt)), UUID.randomUUID());
   }
 
-  /** 在执行根的产品绑定上插入一个 Chat owner，并返回 chatId。 */
+  /** 在执行根同时建立旧 Chat 锁测试所需关联和真实 Chat Space 工作区归属。 */
   private UUID bindChat(UUID sessionId) {
+    return bindChat(PRINCIPAL, sessionId);
+  }
+
+  private UUID bindChat(StudioPrincipal principal, UUID sessionId) {
     UUID chatId = UUID.randomUUID();
-    jdbc.update(
-        "insert into chat (id, title, agent_name) values (?, ?, ?)",
-        chatId,
-        "chat-" + chatId,
-        AGENT);
+    String title = "chat-" + chatId;
+    jdbc.update("insert into chat (id, title, agent_name) values (?, ?, ?)", chatId, title, AGENT);
     jdbc.update("insert into chat_session (session_id, chat_id) values (?, ?)", sessionId, chatId);
-    return chatId;
+
+    ChatSpaceService.Space space =
+        chatSpaceService.create(
+            principal,
+            UUID.randomUUID(),
+            new ChatSpaceService.Create(title, "root", AGENT, null, false));
+    jdbc.update(
+        """
+        insert into workspace_resource (id, workspace_id, folder_id, session_id, position, agent_name)
+        select ?, workspace_id, id, ?, 0, ? from workspace_folder where workspace_id = ?
+        """,
+        sessionId,
+        sessionId,
+        AGENT,
+        space.id());
+    return space.id();
   }
 
   /**
@@ -959,6 +1144,24 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
       boolean yoloEnabled,
       boolean requestToolWork,
       EnvironmentId requiredEnvironmentId) {
+    return seedStandaloneRoot(
+        humanInput,
+        argumentsJson,
+        freeze,
+        yoloEnabled,
+        requestToolWork,
+        requiredEnvironmentId,
+        ThreadKind.USER);
+  }
+
+  private Seed seedStandaloneRoot(
+      boolean humanInput,
+      String argumentsJson,
+      boolean freeze,
+      boolean yoloEnabled,
+      boolean requestToolWork,
+      EnvironmentId requiredEnvironmentId,
+      ThreadKind kind) {
     return store.transaction(
         tx -> {
           Instant now = nextTime();
@@ -978,7 +1181,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                   "standalone",
                   threadId,
                   yoloEnabled,
-                  ThreadKind.USER,
+                  kind,
                   ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
@@ -1249,7 +1452,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     List<InteractionDTO> all = new ArrayList<>();
     String cursor = null;
     for (int guard = 0; guard < 20; guard++) {
-      InteractionPageDTO page = queryService.listInteractions(rootThreadId, cursor, limit);
+      InteractionPageDTO page =
+          queryService.listInteractions(PRINCIPAL, rootThreadId, cursor, limit);
       all.addAll(page.getItems());
       if (page.getNextCursor() == null) {
         return all;

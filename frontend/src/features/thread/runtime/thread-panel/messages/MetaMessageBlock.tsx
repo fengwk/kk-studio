@@ -1,6 +1,7 @@
-import { Coins, GitBranch } from 'lucide-react'
+import { useContext } from 'react'
+import { Coins, GitBranch, MessageSquarePlus } from 'lucide-react'
 import type { MetaDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
-import { useEntryBranchRequest } from '@/features/thread/runtime/thread-panel/entry-branch-context'
+import { EntryForkContext, useEntryBranchRequest } from '@/features/thread/runtime/thread-panel/entry-branch-context'
 import { formatUsageDetails } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { useI18n } from '@/shared/i18n'
@@ -21,6 +22,7 @@ import '@/features/thread/runtime/thread-panel/messages/meta-message-block.css'
 export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) {
   const { t } = useI18n()
   const requestBranch = useEntryBranchRequest()
+  const requestFork = useContext(EntryForkContext)
   const title = message.turnUsage != null
     ? formatUsageDetails(message.turnUsage, t)
     : undefined
@@ -30,6 +32,7 @@ export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) 
   const endEntryId = message.endEntryId ?? null
   const canBranch = endEntryId != null && requestBranch != null
   const branchLabel = t('ai.chat.branch.fromHere')
+  const forkLabel = t('ai.chat.branch.forkSession')
   return (
     <section
       className={`thread-block thread-block-meta kind-${message.kind}`}
@@ -53,6 +56,10 @@ export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) 
           >
             <GitBranch aria-hidden="true" />
           </IconButton>
+        ) : null}
+        {endEntryId != null && requestFork != null ? (
+          <IconButton className="thread-meta-branch-btn" label={forkLabel} title={forkLabel}
+            onClick={() => requestFork(endEntryId)}><MessageSquarePlus aria-hidden="true" /></IconButton>
         ) : null}
       </div>
     </section>

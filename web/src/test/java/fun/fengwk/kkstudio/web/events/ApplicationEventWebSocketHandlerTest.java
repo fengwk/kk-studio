@@ -254,7 +254,7 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
-  void demotedAccountLosesOnlyAdministratorSubscriptions() throws Exception {
+  void demotedAccountKeepsInteractionsSubscription() throws Exception {
     AutoCloseable releaseInteractions = mock(AutoCloseable.class);
     Runnable releaseEnvironments = mock(Runnable.class);
     HarnessInvalidationChanges interactionSource = mock(HarnessInvalidationChanges.class);
@@ -275,11 +275,12 @@ class ApplicationEventWebSocketHandlerTest {
         .thenReturn(Optional.of(new StudioPrincipal(EVENT_NODE, "event-admin", StudioRole.USER)));
     nowNanos.addAndGet(TimeUnit.SECONDS.toNanos(60));
     handler.heartbeatTick();
-    verify(releaseInteractions).close();
+    verify(releaseInteractions, never()).close();
     verify(releaseEnvironments, never()).run();
     recorder.complete(2);
+    int sentBeforeDuplicateSubscribe = recorder.sent.size();
     handler.handleTextMessage(springSession, interactions);
-    assertTrue(recorder.sent.get(3).contains("ADMIN_REQUIRED"));
+    assertEquals(sentBeforeDuplicateSubscribe, recorder.sent.size());
   }
 
   @Test

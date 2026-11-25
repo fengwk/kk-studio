@@ -67,10 +67,6 @@ export const resourcesCatalog = {
     'en-US': 'New Session',
     'zh-CN': '新建会话',
   },
-  'ai.catalog.action.enterConversation': {
-    'en-US': 'Open chat',
-    'zh-CN': '进入对话',
-  },
   'ai.catalog.action.edit': {
     'en-US': 'Edit',
     'zh-CN': '编辑',

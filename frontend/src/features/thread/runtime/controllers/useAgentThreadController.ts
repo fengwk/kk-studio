@@ -13,8 +13,8 @@ import {
   sameBatchRequestIdentity,
   type BoundPendingMessage,
 } from '@/features/thread/runtime/state/pending-request-store'
-import { isDefiniteAcceptanceFailure } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
-import type { CommandBatchPlan } from '@/features/thread/command-batch-plan'
+import { isDefiniteAcceptanceFailure } from '@/features/thread/thread-commands-request'
+import type { CommandBatchPlan } from '@/features/thread/thread-commands-plan'
 import {
   hasMessageContent,
   partsKey,

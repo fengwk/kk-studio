@@ -60,6 +60,7 @@ export function usableModels(models: readonly ThreadComposerModelOption[]): Thre
 export function menuItems({
   menu,
   environmentNames,
+  defaultEnvironmentLabel,
   models,
   query,
   variantTarget,
@@ -67,6 +68,7 @@ export function menuItems({
 }: {
   menu: ThreadComposerControlMenu
   environmentNames: string[]
+  defaultEnvironmentLabel?: string
   models: readonly ThreadComposerModelOption[]
   query: string
   variantTarget: ThreadComposerModelOption | null
@@ -80,7 +82,7 @@ export function menuItems({
   }
   if (menu === 'environment') {
     return [
-      { id: NO_ENVIRONMENT_ITEM_ID, label: t('ai.runtime.composer.environmentNone') },
+      { id: NO_ENVIRONMENT_ITEM_ID, label: defaultEnvironmentLabel ?? t('ai.runtime.composer.environmentNone') },
       ...environmentNames.map((name) => ({ id: environmentItemId(name), label: name })),
     ]
   }

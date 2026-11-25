@@ -88,7 +88,6 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
   return {
     threadId: snapshot.thread.threadId,
     sessionId: snapshot.thread.sessionId,
-    agents: [],
     models: [],
     thread: snapshot.thread,
     bound: true,

@@ -54,6 +54,7 @@ export interface ThreadPanelComposerInput {
   parts: ComposerPart[]
   pending: boolean
   disabled: boolean
+  sendDisabled?: boolean
   onPartsChange: (parts: ComposerPart[]) => void
   onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */

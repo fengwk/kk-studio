@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
-import { paneTargetViewKey, threadIdentity, useThreadPresentation } from './thread-presentation'
+import { threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import type { ModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
@@ -45,13 +45,6 @@ function options() {
 }
 
 describe('visible thread presentation', () => {
-  it('uses durable draft identities without inventing a thread', () => {
-    expect(paneTargetViewKey({ kind: 'NEW_SESSION_DRAFT' })).toBe('')
-    expect(paneTargetViewKey({ kind: 'BOUND_THREAD', threadId: 'child' })).toBe('thread:child')
-    expect(paneTargetViewKey({ kind: 'NEW_THREAD_DRAFT', sessionId: 's', startEntryId: 'e', threadName: 'n' })).toBe('branch:s:e:n')
-    expect(paneTargetViewKey({ kind: 'FORK_SESSION_DRAFT', sessionId: 's', sourceThreadId: 't', startEntryId: 'e' })).toBe('fork-session:s:t:e')
-  })
-
   it('uses the real branch variant as identity without consulting catalog reasoning facts', () => {
     // 身份只来自 branch settings 快照，catalog 未加载（无 models）也不改变结果。
     expect(threadIdentity({ thread })).toBe('researcher · model (deep)')

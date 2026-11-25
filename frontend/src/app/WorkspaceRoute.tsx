@@ -8,6 +8,7 @@ import { EnvironmentList } from '@/features/environment/ide/EnvironmentList'
 import { IdePaneCloseContext } from '@/features/environment/ide/ide-pane-close'
 import { IdeWorkspaceProvider } from '@/features/environment/ide/IdeWorkspaceProvider'
 import { VsCodePaneRenderer } from '@/features/environment/ide/VsCodePaneRenderer'
+import { DraftPaneRenderer, ThreadPaneRenderer } from '@/features/thread/workspace'
 import { WorkspaceShell, type WorkspaceShellProps } from '@/features/workspace/WorkspaceShell'
 import type { PaneRendererProps, PaneRenderers } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
@@ -21,7 +22,7 @@ import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 function CanvasPane({ target }: PaneRendererProps<{ kind: 'canvas'; canvasId: string }>) {
   return <CanvasWorkbench canvasId={target.canvasId} />
 }
-const renderers = { canvas: CanvasPane, vscode: VsCodePaneRenderer } satisfies Partial<PaneRenderers>
+const renderers = { canvas: CanvasPane, vscode: VsCodePaneRenderer, thread: ThreadPaneRenderer, draft: DraftPaneRenderer } satisfies PaneRenderers
 const account = (hasUnsentContent: boolean) => <AccountMenu hasUnsentContent={hasUnsentContent} />
 const pathToSpace = (id: string) => `/chat-spaces/${id}`
 

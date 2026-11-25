@@ -1,34 +1,12 @@
-import type {
-  HarnessCommandBatchDTO,
-  HarnessThreadCommandBatchDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
-import type { BranchDraft } from '@/features/thread/branch-draft'
+import type { HarnessThreadCommandBatchDTO } from '@/shared/api/contracts/ai-runtime'
+import type { BranchDraft } from '@/features/thread/thread-settings'
 import type { ComposerPart } from '@/features/thread/composer/composer-parts'
-import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
 import { hasExactKeys, isRecord, nonBlank } from '@/shared/lib/value'
 import {
   isBranchDraft,
   isComposerPart,
-  isPendingAcceptanceValue,
   isThreadCommandBatchRequest,
-  ownerIdentity,
-  samePaneTarget,
-} from '@/features/thread/runtime/agent-pane/pane-target'
-
-/**
- * 容器创建（NEW_SESSION / NEW_THREAD / FORK_SESSION）的未决接受请求。
- * 只有容器创建才携带产品 owner。
- */
-export interface PendingAcceptance {
-  owner: AgentRuntimeOwnerDTO
-  target: PaneTarget
-  request: HarnessCommandBatchDTO
-  branchDraft: BranchDraft
-  composerParts: ComposerPart[]
-  generation: number
-  unknownOutcome: boolean
-}
+} from '@/features/thread/runtime/state/thread-message-validation'
 
 /**
  * 既有 Thread 的一次未决消息写入。它只依赖 Thread 的 CAS 游标，
@@ -43,18 +21,7 @@ export interface BoundPendingMessage {
   unknownOutcome: boolean
 }
 
-type PendingAcceptanceSlot =
-  | { status: 'empty' }
-  | { status: 'occupied'; pending: PendingAcceptance }
-  | { status: 'invalid' }
-  | { status: 'unavailable' }
-
-const ACCEPTANCE_STORAGE_PREFIX = 'kk-studio.agent-pane-acceptance.'
 const BOUND_PENDING_STORAGE_PREFIX = 'kk-studio.agent-thread-pending.'
-
-export function acceptanceStorageKey(owner: AgentRuntimeOwnerDTO, paneId: string): string {
-  return `${ACCEPTANCE_STORAGE_PREFIX}${ownerIdentity(owner)}:${paneId}`
-}
 
 function boundPendingStorageKey(threadId: string): string {
   return `${BOUND_PENDING_STORAGE_PREFIX}${threadId}`
@@ -76,8 +43,6 @@ function resolveStorage(
   return null
 }
 
-export { isPendingAcceptanceValue }
-
 export function isBoundPendingMessageValue(value: unknown): value is BoundPendingMessage {
   return isRecord(value)
     && hasExactKeys(value, [
@@ -95,16 +60,6 @@ export function isBoundPendingMessageValue(value: unknown): value is BoundPendin
     && value.localDraft.every(isComposerPart)
 }
 
-export function samePendingAcceptanceIdentity(
-  left: PendingAcceptance,
-  right: PendingAcceptance,
-): boolean {
-  return ownerIdentity(left.owner) === ownerIdentity(right.owner)
-    && ownerIdentity(left.request.owner) === ownerIdentity(right.request.owner)
-    && samePaneTarget(left.target, right.target)
-    && sameBatchRequestIdentity(left.request, right.request)
-}
-
 export function sameBatchRequestIdentity(
   left: { commands: readonly { idempotencyKey: string }[] },
   right: { commands: readonly { idempotencyKey: string }[] },
@@ -118,116 +73,6 @@ export function sameBatchRequestIdentity(
   return left.commands.every(
     (cmd, index) => cmd.idempotencyKey === right.commands[index]?.idempotencyKey,
   )
-}
-
-/**
- * 按 owner/pane 槽位读取原始 pending acceptance，不按当前展示目标过滤。
- * 槽位被损坏/不可读取时返回 invalid/unavailable，调用方阻塞新提交以保护现场。
- */
-export function inspectPendingAcceptanceSlot(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  storage?: Pick<Storage, 'getItem'>,
-): PendingAcceptanceSlot {
-  const resolved = resolveStorage(storage)
-  if (resolved == null) {
-    return { status: 'unavailable' }
-  }
-  try {
-    const raw = resolved.getItem(acceptanceStorageKey(owner, paneId))
-    if (!raw) {
-      return { status: 'empty' }
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return { status: 'invalid' }
-    }
-    if (
-      !isPendingAcceptanceValue(parsed)
-      || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
-      || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
-    ) {
-      return { status: 'invalid' }
-    }
-    return { status: 'occupied', pending: parsed }
-  } catch {
-    return { status: 'unavailable' }
-  }
-}
-
-export function loadPendingAcceptance(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  storage?: Pick<Storage, 'getItem'>,
-  expectedTarget?: PaneTarget,
-): PendingAcceptance | null {
-  const slot = inspectPendingAcceptanceSlot(owner, paneId, storage)
-  if (slot.status !== 'occupied') {
-    return null
-  }
-  if (expectedTarget != null && !samePaneTarget(slot.pending.target, expectedTarget)) {
-    return null
-  }
-  return slot.pending
-}
-
-/**
- * 写入 pending acceptance：防止同一槽位被不同请求身份覆盖（防重复拥有/重复持久化）。
- */
-export function savePendingAcceptance(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  pending: PendingAcceptance,
-  storage?: Pick<Storage, 'getItem' | 'setItem'>,
-): boolean {
-  const resolved = resolveStorage(storage)
-  if (
-    resolved == null
-    || ownerIdentity(pending.owner) !== ownerIdentity(owner)
-    || ownerIdentity(pending.request.owner) !== ownerIdentity(owner)
-  ) {
-    return false
-  }
-  const slot = inspectPendingAcceptanceSlot(owner, paneId, resolved)
-  if (slot.status === 'invalid' || slot.status === 'unavailable') {
-    return false
-  }
-  if (slot.status === 'occupied' && !samePendingAcceptanceIdentity(slot.pending, pending)) {
-    return false
-  }
-  try {
-    resolved.setItem(acceptanceStorageKey(owner, paneId), JSON.stringify(pending))
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * 仅清除与 expected 严格匹配的 pending acceptance，避免误删属于其他操作的对账记录。
- */
-export function clearPendingAcceptance(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  expected: PendingAcceptance,
-  storage?: Pick<Storage, 'getItem' | 'removeItem'>,
-): boolean {
-  const resolved = resolveStorage(storage)
-  if (resolved == null) {
-    return false
-  }
-  const slot = inspectPendingAcceptanceSlot(owner, paneId, resolved)
-  if (slot.status !== 'occupied' || !samePendingAcceptanceIdentity(slot.pending, expected)) {
-    return false
-  }
-  try {
-    resolved.removeItem(acceptanceStorageKey(owner, paneId))
-    return true
-  } catch {
-    return false
-  }
 }
 
 /**
