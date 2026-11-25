@@ -16,10 +16,21 @@ import { assertReadOnlyZeroFooter } from './assertions.mjs'
 import { clearChatPaneState } from './chat-pane-storage.mjs'
 import { runWorkspaceContractMatrix, waitForThreadSnapshot } from './workspace-contracts.mjs'
 import {
+  bindThreadComposer as bindWorkspaceThreadComposer,
+  cleanupWorkspaceFixtureState,
+  expectComposerText as expectWorkspaceComposerText,
+  expectStorage as expectWorkspaceStorage,
+  waitForActiveModel as waitForWorkspaceActiveModel,
+  waitForQueuedMessages as waitForWorkspaceQueuedMessages,
+  withUiFixture as withWorkspaceUiFixture,
+} from './workspace-helpers.mjs'
+import {
   acceptCommandBatch,
   branchSettingsOf,
   chatOwner,
   createChat,
+  createWorkspaceSession,
+  createWorkspaceSpace,
   getThreadSnapshot,
   createNewThread,
   createNewSession,
@@ -63,6 +74,7 @@ export async function runComposerMatrix(ui) {
   const {
     apiCtx,
     consoleErrors,
+    ensureSignedIn,
     expectNoFatal,
     goto,
     page,
@@ -73,22 +85,23 @@ export async function runComposerMatrix(ui) {
   } = ui
 
   await run(
-    'ui.chat.composer.history_order_boundaries',
+    'ui.workspace.composer.history_order_boundaries',
     'Composer 按 durable、queued、草稿顺序导航且两端不循环',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
-        () => createHoldingQueueFixture(apiCtx, {
+        () => createWorkspaceHoldingQueueFixture(apiCtx, {
           title: `e2e-ui-composer-order-${stamp}`,
           historicalMessage: `durable history ${stamp}`,
           queuedMessages: [`queued 1 ${stamp}`, `queued 2 ${stamp}`],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `local draft ${stamp}`
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
 
           for (const expected of [
             `queued 2 ${stamp}`,
@@ -98,8 +111,8 @@ export async function runComposerMatrix(ui) {
             fixture.bootstrapMessage,
           ]) {
             await composer.press('ArrowUp')
-            await expectComposerText(page, expected)
-            await expectStorage(page, draftKey, draft)
+            await expectWorkspaceComposerText(page, expected)
+            await expectWorkspaceStorage(page, draftKey, draft)
           }
           for (const expected of [
             `durable history ${stamp}`,
@@ -109,8 +122,8 @@ export async function runComposerMatrix(ui) {
             draft,
           ]) {
             await composer.press('ArrowDown')
-            await expectComposerText(page, expected)
-            await expectStorage(page, draftKey, draft)
+            await expectWorkspaceComposerText(page, expected)
+            await expectWorkspaceStorage(page, draftKey, draft)
           }
 
           await shot(caseArt, 'composer-history-order-boundaries')
@@ -1409,6 +1422,139 @@ async function createBranchedHistoryFixture(
     return fixtureOf(state)
   } catch (error) {
     await cleanupFixture(state).catch(() => undefined)
+    throw error
+  }
+}
+
+async function createWorkspaceHoldingQueueFixture(
+  apiCtx,
+  { title, historicalMessage, queuedMessages = [] },
+) {
+  const suffix = cid().slice(0, 8)
+  const mock = new HoldingOpenAiMock()
+  const state = {
+    apiCtx,
+    agent: null,
+    bootstrapMessage: `hold materialize ${suffix}`,
+    space: null,
+    mock,
+    model: null,
+    provider: null,
+    sessionId: null,
+    threadId: null,
+  }
+  try {
+    await mock.start()
+    const providerResponse = await apiCtx.call(
+      'POST',
+      '/api/platform/providers',
+      {
+        name: `e2e-ui-hold-provider-${suffix}`,
+        description: 'Local hold provider for free UI queue tests.',
+        providerType: 'openai',
+        baseUrl: mock.baseUrl('/v1'),
+        credential: { operation: 'SET', value: `e2e-ui-hold-${suffix}` },
+        modelCallTimeoutMillis: '60000',
+        modelCallIdleTimeoutMillis: '60000',
+      },
+    )
+    assert(
+      providerResponse.status === 201,
+      `create hold provider: ${JSON.stringify(providerResponse)}`,
+    )
+    state.provider = providerResponse.json
+
+    const modelResponse = await apiCtx.call(
+      'POST',
+      '/api/platform/models',
+      {
+        type: 'MODEL',
+        providerName: state.provider.name,
+        name: `e2e-ui-hold-model-${suffix}`,
+        modelId: `wire-ui-hold-${suffix}`,
+        description: 'Local hold model for free UI queue tests.',
+        config: baseModelConfig({
+          limit: { context: 4096, output: 128 },
+          abilities: {
+            tools: false,
+            reasoning: false,
+            inputModalities: ['TEXT'],
+          },
+          variants: [{ id: 'default', promptCacheRetention: 'SHORT' }, { id: 'review', promptCacheRetention: 'SHORT' }],
+        }),
+      },
+    )
+    assert(
+      modelResponse.status === 201,
+      `create hold model: ${JSON.stringify(modelResponse)}`,
+    )
+    state.model = modelResponse.json
+
+    const agentResponse = await apiCtx.call(
+      'POST',
+      '/api/platform/agents',
+      {
+        name: `e2e-ui-hold-agent-${suffix}`,
+        description: 'Local hold agent for free UI queue tests.',
+        systemPrompt: 'Wait for the local E2E stream.',
+        execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
+        config: { tools: [], skills: [], subagents: [] },
+      },
+    )
+    assert(
+      agentResponse.status === 201,
+      `create hold agent: ${JSON.stringify(agentResponse)}`,
+    )
+    state.agent = agentResponse.json
+
+    state.space = await createWorkspaceSpace(apiCtx, {
+      title,
+      defaultAgentName: state.agent.name,
+    })
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: state.bootstrapMessage }],
+      modelSelection: {
+        modelName: `${state.model.name}-missing`,
+        variant: 'default',
+      },
+      yoloEnabled: false,
+    })
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
+    const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    await acceptCommandBatch(apiCtx, {
+      target: threadTarget({
+        threadId: state.threadId,
+        expectedHeadEntryId: idle.headEntryId,
+        expectedNextCommandSequence: idle.nextCommandSequence,
+      }),
+      commands: [
+        setExecutionCommand(state.agent.execution.settings, cid()),
+        userMessageCommand(historicalMessage, cid()),
+      ],
+    })
+    await mock.waitForRequest(historicalMessage)
+
+    if (queuedMessages.length > 0) {
+      await waitForWorkspaceActiveModel(apiCtx, state.threadId)
+      for (const message of queuedMessages) {
+        await acceptCommandBatch(apiCtx, {
+          target: threadTarget({ threadId: state.threadId }),
+          commands: [userMessageCommand(message, cid())],
+        })
+      }
+      await waitForWorkspaceQueuedMessages(apiCtx, state.threadId, queuedMessages.length)
+    }
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
+    }
+  } catch (error) {
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
   }
 }

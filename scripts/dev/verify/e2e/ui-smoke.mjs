@@ -26,6 +26,7 @@ import { deleteWorkspaceSession } from './lib/harness.mjs'
 import { cid, httpJson, HttpError, loginStudio } from './lib/http.mjs'
 import { ENVIRONMENT_CARD_ACTIONS } from './ui/environment-actions.mjs'
 import { waitForSettledAssistantText } from './ui/assertions.mjs'
+import { runComposerMatrix } from './ui/composer-matrix.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
 
 // Playwright 安装在 frontend/node_modules，直接 import 会找不到包。
@@ -73,9 +74,9 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed')
 }
 
-async function apiJson(backendUrl, method, requestPath, body) {
+async function apiJson(backendUrl, method, requestPath, body, headers) {
   try {
-    const { status, json } = await httpJson(backendUrl, method, requestPath, body)
+    const { status, json } = await httpJson(backendUrl, method, requestPath, body, undefined, headers)
     return { status, json }
   } catch (error) {
     if (error instanceof HttpError) {
@@ -362,10 +363,10 @@ async function main(argv) {
   mkdirSync(path.join(reportDir, 'cases'), { recursive: true })
   mkdirSync(artRoot, { recursive: true })
   const apiCtx = {
-    call: (method, requestPath, body) =>
-      apiJson(args.backendUrl, method, requestPath, body),
-    request: (requestPath, { method = 'GET', body } = {}) =>
-      apiJson(args.backendUrl, method, requestPath, body),
+    call: (method, requestPath, body, headers) =>
+      apiJson(args.backendUrl, method, requestPath, body, headers),
+    request: (requestPath, { method = 'GET', body, headers } = {}) =>
+      apiJson(args.backendUrl, method, requestPath, body, headers),
   }
   if (args.real) await requireRealMiniMaxM3(args.backendUrl, MINIMAX_ANTHROPIC_M3)
 
@@ -429,9 +430,14 @@ async function main(argv) {
     await page.screenshot({ path: file, fullPage: true })
   }
 
+  let authenticated = false
+
   async function signInViaForm(caseArt = null) {
     const signInGate = page.locator('main.account-gate form.sign-in-form')
-    if (await signInGate.count() === 0) return false
+    if (await signInGate.count() === 0) {
+      authenticated = true
+      return false
+    }
     const usernameInput = signInGate.getByLabel(/^(?:Username|用户名)$/)
     const passwordInput = signInGate.getByLabel(/^(?:Password|密码)$/)
     await usernameInput.waitFor({ state: 'visible', timeout: 15_000 })
@@ -440,7 +446,14 @@ async function main(argv) {
     if (caseArt) await shot(caseArt, 'login-form')
     await signInGate.getByRole('button', { name: /^(?:Sign in|登录)$/ }).click()
     await signInGate.waitFor({ state: 'detached', timeout: 20_000 })
+    authenticated = true
     return true
+  }
+
+  async function ensureSignedIn() {
+    if (authenticated) return
+    await goto('/')
+    await signInViaForm()
   }
 
   async function landInWorkspaceSpace(spaceTitle) {
@@ -868,6 +881,21 @@ async function main(argv) {
       }
     })
   }
+
+  await runComposerMatrix({
+    apiCtx,
+    args,
+    backendUrl: args.backendUrl,
+    consoleErrors,
+    ensureSignedIn,
+    expectNoFatal,
+    goto,
+    page,
+    pageErrors,
+    run,
+    shot,
+    stamp,
+  })
 
   const unknownCaseIds = [...selectedCaseIds].filter(
     (caseId) => !registeredCaseIds.has(caseId),
