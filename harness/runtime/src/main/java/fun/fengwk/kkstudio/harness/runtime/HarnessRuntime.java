@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
@@ -225,6 +226,16 @@ public final class HarnessRuntime {
   public Optional<UUID> findRootThreadId(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(tx -> tx.threads().find(threadId).map(ThreadState::rootThreadId));
+  }
+
+  /** Reads an execution root's kind without opening its timeline. */
+  public Optional<ThreadKind> findExecutionRootKind(UUID threadId) {
+    return store.transaction(
+        tx ->
+            tx.threads()
+                .find(threadId)
+                .filter(thread -> thread.id().equals(thread.rootThreadId()))
+                .map(ThreadState::kind));
   }
 
   /** 查询 Thread 的不可变 Session 归属；Thread 不存在时为空。 */

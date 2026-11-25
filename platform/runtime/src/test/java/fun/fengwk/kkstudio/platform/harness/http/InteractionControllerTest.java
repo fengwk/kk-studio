@@ -43,6 +43,8 @@ class InteractionControllerTest {
   private static final UUID THREAD = new UUID(0L, 101);
   private static final UUID INVOCATION = new UUID(0L, 100);
   private static final UUID ACTOR = new UUID(0L, 1);
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(ACTOR, "tester", StudioRole.USER);
   private static final UUID SUBMISSION = new UUID(0L, 102);
 
   private InteractionQueryService queryService;
@@ -56,6 +58,8 @@ class InteractionControllerTest {
     mvc =
         MockMvcBuilders.standaloneSetup(new InteractionController(queryService, interactionService))
             .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
+            .defaultRequest(
+                get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL))
             .build();
   }
 
@@ -64,7 +68,7 @@ class InteractionControllerTest {
     // 默认 limit=50；每个条目只携带自身形态的字段，判别属性为 type。
     InteractionPageDTO page = new InteractionPageDTO();
     InteractionOwnerDTO owner = new InteractionOwnerDTO();
-    owner.setKind("CHAT");
+    owner.setKind("CHAT_SPACE");
     owner.setId("chat-1");
     page.setItems(
         List.of(
@@ -86,14 +90,14 @@ class InteractionControllerTest {
                 2,
                 Instant.parse("2026-03-01T10:00:01Z"))));
     page.setTotal(2);
-    when(queryService.listInteractions(null, null, 50)).thenReturn(page);
+    when(queryService.listInteractions(PRINCIPAL, null, null, 50)).thenReturn(page);
 
     mvc.perform(get("/api/harness/interactions"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items[0].type").value("INPUT"))
         .andExpect(jsonPath("$.items[0].toolInvocationId").value(INVOCATION.toString()))
         .andExpect(jsonPath("$.items[0].threadId").value(THREAD.toString()))
-        .andExpect(jsonPath("$.items[0].owner.kind").value("CHAT"))
+        .andExpect(jsonPath("$.items[0].owner.kind").value("CHAT_SPACE"))
         .andExpect(jsonPath("$.items[0].argumentsJson").value("{\"questions\":[]}"))
         .andExpect(jsonPath("$.items[0].createdAt").hasJsonPath())
         .andExpect(jsonPath("$.items[0].waitingCount").doesNotExist())
@@ -103,13 +107,13 @@ class InteractionControllerTest {
         .andExpect(jsonPath("$.items[1].toolInvocationId").doesNotExist())
         .andExpect(jsonPath("$.total").value(2));
 
-    verify(queryService).listInteractions(null, null, 50);
+    verify(queryService).listInteractions(PRINCIPAL, null, null, 50);
   }
 
   @Test
   void passesRootCursorAndLimitAsTypedParameters() throws Exception {
     UUID root = new UUID(0L, 7);
-    when(queryService.listInteractions(root, "1772445600000:" + INVOCATION, 20))
+    when(queryService.listInteractions(PRINCIPAL, root, "1772445600000:" + INVOCATION, 20))
         .thenReturn(new InteractionPageDTO());
 
     mvc.perform(
@@ -119,7 +123,7 @@ class InteractionControllerTest {
                 .param("limit", "20"))
         .andExpect(status().isOk());
 
-    verify(queryService).listInteractions(root, "1772445600000:" + INVOCATION, 20);
+    verify(queryService).listInteractions(PRINCIPAL, root, "1772445600000:" + INVOCATION, 20);
   }
 
   @Test

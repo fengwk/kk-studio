@@ -270,11 +270,8 @@ subscriber 独立围栏保证关闭后不再回调，用户回调在全局锁外
 Harness 只读取调用和 Work 事实，在分页之前完成分组；平台环境服务用数据库时间判断
 READY 租约并补齐名称，过滤在线环境后继续扫描候选，确保跨页不拆分同一分组。
 分组用最早调用的 `(createdAt, id)` 排序，与人工等待做 keyset 归并；`total` 是
-同一根过滤条件下的完整可见待处理数，不是当前页长度。产品归属按根解析为 `CHAT`，或控制器/插件发起、没有产品页面的独立任务 `AGENT_TASK`
-（带 Agent 名与根 Thread 名，只在交互中心处理）；其余无法解析归属的根不暴露。
-
-owner 附带 Chat 标题、根 Thread 名称和 Agent 名；查询内缓存产品与根读取，
-显示名称不参与路由或身份判断。工具快照还独立批量读取当前 Work 的
+同一用户及根过滤条件下的完整可见待处理数，不是当前页长度。按执行根 Session 的归属过滤：
+当前用户的空间（含归档）投影为 `CHAT_SPACE`，owner 附带空间 ID 与标题；未登记的插件后台任务仅管理员可见，投影为 `AGENT_TASK`，优先显示 Agent 名。查询内缓存归属与根读取，显示名称不参与权限判断。工具快照还独立批量读取当前 Work 的
 `requiredEnvironmentId`、`requiredEnvironmentName`、`waitingForEnvironment` 和
 `environmentWaitFreshnessAt`，不从聚合卡片反推调用。名称沿 Work 冻结身份读取环境目录，
 与 Thread 当前环境选择无关；时效边界只取该 READY 环境调用未来的有效 READY 连接租约、

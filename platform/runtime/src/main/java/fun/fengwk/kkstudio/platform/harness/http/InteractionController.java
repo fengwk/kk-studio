@@ -51,8 +51,9 @@ public class InteractionController {
   public InteractionPageDTO listInteractions(
       @RequestParam(required = false) UUID rootThreadId,
       @RequestParam(required = false) String cursor,
-      @RequestParam(required = false, defaultValue = "50") int limit) {
-    return interactionQueryService.listInteractions(rootThreadId, cursor, limit);
+      @RequestParam(required = false, defaultValue = "50") int limit,
+      StudioPrincipal principal) {
+    return interactionQueryService.listInteractions(principal, rootThreadId, cursor, limit);
   }
 
   /**
