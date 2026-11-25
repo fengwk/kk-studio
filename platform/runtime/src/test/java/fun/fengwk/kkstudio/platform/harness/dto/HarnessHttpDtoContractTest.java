@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,54 +35,12 @@ class HarnessHttpDtoContractTest {
           .build();
 
   @Test
-  void commandUnionRoundTripsTypedVariantsAndExplicitNulls() {
-    HarnessCommandBatchDTO batch =
-        MAPPER.readValue(
-            """
-            {
-              "owner": {"kind": "CHAT", "id": "chat-1"},
-              "target": {"type": "NEW_SESSION", "sessionId": "s-1", "threadId": "t-1", "yoloEnabled": false},
-              "commands": [
-                {"type": "SET_ENVIRONMENT", "idempotencyKey": "k-2", "environmentName": null},
-                {"type": "USER_MESSAGE", "idempotencyKey": "k-3", "contents": [
-                  {"type": "TEXT", "text": "hi"},
-                  {"type": "ATTACHMENT", "uploadId": "u-1", "imageTier": "1080P"}
-                ]}
-              ]
-            }
-            """,
-            HarnessCommandBatchDTO.class);
-
-    assertInstanceOf(HarnessCommandTargetDTO.NewSessionDTO.class, batch.getTarget());
-    assertEquals(2, batch.getCommands().size());
-
-    HarnessCommandCreateDTO.SetEnvironmentDTO environment =
-        assertInstanceOf(
-            HarnessCommandCreateDTO.SetEnvironmentDTO.class, batch.getCommands().get(0));
-    assertNull(environment.environmentName());
-
-    HarnessCommandCreateDTO.UserMessageDTO message =
-        assertInstanceOf(HarnessCommandCreateDTO.UserMessageDTO.class, batch.getCommands().get(1));
-    HarnessUserMessageContentDTO.TextDTO text =
-        assertInstanceOf(HarnessUserMessageContentDTO.TextDTO.class, message.contents().get(0));
-    assertEquals("hi", text.text());
-    HarnessUserMessageContentDTO.AttachmentDTO attachment =
-        assertInstanceOf(
-            HarnessUserMessageContentDTO.AttachmentDTO.class, message.contents().get(1));
-    assertEquals(HarnessImageInputTier.P1080, attachment.imageTier());
-  }
-
-  @Test
   void sealedUnionsExposeOnlyFinalVariants() {
     assertTrue(HarnessCommandCreateDTO.class.isSealed());
-    assertTrue(HarnessCommandTargetDTO.class.isSealed());
     assertTrue(HarnessUserMessageContentDTO.class.isSealed());
     assertEquals(
         Set.of("USER_MESSAGE", "SET_EXECUTION", "SET_ENVIRONMENT"),
         subtypes(HarnessCommandCreateDTO.class));
-    assertEquals(
-        Set.of("NEW_SESSION", "NEW_THREAD", "NEW_FORKED_SESSION"),
-        subtypes(HarnessCommandTargetDTO.class));
     assertEquals(
         Set.of("TEXT", "ATTACHMENT", "RESOURCE"), subtypes(HarnessUserMessageContentDTO.class));
   }

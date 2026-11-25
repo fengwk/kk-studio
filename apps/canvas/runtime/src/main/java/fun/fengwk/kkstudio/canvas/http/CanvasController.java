@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.canvas.http;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -12,10 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
-import fun.fengwk.kkstudio.canvas.dto.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasPatchDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasSnapshotDTO;
-import fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
@@ -29,10 +25,10 @@ import java.util.UUID;
 /**
  * Canvas 产品的持久化 HTTP 边界。
  *
- * <p>Canvas 不拥有 Session：工作上下文属于 Harness 的 Thread/Invocation，本控制器只提供画布列表、快照与 typed command。 所有实体 id
- * 都以 canonical UUID 跨 HTTP 边界；{@code revision} 是 long（{@code canvas_document.revision} 的公共坐标系）在
- * wire 上的规范十进制字符串。写入使用 typed command 批：前置条件是各语义组的编辑起点旧值，而不是整图版本，因此请求不携带
- * expectedVersion。实时事件经事件通道（{@code /ws/events}）订阅，本控制器不重复实现事件流。
+ * <p>Canvas 不拥有 Session：工作上下文属于 Harness 的 Thread/Invocation，本控制器只提供画布快照与 typed command。 所有实体 id 都以
+ * canonical UUID 跨 HTTP 边界；{@code revision} 是 long（{@code canvas_document.revision} 的公共坐标系）在 wire
+ * 上的规范十进制字符串。写入使用 typed command 批：前置条件是各语义组的编辑起点旧值，而不是整图版本，因此请求不携带 expectedVersion。实时事件经事件通道（{@code
+ * /ws/events}）订阅，本控制器不重复实现事件流。
  */
 @RestController
 @RequestMapping("/api/canvas/canvases")
@@ -50,18 +46,6 @@ public class CanvasController {
     this.canvasCommandService =
         Objects.requireNonNull(canvasCommandService, "canvasCommandService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
-  }
-
-  @GetMapping
-  public List<CanvasDocumentDTO> list() {
-    return canvasQueryService.listDocuments().stream().map(mapper::toDto).toList();
-  }
-
-  @PostMapping
-  public ResponseEntity<CanvasDocumentDTO> create(@RequestBody CreateCanvasRequestDTO request) {
-    CanvasDocumentDTO created =
-        mapper.toDto(canvasCommandService.createCanvas(UUID.randomUUID(), request.getTitle()));
-    return ResponseEntity.status(HttpStatus.CREATED).body(created);
   }
 
   @GetMapping("/{canvasId}")

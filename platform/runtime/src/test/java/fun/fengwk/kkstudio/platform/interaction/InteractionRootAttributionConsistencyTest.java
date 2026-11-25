@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Owner;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 
 import java.time.Instant;
 import java.util.List;
@@ -44,7 +43,7 @@ import java.util.UUID;
 /**
  * 根归属一致性：查询与提交/审批对同一点代来源必须解析出同一真实执行根。
  *
- * <p>本测试刻意让查询与写入共享同一 Runtime stub 与 owner stub：同一点代来源只有一个根，查询据此投影 owner、写入据此加归属锁，谁都不能自行发明根。
+ * <p>本测试刻意让查询与写入共享同一 Runtime stub 与 owner stub：同一点代来源只有一个根，查询据此投影 owner，写入据此验证目标存在。
  */
 class InteractionRootAttributionConsistencyTest {
 
@@ -56,7 +55,6 @@ class InteractionRootAttributionConsistencyTest {
 
   private static final StudioPrincipal ACTOR =
       new StudioPrincipal(new UUID(0, 1), "tester", StudioRole.ADMIN);
-  private SessionOwnership sessionOwnership;
   private ResourceAccess access;
   private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
@@ -67,7 +65,6 @@ class InteractionRootAttributionConsistencyTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    sessionOwnership = mock(SessionOwnership.class);
     environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
@@ -77,7 +74,7 @@ class InteractionRootAttributionConsistencyTest {
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     access = mock(ResourceAccess.class);
     queryService = new InteractionQueryService(access, environmentService, runtimes);
-    interactionService = new InteractionService(List.of(sessionOwnership), runtimes);
+    interactionService = new InteractionService(runtimes);
   }
 
   /** 测试意图：同一后代来源的根归属在查询与提交间一致——查询按根的 owner 绑定投影归属，提交按同一根的绑定加归属锁，两个入口对同一后代各调用一次同源根解析。 */
@@ -125,8 +122,7 @@ class InteractionRootAttributionConsistencyTest {
     assertEquals("CHAT_SPACE", dto.owner().getKind());
     assertEquals("owner", dto.owner().getTitle());
 
-    // 提交：同一点代来源的归属锁同样按根解析；归属锁前只做无锁的 Session 归属读。
-    when(runtime.findThreadSessionId(rootThreadId)).thenReturn(Optional.of(rootSessionId));
+    // 提交：同一点代来源也按相同 Runtime 事实解析真实根。
     ToolInputSubmissionCommand command =
         new ToolInputSubmissionCommand(
             childThreadId, id(102), id(103), "alice", false, List.of(List.of("ans")));
@@ -135,10 +131,9 @@ class InteractionRootAttributionConsistencyTest {
 
     interactionService.submitInput(command);
 
-    // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加归属锁。
+    // 两个入口对同一后代各做一次同源根解析，命中同一真实根。
     verify(runtime, times(2)).findRootThreadId(childThreadId);
     verify(access).owner(Kind.SESSION, rootSessionId);
-    verify(sessionOwnership).lockForInteraction(rootThreadId, rootSessionId);
   }
 
   /** 无产品归属时独立任务使用 agent 名；缺失 agent 名时使用根名称。 */

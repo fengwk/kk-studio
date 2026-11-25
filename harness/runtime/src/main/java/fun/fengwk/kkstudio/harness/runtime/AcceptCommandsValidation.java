@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
-import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.List;
@@ -34,26 +33,13 @@ final class AcceptCommandsValidation {
 
   private AcceptCommandsValidation() {}
 
-  /** NEW_THREAD 的合法 fork 边界：只有 ROOT 或已闭合 {@code TURN_END}。 */
+  /** Requires a closed ROOT or TURN_END fork boundary. */
   static void requireLegalForkBoundary(Entry startEntry) {
-    requireLegalForkBoundary(startEntry, "NEW_THREAD");
-  }
-
-  /**
-   * NEW_THREAD / NEW_FORKED_SESSION 的合法 fork 边界：只有 ROOT 或已闭合 {@code TURN_END}。其它位置都是 active / 半轮 /
-   * 未闭合前缀，必须原子拒绝；这里只按 start Entry 自身判定，不写源 Thread、不补写 synthetic closure，也不做任何 source Thread 推断。
-   */
-  static void requireLegalForkBoundary(Entry startEntry, String target) {
     if (startEntry.payload().type().isRoot() || startEntry.payload() instanceof TurnEndPayload) {
       return;
     }
     throw DomainException.validation(
-        "startEntry",
-        "start entry "
-            + startEntry.id()
-            + " is not a legal "
-            + target
-            + " fork boundary (ROOT or a closed TURN_END)");
+        "startEntry", "start entry " + startEntry.id() + " is not a legal fork boundary");
   }
 
   /** 创建型 target 的 batch shape：允许固定顺序的 SET_* 前缀，并必须以恰一条 user-like 输入结尾。 */
@@ -198,31 +184,6 @@ final class AcceptCommandsValidation {
     for (NewThreadCommand command : commands) {
       if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
         driverRegistry.validate(setExecution.execution());
-      }
-    }
-  }
-
-  static void validateForkExecutionCommands(
-      DriverRegistry driverRegistry,
-      BranchSettings sourceSettings,
-      List<NewThreadCommand> commands,
-      String context) {
-    AgentDriver sourceDriver = driverRegistry.of(sourceSettings);
-    if (!sourceDriver.capabilities().fork()) {
-      throw DomainException.validation(
-          "execution", "fork is unsupported by driver " + sourceDriver.id() + " in " + context);
-    }
-    for (NewThreadCommand command : commands) {
-      if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
-        driverRegistry.validate(setExecution.execution());
-        if (!sourceDriver.id().equals(setExecution.execution().driver())) {
-          throw DomainException.validation(
-              "execution",
-              "driver cannot be changed in fork: source="
-                  + sourceDriver.id()
-                  + ", requested="
-                  + setExecution.execution().driver());
-        }
       }
     }
   }

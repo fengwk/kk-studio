@@ -41,7 +41,6 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
     CanvasDocument created = canvasStore.addDocument(canvasId, "canvas");
     assertEquals(0L, created.revision());
     assertEquals(created, canvasStore.findDocument(canvasId).orElseThrow());
-    assertEquals(List.of(created), canvasStore.listDocuments());
     assertEquals(
         created, transactions.execute(status -> canvasStore.lockDocument(canvasId).orElseThrow()));
 

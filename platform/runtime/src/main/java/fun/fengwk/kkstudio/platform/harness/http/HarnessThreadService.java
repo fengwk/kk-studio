@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
@@ -87,13 +86,6 @@ public class HarnessThreadService {
   public HarnessThreadSnapshotDTO abandonExecution(
       UUID threadId, UUID executionId, long expectedVersion) {
     return snapshotResponse(runtime.abandonExecution(threadId, executionId, expectedVersion));
-  }
-
-  /** 重命名执行根并回读权威当前 Thread；名称规范化与冲突判定由 Runtime 负责。 */
-  public HarnessThreadDTO rename(RenameThreadCommand command) {
-    ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
-    ThreadState updated = runtime.renameThread(command);
-    return HarnessRuntimeResponseMapper.toThreadDto(runtime.getThreadSnapshot(updated.id()));
   }
 
   /** 提交手动压缩并回读提交后的当前 Thread。 */

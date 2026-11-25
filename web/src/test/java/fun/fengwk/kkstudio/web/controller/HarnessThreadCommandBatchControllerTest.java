@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
@@ -128,9 +127,6 @@ class HarnessThreadCommandBatchControllerTest {
     assertEquals(
         UUID.fromString(COMMAND_KEY), commandCaptor.getValue().commands().get(1).idempotencyKey());
 
-    // 既有 Thread 的继续写入只走 acceptOnThread，不借 owner-aware 创建入口，也不回读 snapshot 之外的状态。
-    verify(acceptanceService, never())
-        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
     verify(runtime).getThreadSnapshot(UUID.fromString(AUTHORITATIVE_THREAD_ID));
   }
 

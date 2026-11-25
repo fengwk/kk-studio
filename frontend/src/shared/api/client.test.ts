@@ -36,11 +36,11 @@ describe('HTTP client', () => {
       .mockResolvedValueOnce(new Response('{"title":"A"}', { headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
-    expect(await request('POST /api/canvas/canvases', { body: { title: 'A' } }))
+    expect(await request('POST /api/chat-spaces', { body: { title: 'A', rootFolderName: 'A' } }))
       .toEqual({ title: 'A' })
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/canvas/canvases')
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/chat-spaces')
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({
-      method: 'POST', body: '{"title":"A"}',
+      method: 'POST', body: '{"title":"A","rootFolderName":"A"}',
       headers: { 'Accept-Language': 'en-US', 'Content-Type': 'application/json' },
     })
     await expect(request('DELETE /api/platform/models/{*name}', {
@@ -74,7 +74,7 @@ describe('HTTP client', () => {
       })))
     let error: unknown
     try {
-      await request('GET /api/canvas/canvases', {})
+      await request('GET /api/canvas/functions', {})
     } catch (caught) {
       error = caught
     }
@@ -86,7 +86,7 @@ describe('HTTP client', () => {
     expect(apiErrorDetail(error)).toBe('changed')
     expect(isConflictReason(new ApiError('x', 409, 'conflict', { reason: 'STALE' }), 'STALE'))
       .toBe(false)
-    await expect(request('GET /api/canvas/canvases', {})).rejects.toMatchObject({
+    await expect(request('GET /api/canvas/functions', {})).rejects.toMatchObject({
       status: 502, code: 'upstream_failed',
     })
   })
@@ -114,7 +114,7 @@ describe('HTTP client', () => {
       .mockResolvedValueOnce(new Response('script', { headers: { 'Content-Type': 'application/octet-stream' } }))
       .mockResolvedValueOnce(new Response('bytes', { headers: { 'Content-Type': 'text/plain' } })))
     const parser = vi.fn(() => ['parsed'])
-    expect(await request('GET /api/canvas/canvases', {}, { jsonParser: parser })).toEqual(['parsed'])
+    expect(await request('GET /api/canvas/functions', {}, { jsonParser: parser })).toEqual(['parsed'])
     expect(parser).toHaveBeenCalledWith('{"n":1}')
     expect(await request('GET /api/platform/environments/{environmentId}/uninstall-script', {
       path: { environmentId: 'env-1' }, query: { operatingSystem: 'linux' },
@@ -136,15 +136,15 @@ describe('HTTP client', () => {
         status: 404, headers: { 'Content-Type': 'application/problem+json; charset=utf-8' },
       }))
     vi.stubGlobal('fetch', transport)
-    await expect(request('GET /api/canvas/canvases', {})).resolves.toBeUndefined()
-    await expect(request('GET /api/canvas/canvases', {})).resolves.toBeUndefined()
+    await expect(request('GET /api/canvas/functions', {})).resolves.toBeUndefined()
+    await expect(request('GET /api/canvas/functions', {})).resolves.toBeUndefined()
     await expect(request('GET /api/platform/environments/{environmentId}/uninstall-script', {
       path: { environmentId: 'env-1' }, query: { operatingSystem: 'linux' },
     })).resolves.toBeUndefined()
     await expect(request('GET /api/harness/sessions/{sessionId}/resources/{resourceId}', {
       path: { sessionId: 's', resourceId: 'r' }, query: { download: true },
     })).resolves.toBeUndefined()
-    await expect(request('GET /api/canvas/canvases', {}))
+    await expect(request('GET /api/canvas/functions', {}))
       .rejects.toMatchObject({ status: 404, code: 'not_found' })
   })
 
@@ -171,10 +171,10 @@ describe('HTTP client', () => {
       status: 409, headers: { 'Content-Type': 'application/problem+json' },
     }))
     vi.stubGlobal('fetch', transport)
-    await expect(request('GET /api/canvas/canvases', {}, { signal: AbortSignal.abort() }))
+    await expect(request('GET /api/canvas/functions', {}, { signal: AbortSignal.abort() }))
       .rejects.toMatchObject({ name: 'AbortError' })
     expect(transport).not.toHaveBeenCalled()
-    await expect(request('GET /api/canvas/canvases', {}))
+    await expect(request('GET /api/canvas/functions', {}))
       .rejects.toMatchObject({ status: 409, code: 'conflict' })
   })
 
@@ -184,12 +184,12 @@ describe('HTTP client', () => {
     vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
       init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
     })))
-    const timed = request('GET /api/canvas/canvases', {})
+    const timed = request('GET /api/canvas/functions', {})
     const assertion = expect(timed).rejects.toMatchObject({ code: 'timeout' })
     await vi.advanceTimersByTimeAsync(60000)
     await assertion
     const controller = new AbortController()
-    const aborted = request('GET /api/canvas/canvases', {}, { signal: controller.signal, timeoutMs: 0 })
+    const aborted = request('GET /api/canvas/functions', {}, { signal: controller.signal, timeoutMs: 0 })
     controller.abort()
     await expect(aborted).rejects.toMatchObject({ name: 'AbortError' })
   })
@@ -205,7 +205,7 @@ describe('HTTP client', () => {
         init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
       }),
     })))
-    const pending = request('GET /api/canvas/canvases', {}, { timeoutMs: 5 })
+    const pending = request('GET /api/canvas/functions', {}, { timeoutMs: 5 })
     const assertion = expect(pending).rejects.toMatchObject({ code: 'timeout' })
     await vi.advanceTimersByTimeAsync(5)
     await assertion
@@ -214,7 +214,7 @@ describe('HTTP client', () => {
   // 网络失败不依赖服务端错误信封。
   it('normalizes network failures', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
-    await expect(request('GET /api/canvas/canvases', {}))
+    await expect(request('GET /api/canvas/functions', {}))
       .rejects.toMatchObject({ name: 'ApiError', code: 'network_error', message: 'offline' })
   })
 })

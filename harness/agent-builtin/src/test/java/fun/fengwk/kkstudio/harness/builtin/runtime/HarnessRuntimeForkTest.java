@@ -8,7 +8,6 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.rootEntry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.runtime;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.session;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.turnEndEntry;
@@ -20,7 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +26,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -36,7 +33,6 @@ import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -84,24 +80,22 @@ class HarnessRuntimeForkTest {
   /** fork 初始 batch 的 SET_MODEL 以原子模型整体落盘，fork 来源的 Builtin 模型切换保持可用。 */
   @Test
   void forkAcceptsBuiltinModelSwitch() {
-    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    HarnessRuntimeTestSupport.ContinuationBaseline baseline =
+        HarnessRuntimeTestSupport.seedContinuationChain(store, true);
 
     UUID acceptedThreadId = TestIds.id(983);
+    var branch =
+        runtime.createIdleBranch(
+            baseline.threadId(), baseline.turnEndEntryId(), acceptedThreadId, "branch");
     ExecutionSelection switched = BuiltinExecution.of(ModelSelection.model("model-2", "v2"));
-    AcceptedCommands accepted =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(
-                    baseline.sessionId(),
-                    baseline.rootEntryId(),
-                    acceptedThreadId,
-                    "branch",
-                    false),
-                List.of(
-                    new NewThreadCommand(new SetExecutionCommandPayload(switched), TestIds.id(984)),
-                    userMessageCommand(TestIds.id(985), "hello"))),
-            AcceptancePreflight.IDENTITY);
-    assertEquals(acceptedThreadId, accepted.thread().id());
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                branch.id(), branch.headEntryId(), branch.nextCommandSequence()),
+            List.of(
+                new NewThreadCommand(new SetExecutionCommandPayload(switched), TestIds.id(984)),
+                userMessageCommand(TestIds.id(985), "hello"))),
+        AcceptancePreflight.IDENTITY);
     List<ThreadCommand> commands =
         store.transaction(tx -> loadCommandsByThread(tx, acceptedThreadId));
     SetExecutionCommandPayload queued =
@@ -109,75 +103,33 @@ class HarnessRuntimeForkTest {
     assertEquals(switched, queued.execution());
   }
 
-  /** 无压缩时复制 ROOT 之后的完整历史：新身份、链条连续、tool pair 保留，且不携带来源的 Builtin 模型状态。 */
   @Test
-  void sessionForkCopiesFullHistoryAndRetainsToolPairs() {
+  void idleSessionForkCopiesToolPairsWithoutBuiltinModelState() {
     HistorySeed source = seedHistoryWithModel(store);
-    // 证明来源会话确实包含私有 ModelInvocation，而不是用一个无模型源断言 empty。
     assertTrue(hasModelInvocation(source.threadId(), source.firstTurnStartEntryId()));
-    UUID newSessionId = TestIds.id(950);
-    UUID newThreadId = TestIds.id(951);
-    AcceptedCommands accepted =
-        acceptSessionFork(source.threadId(), source.lastEntryId(), newSessionId, newThreadId);
+    UUID sessionId = TestIds.id(950);
+    UUID threadId = TestIds.id(951);
 
-    assertFalse(accepted.replayed());
-    assertEquals(newSessionId, accepted.session().id());
-    assertEquals(newSessionId, accepted.thread().sessionId());
-    assertNull(accepted.thread().parentThreadId());
+    ThreadState fork =
+        runtime.createIdleFork(
+            source.threadId(),
+            source.lastEntryId(),
+            sessionId,
+            threadId,
+            "fork",
+            (id, entries) -> {});
 
     EntryPath sourcePath = store.transaction(tx -> tx.entries().loadPath(source.lastEntryId()));
-    EntryPath path =
-        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
-    List<Entry> entries = path.entries();
-    // ROOT + 完整来源历史（不含来源 ROOT）+ FORK。
-    assertEquals(sourcePath.entries().size() + 1, entries.size());
-    assertInstanceOf(ForkPayload.class, entries.getLast().payload());
-    assertEquals(ForkPayload.SESSION_NOTICE, projectedTexts(path).getLast());
-
-    List<UUID> sourceIds = sourcePath.entries().stream().map(Entry::id).toList();
-    for (Entry copied : entries.subList(1, entries.size() - 1)) {
-      assertFalse(sourceIds.contains(copied.id()));
-      assertEquals(newSessionId, copied.sessionId());
-    }
-    // tool pair 保留：复制后的 tool result 引用复制后的 assistant Entry，绝不复用旧身份。
-    Entry copiedAssistant = singleRole(entries, AgentMessageRole.ASSISTANT);
-    Entry copiedToolResult = singleRole(entries, AgentMessageRole.TOOL);
-    ToolResultMetadata metadata =
-        ((MessagePayload) copiedToolResult.payload()).toolResultMetadata();
-    assertEquals(copiedAssistant.id(), metadata.assistantEntryId());
-    assertEquals("bash", metadata.toolName());
+    EntryPath copiedPath = store.transaction(tx -> tx.entries().loadPath(fork.headEntryId()));
+    assertEquals(sourcePath.entries().size(), copiedPath.entries().size());
+    Entry copiedAssistant = singleRole(copiedPath.entries(), AgentMessageRole.ASSISTANT);
+    Entry copiedToolResult = singleRole(copiedPath.entries(), AgentMessageRole.TOOL);
     assertEquals(
-        ((MessagePayload) singleRole(sourcePath.entries(), AgentMessageRole.TOOL).payload())
-            .toolResultMetadata()
-            .toolName(),
-        metadata.toolName());
+        copiedAssistant.id(),
+        ((MessagePayload) copiedToolResult.payload()).toolResultMetadata().assistantEntryId());
     assertNotEquals(source.assistantEntryId(), copiedAssistant.id());
-    // 复制不携带任何活跃 invocation / command / join：新 Thread 上只有本批初始命令。
-    assertEquals(
-        List.of(1L),
-        store.transaction(
-            tx ->
-                loadCommandsByThread(tx, newThreadId).stream()
-                    .map(command -> command.sequence())
-                    .toList()));
-    // 来源模型状态仍留在原 Session；新 Thread/复制 Turn 上没有任何 Builtin 私有模型行。
     assertTrue(hasModelInvocation(source.threadId(), source.firstTurnStartEntryId()));
-    assertFalse(hasModelInvocation(newThreadId, entries.get(1).id()));
-  }
-
-  private AcceptedCommands acceptSessionFork(
-      UUID sourceThreadId, UUID cutEntryId, UUID newSessionId, UUID newThreadId) {
-    return runtime.acceptCommands(
-        sessionForkCommand(sourceThreadId, cutEntryId, newSessionId, newThreadId),
-        AcceptancePreflight.IDENTITY);
-  }
-
-  private static AcceptCommandsCommand sessionForkCommand(
-      UUID sourceThreadId, UUID cutEntryId, UUID newSessionId, UUID newThreadId) {
-    return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewForkedSession(
-            sourceThreadId, cutEntryId, newSessionId, newThreadId, false),
-        List.of(userMessageCommand(TestIds.id(952), "fork")));
+    assertFalse(hasModelInvocation(threadId, copiedPath.entries().get(1).id()));
   }
 
   private boolean hasModelInvocation(UUID threadId, UUID turnStartEntryId) {

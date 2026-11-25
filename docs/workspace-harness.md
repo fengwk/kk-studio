@@ -22,7 +22,7 @@ title: 从外部请求到执行事实
   - 执行后端 {ext}: Model Provider, Environment Daemon
 ```
 
-**Runtime 产出执行语义，接入层产出客户端响应。** HTTP 把请求转换成 Java 命令。创建 Session 时，应用服务负责归属与附件，调用 [`HarnessRuntime`](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 在同一事务接受命令。读取 Thread 时，Runtime 从已提交事实派生 `ThreadSnapshot` 和运行状态；[平台读服务](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/http/HarnessThreadService.java#L50) 组装 DTO，补充费用及环境等待。HTTP 查询与 WebSocket 的 Thread 快照共用该服务。
+**Runtime 产出执行语义，产品接入层产出客户端响应。** HTTP 把请求转换成 Java 命令。Workspace 创建 Session 时登记资源归属与附件，并调用 [`HarnessRuntime`](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 在同一事务接受首条命令。Thread 续写通过 Harness Thread command-batch 接口。读取 Thread 时，Runtime 从已提交事实派生 `ThreadSnapshot` 和运行状态；[平台读服务](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/http/HarnessThreadService.java) 组装 DTO，补充费用及环境等待。HTTP 查询与 WebSocket 的 Thread 快照共用该服务。
 
 | 模块 | 职责 |
 | --- | --- |
@@ -70,7 +70,7 @@ erDiagram
 - **历史树**：同一个 Session 的 Thread 可以共享历史前缀。每条 Thread 的 `EntryPath` 从 `head_entry_id` 沿 `parent_entry_id` 回溯到 `ROOT`，再按正序读取。
 - **执行树**：`parent_thread_id` 连接直接父 Thread，`root_thread_id` 定位整棵树。执行树用于委派、停止和删除，可包含多个 Session。子 Agent 通常拥有独立 Session，压缩子 Thread 与发起者共用 Session。
 
-#### [`harness_session`](../schema/src/main/resources/db/migration/V1__schema.sql#L301)
+#### [`harness_session`](../schema/src/main/resources/db/migration/V1__schema.sql#L343)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -78,7 +78,7 @@ erDiagram
 | `name` | `varchar(256)` | 显示名称 |
 | `created_at` | `timestamptz(3)` | 创建时间 |
 
-#### [`harness_entry`](../schema/src/main/resources/db/migration/V1__schema.sql#L315)
+#### [`harness_entry`](../schema/src/main/resources/db/migration/V1__schema.sql#L357)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ erDiagram
 
 父节点用 `(session_id, parent_entry_id)` 引用同 Session 的 Entry。创建 Session 时写入 `ROOT`；部分唯一索引约束每个 Session 至多一个根节点。
 
-#### [`harness_thread`](../schema/src/main/resources/db/migration/V1__schema.sql#L378)
+#### [`harness_thread`](../schema/src/main/resources/db/migration/V1__schema.sql#L420)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ flowchart TB
 
 Runtime 注册 `THREAD` 和 `TOOL`，Builtin Driver 注册 `MODEL`。实线连接 Thread 的业务记录，虚线指向各 Work 类型的调度目标。
 
-#### [`harness_thread_command`](../schema/src/main/resources/db/migration/V1__schema.sql#L485)
+#### [`harness_thread_command`](../schema/src/main/resources/db/migration/V1__schema.sql#L527)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -152,7 +152,7 @@ Runtime 注册 `THREAD` 和 `TOOL`，Builtin Driver 注册 `MODEL`。实线连�
 
 复合主键为 `(thread_id, sequence)`；`(thread_id, idempotency_key)` 唯一。索引支持按序读取排队命令、按 Stop 请求查询撤销的命令。
 
-#### [`builtin_model_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L1218)
+#### [`builtin_model_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L1261)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -175,7 +175,7 @@ Runtime 注册 `THREAD` 和 `TOOL`，Builtin Driver 注册 `MODEL`。实线连�
 
 Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个已挂接的 `result_entry_id` 唯一。结果物化后清理行；进入工具阶段时保留到批次应用完成。
 
-#### [`harness_tool_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L545)
+#### [`harness_tool_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L586)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -197,7 +197,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 `(assistant_entry_id, call_index)` 唯一；同一 Assistant 的调用按顺序形成批次。批次结果写进 Entry 后删除调用行。`WAITING_CHILD` 纳入状态约束与非终态索引；人工待办索引覆盖 `WAITING_APPROVAL` 和 `WAITING_INPUT`。
 
-#### [`durable_work`](../schema/src/main/resources/db/migration/V1__schema.sql#L617)
+#### [`durable_work`](../schema/src/main/resources/db/migration/V1__schema.sql#L659)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -213,7 +213,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 ### 交付、停止与桥接记录
 
-#### [`harness_thread_join`](../schema/src/main/resources/db/migration/V1__schema.sql#L655)
+#### [`harness_thread_join`](../schema/src/main/resources/db/migration/V1__schema.sql#L697)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -235,7 +235,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 源命令和通知命令分别以子、父的 `(thread_id, sequence)` 引用 Command。回执从固定的源命令、终态与回答坐标重建。
 
-#### [`harness_thread_stop_receipt`](../schema/src/main/resources/db/migration/V1__schema.sql#L728)
+#### [`harness_thread_stop_receipt`](../schema/src/main/resources/db/migration/V1__schema.sql#L770)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -247,7 +247,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 复合主键为 `(thread_id, stop_request_id)`。按 `root_stop_request_id` 汇总原始停止集合，按 Command 表的 `stop_request_id` 查撤销的输入。
 
-#### [`harness_execution_exit`](../schema/src/main/resources/db/migration/V1__schema.sql#L753)
+#### [`harness_execution_exit`](../schema/src/main/resources/db/migration/V1__schema.sql#L795)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -266,7 +266,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 退出记录按 Thread 查询，并独立于 Invocation 行保留。远端记录关联 Environment 和发起它的本地执行。
 
-#### [`session_blob_ref`](../schema/src/main/resources/db/migration/V1__schema.sql#L823)
+#### [`session_blob_ref`](../schema/src/main/resources/db/migration/V1__schema.sql#L865)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -276,7 +276,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 复合主键为 `(session_id, blob_id)`；两个外键限制被引用行的删除。同一 Session 对同一 Blob 建立一条持有边；复制到新 Session 时为目标登记持有边。
 
-#### [`realtime_subscription`](../schema/src/main/resources/db/migration/V1__schema.sql#L466)
+#### [`realtime_subscription`](../schema/src/main/resources/db/migration/V1__schema.sql#L508)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -353,7 +353,7 @@ Builtin 将冻结规格与 `request_head_entry_id` 对应的历史组装成中�
 
 #### 模型目录与运行时选择
 
-[目录表](../schema/src/main/resources/db/migration/V1__schema.sql#L846) 以逻辑名标识 Agent、Provider 和模型。`model.kind=MODEL` 通过 `provider_name` 关联 Provider，用 `model_id` 向上游请求；`kind=GROUP` 保存有序成员与降级、冷却设置。`model_group_cooldown` 的冷却记录按组、成员、variant 和组配置版本生效。
+[目录表](../schema/src/main/resources/db/migration/V1__schema.sql#L888) 以逻辑名标识 Agent、Provider 和模型。`model.kind=MODEL` 通过 `provider_name` 关联 Provider，用 `model_id` 向上游请求；`kind=GROUP` 保存有序成员与降级、冷却设置。`model_group_cooldown` 的冷却记录按组、成员、variant 和组配置版本生效。
 
 | 模型 | 字段 | 含义 |
 | --- | --- | --- |
@@ -584,13 +584,9 @@ HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstu
 
 | 方法与路径 | 输入 → 输出 |
 | --- | --- |
-| `POST /command-batches` | `owner:{kind,id}`、创建型 `target`、`commands` → `202`，返回 `session`、`rootEntry`、`thread`、`acceptedCommands`、`replayed`。创建批次以一条用户消息结尾。 |
-| `POST /threads/{threadId}/command-batches` | `commands` 和适用时的两个命令游标 → 同一接受回执。每条有 `type`、`idempotencyKey` 和类型专属字段；HTTP 接收 `USER_MESSAGE` 及三种 `SET_*`；消息使用有序 `contents`。 |
+| `POST /threads/{threadId}/command-batches` | 对既有 Thread 接受续写命令，返回 `202` 接受回执。每条命令有 `type`、`idempotencyKey` 和类型专属字段；消息使用有序 `contents`。新 Session 与首条命令经 `/api/chat-spaces/{spaceId}/sessions` 由 Workspace 原子创建。 |
 | `GET /threads/{threadId}` | 可选 `afterEntryId` → Thread 快照。 |
 | `GET /threads/{threadId}/tree` | 按目标定位执行根 → 轻量执行树节点数组。 |
-| `GET /sessions/{sessionId}/threads` | 同 Session 的 `USER` Thread 摘要，按创建时间和 ID 排序。 |
-| `GET /sessions/{sessionId}/entries` | 可选 `cursor`（同 Session 的 Entry ID）和 `limit`（默认 100，最多 200）→ `{items, nextCursor}`。 |
-| `PUT /sessions/{sessionId}/name`、`PUT /threads/{threadId}/name` | `{name}` → 当前 Session 或 Thread；同名直接返回当前值。 |
 | `PUT /threads/{threadId}/yolo` | `{yoloEnabled}` → 当前 Thread；按锁内当前行应用，同值直接返回。 |
 | `POST /threads/{threadId}/stop` | `{stopRequestId, expectedVersion}` → `202`，Thread 和此次停止的集合/回执。 |
 | `GET /threads/{threadId}/compaction-availability` | 返回查询时的 `{available, disabledReason}`，提交时重新校验。 |
@@ -599,15 +595,6 @@ HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstu
 | `PUT …/tool-invocations/{toolInvocationId}/approval` | 路径前缀 `/threads/{threadId}`；`{decisionId, decision, reason?}` → 工具调用投影。 |
 | `POST …/tool-invocations/{toolInvocationId}/input` | 同上路径前缀；`{type, submissionId, answers?}`，`ANSWER` 或 `DECLINE` → 接受回执。 |
 | `GET /interactions` | 可选 `rootThreadId`、`cursor`、`limit` → 分页 `APPROVAL / INPUT / ENVIRONMENT_WAIT`；原始调用和执行根坐标同时返回。 |
-| `GET /sessions/{sessionId}/resources/{resourceId}` | `download` 默认为 false；校验 Session 持有边和 Blob 后返回字节流。 |
-
-创建请求的 `target.type` 决定必需字段（[Target DTO](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessCommandTargetDTO.java)）：
-
-| `type` | 字段 |
-| --- | --- |
-| `NEW_SESSION` | `sessionId`、`threadId`、`rootSettings`、`yoloEnabled` |
-| `NEW_THREAD` | `sessionId`、`startEntryId`、`threadId`、`threadName`、`yoloEnabled` |
-| `NEW_FORKED_SESSION` | `sourceThreadId`、`startEntryId`、`sessionId`、`threadId`、`yoloEnabled` |
 
 例如对已有 Thread 发送一条文本消息，请求体如下。重放沿用相同的 `idempotencyKey` 和内容。单条 `USER_MESSAGE` 批次省略两个游标：
 

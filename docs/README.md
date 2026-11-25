@@ -67,7 +67,7 @@ HTML 和截图留在 `reports/`，不入库。构建后对两份 HTML 分别运�
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Platform](modules/platform.md) | Catalog、Plugin、Chat、Storage、Environment、MCP 与外部系统如何编排？ |
+| [Platform](modules/platform.md) | Catalog、Plugin、工作区归属、Storage、Environment、MCP 与外部系统如何编排？ |
 | [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、实例如何按类型交出产品域贡献、凭据与资源端口契约是什么？ |
 | [Plugins](modules/plugins.md) | 内置的 ComfyUI、Media、MiniMax Mavis 和 OpenCLI 插件如何配置、认证与提供能力？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
@@ -78,7 +78,7 @@ HTML 和截图留在 `reports/`，不入库。构建后对两份 HTML 分别运�
 | 文档 | 回答的问题 |
 | --- | --- |
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
-| [Chat](modules/chat.md) | 对话集合如何持久化、分页，并持有与深删除 Harness Session？ |
+| [Workspace](modules/workspace.md) | Chat Space、目录和资源归属如何保持一致，并通过工作区入口创建与管理执行资源？ |
 | [工作区持久化](modules/workspace.md) | 空间、目录和资源归属如何保持一致？ |
 
 | [IDE](modules/ide.md) | Chat 内同源 code-server 视图如何经 Daemon 命令通道、权威快照与复用数据连接打开、恢复和转发？ |

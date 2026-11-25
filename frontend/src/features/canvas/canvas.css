@@ -55,29 +55,10 @@
   display: block;
 }
 
-.canvas-feature .library-view.active {
-  display: flex;
-}
-
-.canvas-feature .canvas-library-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
-}
-
-.canvas-feature .canvas-library-grid > * {
-  width: 100%;
-  max-width: 360px;
-}
-
 .canvas-feature h1,
 .canvas-feature h2,
 .canvas-feature p {
   margin: 0;
-}
-
-.canvas-feature .library-load-error {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 16px;
 }
 
 .canvas-feature.canvas-editor-active {

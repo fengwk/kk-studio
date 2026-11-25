@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -278,29 +280,33 @@ class PostgresqlSubagentContinuationTest {
   }
 
   @Test
-  void forkDoesNotTakeRunningChildOrItsReceiptAndCannotJoinOldChild() {
+  void idleBranchDoesNotTakeRunningChildOrItsReceipt() {
     Delegation delegation = runningChild();
     UUID parentId = delegation.parent().thread().id();
     UUID childId = delegation.child().thread().id();
     ThreadSnapshot running = snapshot(childId);
-    AcceptedCommands fork =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(
-                    delegation.parent().session().id(),
-                    delegation.parent().rootEntry().id(),
-                    UUID.randomUUID(),
-                    "fork",
-                    false),
-                List.of(prompt("fork task"))),
-            AcceptancePreflight.IDENTITY);
-    UUID forkId = fork.thread().id();
-    assertEquals(delegation.parent().session().id(), fork.session().id());
-    assertNull(fork.thread().parentThreadId());
+    var source = seedThreadBaseline(store);
+    UUID idleCut =
+        runtime
+            .stop(new StopCommand(source.threadId(), UUID.randomUUID(), 0))
+            .thread()
+            .headEntryId();
+    var fork = runtime.createIdleBranch(source.threadId(), idleCut, UUID.randomUUID(), "fork");
+    UUID forkId = fork.id();
+    assertEquals(source.sessionId(), fork.sessionId());
+    assertNotEquals(delegation.parent().session().id(), fork.sessionId());
+    assertNull(fork.parentThreadId());
     assertEquals(parentId, snapshot(childId).thread().parentThreadId());
     assertEquals(Set.of(parentId, childId), treeIds(parentId));
     assertEquals(Set.of(forkId), treeIds(forkId));
     assertEquals(running, snapshot(childId));
+    ThreadState forkState = snapshot(forkId).thread();
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                forkId, forkState.headEntryId(), forkState.nextCommandSequence()),
+            List.of(prompt("fork task"))),
+        AcceptancePreflight.IDENTITY);
 
     // 新分支企图为旧 child 添加 Join：direct-parent mismatch 必须在任何新 command/join 写入前拒绝。
     UUID stolenJoin = UUID.randomUUID();

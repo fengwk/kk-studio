@@ -8,8 +8,6 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
-import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
@@ -33,23 +31,17 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,22 +52,6 @@ import java.util.function.Supplier;
 public final class HarnessRuntimeRequestMapper {
 
   private HarnessRuntimeRequestMapper() {}
-
-  /** 映射不透明身份，不信任客户端提供的展示字段。 */
-  public static SessionOwner toOwner(HarnessCommandOwnerDTO dto) {
-    requireNonNull(dto, "owner");
-    return new SessionOwner(
-        requireText(dto.getKind(), "owner.kind"), requireText(dto.getId(), "owner.id"));
-  }
-
-  /** 将唯一产品 HTTP 写请求映射为 sealed target 与有序 commands。 */
-  public static AcceptCommandsCommand toAcceptCommandsCommand(HarnessCommandBatchDTO dto) {
-    requireNonNull(dto, "commandBatchDTO");
-    // 创建型 target 必须携带恰一条末尾 user-like 输入；纯设置批次只对既有 Thread 开放。
-    List<NewThreadCommand> commands = toHttpCommands(dto.getCommands(), "commands", true);
-    return validation(
-        "commands", () -> new AcceptCommandsCommand(toTarget(dto.getTarget()), commands));
-  }
 
   public static CompactThreadCommand toCompactThreadCommand(
       String threadId, HarnessThreadCompactDTO dto) {
@@ -113,28 +89,6 @@ public final class HarnessRuntimeRequestMapper {
         parseUuid(threadId, "threadId"), requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
 
-  /** 把 PUT name 请求映射为 Session 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
-  public static RenameSessionCommand toRenameSessionCommand(
-      UUID sessionId, HarnessNameUpdateDTO dto) {
-    try {
-      requireNonNull(dto, "nameUpdateDTO");
-      return new RenameSessionCommand(sessionId, requireText(dto.getName(), "name"));
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation("session", error.getMessage());
-    }
-  }
-
-  /** 把 PUT name 请求映射为 Thread 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
-  public static RenameThreadCommand toRenameThreadCommand(
-      String threadId, HarnessNameUpdateDTO dto) {
-    requireNonNull(dto, "nameUpdateDTO");
-    return validation(
-        "thread",
-        () ->
-            new RenameThreadCommand(
-                parseUuid(threadId, "threadId"), requireText(dto.getName(), "name")));
-  }
-
   /** 把审批请求映射为命令。操作者身份由调用方从认证上下文解析后显式传入，绝不读取请求体中的身份字段。 */
   public static ToolApprovalCommand toToolApprovalCommand(
       String threadId, String toolInvocationId, HarnessToolApprovalDTO dto, String actor) {
@@ -156,51 +110,16 @@ public final class HarnessRuntimeRequestMapper {
                 dto.getReason()));
   }
 
-  private static AcceptCommandsTarget toTarget(HarnessCommandTargetDTO dto) {
-    requireNonNull(dto, "target");
-    return validation(
-        "target",
-        () ->
-            switch (dto) {
-              case HarnessCommandTargetDTO.NewSessionDTO target -> new AcceptCommandsTarget
-                  .NewRootSession(
-                  parseUuid(target.sessionId(), "target.sessionId"),
-                  parseUuid(target.threadId(), "target.threadId"),
-                  toBranchSettings(requireNonNull(target.rootSettings(), "target.rootSettings")),
-                  target.yoloEnabled());
-              case HarnessCommandTargetDTO.NewThreadDTO target -> new AcceptCommandsTarget
-                  .NewThread(
-                  parseUuid(target.sessionId(), "target.sessionId"),
-                  parseUuid(target.startEntryId(), "target.startEntryId"),
-                  parseUuid(target.threadId(), "target.threadId"),
-                  requireText(target.threadName(), "target.threadName"),
-                  target.yoloEnabled());
-              case HarnessCommandTargetDTO.NewForkedSessionDTO target -> new AcceptCommandsTarget
-                  .NewForkedSession(
-                  parseUuid(target.sourceThreadId(), "target.sourceThreadId"),
-                  parseUuid(target.startEntryId(), "target.startEntryId"),
-                  parseUuid(target.sessionId(), "target.sessionId"),
-                  parseUuid(target.threadId(), "target.threadId"),
-                  target.yoloEnabled());
-            });
-  }
-
   /**
    * 映射既有 Thread 的通用命令批：target 由 path 的 {@code threadId} 与请求体的 cursor 组合，不带 owner；附件物化与 Session
    * 归属校验由接受服务的 preflight 完成。单条纯 USER_MESSAGE 批次必须省略 cursor（给出即 400）；其余批次必须显式给出两个 cursor 字段。
    */
   public static AcceptCommandsCommand toAcceptThreadCommandsCommand(
       String threadId, HarnessThreadCommandBatchDTO dto) {
-    return toThreadCommandsCommand(threadId, dto, false);
-  }
-
-  private static AcceptCommandsCommand toThreadCommandsCommand(
-      String threadId, HarnessThreadCommandBatchDTO dto, boolean requireCursor) {
     requireNonNull(dto, "threadCommandBatchDTO");
     // 既有 Thread 允许纯设置批次（0 条 user-like）；最多一条且必须位于末尾，由 Core 在应用边界保证。
-    List<NewThreadCommand> commands = toHttpCommands(dto.getCommands(), "commands", false);
-    boolean cursorRequired =
-        requireCursor || !AcceptCommandsCommand.isPureUserMessageBatch(commands);
+    List<NewThreadCommand> commands = toHttpCommands(dto.getCommands(), "commands");
+    boolean cursorRequired = !AcceptCommandsCommand.isPureUserMessageBatch(commands);
     String headEntryId = dto.getExpectedHeadEntryId();
     Long nextCommandSequence = dto.getExpectedNextCommandSequence();
     if (cursorRequired) {
@@ -222,18 +141,6 @@ public final class HarnessRuntimeRequestMapper {
                 ? null
                 : requirePositive(nextCommandSequence, "expectedNextCommandSequence"));
     return validation("commands", () -> new AcceptCommandsCommand(target, commands));
-  }
-
-  /** rootSettings 是新建 branch 的初始快照。 */
-  private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
-    requireNonNull(dto, "branchSettings");
-    return validation(
-        "branchSettings",
-        () ->
-            new BranchSettings(
-                requireText(dto.getAgentName(), "branchSettings.agentName"),
-                toExecutionSelection(dto.getExecution()),
-                dto.getEnvironmentName()));
   }
 
   private static ExecutionSelection toExecutionSelection(HarnessExecutionSelectionDTO dto) {
@@ -300,13 +207,9 @@ public final class HarnessRuntimeRequestMapper {
             });
   }
 
-  /**
-   * 产品 HTTP 命令批的唯一映射入口：null/空列表与逐项类型校验一致，随后按创建型或有 Thread 的 shape 规则准入。
-   *
-   * <p>返回不可变副本，调用方不再重复遍历或包装。
-   */
+  /** 映射非空、有序的既有 Thread HTTP 命令批。 */
   private static List<NewThreadCommand> toHttpCommands(
-      List<HarnessCommandCreateDTO> requestCommands, String field, boolean requireUserLike) {
+      List<HarnessCommandCreateDTO> requestCommands, String field) {
     List<HarnessCommandCreateDTO> required = requireList(requestCommands, field);
     if (required.isEmpty()) {
       throw DomainException.validation("request", "commands must not be empty");
@@ -315,19 +218,15 @@ public final class HarnessRuntimeRequestMapper {
     for (HarnessCommandCreateDTO command : required) {
       commands.add(toNewHttpCommand(command));
     }
-    validateHttpCommandShape(commands, requireUserLike);
+    validateHttpCommandShape(commands);
     return List.copyOf(commands);
   }
 
   /**
-   * 产品 HTTP 命令批的 shape admission：SET_EXECUTION 与 SET_ENVIRONMENT 按固定顺序出现，各至多一次且位于消息之前；user-like
-   * 输入（USER_MESSAGE）至多一条且必须位于末尾。
-   *
-   * <p>创建型 target（NEW_SESSION / NEW_THREAD）要求恰有一条 user-like 输入；既有 Thread 允许纯设置批次（0 条
-   * user-like），额外保证由 Core 在应用边界完成。
+   * 既有 Thread HTTP 命令批的 shape admission：SET_EXECUTION 与 SET_ENVIRONMENT
+   * 按固定顺序出现，各至多一次且位于消息之前；user-like 输入（USER_MESSAGE）至多一条且必须位于末尾。
    */
-  private static void validateHttpCommandShape(
-      List<NewThreadCommand> commands, boolean requireUserLike) {
+  private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
     List<ThreadCommandType> prefixOrder =
         List.of(ThreadCommandType.SET_EXECUTION, ThreadCommandType.SET_ENVIRONMENT);
     int lastSetOrder = -1;
@@ -350,12 +249,9 @@ public final class HarnessRuntimeRequestMapper {
       }
       lastSetOrder = order;
     }
-    if (requireUserLike ? userLikeCount != 1 : userLikeCount > 1) {
+    if (userLikeCount > 1) {
       throw DomainException.validation(
-          "request",
-          requireUserLike
-              ? "HTTP command batch must contain exactly one USER_MESSAGE command"
-              : "HTTP command batch may contain at most one USER_MESSAGE command");
+          "request", "HTTP command batch may contain at most one USER_MESSAGE command");
     }
   }
 

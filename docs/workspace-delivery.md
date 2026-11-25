@@ -40,9 +40,9 @@
 | 范围 | 退出内容 |
 | --- | --- |
 | **Project / Issue** | 后端、前端、7 张表、`CONTROLLER_TASK`、独有的 API、文案、E2E 和模块文档。 |
-| **旧 Chat** | [后端](../apps/chat/)、前端 Chat 特性、`chat_session`、旧路由、旧目录／多面板外壳和[模块文档](modules/chat.md)。应用归属改用目录边和外键，移除 `SessionOwnership` 与 `AgentReferenceCheck` 派发。 |
+| **旧 Chat** | 旧 Chat 后端、`chat_session`、`/api/chat/chats` 与旧模块文档已退役。当前空间和资源归属由 Workspace 的 `chat_space`、`workspace_folder`、`workspace_resource` 与 `/api/chat-spaces` 承担；平台授权使用 `ResourceOwnership` 与 `ResourceAccess`。 |
 | **被替代的 UI** | 独立 Entry 历史树、旧会话／Thread 选择器、`/agent` 换 Agent 入口、全局待处理页（原 `InteractionsPage`）、画布库、Studio IDE 浮层及外层标签。保留的行为迁入新宿主后，再删除专用组件、样式、存储和测试。 |
-| **被替代的接口** | 通用的 `POST /api/harness/command-batches` 创建入口、旧 Session／Thread 改名接口、无归属的画布创建／列表接口、通用 Blob 取址接口和 `projects` 实时资源。 |
+| **被替代的接口** | 通用的 `POST /api/harness/command-batches`、Session 查询/改名和 Thread 改名入口、无归属的画布创建／列表接口及 `projects` 实时资源已移除；资源创建和管理改由 `/api/chat-spaces/{spaceId}` 下的入口承担。 |
 | **专用辅助件** | 旧 SelectionPanel 与 AgentSelectionPanel、AgentSelect、选择项预览、Markdown 预览压平与命中高亮随旧入口退出；新目录只筛选名称。 |
 
 - **Agent 选择迁到空间默认配置。** 保留可用 Agent 列表及加载、失败和失效时的校验，控件统一用共享 [Select](../frontend/src/shared/ui/controls/Select.tsx)。已有 Session 固定 Agent；草稿不另设换 Agent 面板。

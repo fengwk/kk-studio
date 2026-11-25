@@ -20,7 +20,6 @@ const docsRoot = path.join(repositoryRoot, 'docs')
 const moduleDocuments = [
   'builtin-tools.md',
   'canvas.md',
-  'chat.md',
   'common.md',
   'daemon.md',
   'frontend.md',
@@ -434,7 +433,6 @@ const moduleDependencies = {
     'platform-plugin-api',
     'platform-runtime',
   ],
-  'apps/chat': ['common', 'harness-runtime', 'platform-runtime'],
   'apps/workspace': ['common', 'harness-runtime', 'platform-runtime', 'canvas-runtime', 'work'],
   'apps/ide': ['common', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
   'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
@@ -447,7 +445,6 @@ const moduleDependencies = {
 const appArtifactProducts = {
   'canvas-spi': 'canvas',
   'canvas-runtime': 'canvas',
-  chat: 'chat',
   ide: 'ide',
   workspace: 'workspace',
 }
@@ -938,7 +935,6 @@ const tableOwners = [
   ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
   ['canvas_', 'apps/canvas'],
   ['chat_space', 'apps/workspace'],
-  ['chat', 'apps/chat'],
   ['workspace_', 'apps/workspace'],
   ['cluster_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster'],
   ['durable_work', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness'],

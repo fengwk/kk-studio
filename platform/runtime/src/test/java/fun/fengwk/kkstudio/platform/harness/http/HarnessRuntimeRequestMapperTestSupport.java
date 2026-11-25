@@ -8,11 +8,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
@@ -76,18 +72,6 @@ final class HarnessRuntimeRequestMapperTestSupport {
     return batch;
   }
 
-  static HarnessCommandBatchDTO request(
-      HarnessCommandTargetDTO target, HarnessCommandCreateDTO... commands) {
-    HarnessCommandBatchDTO request = new HarnessCommandBatchDTO();
-    HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
-    owner.setKind("CHAT");
-    owner.setId(idText(10));
-    request.setOwner(owner);
-    request.setTarget(target);
-    request.setCommands(List.of(commands));
-    return request;
-  }
-
   static String idempotencyKey(String suffix) {
     return idText(Math.abs(suffix.hashCode()) + 100);
   }
@@ -112,28 +96,6 @@ final class HarnessRuntimeRequestMapperTestSupport {
 
   static HarnessUserMessageContentDTO userContent() {
     return new HarnessUserMessageContentDTO.TextDTO("hello");
-  }
-
-  static HarnessCommandTargetDTO newSessionTarget() {
-    return new HarnessCommandTargetDTO.NewSessionDTO(idText(2), idText(1), branchSettings(), true);
-  }
-
-  static HarnessCommandTargetDTO newThreadTarget() {
-    return new HarnessCommandTargetDTO.NewThreadDTO(
-        idText(2), idText(3), idText(1), "branch", false);
-  }
-
-  static HarnessCommandTargetDTO newForkedSessionTarget() {
-    return new HarnessCommandTargetDTO.NewForkedSessionDTO(
-        idText(1), idText(2), idText(3), idText(4), false);
-  }
-
-  static HarnessBranchSettingsDTO branchSettings() {
-    HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
-    settings.setAgentName("default-assistant");
-    settings.setExecution(executionSelection());
-    settings.setEnvironmentName(null);
-    return settings;
   }
 
   static HarnessExecutionSelectionDTO executionSelection() {
