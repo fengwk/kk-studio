@@ -35,6 +35,7 @@ class IdeBrowserUseGatewayTest {
   private static final UUID LOCAL_NODE = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID REMOTE_NODE = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   private static final UUID CONNECTION = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
+  private static final UUID USER = UUID.fromString("88888888-8888-8888-8888-888888888888");
   private static final UUID DOCUMENT = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId ENV =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
@@ -65,7 +66,7 @@ class IdeBrowserUseGatewayTest {
   @Test
   void mapsExactIntentAndOnlyBoundProofs() {
     ConnectionIdentity identity = new ConnectionIdentity(LOCAL_NODE, CONNECTION);
-    long generation = registry.register(identity);
+    long generation = registry.register(identity, USER);
     registry.accept(
         identity,
         generation,
@@ -76,20 +77,25 @@ class IdeBrowserUseGatewayTest {
                 new IdeBrowserUseView(ENV, VIEW, CLAIM, 7L),
                 new IdeBrowserUseView(ENV, UNBOUND_VIEW, UNBOUND_CLAIM, null))));
 
-    assertTrue(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
+    assertTrue(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, USER));
+    assertFalse(
+        gateway.findExactIntent(
+            LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, UUID.randomUUID()));
+    assertTrue(gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT, UUID.randomUUID()).isEmpty());
     IdeBrowserUseGateway.Proofs proofs =
-        gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT).orElseThrow();
+        gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT, USER).orElseThrow();
 
     assertEquals(DOCUMENT, proofs.browserSessionId());
+    assertEquals(USER, proofs.userId());
     assertEquals(4L, proofs.revision());
-    assertEquals(List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, 7L)), proofs.views());
+    assertEquals(List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, USER, 7L)), proofs.views());
     verifyNoMoreInteractions(nodes);
   }
 
   @Test
   void missingConnectionIsEmptyNotFabricatedUsage() {
-    assertFalse(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
-    assertTrue(gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT).isEmpty());
+    assertFalse(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, USER));
+    assertTrue(gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT, USER).isEmpty());
   }
 
   @Test

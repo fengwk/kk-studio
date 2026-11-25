@@ -36,6 +36,19 @@ public class IdeBrowserUseGateway {
       EnvironmentId environmentId,
       UUID viewId,
       UUID claimId) {
+    return findExactIntent(
+        eventNodeId, connectionId, browserSessionId, environmentId, viewId, claimId, null);
+  }
+
+  /** Exact intent additionally requires the user authenticated on the event WebSocket. */
+  public boolean findExactIntent(
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID browserSessionId,
+      EnvironmentId environmentId,
+      UUID viewId,
+      UUID claimId,
+      UUID userId) {
     Objects.requireNonNull(eventNodeId, "eventNodeId");
     Objects.requireNonNull(connectionId, "connectionId");
     Objects.requireNonNull(browserSessionId, "browserSessionId");
@@ -48,7 +61,8 @@ public class IdeBrowserUseGateway {
           browserSessionId,
           environmentId,
           viewId,
-          claimId);
+          claimId,
+          userId);
     } catch (DomainException error) {
       if (error.code() == DomainErrorCode.UNAVAILABLE && "IDE_UNAVAILABLE".equals(error.reason())) {
         throw error;
@@ -62,14 +76,20 @@ public class IdeBrowserUseGateway {
   /** 该连接/browser session 当前仍可续租的已绑定持有项；空表示没有证明。 */
   public Optional<Proofs> activeBoundProofs(
       UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+    return activeBoundProofs(eventNodeId, connectionId, browserSessionId, null);
+  }
+
+  /** Returns active proofs only for the user authenticated by the event WebSocket. */
+  public Optional<Proofs> activeBoundProofs(
+      UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
     Objects.requireNonNull(eventNodeId, "eventNodeId");
     Objects.requireNonNull(connectionId, "connectionId");
     Objects.requireNonNull(browserSessionId, "browserSessionId");
     try {
       Optional<IdeBrowserUse> usage =
           client.activeBoundProofs(
-              new ConnectionIdentity(eventNodeId, connectionId), browserSessionId);
-      return usage.map(value -> toProofs(browserSessionId, value));
+              new ConnectionIdentity(eventNodeId, connectionId), browserSessionId, userId);
+      return usage.map(value -> toProofs(browserSessionId, userId, value));
     } catch (DomainException error) {
       if (error.code() == DomainErrorCode.UNAVAILABLE && "IDE_UNAVAILABLE".equals(error.reason())) {
         throw error;
@@ -80,7 +100,8 @@ public class IdeBrowserUseGateway {
     }
   }
 
-  private static Proofs toProofs(UUID expectedBrowserSessionId, IdeBrowserUse usage) {
+  private static Proofs toProofs(
+      UUID expectedBrowserSessionId, UUID userId, IdeBrowserUse usage) {
     if (!usage.browserSessionId().equals(expectedBrowserSessionId)) {
       throw unavailable("browser event node returned a mismatched browser session usage", null);
     }
@@ -91,9 +112,14 @@ public class IdeBrowserUseGateway {
         continue;
       }
       proofs.add(
-          new Proof(view.environmentId(), view.viewId(), usage.browserSessionId(), bindingEpoch));
+          new Proof(
+              view.environmentId(),
+              view.viewId(),
+              usage.browserSessionId(),
+              userId,
+              bindingEpoch));
     }
-    return new Proofs(usage.browserSessionId(), usage.revision(), proofs);
+    return new Proofs(usage.browserSessionId(), userId, usage.revision(), proofs);
   }
 
   private static DomainException unavailable(String message, Throwable cause) {
@@ -103,7 +129,7 @@ public class IdeBrowserUseGateway {
   }
 
   /** 一个 browserSession 当前带 epoch 的绑定列表（可能包含其它 Environment；调用方按 environment 过滤）。 */
-  public record Proofs(UUID browserSessionId, long revision, List<Proof> views) {
+  public record Proofs(UUID browserSessionId, UUID userId, long revision, List<Proof> views) {
 
     public Proofs {
       if (revision <= 0) {
@@ -115,7 +141,11 @@ public class IdeBrowserUseGateway {
 
   /** 单条已绑定使用证明。 */
   public record Proof(
-      EnvironmentId environmentId, UUID viewId, UUID browserSessionId, long bindingEpoch) {
+      EnvironmentId environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      UUID userId,
+      long bindingEpoch) {
 
     public Proof {
       if (bindingEpoch <= 0) {

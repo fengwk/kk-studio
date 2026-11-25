@@ -33,11 +33,13 @@ public final class IdeBrowserUseRegistry {
 
   private static final class Entry {
     private final long generation;
+    private final UUID userId;
     private boolean active = true;
     private IdeBrowserUse usage;
 
-    private Entry(long generation) {
+    private Entry(long generation, UUID userId) {
       this.generation = generation;
+      this.userId = userId;
     }
   }
 
@@ -50,10 +52,11 @@ public final class IdeBrowserUseRegistry {
    *
    * @throws IllegalStateException 同一 identity 已存在活动登记
    */
-  public long register(ConnectionIdentity identity) {
+  public long register(ConnectionIdentity identity, UUID userId) {
     Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(userId, "userId");
     long generation = generations.incrementAndGet();
-    Entry entry = new Entry(generation);
+    Entry entry = new Entry(generation, userId);
     if (connections.putIfAbsent(identity, entry) != null) {
       throw new IllegalStateException("connection identity is already registered");
     }
@@ -109,6 +112,18 @@ public final class IdeBrowserUseRegistry {
       }
       entry.usage = usage;
       return Acceptance.ACCEPTED;
+    }
+  }
+
+  /** 当前物理连接通过事件 WebSocket 握手认证的用户。 */
+  public Optional<UUID> userId(ConnectionIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
+    Entry entry = connections.get(identity);
+    if (entry == null) {
+      return Optional.empty();
+    }
+    synchronized (entry) {
+      return entry.active ? Optional.of(entry.userId) : Optional.empty();
     }
   }
 
