@@ -43,8 +43,8 @@ import java.util.concurrent.TimeUnit;
 /** Account HTTP contract exercised against the shared Testcontainers PostgreSQL database. */
 class StudioAccountHttpIntegrationTest extends WebPostgresTestSupport {
   private static final String ORIGIN = "http://localhost";
-  private static final String ADMIN = "kkstudio";
-  private static final String PASSWORD = "kkstudio";
+  private static final String ADMIN = WebAccountTestFixture.ADMIN_USERNAME;
+  private static final String PASSWORD = WebAccountTestFixture.ADMIN_PASSWORD;
 
   @LocalServerPort private int port;
   @Autowired private WebApplicationContext webContext;
@@ -67,8 +67,8 @@ class StudioAccountHttpIntegrationTest extends WebPostgresTestSupport {
           "{}",
           "{\"username\":null,\"password\":\"password-123\"}",
           "{\"username\":\" \",\"password\":\"password-123\"}",
-          "{\"username\":\"kkstudio\",\"password\":null}",
-          "{\"username\":\"kkstudio\",\"password\":\" \"}"
+          "{\"username\":\"" + ADMIN + "\",\"password\":null}",
+          "{\"username\":\"" + ADMIN + "\",\"password\":\" \"}"
         }) {
       mvc.perform(
               post("/api/auth/login").with(origin()).contentType("application/json").content(body))
@@ -135,7 +135,7 @@ class StudioAccountHttpIntegrationTest extends WebPostgresTestSupport {
             post("/api/auth/login")
                 .header("Origin", ORIGIN)
                 .contentType("application/json")
-                .content("{\"username\":\"kkstudio\",\"password\":\"wrong\"}"))
+                .content("{\"username\":\"" + ADMIN + "\",\"password\":\"wrong\"}"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.reason").value("INVALID_CREDENTIALS"));
     MvcResult login = login(ADMIN, PASSWORD);
@@ -234,7 +234,10 @@ class StudioAccountHttpIntegrationTest extends WebPostgresTestSupport {
                 .with(origin())
                 .cookie(currentCookie)
                 .contentType("application/json")
-                .content("{\"currentPassword\":\"kkstudio\",\"newPassword\":\"new-password-123\"}"))
+                .content(
+                    "{\"currentPassword\":\""
+                        + PASSWORD
+                        + "\",\"newPassword\":\"new-password-123\"}"))
         .andExpect(status().isNoContent());
     mvc.perform(get("/api/auth/me").cookie(currentCookie)).andExpect(status().isOk());
     mvc.perform(get("/api/auth/me").cookie(otherCookie)).andExpect(status().isUnauthorized());

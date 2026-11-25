@@ -114,6 +114,10 @@ class StudioAccountRepository {
     jdbc.sql("select pg_advisory_xact_lock(130, 1)").query().singleRow();
   }
 
+  boolean hasUsers() {
+    return jdbc.sql("select exists (select 1 from studio_user)").query(Boolean.class).single();
+  }
+
   long countEnabledAdmins() {
     return jdbc.sql(
             """

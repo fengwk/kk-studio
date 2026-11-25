@@ -369,7 +369,7 @@ class WorkspacePostgresIntegrationTest {
         .sql(
             """
         insert into studio_user (id, username, role, password_hash)
-        select :id, :username, 'USER', password_hash from studio_user where username = 'kkstudio'
+        values (:id, :username, 'USER', '{noop}workspace-test-password')
         """)
         .param("id", id)
         .param("username", username)
@@ -409,9 +409,13 @@ class WorkspacePostgresIntegrationTest {
       connection.setAutoCommit(false);
       sql.executeUpdate(
           """
+          insert into studio_user (id, username, role, password_hash)
+          values ('00000000-0000-0000-0000-000000000013', 'folder-constraint-owner', 'USER', '{noop}workspace-test-password')
+          """);
+      sql.executeUpdate(
+          """
           insert into chat_space (id, owner_user_id, title, title_key, create_request_hash)
-          select '00000000-0000-0000-0000-000000000010', id, 'Test A', 'test a', repeat('0', 64)
-          from studio_user where username = 'kkstudio'
+          values ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000013', 'Test A', 'test a', repeat('0', 64))
           """);
       sql.executeUpdate(
           """
@@ -442,9 +446,13 @@ class WorkspacePostgresIntegrationTest {
       connection.setAutoCommit(false);
       sql.executeUpdate(
           """
+          insert into studio_user (id, username, role, password_hash)
+          values ('00000000-0000-0000-0000-000000000023', 'position-constraint-owner', 'USER', '{noop}workspace-test-password')
+          """);
+      sql.executeUpdate(
+          """
           insert into chat_space (id, owner_user_id, title, title_key, create_request_hash)
-          select '00000000-0000-0000-0000-000000000020', id, 'Test B', 'test b', repeat('0', 64)
-          from studio_user where username = 'kkstudio'
+          values ('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000023', 'Test B', 'test b', repeat('0', 64))
           """);
       assertEquals(
           2,

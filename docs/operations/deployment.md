@@ -22,9 +22,8 @@ Compose 中 MinIO 仍使用已记录来源的固定 digest；项目本地构建�
 ## 首次安装
 
 1. 准备 PostgreSQL 与可访问的私有 S3 bucket，确认数据库角色、对象存储凭据和备份策略。
-2. 构建下面的 Fat JAR 或 App 镜像，配置 `prod` 数据源、S3 服务端地址与浏览器公开地址。
-3. 指定唯一 Flyway owner 初始化空库。共享数据面的其它 App 关闭 Flyway；
-   启用 Worker 的节点使用相同产物与 Plugin 集合。
+2. 构建下面的 Fat JAR 或 App 镜像，配置 `prod` 数据源、S3 服务端地址与浏览器公开地址；通过 secret 提供 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD`。
+3. 先启动唯一的 Flyway owner，初始化空库和管理员 `kkstudio`。密码须为 8–128 个字符，不能全为空白或等于公开的测试密码 `kkstudio`。新库缺少有效密码时不会启动；查看应用启动日志中的提示。确认管理员可以登录后，从部署配置移除这个变量；重启不会重置密码。共享数据面的其它 App 在初始化完成后启动，并关闭 Flyway；启用 Worker 的节点使用相同产物与 Plugin 集合。
 4. 检查 `/actuator/health`、UI、预签名上传/下载与关键业务操作。
    需要宿主工具时再安装 Daemon，并在 Studio 确认 Environment `READY`。
 5. 对外开放前完成 TLS、外部认证与 WebSocket 代理配置，见[生产部署与反向代理](#生产部署与反向代理)；
@@ -40,7 +39,8 @@ env JAVA_HOME="$JAVA_HOME_21" \
 # 执行前将 <version> 替换为根 POM 的版本
 jar='web/target/kk-studio-web-<version>.jar'
 test -f "$jar"
-"$JAVA_HOME_21/bin/java" -jar "$jar"
+# 由运行环境注入 PostgreSQL、S3 和首次管理员凭据后启动
+SPRING_PROFILES_ACTIVE=prod "$JAVA_HOME_21/bin/java" -jar "$jar"
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -105,6 +105,7 @@ docker run -d --name kk-studio-app -p 127.0.0.1:8080:8080 \
   -e SPRING_PROFILES_ACTIVE=prod \
   -e 'KK_STUDIO_DB_URL=jdbc:postgresql://<pg-host>:5432/<database>' \
   -e 'KK_STUDIO_DB_USER=<user>' -e 'KK_STUDIO_DB_PASSWORD=<password>' \
+  -e KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD \
   -e 'KK_STUDIO_STORAGE_S3_ENDPOINT=http://<s3-host>:9000' \
   -e 'KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=https://<browser-reachable-s3-origin>' \
   -e 'KK_STUDIO_STORAGE_S3_REGION=<region>' \
@@ -132,9 +133,7 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
   将目录设为 `0700`、文件设为 `0600`；仅由 group 或 ACL 授予写权限不足。镜像已为自带目录设置属主，
   但外部挂载可能遮盖镜像目录，部署时须另外准备卷的属主与权限。它与数据库事实共同构成可重试证据，
   journal 存在本身不证明远端进程已退出，也不能替代真实 `STUDIO_EXITED` / `REMOTE_ACKNOWLEDGED` / `NOT_STARTED`。
-- `prod` profile 不做 `dev`/`e2e` seed；空库的 schema 由 Flyway 的
-  [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 建立，migration
-  只由唯一 Flyway owner 执行。
+- `prod` profile 只加载 schema baseline，不加载 dev/e2e/canvas-test 的 disposable seed；启动会在 Flyway 前拒绝混用 prod 与 disposable profiles。空库的 schema 由 Flyway 的 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 建立，migration 只由唯一 Flyway owner 执行。生产新库须通过 secret 设置 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD`（8–128 个字符且不能全为空白，不能为 `kkstudio`）；它只创建首个管理员，不会在后续启动重置密码，缺失或非法时 fail closed。
 - `prod` profile 的数据源只来自 `KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD`，
   没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与
   `KK_STUDIO_STORAGE_S3_*` 核心连接属性（endpoint、region、bucket、accessKey、secretKey）同样必须显式提供，
@@ -184,7 +183,7 @@ Dispatcher 与 admission 上限属于启动配置，subagent 预算由运行时 
 发布前的验证入口见[开发与测试](development-and-testing.md)。
 
 目标 Schema 与现有数据库不匹配时，先备份并按下文在独立空库初始化当前 V1。
-配置同步只覆盖配置，不恢复会话、空间、画布或运行历史；上传渠道技能包也需另行备份。
+旧 V1 若已创建公开测试管理员，必须使用独立新库；修复 Flyway 校验和不会移除那个账号。配置同步只覆盖配置，不恢复会话、空间、画布或运行历史；上传渠道技能包也需另行备份。
 
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不会按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
@@ -238,8 +237,8 @@ reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能�
 
 ## 生产部署与反向代理
 
-Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须在外部入口配置 TLS 和访问控制；
-容器本身保持 `127.0.0.1` 或内部网络绑定，由反向代理承担对外职责。
+Studio 的登录与资源授权由应用处理。向局域网或公网暴露前，必须在外部入口配置 TLS 和访问控制；
+容器本身保持 `127.0.0.1` 或内部网络绑定，由反向代理承担对外职责。浏览器登录、退出、非 GET/HEAD Studio API 与浏览器 WebSocket 握手必须携带唯一且有效的 `Origin`，scheme、host 和有效端口必须与 Studio 的浏览器入口完全一致。代理应原样传递 `Origin`，移除客户端提供的 `Forwarded` 和 `X-Forwarded-*`，再设置反映外部地址的 `X-Forwarded-Proto`、`X-Forwarded-Host` 和 `X-Forwarded-Port`。
 
 反向代理需要覆盖以下流量：
 

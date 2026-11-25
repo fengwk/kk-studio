@@ -121,7 +121,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 
 **账号密码登录，两种角色，每个 Chat Space 属于一个用户。** 不提供自助注册、单点登录或找回密码；忘记密码由管理员重置。
 
-- **内置管理员**：建库时写入管理员 `kkstudio`，初始密码与用户名相同。首次部署只允许部署者访问，登录修改初始密码后再开放端口。用户只能由管理员在设置 → 系统 → 用户中新建；管理员可以修改任何用户的用户名、密码和角色，也可以禁用或重新启用账号，不删除用户。重置密码只作废旧凭据和既有登录。
+- **初始管理员**：生产首次启动在数据库事务锁内为新库创建管理员 `kkstudio`，密码由部署者通过 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD` 注入。启动不会修改已有账号；确认能登录后可移除该变量。操作见[部署与运行](operations/deployment.md)。用户只能由管理员在设置 → 系统 → 用户中新建；管理员可以修改任何用户的用户名、密码和角色，也可以禁用或重新启用账号，不删除用户。重置密码只作废旧凭据和既有登录。
 - **账号**：用户名 1–32 个字符，只含小写字母、数字和 `.`、`_`、`-`，以字母或数字开头；全局唯一。空间、上传和登录都引用用户 ID，改名不影响它们，之后用新用户名登录。头像显示用户名首字母的大写。密码 8–128 个字符，只保存加盐的 PBKDF2-HMAC-SHA256 哈希，哈希串带算法标识，以后可以换算法。用户资料存为 JSON 对象，1.3.0 不定义字段。
 - **角色**：管理员（`ADMIN`）和普通用户（`USER`）都使用自己的 Chat Space，以及全局的 Agent、模型和环境（包括 VS Code）。只有管理员能修改 Harness 和系统设置、导入导出配置、管理用户，以及看到和处理插件后台任务；普通用户的设置只有「界面」。至少保留一名启用的管理员。
 - **禁用账号**：禁止登录并作废全部登录 Cookie；定时任务暂停，不再自动触发。已提交的回合不强制停止，空间、历史、附件、任务和执行记录都保留。重新启用账号后可登录，任务保持暂停，由所有者逐个恢复。禁用不赋予管理员读取账号内容的权限。
@@ -163,7 +163,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 
 | 表 | 字段与约束 |
 | --- | --- |
-| `studio_user` | `id uuid PK`、`username varchar(32) UNIQUE`（CHECK 用户名规则）、`password_hash`、`profile jsonb NOT NULL DEFAULT '{}'`（CHECK 为 JSON 对象）、`role`（CHECK 为 `ADMIN` 或 `USER`）、可空 `disabled_at`、`created_at`、`updated_at`。V1 写入内置管理员 `kkstudio`，密码哈希预先算好。 |
+| `studio_user` | `id uuid PK`、`username varchar(32) UNIQUE`（CHECK 用户名规则）、`password_hash`、`profile jsonb NOT NULL DEFAULT '{}'`（CHECK 为 JSON 对象）、`role`（CHECK 为 `ADMIN` 或 `USER`）、可空 `disabled_at`、`created_at`、`updated_at`。V1 不创建账号；生产启动将部署者提供的初始密码按常规方式哈希后写入。 |
 | `login_session` | `token_hash bytea PK`（登录令牌的 SHA-256）、`user_id FK → studio_user ON DELETE CASCADE`、`created_at`、`expires_at`；按 `user_id` 建索引。登录时顺带删除该用户已过期的记录。 |
 
 `storage_upload` 增加 `owner_user_id FK → studio_user RESTRICT`，用户上传预约记录上传者；complete/delete 与资源引用只能作用于本人上传。可信服务端 staging 使用 NULL owner，并且只可由内部 ownerless 调用路径消费，不能作为用户上传的授权旁路。Canvas BLOB 命令的 HTTP 输入是 READY `uploadId`，服务端按已认证用户锁定上传、取权威文件事实并登记 Blob 持有边；持久资源仍保存 `blobId`。

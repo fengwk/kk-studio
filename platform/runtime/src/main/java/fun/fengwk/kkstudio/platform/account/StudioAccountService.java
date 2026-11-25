@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.account;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -113,6 +114,28 @@ public class StudioAccountService {
     return repository.list().stream().map(this::view).toList();
   }
 
+  /** Initializes a fresh installation without changing any existing accounts. */
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public void bootstrapAdmin(@Nullable String password) {
+    repository.lockAdminMutations();
+    if (repository.countEnabledAdmins() > 0) {
+      return;
+    }
+    if (repository.hasUsers()) {
+      throw new IllegalStateException("Studio has accounts but no enabled administrator");
+    }
+    if (password == null) {
+      throw new IllegalStateException(
+          "Set KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD to initialize the first Studio administrator");
+    }
+    if (!isValidPassword(password) || "kkstudio".equals(password)) {
+      throw new IllegalStateException(
+          "KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD must contain 8 to 128 characters, cannot be blank,"
+              + " and cannot be the disposable test password");
+    }
+    repository.create(UUID.randomUUID(), "kkstudio", passwords.encode(password), StudioRole.ADMIN);
+  }
+
   @Transactional
   public StudioUserDTO create(
       @Nullable String username, @Nullable String password, @Nullable StudioRole role) {
@@ -192,10 +215,14 @@ public class StudioAccountService {
   }
 
   private static void validatePassword(@Nullable String value) {
-    if (value == null || value.isBlank() || value.length() < 8 || value.length() > 128) {
+    if (!isValidPassword(value)) {
       throw DomainException.validationReason(
           "INVALID_ARGUMENT", "Password must contain 8 to 128 characters and cannot be blank");
     }
+  }
+
+  private static boolean isValidPassword(@Nullable String value) {
+    return value != null && !value.isBlank() && value.length() >= 8 && value.length() <= 128;
   }
 
   private static byte[] hash(byte[] token) {

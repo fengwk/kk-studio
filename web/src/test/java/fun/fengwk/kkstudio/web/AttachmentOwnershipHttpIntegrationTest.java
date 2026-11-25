@@ -63,7 +63,8 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
   @BeforeEach
   void setUp() throws Exception {
     mvc = MockMvcBuilders.webAppContextSetup(context).addFilters(accountFilter).build();
-    administrator = login("kkstudio", "kkstudio");
+    administrator =
+        login(WebAccountTestFixture.ADMIN_USERNAME, WebAccountTestFixture.ADMIN_PASSWORD);
     createUser("attach-owner-a");
     createUser("attach-owner-b");
     alice = login("attach-owner-a", "password-123");

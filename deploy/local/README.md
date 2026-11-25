@@ -87,14 +87,12 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 
 把宿主绑定改成 `0.0.0.0` 等非 loopback 地址时，必须同时覆盖上面所有 PostgreSQL 与 MinIO
 凭据，并把 `KK_STUDIO_S3_PUBLIC_HOST` 设为浏览器实际可访问的主机名或 IP：预签名 URL 不会
-使用不可路由的绑定地址。Studio 当前没有内置登录鉴权，向局域网或公网暴露前必须在外部入口
-配置 TLS 和访问控制，见[部署与运行](../../docs/operations/deployment.md)。
+使用不可路由的绑定地址。`dev` 会加载公开测试账号，只能用于隔离的开发环境；面向局域网或公网部署时，请使用 `prod`、独立的新库和 TLS，见[部署与运行](../../docs/operations/deployment.md)。
 
 ## 数据与 Flyway
 
 PostgreSQL 是唯一 durable 数据库。空库由 `app` 在 `dev` profile 下用 Flyway 执行
-[V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql)，不预置
-Provider、模型或 Agent，首次打开 Studio 时按引导添加。已执行版本记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres`、`kk-studio-minio` 与
+[V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql) 和 disposable seed，使用 `kkstudio` / `kkstudio` 登录。不预置 Provider、模型或 Agent，首次打开 Studio 时按引导添加。已执行版本记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres`、`kk-studio-minio` 与
 `kk-studio-execution-exits`（App 实例独占的写前日志目录，不与其它实例共享）；
 默认 project `kk-studio-local` 下的 Docker 卷名分别为
 `kk-studio-local_kk-studio-postgres`、`kk-studio-local_kk-studio-minio` 与

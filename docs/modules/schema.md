@@ -11,12 +11,15 @@ Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测
 
 | profile | Flyway 资源 |
 | --- | --- |
-| prod、dev | `classpath:db/migration` |
-| e2e | migration + [e2e seed](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) |
-| canvas-test | migration + [canvas-test seed](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) |
+| prod | `classpath:db/migration` |
+| dev | migration + [disposable admin seed](../../schema/src/main/resources/db/seed/disposable/R__disposable_admin_seed.sql) |
+| e2e | migration + disposable admin seed + [e2e seed](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) |
+| canvas-test | migration + disposable admin seed + [canvas-test seed](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) |
 
-运行时 profile 不预置 Catalog：新库从空 Provider 开始，由 Studio 引导用户添加 Provider、
-模型与 Agent。e2e seed 提供模型目录与受控审批规则，canvas-test seed 提供测试栈设置。
+`prod` 不预置管理员或 Catalog。首次启动使用 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；后续启动不重置密码。详见[首次安装](../operations/deployment.md#首次安装)。
+
+`dev`、`e2e` 与 `canvas-test` 只用于隔离环境，使用公开测试账号 `kkstudio` / `kkstudio`。
+`e2e` 还预置模型目录和受控审批规则，`canvas-test` 则加载测试栈设置。
 [fixture seed](../../schema/src/main/resources/db/seed/fixture/R__fixture_seed.sql)
 只供集成测试显式加载，提供离线 stub Catalog。seed 重复执行保持确定性。
 V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `SystemSettingsTestFixture` 校验 codec 与数据库 seed 一致。

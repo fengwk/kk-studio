@@ -156,7 +156,10 @@ public abstract class WebPostgresTestSupport {
       verifyDevSeed(conn);
     }
     persistBaselineConfigurations();
-    adminCredentials.setToken(accountService.login("kkstudio", "kkstudio").token());
+    adminCredentials.setToken(
+        accountService
+            .login(WebAccountTestFixture.ADMIN_USERNAME, WebAccountTestFixture.ADMIN_PASSWORD)
+            .token());
     pausedLifecycles.forEach(SmartLifecycle::start);
   }
 
@@ -274,5 +277,6 @@ public abstract class WebPostgresTestSupport {
         .validateMigrationNaming(true)
         .load()
         .migrate();
+    WebAccountTestFixture.seed(dataSource);
   }
 }
