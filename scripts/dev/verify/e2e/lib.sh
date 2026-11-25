@@ -3,8 +3,6 @@
 #
 # 共享函数库：e2e 入口与各 case 共用。
 # 约定：
-# - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
-# - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
 # - Environment Daemon 使用 Go 1.27.4 构建的独立二进制；bootstrap helper 用它读取 daemon.json 启动。
 
@@ -16,8 +14,13 @@ resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/http-wait.sh"
 source "$SCRIPT_DIR/../../lib/toolchain.sh"
 source "$SCRIPT_DIR/../../lib/backend-jar.sh"
-source "$SCRIPT_DIR/../../lib/port-cleanup.sh"
 WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
+STACK_COMPOSE_FILE="$SCRIPT_DIR/stack.compose.yaml"
+STACK_PROJECT="kk-studio-e2e-${UID:-$(id -u)}-$$"
+STACK_STARTED=false
+OWNED_BACKEND_PID=''
+OWNED_FRONTEND_PID=''
+OWNED_DAEMON_PID=''
 
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
 BACKEND_PORT=${BACKEND_PORT:-18081}
@@ -41,61 +44,24 @@ export DAEMON_ENV_ROOT
 
 # 产物名由根 POM 版本决定；调用方已构建好产物时可用 BACKEND_JAR 覆盖。
 BACKEND_JAR=${BACKEND_JAR:-$(backend_jar_path "$REPO_ROOT")}
-STORAGE_S3_ENDPOINT=${KK_STUDIO_STORAGE_S3_ENDPOINT:-http://127.0.0.1:9000}
-STORAGE_S3_PUBLIC_ENDPOINT=${KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+STORAGE_S3_ENDPOINT=''
+STORAGE_S3_PUBLIC_ENDPOINT=''
 STORAGE_S3_REGION=${KK_STUDIO_STORAGE_S3_REGION:-us-east-1}
-STORAGE_S3_ACCESS_KEY=${KK_STUDIO_STORAGE_S3_ACCESS_KEY:-kk-studio}
-STORAGE_S3_SECRET_KEY=${KK_STUDIO_STORAGE_S3_SECRET_KEY:-kk-studio}
+STORAGE_S3_ACCESS_KEY=kk-studio
+STORAGE_S3_SECRET_KEY=kk-studio
 
-is_local_minio_endpoint() {
-  case "$STORAGE_S3_ENDPOINT" in
-    http://127.0.0.1:9000*|http://localhost:9000*|127.0.0.1:9000*|localhost:9000*)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-# S3 bucket 隔离规则：
-# - 本地 MinIO (127.0.0.1/localhost:9000) 固定使用专用名 kk-studio-e2e-matrix，忽略环境变量覆盖并执行清理；
-# - 外部 S3 endpoint 允许经 KK_STUDIO_STORAGE_S3_BUCKET 覆盖，但绝不执行清理。
-if is_local_minio_endpoint; then
-  STORAGE_S3_BUCKET="kk-studio-e2e-matrix"
-else
-  STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio-e2e-matrix}
-fi
+STORAGE_S3_BUCKET=kk-studio-e2e-matrix
 DAEMON_DIST=${DAEMON_DIST:-"$WORK_DIR/daemon-distribution"}
 DAEMON_BINARY=${DAEMON_BINARY:-"$DAEMON_DIST/kk-studio-daemon"}
 GO_BIN=${GO_BIN:-/usr/local/opt/go/bin/go}
 
 # E2E 拥有固定专用的独立数据库与 S3 bucket，绝不触碰开发应用的 kk_studio_e2e 或 kk_studio
 E2E_DEDICATED_DATABASE="kk_studio_e2e_matrix"
-DB_HOST=${KK_STUDIO_DB_HOST:-127.0.0.1}
-DB_PORT=${KK_STUDIO_DB_PORT:-5432}
-DB_USER=${KK_STUDIO_DB_USER:-kk_studio}
-DB_PASSWORD=${KK_STUDIO_DB_PASSWORD:-kk_studio}
-if [ -n "${KK_STUDIO_DB_URL:-}" ]; then
-  if [[ "$KK_STUDIO_DB_URL" =~ jdbc:postgresql://([^:/]+)(:([0-9]+))?(/([^/?#]+))? ]]; then
-    DB_HOST="${BASH_REMATCH[1]}"
-    DB_PORT="${BASH_REMATCH[3]:-5432}"
-  fi
-fi
+DB_HOST=127.0.0.1
+DB_PORT=''
+DB_USER=kk_studio
+DB_PASSWORD=kk_studio
 
-# deploy/local compose 只在未被覆盖的默认端点上才是当前 E2E 数据库；其它端点必须由宿主 psql 访问。
-is_local_compose_postgres_endpoint() {
-  case "$DB_HOST:$DB_PORT" in
-    127.0.0.1:5432|localhost:5432)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-export KK_STUDIO_DB_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${E2E_DEDICATED_DATABASE}"
 export KK_STUDIO_DB_USER="$DB_USER"
 export KK_STUDIO_DB_PASSWORD="$DB_PASSWORD"
 export KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET"
@@ -157,17 +123,6 @@ wait_http_process() {
   exit 1
 }
 
-kill_daemon() {
-  local pids
-  pids=$(pgrep -f -- "$DAEMON_BINARY" || true)
-  if [ -n "$pids" ]; then
-    step "Stopping daemon ($pids)"
-    # shellcheck disable=SC2086
-    kill $pids 2>/dev/null || true
-    sleep 0.4
-  fi
-}
-
 package_backend() {
   local java_home=$1
   step "Clean packaging backend (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
@@ -193,51 +148,48 @@ package_daemon() {
   [ -x "$DAEMON_BINARY" ] || die "daemon binary missing: $DAEMON_BINARY"
 }
 
-ensure_s3_storage() {
-  local s3_endpoint="$STORAGE_S3_ENDPOINT"
-  if [ "$s3_endpoint" = "http://127.0.0.1:9000" ] || [ "$s3_endpoint" = "http://localhost:9000" ]; then
-    if ! curl -fsS "http://127.0.0.1:9000/minio/health/live" >/dev/null 2>&1; then
-      step "Ensuring local MinIO dependency (deploy/local/compose.yaml)"
-      command -v docker >/dev/null 2>&1 || die "docker is required to run local MinIO dependency"
-      docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" up -d minio minio-init
-      wait_http "http://127.0.0.1:9000/minio/health/live" "minio" 30
-    fi
-  fi
+compose_stack() {
+  docker compose -p "$STACK_PROJECT" -f "$STACK_COMPOSE_FILE" "$@"
 }
 
-ensure_dedicated_s3_bucket() {
-  if ! is_local_minio_endpoint; then
-    step "External S3 endpoint configured ($STORAGE_S3_ENDPOINT); skipping bucket cleanup"
-    return 0
+start_owned_stack() {
+  command -v docker >/dev/null 2>&1 || die "docker is required for the isolated E2E dependency stack"
+  local mapping
+  step "Starting isolated E2E dependencies (project=$STACK_PROJECT)"
+  STACK_STARTED=true
+  compose_stack up -d --wait postgres minio
+  local minio_client_image=kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z
+  if ! docker image inspect "$minio_client_image" >/dev/null 2>&1; then
+    step "Building missing MinIO init image $minio_client_image"
+    compose_stack build minio-init
   fi
+  compose_stack run --rm minio-init
+  mapping=$(compose_stack port postgres 5432)
+  DB_PORT=${mapping##*:}
+  mapping=$(compose_stack port minio 9000)
+  STORAGE_S3_ENDPOINT="http://127.0.0.1:${mapping##*:}"
+  STORAGE_S3_PUBLIC_ENDPOINT=$STORAGE_S3_ENDPOINT
+  export KK_STUDIO_DB_URL="jdbc:postgresql://127.0.0.1:${DB_PORT}/${E2E_DEDICATED_DATABASE}"
+  export KK_STUDIO_STORAGE_S3_ENDPOINT="$STORAGE_S3_ENDPOINT"
+  export KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT="$STORAGE_S3_PUBLIC_ENDPOINT"
+  wait_http "$STORAGE_S3_ENDPOINT/minio/health/live" minio 30
+}
 
-  ensure_s3_storage
-  step "Ensuring clean dedicated E2E bucket $STORAGE_S3_BUCKET"
-  local init_script="$REPO_ROOT/deploy/dependencies/minio-client/init-bucket.sh"
-  (
-    export MINIO_ROOT_USER="$STORAGE_S3_ACCESS_KEY"
-    export MINIO_ROOT_PASSWORD="$STORAGE_S3_SECRET_KEY"
-    export MINIO_BUCKET="$STORAGE_S3_BUCKET"
-    export MINIO_ALIAS=e2e-local
-    export MINIO_ENDPOINT="$STORAGE_S3_ENDPOINT"
-    if command -v mc >/dev/null 2>&1; then
-      sh "$init_script" --clean-existing
-    elif command -v docker >/dev/null 2>&1; then
-      # Read the checkout's script before invoking mc, so an older image is safe
-      # and mc cannot consume the script from the container's stdin.
-      docker run --rm -i --net host \
-        --env MINIO_ROOT_USER \
-        --env MINIO_ROOT_PASSWORD \
-        --env MINIO_BUCKET \
-        --env MINIO_ALIAS \
-        --env MINIO_ENDPOINT \
-        --entrypoint /bin/sh \
-        kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z \
-        -ec 'script=$(cat); exec /bin/sh -c "$script" -- --clean-existing' <"$init_script"
-    else
-      die "cannot initialize E2E S3 bucket: mc is not installed and docker is not available"
+cleanup_owned_stack() {
+  local status=$?
+  set +e
+  for pid in "$OWNED_BACKEND_PID" "$OWNED_FRONTEND_PID" "$OWNED_DAEMON_PID"; do
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null
+      for _ in {1..20}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+      kill -9 "$pid" 2>/dev/null || true
     fi
-  )
+  done
+  rm -f "$WORK_DIR/backend.pid" "$WORK_DIR/frontend.pid" "$WORK_DIR/daemon.pid"
+  if [ "$STACK_STARTED" = true ]; then
+    compose_stack down --volumes --remove-orphans
+  fi
+  exit "$status"
 }
 
 exec_postgres_admin_sql() {
@@ -245,14 +197,8 @@ exec_postgres_admin_sql() {
   if command -v psql >/dev/null 2>&1; then
     PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
       -v ON_ERROR_STOP=1 -c "$sql"
-  elif ! is_local_compose_postgres_endpoint; then
-    # 数据库端点被覆盖时绝不回退到共享的 deploy/local 实例：那会重置另一套数据库。
-    die "cannot reset E2E database at $DB_HOST:$DB_PORT: host psql is required unless the endpoint is the local compose postgres"
-  elif ! command -v docker >/dev/null 2>&1 \
-    || [ -z "$(docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" ps --status running -q postgres 2>/dev/null)" ]; then
-    die "cannot reset E2E database: psql is not installed on host and deploy/local postgres container is not running"
   else
-    docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
+    compose_stack exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
       psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c "$sql"
   fi
 }
@@ -266,9 +212,10 @@ reset_e2e_database() {
 start_backend() {
   local java_home=$1
   mkdir -p "$WORK_DIR"
-  kill_port "$BACKEND_PORT"
+  if lsof -nP -iTCP:"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    die "backend port $BACKEND_PORT is already in use; refusing to stop an unrelated process"
+  fi
   reset_e2e_database
-  ensure_dedicated_s3_bucket
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
   # Backend always connects to the dedicated E2E database and bucket; scrub every TEST_* input.
@@ -277,6 +224,7 @@ start_backend() {
   nohup env \
     "${test_env_unsets[@]}" \
     JAVA_HOME="$java_home" \
+    KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY="$WORK_DIR/execution-exits" \
     KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL" \
     KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER" \
     KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD" \
@@ -292,6 +240,7 @@ start_backend() {
     --server.port="$BACKEND_PORT" \
     >"$WORK_DIR/backend.log" 2>&1 &
   local pid=$!
+  OWNED_BACKEND_PID=$pid
   echo "$pid" >"$WORK_DIR/backend.pid"
   wait_http_process \
     "$BACKEND_URL/actuator/health" \
@@ -304,7 +253,9 @@ start_backend() {
 
 start_frontend() {
   mkdir -p "$WORK_DIR"
-  kill_port "$FRONTEND_PORT"
+  if lsof -nP -iTCP:"$FRONTEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    die "frontend port $FRONTEND_PORT is already in use; refusing to stop an unrelated process"
+  fi
   : >"$WORK_DIR/frontend.log"
   step "Starting frontend $FRONTEND_URL proxy->$BACKEND_URL"
   (
@@ -313,14 +264,16 @@ start_frontend() {
     mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
     nohup env \
       "${test_env_unsets[@]}" \
-      API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
+      API_PROXY_TARGET="$BACKEND_URL" "$REPO_ROOT/frontend/node_modules/.bin/vite" \
       --host "$FRONTEND_HOST" \
       --port "$FRONTEND_PORT" \
+      --strictPort \
       >"$WORK_DIR/frontend.log" 2>&1 &
     echo $! >"$WORK_DIR/frontend.pid"
   )
   local pid
   pid=$(cat "$WORK_DIR/frontend.pid")
+  OWNED_FRONTEND_PID=$pid
   wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
   # 额外确认代理已打到当前 backend 契约（结构化 config）
   e2e_studio_get "$E2E_STUDIO_COOKIE" "$FRONTEND_URL/api/platform/models" \
@@ -329,7 +282,6 @@ start_frontend() {
 
 start_daemon() {
   mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
-  kill_daemon
   package_daemon
   : >"$WORK_DIR/daemon.log"
   step "Starting daemon env=$DAEMON_ENV_NAME"
@@ -354,7 +306,8 @@ start_daemon() {
     DAEMON_BINARY="$DAEMON_BINARY" \
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
     >"$WORK_DIR/daemon.log" 2>&1 &
-  echo $! >"$WORK_DIR/daemon.pid"
+  OWNED_DAEMON_PID=$!
+  echo "$OWNED_DAEMON_PID" >"$WORK_DIR/daemon.pid"
   local _ env_status=""
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
   for _ in $(seq 1 180); do
@@ -379,56 +332,17 @@ ensure_stack() {
   require_cmd lsof
   require_cmd mvn
   require_cmd npm
+  [ -x "$REPO_ROOT/frontend/node_modules/.bin/vite" ] || die "Frontend dependencies are missing; run npm --prefix frontend ci"
   java_home=$(resolve_java_home)
   mkdir -p "$WORK_DIR"
-
-  if [ "$rebuild" = "true" ]; then
-    package_backend "$java_home"
-    start_backend "$java_home"
-    start_frontend
-    if [ "$with_daemon" = "true" ]; then
-      start_daemon
-    fi
-    return
-  fi
-
-  if [ ! -f "$BACKEND_JAR" ]; then
+  start_owned_stack
+  if [ "$rebuild" = "true" ] || [ ! -f "$BACKEND_JAR" ]; then
     package_backend "$java_home"
   fi
-
-  if ! curl -fsS "$BACKEND_URL/actuator/health" >/dev/null 2>&1; then
-    start_backend "$java_home"
-  else
-    step "Reusing backend $BACKEND_URL"
-    E2E_STUDIO_COOKIE=$(e2e_studio_login "$BACKEND_URL")
-    # Reused processes must expose the current structured model contract.
-    if ! e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/models" \
-      | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-check 2>/dev/null; then
-      step "Backend contract stale (missing model.config); rebuilding and restarting"
-      package_backend "$java_home"
-      start_backend "$java_home"
-    fi
-  fi
-
-  if ! curl -fsS "$FRONTEND_URL/" >/dev/null 2>&1; then
-    start_frontend
-  else
-    step "Reusing frontend $FRONTEND_URL"
-    if ! e2e_studio_get "$E2E_STUDIO_COOKIE" "$FRONTEND_URL/api/platform/models" \
-      | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-check 2>/dev/null; then
-      step "Frontend proxy contract stale; restarting frontend with API_PROXY_TARGET"
-      start_frontend
-    fi
-  fi
+  start_backend "$java_home"
+  start_frontend
 
   if [ "$with_daemon" = "true" ]; then
-    env_status=$(e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/environments" \
-      | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
-      2>/dev/null || true)
-    if [ "$env_status" != "READY" ]; then
-      start_daemon
-    else
-      step "Reusing daemon env=$DAEMON_ENV_NAME status=READY"
-    fi
+    start_daemon
   fi
 }
