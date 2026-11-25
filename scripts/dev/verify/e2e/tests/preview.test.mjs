@@ -55,7 +55,8 @@ function modelRequestDebugFixture() {
     version: '1',
   }
   const requests = []
-  let chat = null
+  let space = null
+  let session = null
   let thread = null
   const call = async (method, path, body) => {
     requests.push({ method, path, body })
@@ -66,20 +67,13 @@ function modelRequestDebugFixture() {
     if (method === 'GET' && pathname === '/api/platform/models') {
       return { status: 200, json: [model] }
     }
-    if (method === 'POST' && pathname === '/api/chat/chats') {
-      chat = {
-        id: id(1),
-        title: body.title,
-        agentName: body.agentName,
-        environmentName: body.environmentName ?? null,
-        yoloEnabled: body.yoloEnabled === true,
-        version: '0',
-      }
-      return { status: 201, json: { ...chat } }
+    if (method === 'POST' && pathname === '/api/chat-spaces') {
+      space = { id: id(1), title: body.title, defaultAgentName: body.defaultAgentName, version: '0' }
+      return { status: 201, json: { ...space } }
     }
-    if (method === 'POST' && pathname === '/api/harness/command-batches') {
-      assert.match(body.target.rootSettings.agentName, /^missing-debug-agent-/)
-      const { threadId, sessionId } = body.target
+    if (method === 'POST' && pathname === `/api/chat-spaces/${space?.id}/sessions`) {
+      session = { sessionId: id(3), threadId: id(4), commandId: id(5), treeVersion: '1' }
+      const { threadId, sessionId } = session
       thread = {
         threadId,
         sessionId,
@@ -92,23 +86,9 @@ function modelRequestDebugFixture() {
         executionControl: 'RUNNABLE',
         rootThreadId: threadId, yoloEnabled: false,
       }
-      return {
-        status: 202,
-        json: {
-          session: { sessionId, name: 'fixture' },
-          rootEntry: { entryId: id(2), entryType: 'ROOT', sessionId },
-          thread,
-          replayed: false,
-          acceptedCommands: body.commands.map((command, index) => ({
-            type: command.type,
-            idempotencyKey: command.idempotencyKey,
-            threadId,
-            sequence: String(index + 1),
-          })),
-        },
-      }
+      return { status: 201, json: session }
     }
-    if (method === 'GET' && pathname === `/api/harness/threads/${thread.threadId}`) {
+    if (method === 'GET' && pathname === `/api/harness/threads/${thread?.threadId}`) {
       return {
         status: 200,
         json: {
@@ -155,12 +135,23 @@ function modelRequestDebugFixture() {
         },
       }
     }
-    if (method === 'DELETE' && pathname === `/api/chat/chats/${chat.id}`) {
+    if (method === 'GET' && pathname === `/api/chat-spaces/${space?.id}/tree`) {
+      return { status: 200, json: { treeVersion: '1' } }
+    }
+    if (method === 'DELETE' && pathname === `/api/chat-spaces/${space?.id}/sessions/${session?.sessionId}`) {
       return { status: 204, json: null }
+    }
+    if (method === 'GET' && pathname === '/api/chat-spaces') {
+      return { status: 200, json: [space] }
+    }
+    if (method === 'PATCH' && pathname === `/api/chat-spaces/${space?.id}`) {
+      space.defaultAgentName = body.defaultAgentName
+      return { status: 200, json: space }
     }
     throw new Error(`unexpected call ${method} ${pathname}`)
   }
-  return { ctx: { call }, requests }
+  const request = async (path, options = {}) => call(options.method || 'GET', path, options.body)
+  return { ctx: { call, request }, requests }
 }
 
 test('model request debug case executes the draft wire and read-only invariants', async () => {

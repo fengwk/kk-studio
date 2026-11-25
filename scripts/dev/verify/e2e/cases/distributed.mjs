@@ -8,13 +8,6 @@ import {
   queryDistributedEnvironmentOwners,
 } from '../lib/distributed.mjs'
 import { createDurationTimer } from '../lib/time.mjs'
-import {
-  branchSettingsOf,
-  chatOwner,
-  createChat,
-  createNewSession,
-  userMessageCommand,
-} from '../lib/harness.mjs'
 import { baseModelConfig, daemonConfigFixture, environmentCreateBody } from '../lib/fixtures.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
@@ -22,6 +15,30 @@ export const cases = []
 const registerCase = createCaseAdder(cases)
 
 const ENV_C_NAME = 'distributed-c'
+
+async function createDistributedSession(ctx, suffix, agentName, message) {
+  const spaceId = await ctx.createSpace(`e2e-dist-${suffix}`)
+  const spaceResponse = await ctx.request(`/api/chat-spaces/${spaceId}`, { method: 'GET' })
+  assert(spaceResponse.status === 200, `get Chat Space status ${spaceResponse.status}`)
+  const patchResponse = await ctx.request(`/api/chat-spaces/${spaceId}`, {
+    method: 'PATCH',
+    body: {
+      expectedVersion: spaceResponse.json.version,
+      defaultAgentName: agentName,
+      defaultEnvironmentId: ENV_C_ID,
+      defaultYoloEnabled: true,
+    },
+  })
+  assert(patchResponse.status === 200, `patch Chat Space status ${patchResponse.status}`)
+  const created = await ctx.request(`/api/chat-spaces/${spaceId}/sessions`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': randomUUID() },
+    body: { message: [{ type: 'TEXT', text: message }], environmentId: ENV_C_ID, yoloEnabled: true },
+  })
+  assert(created.status === 201, `create Session status ${created.status}`)
+  assert(created.json?.threadId, `invalid Session creation: ${JSON.stringify(created.json)}`)
+  return created.json.threadId
+}
 
 /**
  * DB 网络断开期间的 DB 权威读必须失败：具体 4xx/5xx 由应用错误映射决定，
@@ -630,33 +647,12 @@ registerCase({
     let runError = null
     try {
       harness = await setupDistributedHarness(ctx, suffix)
-      const chat = await createChat(ctx, {
-        title: `e2e-dist-chat-${suffix}`,
-        agentName: harness.agent.name,
-        yoloEnabled: true,
-      })
-
-      const threadId = randomUUID()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId: randomUUID(),
-        threadId,
-        rootSettings: branchSettingsOf(
-          harness.agent,
-          {
-            modelName: harness.model.name,
-            variant: 'default',
-          },
-          ENV_C_NAME,
-        ),
-        yoloEnabled: true,
-        commands: [
-          userMessageCommand(
-            'Please run sleep 20 && echo handover-done on the environment.',
-            randomUUID(),
-          ),
-        ],
-      })
+      const threadId = await createDistributedSession(
+        ctx,
+        `handover-${suffix}`,
+        harness.agent.name,
+        'Please run sleep 20 && echo handover-done on the environment.',
+      )
 
       let toolId = null
       for (let i = 0; i < 60; i++) {
@@ -761,33 +757,12 @@ registerCase({
     let runError = null
     try {
       harness = await setupDistributedHarness(ctx, suffix)
-      const chat = await createChat(ctx, {
-        title: `e2e-crash-chat-${suffix}`,
-        agentName: harness.agent.name,
-        yoloEnabled: true,
-      })
-
-      const threadId = randomUUID()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId: randomUUID(),
-        threadId,
-        rootSettings: branchSettingsOf(
-          harness.agent,
-          {
-            modelName: harness.model.name,
-            variant: 'default',
-          },
-          ENV_C_NAME,
-        ),
-        yoloEnabled: true,
-        commands: [
-          userMessageCommand(
-            'Please run sleep 20 && echo handover-done on the environment.',
-            randomUUID(),
-          ),
-        ],
-      })
+      const threadId = await createDistributedSession(
+        ctx,
+        `crash-${suffix}`,
+        harness.agent.name,
+        'Please run sleep 20 && echo handover-done on the environment.',
+      )
 
       let toolId = null
       for (let i = 0; i < 60; i++) {
@@ -899,33 +874,12 @@ registerCase({
     let runError = null
     try {
       harness = await setupDistributedHarness(ctx, suffix)
-      const chat = await createChat(ctx, {
-        title: `e2e-restart-chat-${suffix}`,
-        agentName: harness.agent.name,
-        yoloEnabled: true,
-      })
-
-      const threadId = randomUUID()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId: randomUUID(),
-        threadId,
-        rootSettings: branchSettingsOf(
-          harness.agent,
-          {
-            modelName: harness.model.name,
-            variant: 'default',
-          },
-          ENV_C_NAME,
-        ),
-        yoloEnabled: true,
-        commands: [
-          userMessageCommand(
-            'Please run sleep 20 && echo handover-done on the environment.',
-            randomUUID(),
-          ),
-        ],
-      })
+      const threadId = await createDistributedSession(
+        ctx,
+        `restart-${suffix}`,
+        harness.agent.name,
+        'Please run sleep 20 && echo handover-done on the environment.',
+      )
 
       let toolId = null
       for (let i = 0; i < 60; i++) {

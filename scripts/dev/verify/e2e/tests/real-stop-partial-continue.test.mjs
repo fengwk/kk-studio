@@ -90,7 +90,7 @@ function installFakeApplicationEvents(t) {
  * 后续 ledger confirmation 才把同一 head 推进为 IDLE + STOPPED 并 touch version。
  */
 function createStopCaseContext({ exitConverges = true } = {}) {
-  const chatId = randomUUID()
+  const spaceId = randomUUID()
   let sessionId = randomUUID()
   let threadId = randomUUID()
   const rootEntryId = randomUUID()
@@ -227,10 +227,49 @@ function createStopCaseContext({ exitConverges = true } = {}) {
     writeArtifact(name, text) {
       artifacts.push({ name, data: JSON.parse(text) })
     },
+    openWebSocket(path) {
+      assert.equal(path, '/ws/events')
+      return new FakeApplicationEventSocket(`ws://mock.invalid${path}`)
+    },
+    async request(url, options = {}) {
+      const method = options.method || 'GET'
+      if (url === '/api/chat-spaces' && method === 'POST') {
+        return {
+          status: 201,
+          json: {
+            id: spaceId,
+            title: options.body.title,
+            version: '0',
+            defaultAgentName: options.body.defaultAgentName,
+          },
+        }
+      }
+      if (url === `/api/chat-spaces/${spaceId}/sessions` && method === 'POST') {
+        sessionId = randomUUID()
+        threadId = randomUUID()
+        thread = { ...thread, threadId, sessionId, rootThreadId: threadId }
+        entries[0].sessionId = sessionId
+        return {
+          status: 201,
+          json: { sessionId, threadId, commandId: randomUUID(), treeVersion: '1' },
+        }
+      }
+      throw new Error(`Unexpected mock request: ${method} ${url}`)
+    },
     async call(method, url, body) {
       if (method === 'DELETE') {
         deleted.push(url)
         return { status: 204, json: null }
+      }
+      if (method === 'GET' && url === `/api/chat-spaces/${spaceId}/tree`) {
+        return { status: 200, json: { treeVersion: '2' } }
+      }
+      if (method === 'GET' && url === '/api/chat-spaces') {
+        return { status: 200, json: [{ id: spaceId, version: '3', defaultAgentName: 'e2e-stop-agent' }] }
+      }
+      if (method === 'PATCH' && url === `/api/chat-spaces/${spaceId}`) {
+        assert.deepEqual(body, { expectedVersion: '3', defaultAgentName: null })
+        return { status: 200, json: { id: spaceId, version: '4', defaultAgentName: null } }
       }
       if (method === 'GET' && url === '/api/platform/providers') {
         return {
@@ -258,30 +297,6 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           driver: 'builtin', settings: { modelName: MODEL.modelName, variant: MODEL.variant },
         })
         return { status: 201, json: { name: body.name, execution: body.execution, version: '0' } }
-      }
-      if (method === 'POST' && url === '/api/chat/chats') {
-        return {
-          status: 201,
-          json: {
-            id: chatId,
-            agentName: body.agentName,
-            environmentName: null,
-            version: '0',
-          },
-        }
-      }
-      if (method === 'POST' && url === '/api/harness/command-batches') {
-        assert.equal(body.target.type, 'NEW_SESSION')
-        // case 在请求中预分配 Session/Thread 身份，mock 采用这些身份以匹配后续路由。
-        sessionId = body.target.sessionId
-        threadId = body.target.threadId
-        thread = {
-          ...thread,
-          threadId,
-          sessionId,
-          rootThreadId: threadId,
-        }
-        return acceptedResponse(body.commands)
       }
       if (method === 'POST' && url === `/api/harness/threads/${threadId}/command-batches`) {
         if (phase === 'idle') {

@@ -14,7 +14,6 @@ const DEFERRED_OUTPUT_FIXTURE = fileURLToPath(
 
 const FREE_L1_CASES = [
   'crud.provider.http_retry_override',
-  'crud.chat.default_environment',
   'settings.system_contract_cas',
 ]
 
@@ -244,44 +243,6 @@ test('tool catalog case accepts its public fields and rejects extra fields', asy
     run([{ ...entries[0], provider: { ...entries[0].provider, unexpected: true } }]),
     /fields must be/,
   )
-})
-
-test('chat default environment case executes the create/replace/clear wire with full replacement', async () => {
-  // 测试意图：真实执行 crud.chat.default_environment（只 fake HTTP），证明它创建的 POST 请求体确实省略
-  // yoloEnabled（由服务端默认 false）并携带默认环境、PUT 整体替换总是携带 title/agentName/environmentName，
-  // 显式清空携带 environmentName:null，且非法值确实被发出并拒绝。
-  const fake = chatDefaultEnvironmentFixture()
-  await getCase('crud.chat.default_environment').run(fake.ctx)
-
-  const create = fake.requests.find(
-    (request) => request.method === 'POST' && request.path === '/api/chat/chats',
-  )
-  const environmentCreate = fake.requests.find(
-    (request) => request.method === 'POST' && request.path === '/api/platform/environments',
-  )
-  // 创建请求必须真的省略 yoloEnabled：只有服务端默认才产生响应里的 false。
-  assert.equal(Object.hasOwn(create.body, 'yoloEnabled'), false)
-  assert.equal(create.body.environmentName, environmentCreate.body.name)
-  assert.equal(environmentCreate.body.daemonConfig.studioUrl, 'http://127.0.0.1:18081')
-
-  const chatPuts = fake.requests.filter(
-    (request) => request.method === 'PUT' && request.path.startsWith('/api/chat/chats/'),
-  )
-  // 整体替换：每次 PUT 都必须回传 title、agentName 与 environmentName。
-  assert.ok(chatPuts.length > 0)
-  for (const request of chatPuts) {
-    assert.equal(Object.hasOwn(request.body, 'title'), true)
-    assert.equal(Object.hasOwn(request.body, 'agentName'), true)
-    assert.equal(Object.hasOwn(request.body, 'environmentName'), true)
-  }
-  // 显式清空：键必须存在且为 null。
-  const clear = chatPuts.find(
-    (request) => Object.hasOwn(request.body, 'environmentName') && request.body.environmentName === null,
-  )
-  assert.ok(clear, 'explicit null must appear in the PUT wire')
-  // 非法值确实被发出（而不是被 case 本地吞掉）。
-  assert.ok(chatPuts.some((request) => request.body.environmentName === 'bad/name'))
-  assert.ok(chatPuts.some((request) => /^missing-env-/.test(String(request.body.environmentName))))
 })
 
 test('run-matrix --list/--docs execute fully offline and include the new contract cases', () => {

@@ -9,10 +9,9 @@ import { createServer } from 'node:http'
 
 import { assert, assertExactFields, cid, expectHttpError, sleep } from '../lib/http.mjs'
 import {
-  branchSettingsOf,
-  chatOwner,
-  createChat,
-  createNewSession,
+  createWorkspaceSpace,
+  createWorkspaceSession,
+  deleteWorkspaceSession,
   getThreadSnapshot,
   previewHistoricalRequest,
   stopThread,
@@ -89,7 +88,7 @@ function parseArguments(interaction) {
 
 function assertInteraction(
   interaction,
-  { threadId, rootThreadId, sessionId, chatId, chatTitle, questionnaire, label },
+  { threadId, rootThreadId, sessionId, chatSpaceId, chatSpaceTitle, questionnaire, label },
 ) {
   assertExactFields(interaction, INPUT_FIELDS, `${label} interaction`)
   assert(
@@ -107,10 +106,10 @@ function assertInteraction(
   )
   assertExactFields(interaction.owner, OWNER_FIELDS, `${label} interaction owner`)
   assert(
-    interaction.owner.kind === 'CHAT'
-      && interaction.owner.id === chatId
-      && interaction.owner.title === chatTitle
-      && interaction.owner.link === `/chats/${chatId}`,
+    interaction.owner.kind === 'CHAT_SPACE'
+      && interaction.owner.id === chatSpaceId
+      && interaction.owner.title === chatSpaceTitle
+      && interaction.owner.link === `/chat-spaces/${chatSpaceId}`,
     JSON.stringify(interaction.owner),
   )
   assert(
@@ -222,7 +221,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；distributed 容器内无法回连宿主 loopback。
   requires: ['host-mock'],
   title: '统一人工交互 API：ask_user 待处理列表、答案物化与门禁',
-  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/harness/interactions 返回仅含 Chat/Issue+Agent 归属的 (createdAt, invocation) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带可省略的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时省略）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；INPUT 条目是判别联合分支，只携带冻结问卷原文、调用坐标与归属（没有审批或环境聚合字段），owner 展示名取自 Chat 与执行根 Thread 的权威数据；POST /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input 的请求体是 ANSWER / DECLINE 联合（未知字段、缺失 submissionId/answers、DECLINE 携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
+  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/harness/interactions 返回仅含 Chat/Issue+Agent 归属的 (createdAt, invocation) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带可省略的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时省略）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；INPUT 条目是判别联合分支，只携带冻结问卷原文、调用坐标与归属（没有审批或环境聚合字段），owner 展示名取自 Chat Space 与执行根 Thread 的权威数据；POST /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input 的请求体是 ANSWER / DECLINE 联合（未知字段、缺失 submissionId/answers、DECLINE 携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const marker = `INTERACTION-PENDING-${suffix}`
@@ -244,7 +243,8 @@ registerCase({
     let provider = null
     let model = null
     let agent = null
-    let chat = null
+    let space = null
+    let sessionId = null
     let threadId = null
     let primaryError = null
     const cleanupErrors = []
@@ -296,10 +296,9 @@ registerCase({
       agent = agentResponse.json
       assert(agent?.name, JSON.stringify(agentResponse.json))
 
-      chat = await createChat(ctx, {
+      space = await createWorkspaceSpace(ctx, {
         title: `e2e-interaction-${suffix}`,
-        agentName: agent.name,
-        yoloEnabled: false,
+        defaultAgentName: agent.name,
       })
 
       // 分页参数边界：limit 必须落在 [1,100]，cursor 必须是服务端给出的 keyset。
@@ -310,19 +309,14 @@ registerCase({
         })
       }
 
-      const sessionId = cid()
-      const createdThreadId = cid()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId,
-        threadId: createdThreadId,
-        rootSettings: branchSettingsOf(agent, {
-          ...agent.execution.settings,
-        }),
+      const created = await createWorkspaceSession(ctx, space.id, {
+        idempotencyKey: cid(),
+        message: [{ type: 'TEXT', text: marker }],
+        modelSelection: agent.execution.settings,
         yoloEnabled: false,
-        commands: [userMessageCommand(marker, cid())],
       })
-      threadId = String(createdThreadId)
+      sessionId = created.sessionId
+      threadId = String(created.threadId)
 
       const pending = assertInteraction(
         await waitForPendingInteraction(ctx, { threadId }),
@@ -330,8 +324,8 @@ registerCase({
           threadId,
           rootThreadId: threadId,
           sessionId: String(sessionId),
-          chatId: chat.id,
-          chatTitle: chat.title,
+          chatSpaceId: space.id,
+          chatSpaceTitle: space.title,
           questionnaire,
           label: 'pending',
         },
@@ -541,12 +535,9 @@ registerCase({
         }
       })
       await cleanup('mock server', () => mock.close())
-      await cleanup('chat', async () => {
-        if (chat?.id) {
-          await ctx.call(
-            'DELETE',
-            `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
-          )
+      await cleanup('workspace Session', async () => {
+        if (space?.id && sessionId) {
+          await deleteWorkspaceSession(ctx, space.id, sessionId)
         }
       })
       await cleanup('agent', async () => {

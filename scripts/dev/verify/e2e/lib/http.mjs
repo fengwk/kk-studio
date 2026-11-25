@@ -59,10 +59,8 @@ export async function loginStudio(baseUrl, timeoutMs = 60_000) {
     { username: 'kkstudio', password: 'kkstudio' },
     timeoutMs,
     { Origin: new URL(baseUrl).origin },
-  )
-  const setCookie = response.headers.get('set-cookie')
-  assert(setCookie, 'login response did not set a session cookie')
-  const cookie = setCookie.split(';', 1)[0]
+  ).catch((err) => { throw new Error(`Studio login failed${err instanceof HttpError ? ` (HTTP ${err.status})` : ''}`) })
+  const cookie = sessionCookie(response.headers)
   setStudioCookie(baseUrl, cookie)
   return cookie
 }
@@ -78,24 +76,63 @@ export function studioAuthHeaders(baseUrl) {
   return { Cookie: cookie, Origin: origin }
 }
 
-export async function httpJson(
+export function openStudioWebSocket(baseUrl, requestPath = '/ws/events', headers = studioAuthHeaders(baseUrl)) {
+  const url = new URL(requestPath, baseUrl)
+  assert(url.origin === new URL(baseUrl).origin, 'WebSocket path must stay on Studio')
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return new WebSocket(url, { headers })
+}
+
+export function createHttpClient({ baseUrl, origin = new URL(baseUrl).origin }) {
+  let cookie
+  const authHeaders = () => cookie ? { Cookie: cookie, Origin: origin } : { Origin: origin }
+  const request = (path, { method = 'GET', body, timeoutMs, headers, allowError } = {}) =>
+    sendJson(baseUrl, method, path, body, timeoutMs, { ...headers, ...authHeaders() }, allowError)
+  return {
+    request,
+    openWebSocket(path) {
+      assert(cookie, 'call login before opening a Studio WebSocket')
+      return openStudioWebSocket(baseUrl, path, authHeaders())
+    },
+    async login(username, password) {
+      const response = await request('/api/auth/login', { method: 'POST', body: { username, password }, allowError: true })
+      assert(response.status === 200, `Studio login failed (HTTP ${response.status})`)
+      cookie = sessionCookie(response.headers)
+      return response.json
+    },
+  }
+}
+
+function sessionCookie(headers) {
+  const value = headers.get('set-cookie')
+  assert(value && /;\s*HttpOnly(?:;|$)/i.test(value), 'login response did not set an HttpOnly session cookie')
+  return value.split(';', 1)[0]
+}
+
+export function httpJson(baseUrl, method, requestPath, body, timeoutMs, requestHeaders) {
+  const headers = studioCookies.has(new URL(baseUrl).origin) ? studioAuthHeaders(baseUrl) : {}
+  return sendJson(baseUrl, method, requestPath, body, timeoutMs, { ...requestHeaders, ...headers })
+}
+
+async function sendJson(
   baseUrl,
   method,
   requestPath,
   body,
   timeoutMs = 60_000,
   requestHeaders = {},
+  allowError = false,
 ) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const headers = {
-      ...(studioCookies.has(new URL(baseUrl).origin) ? studioAuthHeaders(baseUrl) : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...requestHeaders,
     }
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}${requestPath}`, {
       method,
+      redirect: 'manual',
       headers: Object.keys(headers).length === 0 ? undefined : headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
@@ -109,8 +146,8 @@ export async function httpJson(
         json = text
       }
     }
-    if (!res.ok) throw new HttpError(res.status, text, requestPath)
-    return { status: res.status, json, headers: res.headers }
+    if (!res.ok && !allowError) throw new HttpError(res.status, text, requestPath)
+    return { status: res.status, json, text, headers: res.headers }
   } catch (err) {
     if (err instanceof HttpError) throw err
     if (err?.name === 'AbortError') throw new Error(`timeout ${method} ${requestPath}`)

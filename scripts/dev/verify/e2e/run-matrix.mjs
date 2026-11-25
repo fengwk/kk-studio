@@ -30,7 +30,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { httpJson, listResults, loginStudio } from './lib/http.mjs'
+import { createHttpClient, httpJson, listResults, loginStudio, setStudioCookie, studioAuthHeaders, openStudioWebSocket } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
@@ -47,9 +47,8 @@ import { cases as configSyncCases } from './cases/config-sync.mjs'
 import { cases as runtimeIdeCases } from './cases/environment-runtime-ide.mjs'
 import { cases as appEventsCases } from './cases/app-events.mjs'
 import { cases as modelAttemptCases } from './cases/model-attempt-visibility.mjs'
-import { cases as canvasStorageCases } from './cases/canvas-storage.mjs'
 import { cases as canvasFunctionCases } from './cases/canvas-function.mjs'
-import { cases as chatAttachmentCases } from './cases/chat-attachment.mjs'
+import { workspaceCases } from './cases/workspace.mjs'
 import { cases as canvasApiCases } from './cases/canvas-api.mjs'
 import { cases as interactionCases } from './cases/interaction.mjs'
 import { cases as queuedBatchCases } from './cases/thread-queued-batch.mjs'
@@ -63,8 +62,9 @@ const __dirname = path.dirname(__filename)
 export const ALL_CASES = [
   ...seedCases, ...crudCases, ...i18nCases, ...configMatrixCases,
   ...systemSettingsCases, ...environmentCardCases, ...configSyncCases, ...runtimeIdeCases,
-  ...appEventsCases, ...modelAttemptCases, ...canvasStorageCases, ...canvasFunctionCases,
-  ...chatAttachmentCases, ...canvasApiCases, ...interactionCases, ...queuedBatchCases,
+  ...appEventsCases, ...modelAttemptCases, ...canvasFunctionCases,
+  ...canvasApiCases, ...interactionCases, ...queuedBatchCases,
+  ...workspaceCases,
   ...realCases, ...distributedCases,
 ]
 export const getCase = (id) => findCase(ALL_CASES, id)
@@ -80,8 +80,12 @@ class CaseContext {
     withCanvasStorage,
     withCanvasFunction,
     reportDir,
+    client,
   }) {
     this.baseUrl = baseUrl
+    this.request = client?.request ?? ((path, { method = 'GET', body, timeoutMs, headers } = {}) =>
+      httpJson(baseUrl, method, path, body, timeoutMs, headers))
+    this.openWebSocket = client?.openWebSocket ?? ((path) => openStudioWebSocket(baseUrl, path))
     this.daemonEnv = daemonEnv
     this.real = real
     this.withTools = withTools
@@ -113,7 +117,24 @@ class CaseContext {
   }
 
   async call(method, requestPath, body, timeoutMs) {
-    return httpJson(this.baseUrl, method, requestPath, body, timeoutMs)
+    return this.request(requestPath, { method, body, timeoutMs })
+  }
+
+  async createSpace(title = `E2E ${randomUUID()}`) {
+    const { json } = await this.request('/api/chat-spaces', {
+      method: 'POST', headers: { 'Idempotency-Key': randomUUID() },
+      body: { title, rootFolderName: 'E2E', defaultAgentName: 'default-assistant' },
+    })
+    return json.id
+  }
+
+  async createUser() {
+    const username = `e2e-${randomUUID().slice(0, 16)}`
+    const password = randomUUID()
+    await this.request('/api/users', { method: 'POST', body: { username, password, role: 'USER' } })
+    const client = createHttpClient({ baseUrl: this.baseUrl })
+    await client.login(username, password)
+    return new CaseContext({ baseUrl: this.baseUrl, client })
   }
 }
 
@@ -515,6 +536,9 @@ async function main(argv) {
   }
 
   await loginStudio(args.baseUrl)
+  if (args.frontendUrl) {
+    setStudioCookie(args.frontendUrl, studioAuthHeaders(args.baseUrl).Cookie)
+  }
   if (args.distributed && selected.length) await loginStudio(args.baseUrlB)
 
   await verifyProviderExecutionBoundary(args)

@@ -2,11 +2,12 @@
   "domain": {
     "status": 404,
     "code": "not_found",
+    "reason": "WORKSPACE_NOT_FOUND",
     "messages": {
-      "en-US": "The chat was not found.",
-      "zh-CN": "未找到 对话。"
+      "en-US": "The resource was not found.",
+      "zh-CN": "未找到 resource。"
     },
-    "detail": "chat not found"
+    "detail": "Space not found"
   },
   "validation": {
     "status": 400,
@@ -17,10 +18,11 @@
   "responseStatus": {
     "status": 400,
     "code": "validation",
+    "reason": "INVALID_ARGUMENT",
     "messages": {
-      "en-US": "The threadId parameter has an invalid value.",
-      "zh-CN": "threadId 参数的值无效。"
+      "en-US": "Invalid resource request.",
+      "zh-CN": "资源请求无效。"
     },
-    "detail": "threadId has an invalid value"
+    "detail": "Expected a canonical resource ID"
   }
 }
