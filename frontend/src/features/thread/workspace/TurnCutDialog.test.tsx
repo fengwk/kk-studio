@@ -25,6 +25,7 @@ function renderDialog(kind: 'branch' | 'fork', props: Partial<Parameters<typeof 
         sessionId="sess-1"
         sourceThreadId="thread-1"
         turnEndEntryId="entry-1"
+        hasUnsent={false}
         onCreated={onCreated}
         onClose={onClose}
         {...props}

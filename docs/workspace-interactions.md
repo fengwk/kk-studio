@@ -101,7 +101,7 @@
 
 **从回合末尾分支或新建会话**
 
-- 前端：回合末尾的两个按钮各打开名称框，建议名分别是「分支 N」和「原标题 · 分叉」；取消不发请求。成功后在当前窗格打开新的 Thread，展开所在目录并聚焦输入框。
+- 前端：回合末尾的两个按钮各打开名称框，建议名分别是「分支 N」和「原标题 · 分叉」。若输入框有未发送内容，须先在名称框中确认不带入这些内容才能创建；取消不发请求。成功后在当前窗格打开新的 Thread，展开所在目录并聚焦输入框。
 - 接口：`POST /sessions/{id}/branches` 或 `POST /sessions/{id}/forks`，请求体为 `{sourceThreadId, turnEndEntryId, title}`，带 `Idempotency-Key`。
 - 分支事务：锁 Session 行 → 校验切点是源 Thread 可见路径上的 `TURN_END`，分支名在 Session 内唯一 → 创建以该切点为 head 的公开根 Thread，复制切点处的设置；不调用模型。
 - 新会话事务：锁空间行 → 把有效上下文复制到新 Session（新 ID、重写内部引用、为引用的 Blob 登记持有）→ 在源 Session 所在目录的最上面写目录边 → `tree_version` 加一。
