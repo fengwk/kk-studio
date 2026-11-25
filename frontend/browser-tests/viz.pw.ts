@@ -84,6 +84,12 @@ test.describe('Visualization rendering and sanitization', () => {
     const error = page.locator('.md-viz-error')
     await expect(code).toHaveText(source)
     await expect(error).toHaveText('无法渲染此图。第 2 行：连线后面缺少节点。在连线运算符后写节点 id。')
+    // 源码回退不移除测量宿主，也不占据图的空白高度或多显示一个复制按钮。
+    const host = page.locator('.md-viz')
+    const size = await host.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }))
+    expect(size.width).toBeGreaterThan(0)
+    expect(size.height).toBe(0)
+    await expect(page.getByRole('button', { name: '复制代码' })).toHaveCount(1)
     await code.scrollIntoViewIfNeeded()
     await error.scrollIntoViewIfNeeded()
     await page.screenshot({ path: info.outputPath('mermaid-invalid.png') })

@@ -16,6 +16,19 @@
   min-height: 48px;
 }
 
+/* 失败时只显示源码回退，但图宿主仍须有宽度供 ResizeObserver 测量。 */
+.md-viz-shell.md-viz-shell-failed {
+  margin: 0;
+}
+
+.md-viz-shell-failed > .md-code-copy {
+  display: none;
+}
+
+.md-viz-shell-failed > .md-viz {
+  min-height: 0;
+}
+
 /* SVG 保持 1:1：缩放会让图中文字小于排版时的字号。 */
 .md-viz svg {
   display: block;
