@@ -10,8 +10,9 @@ const execution = { driver: 'builtin', settings: { modelName: 'Code model', vari
 const branchSettings = { agentName: 'assistant', execution, environmentName: null }
 const api = `/api/chat-spaces/${spaceId}`
 
-async function serve(page: Page, { agents = true, admin = false, rejectFolder = false } = {}) {
+async function serve(page: Page, { agents = true, admin = false, rejectFolder = false, loseFirstResponse = false } = {}) {
   const posts: { path: string; key: string | undefined; body: unknown }[] = []
+  const creations = new Map<string, { body: string | null; result: { sessionId: string; threadId: string; commandId: string; treeVersion: string } }>()
   let text = ''
   await page.routeWebSocket('**/ws/events', () => {})
   await page.route('**/api/**', async (route) => {
@@ -29,8 +30,17 @@ async function serve(page: Page, { agents = true, admin = false, rejectFolder = 
       posts.push({ path, key: req.headers()['idempotency-key'], body })
       if (path === `${api}/sessions`) {
         if (rejectFolder) return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'INVALID_FOLDER' }) })
+        const key = req.headers()['idempotency-key']
+        const prior = creations.get(key)
+        if (prior) {
+          if (prior.body !== req.postData()) return route.fulfill({ status: 409 })
+          return json(prior.result)
+        }
         text = body.message[0].text
-        return json({ sessionId, threadId: ids[0], commandId: draftId, treeVersion: '2' })
+        const result = { sessionId, threadId: ids[0], commandId: draftId, treeVersion: '2' }
+        creations.set(key, { body: req.postData(), result })
+        if (loseFirstResponse && creations.size === 1) return route.abort('connectionreset')
+        return json(result)
       }
       if (body.title === 'Taken') return route.fulfill({ status: 409, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'THREAD_NAME_EXISTS' }) })
       return json({ sessionId, threadId: path.endsWith('/branches') ? ids[1] : ids[2], treeVersion: '3' })
@@ -51,7 +61,7 @@ async function serve(page: Page, { agents = true, admin = false, rejectFolder = 
     }
     return route.fulfill({ status: 404, body: `Unhandled ${path}` })
   })
-  return posts
+  return Object.assign(posts, { creations })
 }
 
 const sendButton = (page: Page) => page.getByRole('button', { name: 'Send message' })
@@ -131,6 +141,33 @@ for (const scenario of ['available', 'admin', 'user'] as const) {
     expect(posts).toHaveLength(0)
   })
 }
+
+test('replays the exact first send after the server created the session but the response was lost', async ({ page }) => {
+  const posts = await serve(page, { loseFirstResponse: true })
+  await page.goto(`${harness}?folder=${folderId}`)
+  const pane = page.locator('[data-pane-id]')
+  const paneId = await pane.getAttribute('data-pane-id')
+  const editor = page.getByRole('textbox')
+  const message = 'Keep this first message through replay'
+  await editor.fill(message)
+  await sendButton(page).click()
+  const alert = page.getByRole('alert')
+  await expect(alert).toContainText('The send result is unknown')
+  await expect(editor).toHaveText(message)
+  await expect(unsent(page)).toHaveAttribute('data-unsent', 'true')
+  await expect(sendButton(page)).toBeDisabled()
+  expect(posts).toHaveLength(1)
+  expect(posts.creations.size).toBe(1)
+  await alert.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByText('Thread 6', { exact: true })).toBeVisible()
+  await expect(page.getByText(message, { exact: true })).toBeVisible()
+  await expect(pane).toHaveAttribute('data-pane-id', paneId!)
+  await expect(unsent(page)).toHaveAttribute('data-unsent', 'false')
+  expect(posts).toHaveLength(2)
+  expect(posts[0].key).toBe(draftId)
+  expect(posts[1]).toEqual(posts[0])
+  expect(posts.creations.size).toBe(1)
+})
 
 test('an invalid folder leaves the unsent draft and explains the failure', async ({ page }) => {
   const posts = await serve(page, { rejectFolder: true })

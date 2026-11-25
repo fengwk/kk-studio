@@ -236,6 +236,10 @@ export const chatCatalog = {
   },
   'ai.runtime.draft.spaceSettings': { 'en-US': 'Space settings', 'zh-CN': '空间设置' },
   'ai.runtime.draft.agentSettings': { 'en-US': 'Agent settings', 'zh-CN': 'Agent 设置' },
+  'ai.runtime.draft.sendUnknown': {
+    'en-US': 'The send result is unknown. Retry to recover the original session.',
+    'zh-CN': '未收到发送结果。重试以继续原会话。',
+  },
   'ai.runtime.draft.invalidFolder': {
     'en-US': 'This folder is no longer available. Choose another folder to send your message.',
     'zh-CN': '此目录已不可用。请选择其他目录后再发送。',
