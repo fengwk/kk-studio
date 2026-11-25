@@ -46,6 +46,41 @@ public class HarnessPlacementQuery {
         .list();
   }
 
+  /** Durable inputs and open turns remain obligations even if their Work is between transitions. */
+  public boolean hasPendingInputOrTurn(UUID root) {
+    return jdbc.sql(
+            """
+        with recursive members as (
+          select id, head_entry_id, input_through_sequence
+          from harness_thread where root_thread_id = :root
+        ), tails(thread_id, entry_type, parent_entry_id, payload) as (
+          select m.id, e.entry_type, e.parent_entry_id, e.payload
+          from members m join harness_entry e on e.id = m.head_entry_id
+          union all
+          select t.thread_id, e.entry_type, e.parent_entry_id, e.payload
+          from tails t join harness_entry e on e.id = t.parent_entry_id
+          where t.entry_type in ('NOTIFICATION', 'SETTINGS', 'NATIVE_COMPACTION', 'FORK', 'SYSTEM')
+        )
+        select exists (
+          select 1 from members m join harness_thread_command c on c.thread_id = m.id
+          where c.cancelled_at is null and (c.applied_entry_id is null or
+             (c.command_type = 'NOTIFICATION' and c.sequence > m.input_through_sequence))
+        ) or exists (
+          select 1 from tails t
+          where t.entry_type not in ('ROOT','TURN_END','NOTIFICATION','SETTINGS',
+             'NATIVE_COMPACTION','FORK','SYSTEM')
+          or (t.entry_type = 'TURN_END' and t.payload ->> 'continueModel' = 'true' and exists (
+            select 1 from harness_entry s
+            where s.id = cast(t.payload ->> 'turnStartEntryId' as uuid)
+              and s.payload ->> 'ownerThreadId' = cast(t.thread_id as text)
+          ))
+        )
+        """)
+        .param("root", root)
+        .query(Boolean.class)
+        .single();
+  }
+
   public Optional<PublicThread> thread(UUID id) {
     return jdbc.sql(
             """

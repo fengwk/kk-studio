@@ -114,7 +114,8 @@ class ScheduleTargets {
     }
     runtime.lockExecutionTrees(roots);
     if (previous != null
-        && !runtime.executionSettled(previous, t.type() == ScheduleTargetDTO.Type.CONTINUE)) {
+        && (harness.hasPendingInputOrTurn(previous)
+            || !runtime.executionSettled(previous, t.type() == ScheduleTargetDTO.Type.CONTINUE))) {
       return null;
     }
     var message = List.of(new TextDTO(schedule.message()));

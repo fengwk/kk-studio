@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.account.AccountScheduleSuspension;
@@ -39,6 +40,29 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
   private final ScheduleTargets targets;
   private final JdbcClient jdbc;
   private final DurableWorkStore work;
+  private final TransactionTemplate triggerTransaction;
+
+  private static final class RejectedSubmission extends RuntimeException {
+    private final ScheduleDTO schedule;
+    private final String occurrence;
+    private final Instant scheduled;
+    private final Instant started;
+    private final String reason;
+
+    private RejectedSubmission(
+        ScheduleDTO schedule,
+        String occurrence,
+        Instant scheduled,
+        Instant started,
+        DomainException cause) {
+      super(cause);
+      this.schedule = schedule;
+      this.occurrence = occurrence;
+      this.scheduled = scheduled;
+      this.started = started;
+      this.reason = cause.reason() == null ? cause.code().name() : cause.reason();
+    }
+  }
 
   WorkspaceSchedules(
       ScheduleRepository repository,
@@ -53,6 +77,8 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
     this.targets = targets;
     this.jdbc = jdbc;
     this.work = new DurableWorkStore("SCHEDULE", jdbc, transactions);
+    this.triggerTransaction = new TransactionTemplate(transactions);
+    this.triggerTransaction.setPropagationBehavior(Propagation.REQUIRES_NEW.value());
   }
 
   @Transactional(readOnly = true)
@@ -122,12 +148,24 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
     return repository.runs(space, id, before);
   }
 
-  @Transactional
   public ScheduleRunDTO run(StudioPrincipal actor, UUID space, UUID id, UUID key) {
     Instant requested = repository.now();
-    lock(actor, space);
-    return trigger(
-        actor, space, repository.get(space, id, true), "manual:" + key, requested, false);
+    String occurrence = "manual:" + key;
+    try {
+      return triggerTransaction.execute(
+          status -> {
+            lock(actor, space);
+            return trigger(
+                actor, space, repository.get(space, id, true), occurrence, requested, false);
+          });
+    } catch (RejectedSubmission rejected) {
+      return triggerTransaction.execute(
+          status -> {
+            lock(actor, space);
+            repository.get(space, id, true);
+            return recordRejection(space, rejected);
+          });
+    }
   }
 
   public Optional<WorkClaim> claim() {
@@ -138,8 +176,15 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
     work.release(claim);
   }
 
-  @Transactional
   public void auto(WorkClaim claim) {
+    try {
+      triggerTransaction.executeWithoutResult(status -> auto(claim, null));
+    } catch (RejectedSubmission rejected) {
+      triggerTransaction.executeWithoutResult(status -> auto(claim, rejected));
+    }
+  }
+
+  private void auto(WorkClaim claim, RejectedSubmission rejected) {
     UUID id = claim.targetId();
     var space = repository.spaceOf(id);
     if (space.isEmpty()) {
@@ -174,7 +219,12 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
         ScheduleTiming.previous(schedule.trigger(), schedule.timeZone(), now)
             .filter(at -> !at.isBefore(due));
     Instant occurrence = latest.orElse(due);
-    trigger(actor, space.get(), schedule, "auto:" + occurrence, occurrence, latest.isEmpty());
+    if (rejected == null) {
+      trigger(actor, space.get(), schedule, "auto:" + occurrence, occurrence, latest.isEmpty());
+    } else {
+      // The live claim above still fences the same configuration and mailbox.
+      recordRejection(space.get(), rejected);
+    }
     Instant following =
         next(schedule.trigger(), schedule.timeZone(), now, 1).stream().findFirst().orElse(null);
     repository.advance(id, following);
@@ -199,11 +249,16 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
     UUID key =
         UUID.nameUUIDFromBytes((schedule.id() + ":" + occurrence).getBytes(StandardCharsets.UTF_8));
     Instant started = expired ? null : repository.now();
-    UUID output =
-        expired
-            ? null
-            : targets.submit(
-                actor, space, schedule, key, repository.lastOutput(schedule.id()).orElse(null));
+    UUID output = null;
+    if (!expired) {
+      UUID previous = repository.lastOutput(schedule.id()).orElse(null);
+      try {
+        output = targets.submit(actor, space, schedule, key, previous);
+      } catch (DomainException rejection) {
+        // Roll back partial Harness writes and its physical lock ledger before recording failure.
+        throw new RejectedSubmission(schedule, occurrence, scheduled, started, rejection);
+      }
+    }
     String reason = expired ? "EXPIRED" : output == null ? "EXECUTION_NOT_SETTLED" : null;
     var record =
         new ScheduleRunDTO(
@@ -217,6 +272,26 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
     repository.insertRun(schedule.id(), occurrence, record, output);
     WorkspaceNotifications.schedules(jdbc, space, schedule.id());
     return repository.findRun(space, schedule.id(), occurrence).orElseThrow();
+  }
+
+  private ScheduleRunDTO recordRejection(UUID space, RejectedSubmission rejected) {
+    var schedule = rejected.schedule;
+    var replay = repository.findRun(space, schedule.id(), rejected.occurrence);
+    if (replay.isPresent()) {
+      return replay.get();
+    }
+    var record =
+        new ScheduleRunDTO(
+            UUID.randomUUID(),
+            rejected.scheduled,
+            rejected.started,
+            schedule.timeZone(),
+            Result.NOT_SUBMITTED,
+            rejected.reason,
+            null);
+    repository.insertRun(schedule.id(), rejected.occurrence, record, null);
+    WorkspaceNotifications.schedules(jdbc, space, schedule.id());
+    return record;
   }
 
   @Override
