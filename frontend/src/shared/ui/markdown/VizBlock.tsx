@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useRef, useState } from 'react'
+import { memo, useLayoutEffect, useId, useRef, useState } from 'react'
 import type {
   ChartDiagnostic,
   ChartSpec,
@@ -14,13 +14,11 @@ type KChart = typeof import('@fengwk/kchart')
 type Measure = (text: string, size: number, weight: number, fontFamily: string) => number
 type Renderer = { kchart: KChart; theme: Theme; measure?: Measure }
 
-type ChartFigure = { source: string; scene: Scene }
 type CachedViz =
   | { kind: 'chart'; spec: ChartSpec; svg: string; scene: Scene }
   | { kind: 'diagram'; svg: string; scene: Scene }
-type RenderOutcome =
-  | CachedViz
-  | { kind: 'failure'; detail?: string; line?: number }
+type RenderFailure = { kind: 'failure'; detail?: string; line?: number }
+type RenderOutcome = CachedViz | RenderFailure
 
 /**
  * KChart 暗色 Terminal 主题换成应用调色板。KChart 只接受具体颜色，每个值重复旁注 token 的 palette 色值；
@@ -31,7 +29,7 @@ const PALETTE_ROLES = {
   surface: '#101412', // --bg
   surface2: '#202723', // --surface-raised：节点填充
   line: '#2b342f', // --border
-  line2: '#355344', // --accent-border：节点描边
+  line2: '#355344', // --palette-moss-700：节点描边
   fg1: '#edf2ed', // --fg
   fg3: '#9aa59d', // --fg-muted
   accent: '#71e79a', // --accent
@@ -136,7 +134,7 @@ async function renderChart(source: string, width: number, lang: string): Promise
   return { kind: 'chart', spec, svg: result.svg, scene: result.scene }
 }
 
-/** 挂载前只重写 SVG 引用属性，让标题、标记和裁剪都指向当前图。 */
+/** 仅接收 KChart 序列化后的 SVG；重写实例引用，让标题、标记和裁剪都指向当前图。 */
 function mountSvg(host: HTMLElement, svg: string, prefix: string): SVGSVGElement | null {
   const template = document.createElement('template')
   template.innerHTML = svg
@@ -194,22 +192,31 @@ function SourceView({ code, syntax }: { code: string; syntax: VizSyntax }) {
 
 /** 按紧凑布局宽度重绘和缓存；数据图另显示标题、副标题、来源和注释。 */
 export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSyntax; code: string }) {
-  const { t, locale } = useI18n()
+  const { locale } = useI18n()
+  const source = code.trim()
+  if (!source) {
+    return <SourceView code={code} syntax={syntax} />
+  }
+  // 输入切换时同步丢弃旧的图与元信息；同一输入的宽度变化保留可观察的 host。
+  return <VizFigure key={`${syntax}\n${locale}\n${source}`} syntax={syntax} code={code} source={source} locale={locale} />
+})
+
+function VizFigure({ syntax, code, source, locale }: { syntax: VizSyntax; code: string; source: string; locale: string }) {
+  const { t } = useI18n()
   const hostRef = useRef<HTMLDivElement>(null)
   const vizPrefix = `kk-viz-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`
-  const source = code.trim()
-  const [failure, setFailure] = useState<{ source: string; detail?: string; line?: number } | null>(null)
-  const [figure, setFigure] = useState<ChartFigure | null>(null)
-  const failed = failure?.source === source
-  const chartFigure = figure?.source === source ? figure : null
+  const [figure, setFigure] = useState<Scene | RenderFailure | null>(null)
+  const failure = figure && 'kind' in figure ? figure : null
+  const scene = figure && !('kind' in figure) ? figure : null
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = hostRef.current
-    if (!host || !source) {
+    if (!host) {
       return
     }
     let cancelled = false
     let width = 0
+    let drawAttempt = 0
     let attachAttempt = 0
     let disposeInteraction: (() => void) | null = null
 
@@ -221,9 +228,13 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
 
     const attachInteraction = (spec: ChartSpec, svg: SVGSVGElement) => {
       const attempt = ++attachAttempt
-      void loadRenderer().then(({ kchart }) => kchart.attach(svg, spec)).then(
+      const isCurrent = () => !cancelled && attempt === attachAttempt
+      void loadRenderer().then(({ kchart }) => isCurrent() ? kchart.attach(svg, spec) : undefined).then(
         (dispose) => {
-          if (cancelled || attempt !== attachAttempt) {
+          if (!dispose) {
+            return
+          }
+          if (!isCurrent()) {
             dispose()
             return
           }
@@ -235,31 +246,31 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
       )
     }
 
-    const mount = (result: CachedViz) => {
-      const svg = mountSvg(host, result.svg, vizPrefix)
-      if (!svg) {
+    const show = (result: RenderOutcome) => {
+      releaseInteraction()
+      if (result.kind === 'failure') {
+        host.replaceChildren()
+        setFigure(result)
         return
       }
-      if (result.kind === 'chart') {
-        setFigure({ source, scene: result.scene })
-        if (Array.isArray(result.spec.interaction) && result.spec.interaction.length > 0) {
-          attachInteraction(result.spec, svg)
-        }
-      } else {
-        setFigure(null)
+      const svg = mountSvg(host, result.svg, vizPrefix)
+      setFigure(result.kind === 'chart' ? result.scene : null)
+      if (svg && result.kind === 'chart' && Array.isArray(result.spec.interaction) && result.spec.interaction.length > 0) {
+        attachInteraction(result.spec, svg)
       }
     }
 
     const draw = (next: number) => {
-      if (next <= 0 || next === width) {
+      if (cancelled || next <= 0 || next === width) {
         return
       }
       width = next
-      releaseInteraction()
+      const attempt = ++drawAttempt
+      const isCurrent = () => !cancelled && attempt === drawAttempt
       const key = `${syntax}\n${locale}\n${next}\n${source}`
       const cached = vizCache.get(key)
       if (cached !== undefined) {
-        mount(cached)
+        show(cached)
         return
       }
       const rendering = syntax === 'kchart'
@@ -267,19 +278,17 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
         : renderDiagram(source, syntax, next)
       rendering.then(
         (result) => {
-          if (cancelled || width !== next) {
+          if (!isCurrent()) {
             return
           }
-          if (result.kind === 'failure') {
-            setFailure({ source, detail: result.detail, line: result.line })
-            return
+          show(result)
+          if (result.kind !== 'failure') {
+            remember(key, result)
           }
-          mount(result)
-          remember(key, result)
         },
         () => {
-          if (!cancelled && width === next) {
-            setFailure({ source })
+          if (isCurrent()) {
+            show({ kind: 'failure' })
           }
         },
       )
@@ -298,47 +307,35 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
     }
   }, [source, syntax, locale, vizPrefix])
 
-  if (!source) {
-    return <SourceView code={code} syntax={syntax} />
-  }
-
-  if (failed) {
-    const { detail, line } = failure
-    return (
-      <>
-        <SourceView code={code} syntax={syntax} />
-        <div className="md-viz-error">
-          {!detail
-            ? t('shared.vizRenderFailed')
-            : Number.isInteger(line) && line! > 0
-              ? t('shared.vizRenderFailedAt', { line: line!, detail })
-              : t('shared.vizRenderFailedWith', { detail })}
-        </div>
-      </>
-    )
-  }
-
   return (
-    <CopyableShell source={source} className="md-viz-shell">
-      {chartFigure?.scene.heading ? (
-        <div className="md-viz-heading">{chartFigure.scene.heading}</div>
+    <>
+      <CopyableShell source={source} className={failure ? 'md-viz-shell md-viz-shell-failed' : 'md-viz-shell'}>
+        {scene?.heading ? <div className="md-viz-heading">{scene.heading}</div> : null}
+        {scene?.subtitle ? <div className="md-viz-subtitle">{scene.subtitle}</div> : null}
+        <div ref={hostRef} className="md-viz" role={failure ? undefined : 'img'} aria-label={failure ? undefined : t('shared.vizFigure')} />
+        {scene?.source || scene?.note ? (
+          <div className="md-viz-meta">
+            {scene.source ? (
+              <div className="md-viz-source">{t('shared.vizSource', { source: scene.source })}</div>
+            ) : null}
+            {scene.note ? (
+              <div className="md-viz-note">{t('shared.vizNote', { note: scene.note })}</div>
+            ) : null}
+          </div>
+        ) : null}
+      </CopyableShell>
+      {failure ? (
+        <>
+          <SourceView code={code} syntax={syntax} />
+          <div className="md-viz-error">
+            {!failure.detail
+              ? t('shared.vizRenderFailed')
+              : Number.isInteger(failure.line) && failure.line! > 0
+                ? t('shared.vizRenderFailedAt', { line: failure.line!, detail: failure.detail })
+                : t('shared.vizRenderFailedWith', { detail: failure.detail })}
+          </div>
+        </>
       ) : null}
-      {chartFigure?.scene.subtitle ? (
-        <div className="md-viz-subtitle">{chartFigure.scene.subtitle}</div>
-      ) : null}
-      <div ref={hostRef} className="md-viz" role="img" aria-label={t('shared.vizFigure')} />
-      {chartFigure?.scene.source || chartFigure?.scene.note ? (
-        <div className="md-viz-meta">
-          {chartFigure.scene.source ? (
-            <div className="md-viz-source">
-              {t('shared.vizSource', { source: chartFigure.scene.source })}
-            </div>
-          ) : null}
-          {chartFigure.scene.note ? (
-            <div className="md-viz-note">{t('shared.vizNote', { note: chartFigure.scene.note })}</div>
-          ) : null}
-        </div>
-      ) : null}
-    </CopyableShell>
+    </>
   )
-})
+}

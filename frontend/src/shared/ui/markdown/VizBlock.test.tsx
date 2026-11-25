@@ -161,20 +161,7 @@ describe('VizBlock', () => {
 
   it('redraws and caches by layout width, without mounting again above 720px', async () => {
     // 验证隐藏、窄容器与宽容器的转换；宽容器之间保持同一 SVG 节点和缓存。
-    const callbacks: ResizeObserverCallback[] = []
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: ResizeObserverCallback) {
-        callbacks.push(callback)
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    })
-    const resize = (width: number) => act(() => {
-      for (const callback of callbacks) {
-        callback([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver)
-      }
-    })
+    const resize = controlResize()
     const { VizBlock } = await loadVizBlock()
     const view = render(<VizBlock syntax="mermaid" code="graph TD; A-->B" />)
 
@@ -197,6 +184,94 @@ describe('VizBlock', () => {
     resize(1000)
     await expectSvg(next.container, 'data-width="720"')
     expect(kchart.diagram.mock.calls.map(([, options]) => options.width)).toEqual([640, 720])
+  })
+
+  it('recovers on a new width after a layout failure without replacing the observed host', async () => {
+    // 同一份源码的失败不应阻断后续宽度通知，也不能留下旧的图和元信息。
+    const resize = controlResize()
+    const { VizBlock } = await loadVizBlock()
+    const view = render(<VizBlock syntax="kchart" code={JSON.stringify(CHART_SPEC)} />)
+    resize(640)
+    await expectSvg(view.container, 'data-width="640"')
+    const host = view.container.querySelector('.md-viz')
+
+    kchart.render.mockRejectedValueOnce(new Error('layout failed'))
+    resize(360)
+    expect(await screen.findByText('无法渲染此图。')).toBeInTheDocument()
+    expect(view.container.querySelector('.md-viz')).toBe(host)
+    expect(host?.querySelector('svg')).toBeNull()
+    expect(screen.queryByText('发布节奏')).not.toBeInTheDocument()
+
+    resize(480)
+    await expectSvg(view.container, 'data-width="480"')
+    expect(view.container.querySelector('.md-viz')).toBe(host)
+    expect(screen.getByText('发布节奏')).toBeInTheDocument()
+    expect(screen.queryByText('无法渲染此图。')).not.toBeInTheDocument()
+  })
+
+  it('ignores the first width A result after A/B/A and does not cache it', async () => {
+    // 宽度相同不代表同一次请求；旧失败和仍在运行的 B 都不能覆盖新 A。
+    const resize = controlResize()
+    const first = createDeferred<DiagramResult>()
+    const middle = createDeferred<DiagramResult>()
+    kchart.diagram.mockReturnValueOnce(first.promise).mockReturnValueOnce(middle.promise)
+    const { VizBlock } = await loadVizBlock()
+    const view = render(<VizBlock syntax="mermaid" code="graph TD; A-->B" />)
+    resize(480)
+    await flushPromises()
+    resize(360)
+    await flushPromises()
+    resize(480)
+    await expectSvg(view.container, 'data-width="480"')
+    const current = view.container.querySelector('.md-viz svg')
+
+    first.resolve({ svg: null, scene: null, diagnostics: [] })
+    middle.resolve({ svg: '<svg data-width="360"></svg>', scene: { width: 1, height: 1, children: [] }, diagnostics: [] })
+    await flushPromises()
+    expect(screen.queryByText('无法渲染此图。')).not.toBeInTheDocument()
+    expect(view.container.querySelector('.md-viz svg')).toBe(current)
+
+    resize(360)
+    await expectSvg(view.container, 'data-width="360"')
+    expect(kchart.diagram).toHaveBeenCalledTimes(4)
+  })
+
+  it.each(['source', 'syntax', 'locale'] as const)('clears the old figure and releases its attachment when %s changes', async (changed) => {
+    // 让新图保持未完成，检查切换提交时，而不是下一张图绘制完成后，旧内容已消失。
+    const { setLocale } = await import('@/shared/i18n')
+    const { VizBlock } = await loadVizBlock()
+    const spec = { ...CHART_SPEC, interaction: ['inspect'] }
+    const code = JSON.stringify(spec)
+    const dispose = vi.fn()
+    kchart.attach.mockResolvedValueOnce(dispose)
+    const view = render(<VizBlock syntax="kchart" code={code} />)
+    await expectSvg(view.container, 'data-chart="bar"')
+    await flushPromises()
+    const previous = view.container.querySelector('.md-viz svg')
+    dispose.mockImplementation(() => expect(previous?.isConnected).toBe(true))
+
+    const pending = createDeferred<RenderResult>()
+    kchart.render.mockReturnValueOnce(pending.promise)
+    kchart.diagram.mockReturnValueOnce(createDeferred<DiagramResult>().promise)
+    if (changed === 'locale') {
+      act(() => setLocale('en-US'))
+    } else {
+      view.rerender(<VizBlock syntax={changed === 'syntax' ? 'mermaid' : 'kchart'} code={changed === 'source' ? JSON.stringify({ ...spec, title: 'Next' }) : code} />)
+    }
+    expect(view.container.querySelector('.md-viz svg')).toBeNull()
+    expect(view.container.querySelector('.md-viz-heading, .md-viz-meta')).toBeNull()
+    expect(dispose).toHaveBeenCalledTimes(1)
+    if (changed === 'locale') {
+      // 回到 A 命中缓存后，迟到的 B 也不能显示诊断或释放当前交互。
+      await flushPromises()
+      expect(kchart.render.mock.calls[1]?.[1]).toMatchObject({ lang: 'en-US' })
+      act(() => setLocale('zh-CN'))
+      await expectSvg(view.container, 'data-chart="bar"')
+      pending.reject(new Error('stale locale'))
+      await flushPromises()
+      expect(view.container.querySelector('.md-viz-error')).toBeNull()
+      expect(view.container.querySelector('.md-viz-heading')).toHaveTextContent('发布节奏')
+    }
   })
 
   it('opens diagram links in a new tab without opener or referrer', async () => {
@@ -337,24 +412,13 @@ describe('VizBlock', () => {
   it('disposes the previous interaction before redrawing and drops a late attachment', async () => {
     const firstDispose = vi.fn()
     const secondDispose = vi.fn()
+    const thirdDispose = vi.fn()
     const late = createDeferred<() => void>()
     kchart.attach
       .mockReturnValueOnce(late.promise)
       .mockResolvedValueOnce(secondDispose)
-    const callbacks: ResizeObserverCallback[] = []
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: ResizeObserverCallback) {
-        callbacks.push(callback)
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    })
-    const resize = (width: number) => act(() => {
-      for (const callback of callbacks) {
-        callback([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver)
-      }
-    })
+      .mockResolvedValueOnce(thirdDispose)
+    const resize = controlResize()
     const spec = { ...CHART_SPEC, interaction: ['inspect'] }
     const { VizBlock } = await loadVizBlock()
     const view = render(<VizBlock syntax="kchart" code={JSON.stringify(spec)} />)
@@ -368,9 +432,18 @@ describe('VizBlock', () => {
     late.resolve(firstDispose)
     await flushPromises()
     expect(firstDispose).toHaveBeenCalledTimes(1)
+    expect(secondDispose).not.toHaveBeenCalled()
+
+    // 已完成的绑定先释放，再替换对应 SVG；迟到的清理不能覆盖当前绑定。
+    const secondSvg = view.container.querySelector('.md-viz svg')
+    secondDispose.mockImplementation(() => expect(secondSvg?.isConnected).toBe(true))
+    resize(560)
+    await waitFor(() => expect(kchart.attach).toHaveBeenCalledTimes(3))
+    expect(secondDispose).toHaveBeenCalledTimes(1)
+    expect(secondSvg?.isConnected).toBe(false)
 
     view.unmount()
-    expect(secondDispose).toHaveBeenCalledTimes(1)
+    expect(thirdDispose).toHaveBeenCalledTimes(1)
   })
 
   it('does not attach interactions for a chart without interaction actions', async () => {
@@ -443,6 +516,20 @@ async function flushPromises() {
   await act(async () => {
     await Promise.resolve()
     await Promise.resolve()
+  })
+}
+
+function controlResize() {
+  const observers = new Set<ResizeObserverCallback>()
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe() { observers.add(this.callback) }
+    disconnect() { observers.delete(this.callback) }
+  })
+  return (width: number) => act(() => {
+    for (const callback of observers) {
+      callback([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver)
+    }
   })
 }
 
