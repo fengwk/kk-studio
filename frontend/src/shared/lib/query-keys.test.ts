@@ -18,11 +18,6 @@ describe('queryKeys', () => {
     expect(queryKeys.threads.tree('thread-1')).toEqual(['threads', 'tree', 'thread-1'])
   })
 
-  it('keeps Chat-scoped Thread lists and chat details in distinct cache scopes', () => {
-    expect(queryKeys.chats.detail('chat-1')).toEqual(['chats', 'detail', 'chat-1'])
-    expect(queryKeys.chats.threads('chat-1')).toEqual(['chats', 'threads', 'chat-1'])
-  })
-
   /**
    * 测试意图：验证 Skill 全局目录、Skill Packages、Environment 以及 MCP Server 具有确定性的查询键。
    */

@@ -364,7 +364,7 @@ public class CanvasDtoMapper {
         yield new CanvasResourceInput.Text(text.name(), text.textContent());
       }
       case CanvasResourceInputDTO.Blob blob -> new CanvasResourceInput.Blob(
-          blob.name(), requireCommandId(blob.blobId(), "blobId"));
+          blob.name(), requireCommandId(blob.uploadId(), "uploadId"));
     };
   }
 

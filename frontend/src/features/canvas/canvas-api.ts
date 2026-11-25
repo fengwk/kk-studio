@@ -54,24 +54,24 @@ export function listCanvasFunctions(
 
 export function getCanvasResourceOriginalUrl(
   canvasId: string,
-  resourceId: string,
+  blobId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return request(
-    'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/download-url',
-    { path: { canvasId, resourceId } },
+    'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url',
+    { path: { canvasId, blobId } },
     { signal: options?.signal },
   )
 }
 
 export function getCanvasResourcePreviewUrl(
   canvasId: string,
-  resourceId: string,
+  blobId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return request(
-    'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/preview-url',
-    { path: { canvasId, resourceId } },
+    'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/preview-url',
+    { path: { canvasId, blobId } },
     { signal: options?.signal },
   )
 }

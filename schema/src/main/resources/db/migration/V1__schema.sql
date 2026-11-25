@@ -41,6 +41,7 @@ comment on column storage_blob.archive_index is '服务端校验过的 ZIP 归�
 
 create table storage_upload (
     id                  uuid           primary key,
+    owner_user_id       uuid,
     candidate_blob_id   uuid           not null,
     blob_id             uuid,
     filename            varchar(512)   not null,
@@ -172,6 +173,10 @@ create table studio_user (
     constraint ck_studio_user_profile check (jsonb_typeof(profile) = 'object'),
     constraint ck_studio_user_role check (role in ('ADMIN', 'USER'))
 );
+
+alter table storage_upload
+    add constraint fk_storage_upload_owner foreign key (owner_user_id)
+        references studio_user (id) on delete restrict;
 
 create table login_session (
     token_hash bytea primary key,

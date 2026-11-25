@@ -101,30 +101,6 @@ describe('storage-service', () => {
     })
   })
 
-  it('resolves original and preview blob URLs via POST on the blob path', async () => {
-    const presigned = {
-      method: 'GET' as const,
-      url: 'https://s3.test/orig',
-      headers: {},
-      expiresAt: 1786492800000,
-      mediaType: 'image/png',
-      sizeBytes: '64',
-    }
-    apiRequest.mockResolvedValue(presigned)
-
-    await expect(storageService.getBlobDownloadUrl('blob-1')).resolves.toEqual(presigned)
-    expect(apiRequest).toHaveBeenCalledWith(
-      'POST /api/platform/storage/blobs/{blobId}/download-url',
-      { path: { blobId: 'blob-1' } },
-    )
-
-    await expect(storageService.getBlobPreviewUrl('blob-1')).resolves.toEqual(presigned)
-    expect(apiRequest).toHaveBeenCalledWith(
-      'POST /api/platform/storage/blobs/{blobId}/preview-url',
-      { path: { blobId: 'blob-1' } },
-    )
-  })
-
   it('PUTs object bytes with signed headers minus browser-forbidden ones', async () => {
     const file = new File([new Uint8Array(4)], 'a.png', { type: 'image/png' })
     vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 200 }))

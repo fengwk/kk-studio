@@ -16,6 +16,9 @@ import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 
 import java.util.List;
 import java.util.Map;
@@ -37,15 +40,18 @@ public class CanvasController {
   private final CanvasQueryService canvasQueryService;
   private final CanvasCommandService canvasCommandService;
   private final CanvasDtoMapper mapper;
+  private final ResourceAccess resourceAccess;
 
   public CanvasController(
       CanvasQueryService canvasQueryService,
       CanvasCommandService canvasCommandService,
-      CanvasDtoMapper mapper) {
+      CanvasDtoMapper mapper,
+      ResourceAccess resourceAccess) {
     this.canvasQueryService = Objects.requireNonNull(canvasQueryService, "canvasQueryService");
     this.canvasCommandService =
         Objects.requireNonNull(canvasCommandService, "canvasCommandService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.resourceAccess = Objects.requireNonNull(resourceAccess, "resourceAccess");
   }
 
   @GetMapping("/{canvasId}")
@@ -64,13 +70,19 @@ public class CanvasController {
    */
   @PostMapping("/{canvasId}/commands")
   public CanvasPatchDTO applyCommands(
-      @PathVariable UUID canvasId, @RequestBody ApplyCanvasCommandsRequestDTO request) {
+      @PathVariable UUID canvasId,
+      @RequestBody ApplyCanvasCommandsRequestDTO request,
+      StudioPrincipal principal) {
+    resourceAccess.require(principal, Kind.CANVAS, canvasId);
     if (request.getIdempotencyKey() == null) {
       throw DomainException.validation("idempotencyKey", "idempotencyKey is required");
     }
     CanvasCommandResult result =
-        canvasCommandService.applyCommands(
-            canvasId, request.getIdempotencyKey(), mapper.toCommands(request.getCommands()));
+        canvasCommandService.applyCommandsFromUploads(
+            canvasId,
+            request.getIdempotencyKey(),
+            mapper.toCommands(request.getCommands()),
+            principal.userId());
     return switch (result) {
       case CanvasCommandResult.Accepted accepted -> mapper.toDto(accepted.patch());
       case CanvasCommandResult.Conflicted conflicted -> throw conflict(

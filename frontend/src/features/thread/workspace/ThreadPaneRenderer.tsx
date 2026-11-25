@@ -129,6 +129,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
                   focusOnEscape: active,
                   scope: threadId,
                   onPartsChange: controller.setDraft,
+                  onHistoryPartsChange: (parts) => controller.setDraft(parts, 'history'),
                   onSubmit: (payload, localDraft) => void controller.submitMessage(payload, localDraft),
                   commands,
                   onCommand: handleCommand,

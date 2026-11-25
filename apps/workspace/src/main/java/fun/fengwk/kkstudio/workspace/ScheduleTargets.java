@@ -141,7 +141,7 @@ class ScheduleTargets {
                   new TurnCutDTO(source, t.turnEndEntryId(), "Scheduled " + key))
               .threadId();
     }
-    sessions.submitScheduledMessage(thread, schedule.message(), key);
+    sessions.submitScheduledMessage(actor.userId(), thread, schedule.message(), key);
     return thread;
   }
 }

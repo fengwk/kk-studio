@@ -12,6 +12,9 @@ public class StorageUpload {
   /** 上传主键（uuid，应用生成）；PENDING 直传键 {@code uploads/{id}/original} 由其推导。 */
   private UUID id;
 
+  /** Null only for explicitly trusted server-generated staging uploads. */
+  private UUID ownerUserId;
+
   /** 服务端为 PENDING→READY 过渡预分配的 blob id（无 FK，complete 时才建行）。 */
   private UUID candidateBlobId;
 

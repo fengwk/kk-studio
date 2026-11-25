@@ -6,7 +6,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioOriginPolicy;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
@@ -93,6 +95,12 @@ public class IdeGatewayDataPlane {
       return;
     }
 
+    Object principalAttribute = request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE);
+    if (!(principalAttribute instanceof StudioPrincipal principal)) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
+      return;
+    }
+
     Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
     if (route.isEmpty()) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -110,7 +118,19 @@ public class IdeGatewayDataPlane {
       return;
     }
 
-    executeLocal(environmentId, viewId, rawPathAndQuery, request, response);
+    Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
+        viewAuthorizer.authorize(environmentId, viewId, request.getHeader("Cookie"));
+    if (access.isEmpty()) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
+      return;
+    }
+    if (!viewAuthorizer.belongsToUser(
+        environmentId, viewId, request.getHeader("Cookie"), principal.userId())) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
+      return;
+    }
+
+    executeLocal(environmentId, viewId, rawPathAndQuery, request, response, access.get());
   }
 
   /** 处理 owner 内部数据面请求（已校验 HMAC，来源为同集群其它节点）。 */
@@ -139,7 +159,24 @@ public class IdeGatewayDataPlane {
       return;
     }
 
-    executeLocal(environmentId, viewId, rawPathAndQuery, request, response);
+    Object authenticatedUserId =
+        request.getAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE);
+    if (!(authenticatedUserId instanceof UUID userId)) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
+      return;
+    }
+    Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
+        viewAuthorizer.authorize(environmentId, viewId, request.getHeader("Cookie"));
+    if (access.isEmpty()) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
+      return;
+    }
+    if (!viewAuthorizer.belongsToUser(environmentId, viewId, request.getHeader("Cookie"), userId)) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
+      return;
+    }
+
+    executeLocal(environmentId, viewId, rawPathAndQuery, request, response, access.get());
   }
 
   private void executeLocal(
@@ -147,15 +184,10 @@ public class IdeGatewayDataPlane {
       UUID viewId,
       String rawPathAndQuery,
       HttpServletRequest request,
-      HttpServletResponse response)
+      HttpServletResponse response,
+      IdeDataViewAuthorizer.IdeDataViewAccess access)
       throws IOException {
-    Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
-        viewAuthorizer.authorize(environmentId, viewId, request.getHeader("Cookie"));
-    if (access.isEmpty()) {
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
-      return;
-    }
-    if (!workspaceQueryAllowed(access.get(), request)) {
+    if (!workspaceQueryAllowed(access, request)) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
@@ -165,14 +197,13 @@ public class IdeGatewayDataPlane {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    if (!tunnel.get().identity().equals(access.get().controlIdentity())) {
+    if (!tunnel.get().identity().equals(access.controlIdentity())) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_CONFLICT);
       return;
     }
 
     boolean isWs = StudioOriginPolicy.isWebSocketUpgrade(request);
-    String daemonPath =
-        IdeDataPaths.daemonPath(viewId, access.get().bindingEpoch(), rawPathAndQuery);
+    String daemonPath = IdeDataPaths.daemonPath(viewId, access.bindingEpoch(), rawPathAndQuery);
     Map<String, List<String>> forwardHeaders =
         IdeDataHeaderPolicy.forwardRequestHeaders(request, isWs);
 
@@ -227,7 +258,8 @@ public class IdeGatewayDataPlane {
       copyResponseBody(exchange, response);
     } catch (Exception error) {
       log.info(
-          "local tunnel http transfer failed; phase=LOCAL_TUNNEL_TRANSFER; environmentId={}; viewId={}; exception={}",
+          "local tunnel http transfer failed; phase=LOCAL_TUNNEL_TRANSFER; environmentId={};"
+              + " viewId={}; exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -255,7 +287,8 @@ public class IdeGatewayDataPlane {
       return tunnel.openHttp(tunnelRequest);
     } catch (IllegalStateException error) {
       log.info(
-          "local tunnel open failed; phase=LOCAL_TUNNEL_OPEN_HTTP; environmentId={}; viewId={}; exception={}",
+          "local tunnel open failed; phase=LOCAL_TUNNEL_OPEN_HTTP; environmentId={}; viewId={};"
+              + " exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -311,7 +344,8 @@ public class IdeGatewayDataPlane {
           .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
     } catch (Exception error) {
       log.info(
-          "local tunnel response headers failed; phase=LOCAL_TUNNEL_RESPONSE_HEADERS; environmentId={}; viewId={}; exception={}",
+          "local tunnel response headers failed; phase=LOCAL_TUNNEL_RESPONSE_HEADERS;"
+              + " environmentId={}; viewId={}; exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -361,7 +395,8 @@ public class IdeGatewayDataPlane {
       exchange = tunnel.openWebSocket(tunnelRequest);
     } catch (IllegalStateException error) {
       log.info(
-          "local tunnel open ws failed; phase=LOCAL_TUNNEL_OPEN_WS; environmentId={}; viewId={}; exception={}",
+          "local tunnel open ws failed; phase=LOCAL_TUNNEL_OPEN_WS; environmentId={}; viewId={};"
+              + " exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -382,7 +417,8 @@ public class IdeGatewayDataPlane {
         log.debug("failed to close ws exchange after header error", closeErr);
       }
       log.info(
-          "local tunnel ws headers failed; phase=LOCAL_TUNNEL_WS_HEADERS; environmentId={}; viewId={}; exception={}",
+          "local tunnel ws headers failed; phase=LOCAL_TUNNEL_WS_HEADERS; environmentId={};"
+              + " viewId={}; exception={}",
           environmentId,
           viewId,
           error.getClass().getSimpleName());
@@ -397,7 +433,8 @@ public class IdeGatewayDataPlane {
         JettyConnectionHandover.handover(request, 101, tunnelResponse.headers(), exchange.stream());
       } catch (Exception error) {
         log.info(
-            "local tunnel ws handover failed; phase=LOCAL_TUNNEL_WS_HANDOVER; environmentId={}; viewId={}; exception={}",
+            "local tunnel ws handover failed; phase=LOCAL_TUNNEL_WS_HANDOVER; environmentId={};"
+                + " viewId={}; exception={}",
             environmentId,
             viewId,
             error.getClass().getSimpleName());

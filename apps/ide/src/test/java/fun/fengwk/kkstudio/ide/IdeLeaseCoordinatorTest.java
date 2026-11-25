@@ -50,6 +50,7 @@ class IdeLeaseCoordinatorTest {
   private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
   private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
   private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
   private static final DaemonConnectionIdentity IDENTITY =
       new DaemonConnectionIdentity(ENV, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
@@ -73,6 +74,7 @@ class IdeLeaseCoordinatorTest {
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
         new IdeBrowserUseGateway.Proofs(
             DOCUMENT,
+            USER_ID,
             1L,
             List.of(
                 proof(VIEW_1, DOCUMENT, 7L),
@@ -87,6 +89,7 @@ class IdeLeaseCoordinatorTest {
         List.of(new DaemonIdeLease.Binding(VIEW_1, DOCUMENT, 7L)),
         transport.leases.getFirst().bindings());
     assertEquals(List.of(IDENTITY), transport.expectedIdentities);
+    assertEquals(List.of(USER_ID), gateway.queryUsers);
   }
 
   /** 零根视图没有 directory，但租约只按 view/browserSession/epoch 匹配，续租不受影响。 */
@@ -97,7 +100,8 @@ class IdeLeaseCoordinatorTest {
     views.response = views(zeroRoot);
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
 
     coordinator.onHeartbeat(ENV, IDENTITY, 44L);
 
@@ -117,7 +121,8 @@ class IdeLeaseCoordinatorTest {
     gateway.failures.add(new Group(EVENT_NODE, CONNECTION, DOCUMENT));
     gateway.proofs.put(
         new Group(otherNode, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_2, DOCUMENT, 8L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_2, DOCUMENT, 8L))));
 
     coordinator.onHeartbeat(ENV, IDENTITY, 43L);
 
@@ -142,7 +147,8 @@ class IdeLeaseCoordinatorTest {
     views.response = views(view(VIEW_1, 7L));
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
     gateway.afterQuery =
         () -> transport.identity = new DaemonConnectionIdentity(ENV, "other-daemon");
 
@@ -161,7 +167,8 @@ class IdeLeaseCoordinatorTest {
     views.response = views(reported);
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_2, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_2, DOCUMENT, 7L))));
 
     coordinator.onHeartbeat(ENV, IDENTITY, 44L);
 
@@ -232,7 +239,7 @@ class IdeLeaseCoordinatorTest {
   }
 
   private static IdeBrowserUseGateway.Proof proof(UUID viewId, UUID browserSessionId, long epoch) {
-    return new IdeBrowserUseGateway.Proof(ENV, viewId, browserSessionId, epoch);
+    return new IdeBrowserUseGateway.Proof(ENV, viewId, browserSessionId, USER_ID, epoch);
   }
 
   private record Group(UUID eventNodeId, UUID connectionId, UUID browserSessionId) {}
@@ -260,6 +267,11 @@ class IdeLeaseCoordinatorTest {
     public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
       calls++;
       return response;
+    }
+
+    @Override
+    UUID boundUser(EnvironmentId environmentId, UUID viewId) {
+      return USER_ID;
     }
   }
 
@@ -310,6 +322,7 @@ class IdeLeaseCoordinatorTest {
 
     private final Map<Group, Proofs> proofs = new HashMap<>();
     private final Set<Group> failures = new HashSet<>();
+    private final List<UUID> queryUsers = new ArrayList<>();
     private Runnable afterQuery = () -> {};
 
     @Override
@@ -319,13 +332,15 @@ class IdeLeaseCoordinatorTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       throw new AssertionError("unexpected intent query");
     }
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
+      queryUsers.add(userId);
       Group group = new Group(eventNodeId, connectionId, browserSessionId);
       if (failures.contains(group)) {
         throw new IllegalStateException("event node unavailable");

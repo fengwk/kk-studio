@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,13 +18,18 @@ import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
 import fun.fengwk.kkstudio.common.error.DomainException;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -46,6 +52,7 @@ public class CanvasCommandService {
   private final PostgresqlCanvasFunctionRunRepository runRepository;
   private final CanvasResourceLifecycle resourceLifecycle;
   private final CanvasCommandPlanner planner;
+  private final ObjectProvider<CanvasUploadOwnership> uploadOwnership;
 
   public CanvasCommandService(
       PostgresqlCanvasStore canvasStore,
@@ -53,13 +60,15 @@ public class CanvasCommandService {
       PostgresqlCanvasFunctionResourcePinRepository pinRepository,
       PostgresqlCanvasFunctionRunRepository runRepository,
       CanvasResourceLifecycle resourceLifecycle,
-      CanvasCommandPlanner planner) {
+      CanvasCommandPlanner planner,
+      ObjectProvider<CanvasUploadOwnership> uploadOwnership) {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.planner = Objects.requireNonNull(planner, "planner");
+    this.uploadOwnership = Objects.requireNonNull(uploadOwnership, "uploadOwnership");
   }
 
   /** 创建文档并返回初始 revision；加入调用方事务。 */
@@ -143,13 +152,12 @@ public class CanvasCommandService {
     canvasStore.deleteDocument(canvasId);
   }
 
-  @Transactional
-  public CanvasCommandResult applyCommands(
-      UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands) {
-    Objects.requireNonNull(canvasId, "canvasId");
-    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-    Objects.requireNonNull(commands, "commands");
-    String requestHash = CanvasCommandHash.of(commands);
+  private CanvasCommandResult applyCommandsWithHash(
+      UUID canvasId,
+      UUID idempotencyKey,
+      List<CanvasCommand> commands,
+      String requestHash,
+      CanvasUploadOwnership uploadOwner) {
     CanvasDocument document = requireLockedDocument(canvasId);
     CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (dedup != null) {
@@ -165,7 +173,7 @@ public class CanvasCommandService {
     }
     long acceptedRevision = document.revision();
     if (plan.hasChanges()) {
-      applyMutations(canvasId, plan.mutations());
+      applyMutations(canvasId, plan.mutations(), uploadOwner);
       acceptedRevision++;
       if (!canvasStore.advanceRevision(canvasId, document.revision(), acceptedRevision)) {
         throw new IllegalStateException("canvas revision CAS failed under document row lock");
@@ -174,6 +182,85 @@ public class CanvasCommandService {
     canvasStore.addCommandDedup(
         new CommandDedup(canvasId, idempotencyKey, requestHash, acceptedRevision));
     return new Accepted(plan.toPatch(acceptedRevision));
+  }
+
+  /**
+   * User command path: consume only READY uploads owned by that principal, in this Canvas
+   * transaction.
+   */
+  @Transactional
+  public CanvasCommandResult applyCommandsFromUploads(
+      UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands, UUID userId) {
+    Objects.requireNonNull(userId, "userId");
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+    Objects.requireNonNull(commands, "commands");
+    requireLockedDocument(canvasId);
+    String requestHash = CanvasCommandHash.of(commands);
+    CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
+    if (dedup != null) {
+      if (!dedup.requestHash().equals(requestHash)) {
+        throw DomainException.conflict(
+            "IDEMPOTENCY_CONFLICT", "idempotency key is bound to a different request");
+      }
+      return new Accepted(CanvasPatch.receipt(dedup.acceptedRevision()));
+    }
+    List<CanvasCommand> resolved = new ArrayList<>(commands.size());
+    Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads = new LinkedHashMap<>();
+    for (CanvasCommand command : commands) {
+      resolved.add(resolveUploads(command, userId, uploads));
+    }
+    CanvasUploadOwnership owner = uploads.isEmpty() ? null : requireUploadOwnership();
+    CanvasCommandResult result =
+        applyCommandsWithHash(canvasId, idempotencyKey, resolved, requestHash, owner);
+    if (owner != null && result instanceof Accepted accepted && !accepted.patch().isEmpty()) {
+      for (UUID uploadId : uploads.keySet()) {
+        owner.delete(uploadId, userId);
+      }
+    }
+    return result;
+  }
+
+  private CanvasCommand resolveUploads(
+      CanvasCommand command, UUID userId, Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads) {
+    if (command instanceof CanvasCommand.CreateNode create) {
+      return new CanvasCommand.CreateNode(
+          create.nodeId(),
+          create.name(),
+          create.transform(),
+          resolveInputs(create.resources(), userId, uploads));
+    }
+    if (command instanceof CanvasCommand.SetNodeResources set) {
+      return new CanvasCommand.SetNodeResources(
+          set.nodeId(), set.expectedResourceIds(), resolveInputs(set.resources(), userId, uploads));
+    }
+    return command;
+  }
+
+  private List<CanvasResourceInput> resolveInputs(
+      List<CanvasResourceInput> inputs,
+      UUID userId,
+      Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads) {
+    List<CanvasResourceInput> resolved = new ArrayList<>(inputs.size());
+    for (CanvasResourceInput input : inputs) {
+      if (input instanceof CanvasResourceInput.Blob blob) {
+        CanvasUploadOwnership owner = requireUploadOwnership();
+        CanvasUploadOwnership.ReadyUpload ready =
+            uploads.computeIfAbsent(blob.blobId(), uploadId -> owner.lockReady(uploadId, userId));
+        resolved.add(new CanvasResourceInput.Blob(ready.filename(), ready.blobId()));
+      } else {
+        resolved.add(input);
+      }
+    }
+    return List.copyOf(resolved);
+  }
+
+  private CanvasUploadOwnership requireUploadOwnership() {
+    CanvasUploadOwnership owner = uploadOwnership.getIfAvailable();
+    if (owner == null) {
+      throw new IllegalStateException("Canvas upload references require platform Storage");
+    }
+    return owner;
   }
 
   private CanvasDocument requireLockedDocument(UUID canvasId) {
@@ -199,7 +286,8 @@ public class CanvasCommandService {
   }
 
   /** 按规划顺序执行行级步骤；任何一步不满足都抛出，使整个事务回滚。 */
-  private void applyMutations(UUID canvasId, List<CanvasMutation> mutations) {
+  private void applyMutations(
+      UUID canvasId, List<CanvasMutation> mutations, CanvasUploadOwnership uploadOwner) {
     for (CanvasMutation mutation : mutations) {
       switch (mutation) {
         case CanvasMutation.InsertNode insert -> canvasStore.addNode(toRecord(canvasId, insert));
@@ -213,7 +301,12 @@ public class CanvasCommandService {
             throw new IllegalStateException("delete canvas node failed: " + delete.nodeId());
           }
         }
-        case CanvasMutation.InsertResource insert -> resourceRepository.add(insert.resource());
+        case CanvasMutation.InsertResource insert -> {
+          if (uploadOwner != null && insert.resource().blobId() != null) {
+            uploadOwner.retain(insert.resource().blobId());
+          }
+          resourceRepository.add(insert.resource());
+        }
         case CanvasMutation.AttachResource attach -> {
           if (!resourceRepository.attachOwner(
               canvasId, attach.resourceId(), attach.nodeId(), attach.resourceIndex())) {

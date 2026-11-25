@@ -11,34 +11,6 @@
 | [视觉语言与组件体系](workspace-ui.md) | 颜色、间距、焦点、边框和动效遵守什么规则，由哪些共享组件承载，怎样用门禁防止样式回退？ |
 | [保留、重构、删除与交付](workspace-delivery.md) | 现有代码哪些保留、重写或删除，重写必须保持哪些行为，按什么顺序交付和验收？ |
 
-## 运行原型
-
-从仓库根目录启动，已装前端依赖时跳过第一条：
-
-```sh
-npm --prefix frontend ci
-npm --prefix frontend run dev:prototype
-```
-
-打开 [127.0.0.1:5176](http://127.0.0.1:5176/)。保存组件或样式即可热更新；改动页面骨架或 mock 模块会重新载入。登录、对话、审批、定时和设置使用本地样例，VS Code 是静态工作台画面。不需要启动后端或 Daemon。原型默认以内置管理员 kkstudio 进入；退出后可用 kkstudio 或普通用户 chen 加任意密码登录。
-
-| 修改 | 源码 |
-| --- | --- |
-| 侧栏 | [ResourceTree](workspace-prototype/workspace/ResourceTree.tsx)、[ScheduleList](workspace-prototype/workspace/ScheduleList.tsx)、[WorkspaceMenu](workspace-prototype/workspace/WorkspaceMenu.tsx) |
-| 窗格 | [布局树](workspace-prototype/workspace/layout.js)、[窗格容器](workspace-prototype/workspace/pane-layout-view.js)、[PaneHeader](workspace-prototype/workspace/PaneHeader.tsx) |
-| 对话和环境 | [ThreadPane](workspace-prototype/workspace/ThreadPane.tsx)、[环境入口和 VS Code](workspace-prototype/workspace/EnvironmentViews.tsx) |
-| 画布和设置 | [CanvasResource](workspace-prototype/canvas/CanvasResource.tsx)、[SettingsPreview](workspace-prototype/settings/SettingsPreview.tsx) |
-| 登录和账户 | [登录与修改密码表单](workspace-prototype/workspace/AccountForms.tsx)、[用户状态](workspace-prototype/workspace/session.ts)、[头像](workspace-prototype/workspace/UserAvatar.tsx)、[用户设置](workspace-prototype/settings/UsersPreview.tsx) |
-| 样例、审批和 IDE | [mock](workspace-prototype/mock/) |
-
-用 [Vite 构建脚本](workspace-prototype/build-preview.mjs)生成离线单文件：
-
-```sh
-npm --prefix frontend run build:prototype
-```
-
-打开命令输出的 HTML，或把它单独复制给评审者。HTML、截图和 Vite 缓存留在 `reports/`，不提交。原型复用正式 UI 控件和样式 token；迁移时保留组件及其样式，用真实数据替换 mock，评审工具栏不迁入产品。交互回归使用 [Chromium 检查](workspace-prototype/verify-preview.cjs)（可传 `--live`）、[斜杠命令检查](workspace-prototype/check-slash-commands.cjs)和[目录拖拽检查](workspace-prototype/check-tree-drag.cjs)。
-
 ## 一次完整操作
 
 在对话标题栏点「向右拆分」，新窗格默认显示「新会话」。直接输入并发送即可开始对话；也可以点目录里的「1.3.0 工作流」或左下的 VS Code 图标，再选择打开到哪个窗格。点任一窗格标题里的「全屏」可专注当前内容，点「退出全屏」或按 `Esc` 恢复原布局。
@@ -140,7 +112,7 @@ type PaneBindings = Partial<Record<UUID, Target>>
 
 VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流程。一个窗格展示一个工作台，由窗格标题切换，不再叠加 Studio 的 IDE 标签。仅隐藏或全屏时，嵌入宿主保持挂载；不要移动导致 iframe 重载的 DOM 节点。Composer 的 `/files` 打开当前环境的 VS Code，也走同一流程。
 
-- **设置**：侧栏底部是头像和齿轮；展开时头像在齿轮左边，收起时头像在齿轮下面。头像显示用户名首字母，点开只有「修改密码」和「退出登录」。管理员看到全部分类：界面 → 偏好；Harness → Agent、模型、提供商、技能包、环境、MCP 服务；系统 → 常规、用户、插件、AI 运行时、工具与权限、环境默认值、后端网络、存储与媒体、高级、同步。普通用户只看到界面。分类只在桌面左栏或窄屏选择器显示，正文不重复标题；左箭头返回对话。系统设置继续由已有 schema 和聚合版本驱动；保留校验、重置、提交失败及冲突。同步保留选择导出、导入预检和确认流程。全量部署信息放常规，其中的 Studio 版本由前端构建时注入，与项目版本一致；浏览器偏好只在界面。离线原型只读写本次预览已保存的系统设置，不处理正式配置或凭据。
+- **设置**：侧栏底部是头像和齿轮；展开时头像在齿轮左边，收起时头像在齿轮下面。头像显示用户名首字母，点开只有「修改密码」和「退出登录」。管理员看到全部分类：界面 → 偏好；Harness → Agent、模型、提供商、技能包、环境、MCP 服务；系统 → 常规、用户、插件、AI 运行时、工具与权限、环境默认值、后端网络、存储与媒体、高级、同步。普通用户只看到界面。分类只在桌面左栏或窄屏选择器显示，正文不重复标题；左箭头返回对话。系统设置继续由已有 schema 和聚合版本驱动；保留校验、重置、提交失败及冲突。同步保留选择导出、导入预检和确认流程。全量部署信息放常规，其中的 Studio 版本由前端构建时注入，与项目版本一致；浏览器偏好只在界面。
 - **共享组件**：使用现有 `Button`、`IconButton`、`ResourceCard/Grid`、`CreateCard`、`StateBlock`、表单和确认弹窗。普通和紧凑按钮采用共享尺寸，触屏关键操作至少 44px。文字按钮常驻底色，只有图标的按钮平时透明；按钮悬停、目录与标签选中用底色，不画装饰边框。文本、选择控件和 Composer 在指针或键盘聚焦时统一使用 `--border` 的 1px 轮廓；普通按钮只在键盘焦点可见时显示轮廓，保留校验错误的语义。卡片 label/value 字号一致，用色与字重分层。只有确有空值含义的字段才显示「无 / 默认」。字段说明只放在标签后的 `?` 提示里，标签和输入之间、输入下方不放常驻说明；不折叠有用的表单段。日期和时间用与下拉框同外观的选择器，不用浏览器原生控件。规则细节见[视觉语言与组件体系](workspace-ui.md)。
 - **编辑器**：Agent 的工具、技能、子 Agent 直接展开；模型费率规则和倍率分段直显，配置 JSON 保持可见。模型默认变体必选。输入上限留空时显示「跟随上下文窗口」；名称、模型 ID 和输入类型只在校验失败时提示。费率时段的时间为 24 小时制；结束时间的小时列末尾有 24，选中即 `24:00`，与同日 `00:00` 区分。修改已生效方案会改变历史费用展示，这条提醒放在「价格方案」后的 `?` 里。Anthropic 的 mid-conversation system message / per-message effort 不作为用户开关：适配器按模型、能力和端点决定，使用现有明确的协议回退。单纯隐藏 UI 不改变现有已保存值、构造或发送路径；在适配器的能力判定与既有策略等价性通过协议测试后，1.3.0 空库契约移除用户可编辑字段。
 - **环境 / 插件**：环境动作顺序为安装 / 覆盖、管理、编辑、删除；管理直接显示主机、配置与事件，事件消息按当前语言显示。安装覆盖会中断正在执行的调用，须明示；编辑配置不重装。插件仅在配置未应用或应用失败时显示版本差异提示；外部连接状态是独立事实。
@@ -165,7 +137,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 | `/api/chat-spaces/**` | 空间的所有者。 |
 | `/api/harness/**` | Thread 或 Session 所属空间的所有者；插件后台任务只限管理员。 |
 | `/api/canvas/canvases/{id}/**` | 画布所属空间的所有者；画布函数目录对所有用户开放。 |
-| `/api/ide/**`、`/ide/**` | 登录用户可为就绪的环境打开 VS Code。服务端将视图绑定到发起连接及其用户 ID；控制面与数据面都校验用户 ID 和已有的浏览器会话绑定，复用旧绑定时也校验。把文件发送到视图还须通过会话附件授权。 |
+| `/api/ide/**`、`/ide/**` | 登录用户可为就绪的环境打开 VS Code。控制面从认证 `StudioPrincipal` 取得用户 ID，并将视图绑定到该用户与发起连接的浏览器会话；控制面校验已认证用户、浏览器会话和绑定代次，复用旧绑定时也重新校验。数据面校验登录用户与 IDE Cookie 绑定的用户、视图和当前绑定代次，不另收浏览器会话 ID；恢复视图时更换绑定代次，使旧 Cookie 失效。把文件发送到视图还须通过会话附件授权。 |
 | `/api/platform/storage/uploads/**` | 预约记录上传者；完成、取消只限上传者。 |
 | `/api/platform/config-sync/**`、管理和配置接口 | 只限管理员，含读取配置、同步导出和导入预检；不按 HTTP 方法分类。 |
 | `/api/platform/agent-summaries`、`/api/platform/model-summaries`、`/api/platform/environment-summaries` | 登录用户可读。分别返回 Agent 的执行选择、模型及可选变体、环境的就绪状态和能力，不含凭据、请求头或配置原文。 |
@@ -194,7 +166,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 | `studio_user` | `id uuid PK`、`username varchar(32) UNIQUE`（CHECK 用户名规则）、`password_hash`、`profile jsonb NOT NULL DEFAULT '{}'`（CHECK 为 JSON 对象）、`role`（CHECK 为 `ADMIN` 或 `USER`）、可空 `disabled_at`、`created_at`、`updated_at`。V1 写入内置管理员 `kkstudio`，密码哈希预先算好。 |
 | `login_session` | `token_hash bytea PK`（登录令牌的 SHA-256）、`user_id FK → studio_user ON DELETE CASCADE`、`created_at`、`expires_at`；按 `user_id` 建索引。登录时顺带删除该用户已过期的记录。 |
 
-`storage_upload` 增加 `owner_user_id FK → studio_user RESTRICT`。
+`storage_upload` 增加 `owner_user_id FK → studio_user RESTRICT`，用户上传预约记录上传者；complete/delete 与资源引用只能作用于本人上传。可信服务端 staging 使用 NULL owner，并且只可由内部 ownerless 调用路径消费，不能作为用户上传的授权旁路。Canvas BLOB 命令的 HTTP 输入是 READY `uploadId`，服务端按已认证用户锁定上传、取权威文件事实并登记 Blob 持有边；持久资源仍保存 `blobId`。
 
 `position` 为各自同级序列内从 0 起的整数，使用可延迟唯一约束保证批量重排。所有目录结构写按 ChatSpace 行 `FOR UPDATE` 串行，在同一事务内更新两侧顺序、递增 `tree_version`、保留至少一个顶层目录并校验无环；改名不改变结构，不递增 `tree_version`。同一空间内移动只改归属边，历史 ID、Canvas revision、定时目标和深链不变；不能跨空间移动。删除先取 ChatSpace 行锁，再取 Harness 锁。已有 Thread 的发送、停止、审批和问卷回答不取 ChatSpace 锁：发送和停止与删除取同一 Harness 树锁；审批和问卷回答只锁目标 Thread 行，不锁执行根，删除同样锁住闭包内的全部 Thread 行。删除在锁内复验没有待处理命令、交互或执行，晚到的一方失败而不会穿透。运行状态更新不获取空间锁、不改目录顺序。同一 Session 内公开 Thread 名称唯一，分支和改名在 Session 行锁内校验。归档先锁所有者的 `studio_user` 行，再锁空间行，避免并发归档清空该用户的活跃列表；归档只改 `archived_at` 和版本。改变角色或账号启用状态时先取得同一把用户管理事务锁，再锁用户行，保证至少一名启用的管理员。登录签发令牌前在用户行锁内复验启用状态和密码哈希；禁用和重置在同一把用户行锁内撤销登录。
 
@@ -271,7 +243,7 @@ flowchart TB
 | `GET /schedules/{id}/runs?before={cursor}` | 展开时才查；省略游标取最新五条，`before` 取下一页较早记录，返回 `{items,olderCursor}`。游标是 `(scheduledAt,id)` 的不透明表示，同一任务内严格按该组合倒序，不查总数、不用偏移量。客户端保留本次展开的页游标以返回较新页，收起后丢弃。`ScheduleRun` 含 `id, scheduledAt, startedAt, timeZone, result, reason` 和可选的 `thread:{sessionId,id,title}`；只返回当前空间可读的公开 Thread，点击时仍按统一打开流程复验。未提交的记录显示调度原因；已提交但没有可读 Thread 时不返回链接。 |
 | `GET /api/harness/interactions`（保留） | 带 `rootThreadId` 时返回该根及子执行的待处理审批和问卷；不带时按当前用户可访问的全部空间查询，管理员另含插件后台任务。条目含执行根 ID、标题、最后活动时间及来源；空间来源另带空间 ID 和名称。「待处理」按执行根合并，同根最后一项处理完才移出。 |
 
-附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}` 或 `/api/canvas/canvases/{canvasId}/blobs/{blobId}` 下的 `POST /download-url`、`POST /preview-url`。Session 校验 `session_blob_ref`，画布校验该文档的资源引用。继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。
+附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url`、`preview-url` 和 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url`、`preview-url`，均为 POST。Session 取址校验当前用户对 Session 的资源访问权及 `session_blob_ref` 持有边；Canvas 取址校验 Canvas 归属与该画布对 Blob 的持有边。任一不满足均返回 404，不提供凭 Blob ID 的通用取址。接口继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 为 Markdown 资源链接提供同源预览与下载流，校验 Session 访问权、持有边和 Blob ACTIVE 状态。
 
 用户与登录接口不在空间路径下：
 

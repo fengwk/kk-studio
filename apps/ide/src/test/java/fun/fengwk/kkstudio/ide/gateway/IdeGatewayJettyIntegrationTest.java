@@ -44,7 +44,10 @@ import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeConfiguration;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioOriginPolicy;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.ClusterProperties;
@@ -108,6 +111,9 @@ class IdeGatewayJettyIntegrationTest {
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID VIEW = UUID.fromString("22222222-2222-4222-8222-222222222222");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(USER_ID, "test", StudioRole.USER);
   private static final DaemonConnectionIdentity IDENTITY =
       new DaemonConnectionIdentity(ENV, "daemon-owner-1");
 
@@ -167,7 +173,7 @@ class IdeGatewayJettyIntegrationTest {
                 "/managed/dir",
                 "/managed/workspace",
                 IdeViewState.OPEN)));
-    sessionCookie = registry.open(IDENTITY, VIEW.toString(), 1L, "/managed/workspace");
+    sessionCookie = registry.open(IDENTITY, VIEW.toString(), 1L, "/managed/workspace", USER_ID);
 
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
@@ -222,9 +228,11 @@ class IdeGatewayJettyIntegrationTest {
 
     IdeRemoteDataPlaneForwarder node1Forwarder =
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
+    IdeDataViewAuthorizer nonOwnerAuthorizer =
+        new SessionIdeDataViewAuthorizer(new IdeBrowserSessionRegistry(), snapshots, transport);
     IdeGatewayDataPlane node1DataPlane =
         new IdeGatewayDataPlane(
-            node1ClusterRegistry, ownerTunnels, authorizer, sessionHandler, node1Forwarder);
+            node1ClusterRegistry, ownerTunnels, nonOwnerAuthorizer, sessionHandler, node1Forwarder);
 
     ServletContextHandler node1Context = new ServletContextHandler();
     node1Context.setContextPath("/");
@@ -599,7 +607,7 @@ class IdeGatewayJettyIntegrationTest {
         .thenReturn(
             Optional.of(
                 new IdeBootstrapTicketService.Ticket(
-                    IDENTITY, VIEW.toString(), 1L, "/managed/workspace")));
+                    IDENTITY, VIEW.toString(), 1L, "/managed/workspace", USER_ID)));
 
     // Test 1: plain http request to Node 1 (non-owner)
     HttpRequest request =
@@ -642,7 +650,7 @@ class IdeGatewayJettyIntegrationTest {
         .thenReturn(
             Optional.of(
                 new IdeBootstrapTicketService.Ticket(
-                    IDENTITY, VIEW.toString(), 1L, "/managed/workspace")));
+                    IDENTITY, VIEW.toString(), 1L, "/managed/workspace", USER_ID)));
 
     HttpRequest secureRequest =
         HttpRequest.newBuilder(
@@ -1049,6 +1057,7 @@ class IdeGatewayJettyIntegrationTest {
     @Override
     protected void service(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException {
+      request.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL);
       ForwardingTarget target = forwardingTarget.get();
       String prefix = "/tls-ide/" + ENV + "/" + VIEW;
       String uri = request.getRequestURI();
@@ -1085,6 +1094,7 @@ class IdeGatewayJettyIntegrationTest {
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp)
         throws ServletException, IOException {
+      req.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL);
       String uri = req.getRequestURI();
       String prefix = "/ide/";
       if (!uri.startsWith(prefix)) {
@@ -1135,12 +1145,15 @@ class IdeGatewayJettyIntegrationTest {
       EnvironmentId envId = EnvironmentId.parse(sub.substring(0, slash));
       String viewIdStr = req.getParameter(IdeDataPaths.VIEW_ID_PARAMETER);
       String rawPathAndQuery = req.getParameter(IdeDataPaths.PATH_PARAMETER);
-      if (viewIdStr == null || rawPathAndQuery == null) {
+      String userId = req.getParameter("userId");
+      if (viewIdStr == null || rawPathAndQuery == null || userId == null) {
         resp.sendError(400);
         return;
       }
       UUID viewId = UUID.fromString(viewIdStr);
       HttpServletRequest forwarded = IdeForwardedRequest.of(req, rawPathAndQuery);
+      forwarded.setAttribute(
+          IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE, UUID.fromString(userId));
       dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, resp);
     }
   }

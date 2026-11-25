@@ -15,7 +15,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | `bindingEpoch` | Daemon 已提交的绑定代次；新绑定废止旧网络流、旧命令与旧凭据。 |
 | Environment + `daemonInstanceId` | 整个授权代际；进程变化时旧身份全部不可复用。 |
 
-所有控制请求都先验证当前连接已 ACK 的使用意图，再核对 view 的 owner、Daemon 实例与绑定代次。同一 `browserSessionId` 的新连接可以立即绑定到当前权威快照，不等待旧连接关闭；旧连接迟到的 proof、注销或关闭只按原 connection/epoch 处理，不能续租或撤销新绑定。旧 claim 或旧 epoch 的迟到结果也只能作用于精确旧代次，不能关闭、改目录或覆盖新绑定。
+所有浏览器控制请求先由 Studio 登录过滤器解析 `StudioPrincipal`，服务方法使用其 `userId` 校验视图绑定的用户；再验证当前连接已 ACK 的使用意图，并核对 `browserSessionId`、view owner、Daemon 实例与绑定代次。数据面同样依赖当前已认证用户，并以 IDE cookie 的浏览器会话核对视图绑定；browserSessionId 只是 tab 恢复身份，不是认证凭据。同一 `browserSessionId` 的新连接可以立即绑定到当前权威快照，不等待旧连接关闭；旧连接迟到的 proof、注销或关闭只按原 connection/epoch 处理，不能续租或撤销新绑定。旧 claim 或旧 epoch 的迟到结果也只能作用于精确旧代次，不能关闭、改目录或覆盖新绑定。
 
 ## 控制面
 
@@ -123,7 +123,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。�
 
 - `openView` 先向事件节点核验 exact intent：只有该物理连接、browserSession 与 view/claim 意图仍存活且匹配时才发命令（[`IdeBrowserUseGateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBrowserUseGateway.java)）；事件节点不可达或当前 usage 未 ACK 时不建立新绑定。`claimId` 在单次请求未确认期间保持不变，同 claim 的同形请求返回同一绑定，参数漂移被拒绝。
 - `openView` 成功后才用权威快照铸造一次性 bootstrap 票据；票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管工作区路径，短时、消费即删除。`GET` 不生成 entryUrl，也不发票据。
-- 数据面授权由 [`SessionIdeDataViewAuthorizer`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/SessionIdeDataViewAuthorizer.java) 完成：从配置名匹配的 IDE cookie 查询真实会话，再要求当前 Daemon 进程、OPEN 状态、bindingEpoch 与 workspace 都和唯一权威快照一致。关闭、重绑、过期与实例替换使入口失效；同实例暂断保留 cookie，但不新增授权或续租。
+- 数据面授权由 [`SessionIdeDataViewAuthorizer`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/SessionIdeDataViewAuthorizer.java) 完成：请求须经 Studio 登录认证，并从配置名匹配的 IDE cookie 查询浏览器会话，再要求当前用户与绑定 owner 相同、浏览器会话与绑定相同，且当前 Daemon 进程、OPEN 状态、bindingEpoch 与 workspace 都和唯一权威快照一致。关闭、重绑、过期与实例替换使入口失效；同实例暂断保留 cookie，但不新增授权或续租。
 - 数据流以 `/ide/{viewId}/{bindingEpoch}/...` 进入 Daemon，校验当前 OPEN 绑定后转发到 code-server 的私有路径；绑定 CAS 在途时新流与使用证明不 attach，resume 成功后旧流被中止。
 
 每个 browserSession 使用浏览器 Web Locks 做同源独占：刷新复用会话；复制 tab 发现会话已被活页面持有就生成新会话并清空复制来的运行身份，只保留非运行态展示偏好。pagehide 只撤回或暂停使用证明，不删除视图；BFCache pageshow 重新确认锁与权威绑定。Web Locks 不可用时明确报告浏览器能力不足，不退回共享身份或基于本地时间的接管。

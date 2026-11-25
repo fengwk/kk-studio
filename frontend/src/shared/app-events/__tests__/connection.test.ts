@@ -701,7 +701,7 @@ describe('ApplicationEventConnection', () => {
 
 describe('createApplicationEventUrl', () => {
   it('builds ws://<origin>/ws/events and clears search/hash', () => {
-    window.history.replaceState({}, '', '/chats/abc?session=1#top')
+    window.history.replaceState({}, '', '/chat-spaces/abc?thread=1#top')
     const url = createApplicationEventUrl()
     expect(url).toBe(`ws://${window.location.host}/ws/events`)
     expect(url).not.toContain('?')

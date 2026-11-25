@@ -1,13 +1,17 @@
 package fun.fengwk.kkstudio.ide.browser;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /** 事件节点返回的已绑定使用证明快照；只包含带 binding epoch、当前仍可续租的持有项。 */
 public record IdeBrowserUseSnapshot(
     String eventNodeId,
     String connectionId,
     String browserSessionId,
+    String userId,
     Long revision,
     List<View> views) {
 
@@ -15,6 +19,7 @@ public record IdeBrowserUseSnapshot(
     eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
     connectionId = Objects.requireNonNull(connectionId, "connectionId");
     browserSessionId = Objects.requireNonNull(browserSessionId, "browserSessionId");
+    userId = Uuids.parseCanonical(Objects.requireNonNull(userId, "userId"), "userId").toString();
     revision = Objects.requireNonNull(revision, "revision");
     views = List.copyOf(Objects.requireNonNull(views, "views"));
   }
@@ -31,8 +36,9 @@ public record IdeBrowserUseSnapshot(
   }
 
   public static IdeBrowserUseSnapshot from(
-      ConnectionIdentity identity, IdeBrowserUse activeBoundProofs) {
+      ConnectionIdentity identity, UUID userId, IdeBrowserUse activeBoundProofs) {
     Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(userId, "userId");
     Objects.requireNonNull(activeBoundProofs, "activeBoundProofs");
     List<View> viewBodies =
         activeBoundProofs.views().stream()
@@ -48,6 +54,7 @@ public record IdeBrowserUseSnapshot(
         identity.eventNodeId().toString(),
         identity.connectionId().toString(),
         activeBoundProofs.browserSessionId().toString(),
+        userId.toString(),
         activeBoundProofs.revision(),
         viewBodies);
   }

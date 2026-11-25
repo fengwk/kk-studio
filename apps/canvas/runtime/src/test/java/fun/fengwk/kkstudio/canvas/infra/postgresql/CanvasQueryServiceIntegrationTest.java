@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -74,7 +76,30 @@ class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
     assertNull(consumerNode.run());
   }
 
-  /** 无引用配置不得臆造连线或占位行，未知画布保持缺失语义。 */
+  /** 只有挂接到节点的 Blob 才是 Canvas 持有资源，解挂、未知 Canvas 与未知 Blob 均不可访问。 */
+  @Test
+  void containsHeldBlobRequiresAttachedResource() {
+    UUID canvasId = addDocument();
+    NodeFixture node = addFunctionNode(canvasId, "image.crop");
+    UUID blobId = UUID.randomUUID();
+    jdbc.update(
+        "insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state)"
+            + " values (?, ?, 1, 'application/octet-stream', 1, 'ACTIVE')",
+        blobId,
+        "a".repeat(64));
+    CanvasResource resource =
+        new CanvasResource(
+            UUID.randomUUID(), canvasId, node.nodeId, 0, blobId, "image.png", null, Instant.EPOCH);
+    resourceRepository.add(resource);
+
+    assertTrue(queryService.containsHeldBlob(canvasId, blobId));
+    assertFalse(queryService.containsHeldBlob(canvasId, UUID.randomUUID()));
+    assertFalse(queryService.containsHeldBlob(UUID.randomUUID(), blobId));
+    assertTrue(resourceRepository.detachOwner(canvasId, resource.id(), node.nodeId));
+    assertFalse(queryService.containsHeldBlob(canvasId, blobId));
+  }
+
+  /** 无引用的配置与未知画布保持空/缺失语义，不臆造连线或占位行。 */
   @Test
   void snapshotWithoutReferencesAndUnknownCanvas() {
     UUID canvasId = addDocument();

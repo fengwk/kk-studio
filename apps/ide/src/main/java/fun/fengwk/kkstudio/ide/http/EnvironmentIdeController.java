@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,6 +23,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 
 import java.util.UUID;
 
@@ -41,14 +44,17 @@ public class EnvironmentIdeController {
 
   @PostMapping("/views")
   public EnvironmentIdeViewDTO openView(
-      @PathVariable UUID environmentId, @RequestBody EnvironmentIdeOpenViewDTO request) {
-    return environmentIdeService.openView(EnvironmentId.of(environmentId), request);
+      @PathVariable UUID environmentId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
+      @RequestBody EnvironmentIdeOpenViewDTO request) {
+    return environmentIdeService.openView(EnvironmentId.of(environmentId), request, principal);
   }
 
   @GetMapping("/views/{viewId}")
   public EnvironmentIdeViewSnapshotDTO readView(
       @PathVariable UUID environmentId,
       @PathVariable UUID viewId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
       @RequestParam("browserSessionId") UUID browserSessionId,
       @RequestParam("eventNodeId") UUID eventNodeId,
       @RequestParam("connectionId") UUID connectionId,
@@ -62,16 +68,17 @@ public class EnvironmentIdeController {
     request.setClaimId(claimId.toString());
     request.setExpectedDaemonInstanceId(expectedDaemonInstanceId);
     return environmentIdeService.readView(
-        EnvironmentId.of(environmentId), viewId.toString(), request);
+        EnvironmentId.of(environmentId), viewId.toString(), request, principal);
   }
 
   @PutMapping("/views/{viewId}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
       @PathVariable UUID environmentId,
       @PathVariable UUID viewId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
       @RequestBody EnvironmentIdeChangeDirectoryDTO request) {
     return environmentIdeService.changeDirectory(
-        EnvironmentId.of(environmentId), viewId.toString(), request);
+        EnvironmentId.of(environmentId), viewId.toString(), request, principal);
   }
 
   @PostMapping("/views/{viewId}/focus-terminal")
@@ -79,9 +86,10 @@ public class EnvironmentIdeController {
   public void focusTerminal(
       @PathVariable UUID environmentId,
       @PathVariable UUID viewId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
       @RequestBody EnvironmentIdeViewBindingDTO request) {
     environmentIdeService.focusTerminal(
-        EnvironmentId.of(environmentId), viewId.toString(), request);
+        EnvironmentId.of(environmentId), viewId.toString(), request, principal);
   }
 
   @PostMapping("/views/{viewId}/attachments/{sessionId}/{resourceId}")
@@ -91,10 +99,11 @@ public class EnvironmentIdeController {
       @PathVariable String viewId,
       @PathVariable String sessionId,
       @PathVariable String resourceId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
       @RequestBody EnvironmentIdeViewBindingDTO request) {
     UUID parsedEnvironmentId = IdeUuids.requireInput(environmentId, "environmentId");
     environmentIdeService.openAttachment(
-        EnvironmentId.of(parsedEnvironmentId), viewId, sessionId, resourceId, request);
+        EnvironmentId.of(parsedEnvironmentId), viewId, sessionId, resourceId, principal, request);
   }
 
   @PostMapping("/views/{viewId}/apply-mobile-layout")
@@ -102,9 +111,10 @@ public class EnvironmentIdeController {
   public void collapseMobile(
       @PathVariable UUID environmentId,
       @PathVariable UUID viewId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
       @RequestBody EnvironmentIdeViewBindingDTO request) {
     environmentIdeService.collapseMobile(
-        EnvironmentId.of(environmentId), viewId.toString(), request);
+        EnvironmentId.of(environmentId), viewId.toString(), request, principal);
   }
 
   @PostMapping("/views/{viewId}/close")
@@ -112,7 +122,9 @@ public class EnvironmentIdeController {
   public void closeView(
       @PathVariable UUID environmentId,
       @PathVariable UUID viewId,
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal,
       @RequestBody EnvironmentIdeCloseViewDTO request) {
-    environmentIdeService.closeView(EnvironmentId.of(environmentId), viewId.toString(), request);
+    environmentIdeService.closeView(
+        EnvironmentId.of(environmentId), viewId.toString(), request, principal);
   }
 }

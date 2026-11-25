@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,7 +21,6 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -133,34 +131,6 @@ public class StorageControllerTest extends WebPostgresTestSupport {
             .andReturn();
     String blobId = readJsonString(completed.getResponse().getContentAsString(), "$.blobId");
 
-    MvcResult original =
-        mockMvc
-            .perform(post("/api/platform/storage/blobs/" + blobId + "/download-url"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.method").value("GET"))
-            .andExpect(jsonPath("$.url").value(containsString("blobs/" + blobId + "/original")))
-            .andExpect(jsonPath("$.headers").isEmpty())
-            .andExpect(jsonPath("$.mediaType").value("text/plain"))
-            .andExpect(jsonPath("$.sizeBytes").value(Long.toString(content.length)))
-            .andReturn();
-    JsonNode originalJson = objectMapper.readTree(original.getResponse().getContentAsByteArray());
-    assertTrue(originalJson.at("/sizeBytes").isTextual(), "sizeBytes must be a JSON string");
-    assertEquals(Long.toString(content.length), originalJson.at("/sizeBytes").textValue());
-
-    MvcResult preview =
-        mockMvc
-            .perform(post("/api/platform/storage/blobs/" + blobId + "/preview-url"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.url").value(containsString("blobs/" + blobId + "/preview.webp")))
-            .andExpect(jsonPath("$.mediaType").value(nullValue()))
-            .andExpect(jsonPath("$.sizeBytes").value(nullValue()))
-            .andReturn();
-    JsonNode previewJson = objectMapper.readTree(preview.getResponse().getContentAsByteArray());
-    assertTrue(previewJson.has("mediaType"));
-    assertTrue(previewJson.at("/mediaType").isNull());
-    assertTrue(previewJson.has("sizeBytes"));
-    assertTrue(previewJson.at("/sizeBytes").isNull());
-
     mockMvc
         .perform(delete("/api/platform/storage/uploads/" + uploadId))
         .andExpect(status().isNoContent());
@@ -189,10 +159,6 @@ public class StorageControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(delete("/api/platform/storage/uploads/" + uploadId))
-        .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("not_found"));
-    mockMvc
-        .perform(post("/api/platform/storage/blobs/" + blobId + "/download-url"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"));
   }

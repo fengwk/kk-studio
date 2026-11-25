@@ -77,8 +77,6 @@ function createHarness(options?: Partial<CanvasUploadPipelineOptions>) {
     uploadFile: vi.fn().mockResolvedValue(undefined),
     completeUpload: vi.fn().mockResolvedValue(readyReservation()),
     deleteUpload: vi.fn(),
-    getBlobDownloadUrl: vi.fn(),
-    getBlobPreviewUrl: vi.fn(),
   }
   const nextTransform = vi.fn(() => ({ x: 100, y: 100, width: 320, height: 246 }))
   const view = renderHook(() => useCanvasUploadPipeline({
@@ -244,7 +242,7 @@ describe('useCanvasUploadPipeline', () => {
       resources: [{
         type: 'BLOB',
         name: 'upload.png',
-        blobId: 'blob-existing',
+        uploadId: UPLOAD_ID,
       }],
       transform: { x: 100, y: 100, width: 320, height: 246 },
     }])

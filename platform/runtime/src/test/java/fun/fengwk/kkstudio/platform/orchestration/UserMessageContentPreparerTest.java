@@ -2,12 +2,17 @@ package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -46,7 +51,7 @@ class UserMessageContentPreparerTest {
         new UserMessageContentPreparer(
             refManager,
             blobManager,
-            (ignoredSessionId, ignoredUploadId) -> null,
+            (ignoredUserId, ignoredSessionId, ignoredUploadId) -> null,
             () -> ImageInputTier.P720,
             () -> 2);
     NewThreadCommand command =
@@ -94,7 +99,7 @@ class UserMessageContentPreparerTest {
         new UserMessageContentPreparer(
             refManager,
             blobManager,
-            (ignoredSessionId, ignoredUploadId) -> null,
+            (ignoredUserId, ignoredSessionId, ignoredUploadId) -> null,
             () -> ImageInputTier.P720,
             () -> 2);
     NewThreadCommand command =
@@ -122,10 +127,37 @@ class UserMessageContentPreparerTest {
   }
 
   @Test
+  void rejectsUnheldTextReferenceBeforeBlobLookup() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    SessionBlobRefManager refs = mock(SessionBlobRefManager.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    UserMessageContentPreparer preparer =
+        new UserMessageContentPreparer(
+            refs, blobs, (userId, session, upload) -> null, () -> ImageInputTier.P720, () -> 2);
+    NewThreadCommand command =
+        new NewThreadCommand(
+            new UserMessageCommandPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(
+                        new TextMessageContent("See " + ResourceRef.sessionResourceUri(blobId))))),
+            UUID.randomUUID());
+
+    assertThrows(
+        DomainException.class,
+        () -> preparer.prepare(UUID.randomUUID(), sessionId, List.of(command), null));
+
+    verify(refs).contains(sessionId, blobId);
+    verify(blobs, never()).getBlob(blobId);
+  }
+
+  @Test
   void copiesAuthoritativeUploadDimensionsIntoDurableResource() {
     UUID uploadId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
+    UUID userId = UUID.randomUUID();
     StorageBlob blob = mock(StorageBlob.class);
     when(blob.getState()).thenReturn(StorageBlobState.ACTIVE);
     when(blob.getMediaType()).thenReturn("image/png");
@@ -136,7 +168,8 @@ class UserMessageContentPreparerTest {
         new UserMessageContentPreparer(
             mock(SessionBlobRefManager.class),
             blobManager,
-            (requestedSessionId, requestedUploadId) -> {
+            (requestedUserId, requestedSessionId, requestedUploadId) -> {
+              assertEquals(userId, requestedUserId);
               assertEquals(sessionId, requestedSessionId);
               assertEquals(uploadId, requestedUploadId);
               return new UserMessageContentPreparer.ReadyAttachment(
@@ -152,7 +185,7 @@ class UserMessageContentPreparerTest {
                     List.of(new AttachmentMessageContent(uploadId, ImageInputTier.P720)))),
             UUID.randomUUID());
 
-    NewThreadCommand prepared = preparer.prepare(sessionId, List.of(command)).get(0);
+    NewThreadCommand prepared = preparer.prepare(userId, sessionId, List.of(command), null).get(0);
 
     ResourceMessageContent resource =
         assertInstanceOf(

@@ -39,6 +39,7 @@ class IdeBindingsTest {
   private static final UUID OTHER_SESSION = UUID.fromString("99999999-9999-9999-9999-999999999999");
   private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
   private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
+  private static final UUID USER = new UUID(0, 1);
   private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
 
   private StubTransport transport;
@@ -72,7 +73,7 @@ class IdeBindingsTest {
 
   @Test
   void requireIntentAcceptsOnlyAnExactlyConfirmedIntent() {
-    bindings.requireIntent(EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM);
+    bindings.requireIntent(EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM, USER);
     assertEquals(1, browserUse.queries);
 
     browserUse.matched = false;
@@ -80,7 +81,8 @@ class IdeBindingsTest {
         assertThrows(
             DomainException.class,
             () ->
-                bindings.requireIntent(EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM));
+                bindings.requireIntent(
+                    EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM, USER));
     assertEquals("STALE_BINDING", error.reason());
     assertEquals("browser IDE usage intent is no longer confirmed", error.getMessage());
   }
@@ -92,7 +94,8 @@ class IdeBindingsTest {
         assertThrows(
             DomainException.class,
             () ->
-                bindings.requireIntent(EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM));
+                bindings.requireIntent(
+                    EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM, USER));
     assertEquals("IDE_UNAVAILABLE", passthrough.reason());
     assertEquals("node down", passthrough.getMessage());
 
@@ -101,7 +104,8 @@ class IdeBindingsTest {
         assertThrows(
             DomainException.class,
             () ->
-                bindings.requireIntent(EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM));
+                bindings.requireIntent(
+                    EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM, USER));
     assertEquals("IDE_UNAVAILABLE", wrapped.reason());
     assertEquals("browser IDE usage intent is unavailable", wrapped.getMessage());
   }
@@ -114,7 +118,8 @@ class IdeBindingsTest {
         assertThrows(
             DomainException.class,
             () ->
-                bindings.requireIntent(EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM));
+                bindings.requireIntent(
+                    EVENT_NODE, CONNECTION, BROWSER_SESSION, ENV, VIEW, CLAIM, USER));
 
     assertEquals("IDE_UNAVAILABLE", error.reason());
     assertEquals("browser IDE usage intent is unavailable", error.getMessage());
@@ -126,7 +131,7 @@ class IdeBindingsTest {
     store.accept(IDENTITY, 1L, List.of(snapshotView(7L, BROWSER_SESSION)));
 
     IdeBindings.Binding binding =
-        bindings.requireBinding(ENV, VIEW, BROWSER_SESSION, 7L, IDENTITY.daemonInstanceId());
+        bindings.requireBinding(ENV, VIEW, BROWSER_SESSION, 7L, IDENTITY.daemonInstanceId(), USER);
 
     assertEquals(IDENTITY, binding.identity());
     assertEquals(VIEW, binding.view().viewId());
@@ -139,7 +144,7 @@ class IdeBindingsTest {
     transport.replies.add(snapshot(2L, view(7L, BROWSER_SESSION)));
 
     IdeBindings.Binding binding =
-        bindings.requireBinding(ENV, VIEW, BROWSER_SESSION, 7L, IDENTITY.daemonInstanceId());
+        bindings.requireBinding(ENV, VIEW, BROWSER_SESSION, 7L, IDENTITY.daemonInstanceId(), USER);
 
     assertEquals(7L, binding.view().bindingEpoch());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.get(0).getAction());
@@ -156,14 +161,20 @@ class IdeBindingsTest {
             DomainException.class,
             () ->
                 bindings.requireBinding(
-                    ENV, UUID.randomUUID(), BROWSER_SESSION, 7L, IDENTITY.daemonInstanceId()));
+                    ENV,
+                    UUID.randomUUID(),
+                    BROWSER_SESSION,
+                    7L,
+                    IDENTITY.daemonInstanceId(),
+                    USER));
     assertEquals("VIEW_GONE", missing.reason());
 
     DomainException foreign =
         assertThrows(
             DomainException.class,
             () ->
-                bindings.requireBinding(ENV, VIEW, OTHER_SESSION, 7L, IDENTITY.daemonInstanceId()));
+                bindings.requireBinding(
+                    ENV, VIEW, OTHER_SESSION, 7L, IDENTITY.daemonInstanceId(), USER));
     assertEquals("VIEW_OWNED_BY_OTHER_SESSION", foreign.reason());
 
     DomainException stale =
@@ -171,7 +182,7 @@ class IdeBindingsTest {
             DomainException.class,
             () ->
                 bindings.requireBinding(
-                    ENV, VIEW, BROWSER_SESSION, 6L, IDENTITY.daemonInstanceId()));
+                    ENV, VIEW, BROWSER_SESSION, 6L, IDENTITY.daemonInstanceId(), USER));
     assertEquals("STALE_BINDING", stale.reason());
     assertEquals("IDE view binding has been replaced", stale.getMessage());
   }
@@ -185,7 +196,7 @@ class IdeBindingsTest {
             DomainException.class,
             () ->
                 bindings.requireBinding(
-                    ENV, VIEW, BROWSER_SESSION, 7L, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+                    ENV, VIEW, BROWSER_SESSION, 7L, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", USER));
     assertEquals("VIEW_GONE", error.reason());
     assertEquals("environment daemon instance has been replaced", error.getMessage());
   }
@@ -244,7 +255,8 @@ class IdeBindingsTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       queries++;
       if (runtimeFailure != null) {
         throw runtimeFailure;

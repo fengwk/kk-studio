@@ -5,7 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 public final class StudioBrowserSession {
   public static final String COOKIE = "studio_session";
-  public static final String PRINCIPAL_ATTRIBUTE = StudioPrincipal.class.getName();
+  public static final String PRINCIPAL_ATTRIBUTE = "studioPrincipal";
 
   private StudioBrowserSession() {}
 

@@ -6,11 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -30,10 +33,15 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
@@ -56,28 +64,36 @@ class HarnessThreadCommandBatchControllerTest {
 
   private static final String COMMAND_KEY = "00000000-0000-0000-0000-000000000014";
   private static final String SET_COMMAND_KEY = "00000000-0000-0000-0000-000000000015";
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(
+          UUID.fromString("00000000-0000-0000-0000-000000000020"), "tester", StudioRole.USER);
 
   /** fixture 的权威 Thread id：接受后回读的 snapshot，与 path 的客户端 threadId 是不同事实。 */
   private static final String AUTHORITATIVE_THREAD_ID = "00000000-0000-0000-0000-000000000001";
 
   private HarnessCommandAcceptanceOrchestrator acceptanceService;
   private HarnessRuntime runtime;
+  private ResourceAccess resourceAccess;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
+    resourceAccess = mock(ResourceAccess.class);
     HarnessThreadCommandBatchController controller =
         new HarnessThreadCommandBatchController(
-            new HarnessCommandBatchService(acceptanceService, runtime));
+            new HarnessCommandBatchService(acceptanceService, runtime, resourceAccess));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
+            .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
+            .defaultRequest(
+                get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
-    when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
+    when(acceptanceService.acceptOnThread(any(UUID.class), any(AcceptCommandsCommand.class)))
         .thenReturn(
             new AcceptedCommands(
                 HarnessRuntimeTestFixtures.session(),
@@ -87,6 +103,19 @@ class HarnessThreadCommandBatchControllerTest {
                 false,
                 false));
     when(runtime.getThreadSnapshot(any())).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+  }
+
+  @Test
+  void rejectsThreadNotOwnedByCurrentPrincipalBeforeAcceptance() throws Exception {
+    doThrow(ResourceAccess.notFound())
+        .when(resourceAccess)
+        .requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
+
+    postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
+        .andExpect(status().isNotFound());
+
+    verify(resourceAccess).requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
+    verifyNoInteractions(acceptanceService, runtime);
   }
 
   /** 成功：owner-free 的 SET_* 混合批次映射为 path Thread + 精确 cursor 的 THREAD target，响应回读接受后的权威 Thread。 */
@@ -112,7 +141,8 @@ class HarnessThreadCommandBatchControllerTest {
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService).acceptOnThread(commandCaptor.capture());
+    verify(acceptanceService).acceptOnThread(eq(PRINCIPAL.userId()), commandCaptor.capture());
+    verify(resourceAccess).requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
     assertEquals(UUID.fromString(THREAD_ID), target.threadId());
@@ -143,7 +173,8 @@ class HarnessThreadCommandBatchControllerTest {
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService).acceptOnThread(commandCaptor.capture());
+    verify(acceptanceService).acceptOnThread(eq(PRINCIPAL.userId()), commandCaptor.capture());
+    verify(resourceAccess).requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
     assertEquals(UUID.fromString(THREAD_ID), target.threadId());
@@ -268,19 +299,19 @@ class HarnessThreadCommandBatchControllerTest {
   /** 类型化拒绝经统一翻译：orchestrator 拒绝 400、缺失 Thread 404、业务冲突 409 且保留 reason，全程不回读 snapshot。 */
   @Test
   void translatesTypedRejectionsFromAcceptOnThread() throws Exception {
-    when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
+    when(acceptanceService.acceptOnThread(any(UUID.class), any(AcceptCommandsCommand.class)))
         .thenThrow(DomainException.validation("thread", "thread command batch rejected"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value("thread command batch rejected"));
 
-    when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
+    when(acceptanceService.acceptOnThread(any(UUID.class), any(AcceptCommandsCommand.class)))
         .thenThrow(DomainException.notFound("thread", "thread not found"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.detail").value("thread not found"));
 
-    when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
+    when(acceptanceService.acceptOnThread(any(UUID.class), any(AcceptCommandsCommand.class)))
         .thenThrow(
             DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "client command id was reused"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))

@@ -31,6 +31,29 @@ public final class SessionIdeDataViewAuthorizer implements IdeDataViewAuthorizer
   }
 
   @Override
+  public boolean belongsToUser(
+      EnvironmentId environmentId, UUID viewId, String cookieHeader, UUID userId) {
+    if (cookieHeader == null) {
+      return false;
+    }
+    String name = IdeGatewayConstants.SESSION_COOKIE_NAME;
+    String token = null;
+    for (String part : cookieHeader.split(";")) {
+      int equals = part.indexOf('=');
+      if (equals >= 0 && name.equals(part.substring(0, equals).trim())) {
+        if (token != null) {
+          return false;
+        }
+        token = part.substring(equals + 1).trim();
+      }
+    }
+    return sessions
+        .lookup(token, environmentId, viewId.toString())
+        .filter(session -> session.userId().equals(userId))
+        .isPresent();
+  }
+
+  @Override
   public Optional<IdeDataViewAccess> authorize(
       EnvironmentId environmentId, UUID viewId, String cookieHeader) {
     if (cookieHeader == null) {

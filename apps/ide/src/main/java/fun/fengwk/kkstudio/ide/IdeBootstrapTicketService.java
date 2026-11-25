@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.platform.daemon.server.OneTimeTicketStore;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * IDE 同源网关的一次性 bootstrap 票据：claim 成功后的 entryUrl 携带该票据，网关消费后设置绑定 view+epoch 的 HttpOnly cookie。
@@ -19,11 +20,16 @@ public class IdeBootstrapTicketService {
   private final OneTimeTicketStore<Ticket> store = new OneTimeTicketStore<>();
 
   public String issue(
-      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+      DaemonConnectionIdentity identity,
+      String viewId,
+      long bindingEpoch,
+      String workspacePath,
+      UUID userId) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(workspacePath, "workspacePath");
-    return store.issue(new Ticket(identity, viewId, bindingEpoch, workspacePath));
+    Objects.requireNonNull(userId, "userId");
+    return store.issue(new Ticket(identity, viewId, bindingEpoch, workspacePath, userId));
   }
 
   public Optional<Ticket> consume(String ticket) {
@@ -64,7 +70,11 @@ public class IdeBootstrapTicketService {
   }
 
   public record Ticket(
-      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+      DaemonConnectionIdentity identity,
+      String viewId,
+      long bindingEpoch,
+      String workspacePath,
+      UUID userId) {
 
     public Ticket {
       if (bindingEpoch <= 0) {

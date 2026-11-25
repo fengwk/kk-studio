@@ -12,7 +12,7 @@ import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
 type PreviewRecoveryPhase = 'initial' | 'refreshing' | 'refreshed' | 'original'
 
 interface PreviewRecoveryInput {
-  resource: { canvasId: string; id: string }
+  resource: { canvasId: string; id: string; blobId: string | null }
   previewUrl: string | null
   previewError: unknown
   refreshPreview: () => Promise<{ isError: boolean }>
@@ -40,7 +40,7 @@ export function usePreviewRecovery({
     refresh: refreshOriginal,
   } = useCanvasResourceUrl({
     canvasId: resource.canvasId,
-    resourceId: resource.id,
+    blobId: resource.blobId,
     kind: 'original',
     enabled: originalRequested,
   })
@@ -50,7 +50,7 @@ export function usePreviewRecovery({
     setOriginalRequested(false)
     setPlayRequested(false)
     setOriginalUnavailable(false)
-  }, [resource.canvasId, resource.id])
+  }, [resource.canvasId, resource.id, resource.blobId])
 
   useEffect(() => () => {
     const media = mediaRef.current

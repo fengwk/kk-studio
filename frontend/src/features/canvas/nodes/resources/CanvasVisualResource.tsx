@@ -15,7 +15,7 @@ export function CanvasVisualResource({ resource }: { resource: Resource }) {
     refresh: refreshPreview,
   } = useCanvasResourceUrl({
     canvasId: resource.canvasId,
-    resourceId: resource.id,
+    blobId: resource.blobId,
     kind: 'preview',
     lazy: true,
   })

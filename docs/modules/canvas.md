@@ -57,6 +57,8 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 ## Typed Command 与并发语义
 
+HTTP 的 BLOB 输入使用 READY 上传的 `uploadId`，而 Canvas 领域资源持久化的是解析后的 `blobId`。接受命令时按当前 `StudioPrincipal.userId` 锁定并校验上传归属，使用上传记录中的权威文件名与媒体事实登记画布持有引用；客户端提交 `blobId` 不能代替上传授权。由 Function 等受信服务端流程创建的 ownerless staging 上传通过内部可信调用消费，不开放给用户直接引用。
+
 [`CanvasCommand`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommand.java) 是 sealed interface，每个原子命令只修改一个语义组，并携带该组在编辑起点的基线：
 
 | 语义组 | 前置条件 |
@@ -102,6 +104,8 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 深删除先锁文档并核对 revision，再按节点 → Run → Work 的顺序加锁。版本不符返回 `VERSION_CONFLICT`；若有 `READY`、`RUNNING` 或 `UNKNOWN` Run，则返回冲突原因 `EXECUTION_NOT_SETTLED`，不删除任何行，也不重新提交任务。删除释放 pin、清理 Run 和 Work、删除资源边及节点（引用随节点参数删除），最后删除组、命令回执与文档。每条 Blob 资源边只释放一次引用，文件对象仍由 Storage 异步回收；任一步失败均回滚。
 
 单独删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。
+
+Canvas Blob 下载与预览使用 `POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url` 和 `preview-url`。每次签发都校验当前用户对 Canvas 的归属权限及该 Canvas 的 Blob 持有边；不提供通用 Blob ID 取址。
 
 [`CanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。
 

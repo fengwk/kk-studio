@@ -3,7 +3,6 @@ import { useApplicationEvents } from '@/shared/app-events'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { isConflictError } from '@/shared/api/client'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import type { TranslationKey } from '@/shared/i18n'
 import {
@@ -148,10 +147,7 @@ export function useThreadStopOperation({
         if (!isCurrentBound()) {
           // 导航门控正常情况下不会发生；若宿主强制重绑，保留旧 Thread sidecar，
           // 让用户返回后用同一 id replay，并从快照回执恢复草稿。
-          await Promise.all([
-            requestThreadSnapshotRefresh(queryClient, applicationEvents, operationThreadId),
-            queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-          ])
+          await requestThreadSnapshotRefresh(queryClient, applicationEvents, operationThreadId)
           return
         }
         // Stop 成功（或服务器重放了完全相同的先前 Stop）：完整受影响集合的持久回执
@@ -167,10 +163,7 @@ export function useThreadStopOperation({
           setStopReplayPending(false)
           discardPendingMessage()
         }
-        await Promise.all([
-          requestThreadSnapshotRefresh(queryClient, applicationEvents, operationThreadId),
-          queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-        ])
+        await requestThreadSnapshotRefresh(queryClient, applicationEvents, operationThreadId)
       })
       .catch((error: unknown) => {
         const stillBound = isCurrentBound()

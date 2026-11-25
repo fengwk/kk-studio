@@ -40,16 +40,10 @@ export const FORBIDDEN_UPLOAD_HEADERS = new Set([
  * - 直传 PUT（仅 PENDING 预留；跨域签名 URL，使用 fetch）
  * - POST /api/platform/storage/uploads/{id}/complete（返回同一 StorageUploadDTO，句柄不变）
  * - DELETE /api/platform/storage/uploads/{id}（释放句柄；绝不按 blobId 删除）
- * - POST /api/platform/storage/blobs/{blobId}/download-url|preview-url（渲染期解析）
  *
  * 该契约绝不暴露 bucket/key，客户端也不能提交对象 key。
  */
 function createStorageService() {
-  const getBlobDownloadUrl = (blobId: string): Promise<StoragePresignedUrlDTO> =>
-    request('POST /api/platform/storage/blobs/{blobId}/download-url', {
-      path: { blobId },
-    })
-
   return {
     reserveUpload: (body: StorageUploadReserveRequestDTO): Promise<StorageUploadDTO> =>
       request('POST /api/platform/storage/uploads', { body }),
@@ -59,12 +53,6 @@ function createStorageService() {
       }),
     deleteUpload: (uploadId: string): Promise<void> =>
       request('DELETE /api/platform/storage/uploads/{uploadId}', { path: { uploadId } }),
-    /** 下载 URL 端点（原件）：给出权威 mediaType 与 sizeBytes。 */
-    getBlobDownloadUrl,
-    getBlobPreviewUrl: (blobId: string): Promise<StoragePresignedUrlDTO> =>
-      request('POST /api/platform/storage/blobs/{blobId}/preview-url', {
-        path: { blobId },
-      }),
     /** 直传对象字节到签名 URL；仅发送签名响应提供的浏览器安全请求头。 */
     uploadFile: async (
       presignedPut: StoragePresignedUrlDTO,

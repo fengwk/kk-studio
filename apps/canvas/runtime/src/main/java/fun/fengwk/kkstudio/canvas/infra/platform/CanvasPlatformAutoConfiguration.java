@@ -4,6 +4,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
@@ -11,6 +12,7 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionResou
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -27,9 +29,17 @@ import java.time.Duration;
 public class CanvasPlatformAutoConfiguration {
 
   @Bean
+  public CanvasUploadOwnership canvasUploadOwnership(
+      StorageUploadService uploadService, StorageBlobManager blobManager) {
+    return new PlatformCanvasUploadOwnership(uploadService, blobManager);
+  }
+
+  @Bean
   public CanvasResourceUrlService canvasResourceUrlService(
-      CanvasQueryService queryService, StorageBlobManager blobManager) {
-    return new CanvasResourceUrlService(queryService, blobManager);
+      CanvasQueryService queryService,
+      StorageBlobManager blobManager,
+      ResourceAccess resourceAccess) {
+    return new CanvasResourceUrlService(queryService, blobManager, resourceAccess);
   }
 
   /** DTO 媒体事实依赖平台 Storage，不随独立 Canvas 运行时装配。 */

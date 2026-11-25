@@ -18,6 +18,7 @@ class IdeBrowserUseRegistryTest {
 
   private static final UUID EVENT_NODE = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID CONNECTION = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+  private static final UUID USER = UUID.fromString("88888888-8888-8888-8888-888888888888");
   private static final ConnectionIdentity IDENTITY = new ConnectionIdentity(EVENT_NODE, CONNECTION);
   private static final UUID DOCUMENT = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final UUID OTHER_DOCUMENT =
@@ -33,7 +34,7 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void unregisterOnlyDeletesItsOwnGeneration() {
-    long first = registry.register(IDENTITY);
+    long first = registry.register(IDENTITY, USER);
     registry.unregister(IDENTITY, first + 1);
     assertTrue(registry.usage(IDENTITY).isEmpty());
 
@@ -43,7 +44,7 @@ class IdeBrowserUseRegistryTest {
 
     registry.unregister(IDENTITY, first);
     assertTrue(registry.usage(IDENTITY).isEmpty());
-    long second = registry.register(IDENTITY);
+    long second = registry.register(IDENTITY, USER);
     assertTrue(second > first);
     assertEquals(Acceptance.ACCEPTED, registry.accept(IDENTITY, second, usage(2, intent())));
     registry.unregister(IDENTITY, first);
@@ -55,13 +56,13 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void rejectsDuplicateActiveConnectionIdentity() {
-    registry.register(IDENTITY);
-    assertThrows(IllegalStateException.class, () -> registry.register(IDENTITY));
+    registry.register(IDENTITY, USER);
+    assertThrows(IllegalStateException.class, () -> registry.register(IDENTITY, USER));
   }
 
   @Test
   void documentIsFixedPerConnection() {
-    long generation = registry.register(IDENTITY);
+    long generation = registry.register(IDENTITY, USER);
     assertEquals(Acceptance.ACCEPTED, registry.accept(IDENTITY, generation, usage(1, intent())));
 
     assertEquals(
@@ -72,7 +73,7 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void sameRevisionIsIdempotentOnlyForIdenticalCanonicalContent() {
-    long generation = registry.register(IDENTITY);
+    long generation = registry.register(IDENTITY, USER);
     IdeBrowserUseView first = intent();
     IdeBrowserUseView second = new IdeBrowserUseView(ENVIRONMENT, OTHER_VIEW, OTHER_CLAIM, null);
     IdeBrowserUse original = usage(2, first, second);
@@ -93,7 +94,7 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void higherRevisionAtomicallyReplacesTheWholeList() {
-    long generation = registry.register(IDENTITY);
+    long generation = registry.register(IDENTITY, USER);
     registry.accept(IDENTITY, generation, usage(1, intent()));
     IdeBrowserUseView bound = new IdeBrowserUseView(ENVIRONMENT, VIEW, CLAIM, 9L);
 
@@ -110,7 +111,7 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void exactIntentRequiresLiveConnectionDocumentAndAllClaimFields() {
-    long generation = registry.register(IDENTITY);
+    long generation = registry.register(IDENTITY, USER);
     registry.accept(IDENTITY, generation, usage(1, intent()));
 
     assertTrue(registry.findExactIntent(IDENTITY, DOCUMENT, ENVIRONMENT, VIEW, CLAIM).isPresent());
@@ -127,7 +128,7 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void activeBoundProofsExcludeIntentsWithoutEpoch() {
-    long generation = registry.register(IDENTITY);
+    long generation = registry.register(IDENTITY, USER);
     registry.accept(IDENTITY, generation, usage(1, intent()));
     assertTrue(registry.activeBoundProofs(IDENTITY, DOCUMENT).isEmpty());
 
@@ -144,7 +145,7 @@ class IdeBrowserUseRegistryTest {
 
   @Test
   void closedGenerationCannotAcceptFurtherUsage() {
-    long generation = registry.register(IDENTITY);
+    long generation = registry.register(IDENTITY, USER);
     registry.unregister(IDENTITY, generation);
     assertEquals(
         Acceptance.DISCONNECTED, registry.accept(IDENTITY, generation, usage(1, intent())));

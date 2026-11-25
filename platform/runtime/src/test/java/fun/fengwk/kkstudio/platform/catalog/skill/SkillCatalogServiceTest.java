@@ -23,6 +23,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
@@ -64,6 +66,8 @@ class SkillCatalogServiceTest {
   private static final String OLD_HEAD = "89abcdef0123456789abcdef0123456789abcdef";
   private static final String ARTIFACT_SHA = "a".repeat(64);
   private static final String NEW_ARTIFACT_SHA = "b".repeat(64);
+  private static final StudioPrincipal ACTOR =
+      new StudioPrincipal(UUID.randomUUID(), "skill-owner", StudioRole.USER);
 
   private SkillPackageRepository packageRepository;
   private AgentRepository agentRepository;
@@ -463,7 +467,7 @@ class SkillCatalogServiceTest {
     UUID rawBlobId = UUID.randomUUID();
     UUID stagingUploadId = UUID.randomUUID();
     UUID stagedBlobId = UUID.randomUUID();
-    when(uploadService.peekReady(rawUploadId))
+    when(uploadService.peekReady(rawUploadId, ACTOR.userId()))
         .thenReturn(new StorageUploadService.ReadyUpload(rawBlobId, "skills.zip"));
     when(uploadService.peekReady(stagingUploadId))
         .thenReturn(new StorageUploadService.ReadyUpload(stagedBlobId, PACKAGE + ".zip"));
@@ -474,27 +478,41 @@ class SkillCatalogServiceTest {
     when(blobManager.getBlob(stagedBlobId))
         .thenReturn(blob(stagedBlobId, ARTIFACT_SHA, archive.zip().length));
 
-    SkillPackageStagingDTO preview = service.previewUpload(uploadPreviewDTO(rawUploadId));
+    SkillPackageStagingDTO preview = service.previewUpload(ACTOR, uploadPreviewDTO(rawUploadId));
 
     assertEquals(stagingUploadId.toString(), preview.getId());
     assertEquals("v1", preview.getPackageVersion());
     assertEquals(1, preview.getFileCount());
     assertEquals(archive.index().get(0).size(), preview.getContentSizeBytes());
     assertEquals(ARTIFACT_SHA, preview.getArchiveSha256());
-    verify(uploadService).delete(rawUploadId);
+    verify(uploadService).delete(rawUploadId, ACTOR.userId());
     verify(blobRepository).updateArchiveIndex(eq(stagedBlobId), anyString());
+  }
+
+  @Test
+  void previewUploadRejectsAnotherUsersUploadBeforeReadingItsBlob() {
+    UUID rawUploadId = UUID.randomUUID();
+    when(uploadService.peekReady(rawUploadId, ACTOR.userId()))
+        .thenThrow(DomainException.notFound("upload"));
+
+    assertThrows(
+        DomainException.class, () -> service.previewUpload(ACTOR, uploadPreviewDTO(rawUploadId)));
+
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+    verify(uploadService, never()).delete(any(UUID.class), any(UUID.class));
   }
 
   @Test
   void previewUploadRejectsNonArchiveBytes() {
     UUID rawUploadId = UUID.randomUUID();
     UUID rawBlobId = UUID.randomUUID();
-    when(uploadService.peekReady(rawUploadId))
+    when(uploadService.peekReady(rawUploadId, ACTOR.userId()))
         .thenReturn(new StorageUploadService.ReadyUpload(rawBlobId, "notes.txt"));
     when(contentService.readBlobContent(rawBlobId, SkillArchiveBuilder.MAX_ARCHIVE_BYTES))
         .thenReturn(content(rawBlobId, "not a zip".getBytes(StandardCharsets.UTF_8)));
 
-    assertThrows(DomainException.class, () -> service.previewUpload(uploadPreviewDTO(rawUploadId)));
+    assertThrows(
+        DomainException.class, () -> service.previewUpload(ACTOR, uploadPreviewDTO(rawUploadId)));
     verify(uploadService, never()).stage(anyString(), anyString(), any(), anyLong());
   }
 

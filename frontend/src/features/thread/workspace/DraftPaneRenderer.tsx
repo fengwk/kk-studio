@@ -112,6 +112,7 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
         focusOnEscape: active,
         scope,
         onPartsChange: changeParts,
+        onHistoryPartsChange: changeParts,
         onSubmit: (payload: ComposerPart[]) => {
           if (locked) return
           submit({

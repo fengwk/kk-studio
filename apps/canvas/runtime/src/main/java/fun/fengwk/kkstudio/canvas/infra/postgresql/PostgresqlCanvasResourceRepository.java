@@ -44,6 +44,10 @@ public class PostgresqlCanvasResourceRepository {
         .map(PostgresqlCanvasResourceRepository::toDomain);
   }
 
+  public boolean containsHeldBlob(UUID canvasId, UUID blobId) {
+    return resourceStore.existsHeldBlob(canvasId, blobId);
+  }
+
   public Optional<CanvasResource> findByIdForUpdate(UUID canvasId, UUID resourceId) {
     return resourceStore
         .findByIdForUpdate(canvasId, resourceId)

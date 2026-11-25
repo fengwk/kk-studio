@@ -25,11 +25,23 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('resource URI markdown', () => {
-  it('renders a resource link as authenticated preview and download actions, never as navigation', async () => {
-    vi.mocked(fetchSessionResource).mockResolvedValueOnce(new Blob(['preview'], { type: 'text/plain' }))
+  it('renders a resource link as same-origin preview and download actions, never as navigation', async () => {
+    vi.mocked(fetchSessionResource)
+      .mockResolvedValueOnce(new Blob(['preview'], { type: 'text/plain' }))
+      .mockResolvedValueOnce(new Blob(['download'], { type: 'image/png' }))
+    const createObjectURL = vi.fn(() => 'blob:resource-download')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    })
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
     render(
       <ResourceSessionContext.Provider value={SESSION_ID}>
         <MarkdownRenderer content={`[notes](${RESOURCE_URI})`} />
@@ -40,7 +52,14 @@ describe('resource URI markdown', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
     expect(await screen.findByText('preview')).toBeInTheDocument()
     expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false)
-    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledOnce())
+    expect(fetchSessionResource).toHaveBeenNthCalledWith(2, SESSION_ID, RESOURCE_ID, true)
+    const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement
+    expect(anchor.href).toBe('blob:resource-download')
+    expect(anchor.download).toBe('notes')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:resource-download')
   })
 
   it('shows Open in IDE only when the Chat host supplies an eligible action, with pending and localized limit errors', async () => {
@@ -112,7 +131,6 @@ describe('resource URI markdown', () => {
     expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false, expect.any(AbortSignal))
     view.unmount()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:resource-preview')
-    vi.unstubAllGlobals()
   })
 
   it('revokes an image URL when its resource URI changes', async () => {

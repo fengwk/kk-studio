@@ -16,6 +16,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * IDE 浏览器 cookie 会话登记。
@@ -30,7 +31,11 @@ public final class IdeBrowserSessionRegistry {
 
   /** 一个浏览器 IDE cookie 会话；授权仍需匹配权威快照。 */
   public record Session(
-      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+      DaemonConnectionIdentity identity,
+      String viewId,
+      long bindingEpoch,
+      String workspacePath,
+      UUID userId) {
 
     public Session {
       identity = Objects.requireNonNull(identity, "identity");
@@ -39,6 +44,7 @@ public final class IdeBrowserSessionRegistry {
         throw new IllegalArgumentException("bindingEpoch must be positive");
       }
       workspacePath = Objects.requireNonNull(workspacePath, "workspacePath");
+      userId = Objects.requireNonNull(userId, "userId");
     }
   }
 
@@ -64,10 +70,15 @@ public final class IdeBrowserSessionRegistry {
 
   /** 为已由权威快照确认的绑定签发/复用 view 作用域 cookie。 */
   public String open(
-      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+      DaemonConnectionIdentity identity,
+      String viewId,
+      long bindingEpoch,
+      String workspacePath,
+      UUID userId) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(workspacePath, "workspacePath");
+    Objects.requireNonNull(userId, "userId");
     if (bindingEpoch <= 0) {
       throw new IllegalArgumentException("bindingEpoch must be positive");
     }
@@ -77,7 +88,9 @@ public final class IdeBrowserSessionRegistry {
       reclaim(identity, viewId, bindingEpoch, now);
       String existingToken = tokenBySessionKey.get(key);
       SessionState existing = existingToken == null ? null : sessions.get(existingToken);
-      if (existing != null && existing.workspacePath.equals(workspacePath)) {
+      if (existing != null
+          && existing.workspacePath.equals(workspacePath)
+          && existing.userId.equals(userId)) {
         existing.expiresAt = now.plus(sessionTtl);
         return existingToken;
       }
@@ -86,7 +99,8 @@ public final class IdeBrowserSessionRegistry {
       }
       String token = newToken();
       SessionState session =
-          new SessionState(identity, viewId, bindingEpoch, workspacePath, now.plus(sessionTtl));
+          new SessionState(
+              identity, viewId, bindingEpoch, workspacePath, userId, now.plus(sessionTtl));
       sessions.put(token, session);
       tokenBySessionKey.put(key, token);
       return token;
@@ -111,7 +125,8 @@ public final class IdeBrowserSessionRegistry {
         return Optional.empty();
       }
       return Optional.of(
-          new Session(state.identity, state.viewId, state.bindingEpoch, state.workspacePath));
+          new Session(
+              state.identity, state.viewId, state.bindingEpoch, state.workspacePath, state.userId));
     }
   }
 
@@ -157,6 +172,7 @@ public final class IdeBrowserSessionRegistry {
     private final String viewId;
     private final long bindingEpoch;
     private final String workspacePath;
+    private final UUID userId;
     private Instant expiresAt;
 
     private SessionState(
@@ -164,11 +180,13 @@ public final class IdeBrowserSessionRegistry {
         String viewId,
         long bindingEpoch,
         String workspacePath,
+        UUID userId,
         Instant expiresAt) {
       this.identity = identity;
       this.viewId = viewId;
       this.bindingEpoch = bindingEpoch;
       this.workspacePath = workspacePath;
+      this.userId = userId;
       this.expiresAt = expiresAt;
     }
 

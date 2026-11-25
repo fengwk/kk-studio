@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
@@ -96,9 +97,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   @Override
   public EnvironmentIdeViewDTO openView(
-      EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request) {
+      EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request, StudioPrincipal principal) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
+    UUID userId = Objects.requireNonNull(principal, "principal").userId();
     UUID viewId = IdeInputs.requireViewId(request.getViewId());
     UUID browserSessionId =
         IdeUuids.requireInput(request.getBrowserSessionId(), "browserSessionId");
@@ -121,7 +123,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             "expectedDaemonInstanceId is required for " + requestMode.wireValue(),
             identity);
     bindings.requireIntent(
-        eventNodeId, connectionId, browserSessionId, environmentId, viewId, claimId);
+        eventNodeId, connectionId, browserSessionId, environmentId, viewId, claimId, userId);
+    if (mode == IdeOpenMode.RESUME || bindings.boundUser(environmentId, viewId) != null) {
+      bindings.requireUser(userId, environmentId, viewId);
+    } else {
+      if (snapshotBoundary.refresh(environmentId, identity).find(viewId).isPresent()) {
+        throw ResourceAccess.notFound();
+      }
+      bindings.bindUser(userId, environmentId, viewId);
+    }
 
     IdeCall result;
     try {
@@ -148,7 +158,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
           connectionId,
           claimId,
           identity,
-          error);
+          error,
+          principal);
     }
     if (!result.reply().getOk()) {
       snapshotBoundary.acceptFailureSnapshot(result);
@@ -157,7 +168,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     IdeViewSnapshotStore.Snapshot snapshot = snapshotBoundary.requireReplySnapshot(result);
     IdeViewSnapshotStore.View view =
         requireOpenedView(snapshot, viewId, browserSessionId, eventNodeId, connectionId, claimId);
-    return publishOpen(identity, view);
+    bindings.bindUser(userId, environmentId, viewId);
+    return publishOpen(identity, view, userId);
   }
 
   private static IdeCommand openCommand(
@@ -200,7 +212,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       UUID connectionId,
       UUID claimId,
       DaemonConnectionIdentity sentIdentity,
-      IdeCommandCaller.IdeOutcomeUnknownException unknown) {
+      IdeCommandCaller.IdeOutcomeUnknownException unknown,
+      StudioPrincipal principal) {
+    UUID userId = principal.userId();
     try {
       Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
       if (current.isEmpty()) {
@@ -215,7 +229,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       read.setConnectionId(connectionId.toString());
       read.setClaimId(claimId.toString());
       read.setExpectedDaemonInstanceId(sentIdentity.daemonInstanceId());
-      EnvironmentIdeViewSnapshotDTO snapshot = readView(environmentId, viewId.toString(), read);
+      EnvironmentIdeViewSnapshotDTO snapshot =
+          readView(environmentId, viewId.toString(), read, principal);
       EnvironmentIdeViewDTO view = snapshot.getView();
       if (view == null) {
         throw unknown;
@@ -233,6 +248,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       String confirmedDirectory = IdeInputs.optionalProtocolPath(view.getDirectory(), "directory");
       String workspacePath =
           IdeInputs.requireProtocolPath(view.getWorkspacePath(), "workspacePath");
+      bindings.bindUser(userId, environmentId, viewId);
       return publishOpen(
           sentIdentity,
           new IdeViewSnapshotStore.View(
@@ -244,7 +260,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
               bindingEpoch,
               confirmedDirectory,
               workspacePath,
-              IdeProtocol.protocolState(IdeProtocol.requireViewState(view.getState()))));
+              IdeProtocol.protocolState(IdeProtocol.requireViewState(view.getState()))),
+          userId);
     } catch (IdeCommandCaller.IdeOutcomeUnknownException error) {
       throw IdeProtocol.outcomeUnknown(unknown.getMessage(), unknown);
     } catch (DomainException error) {
@@ -270,11 +287,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   /** 落实一次性入口票据；授权事实已经完全来自刚接受的权威快照。 */
   private EnvironmentIdeViewDTO publishOpen(
-      DaemonConnectionIdentity identity, IdeViewSnapshotStore.View view) {
+      DaemonConnectionIdentity identity, IdeViewSnapshotStore.View view, UUID userId) {
     snapshotBoundary.requireCurrentGeneration(identity);
     String ticket =
         bootstrapTickets.issue(
-            identity, view.viewId().toString(), view.bindingEpoch(), view.workspacePath());
+            identity, view.viewId().toString(), view.bindingEpoch(), view.workspacePath(), userId);
     EnvironmentIdeViewDTO dto = IdeProtocol.toDto(identity, view);
     dto.setEntryUrl(
         IdeGatewayConstants.ROUTE_PREFIX
@@ -289,7 +306,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   @Override
   public EnvironmentIdeViewDTO changeDirectory(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeChangeDirectoryDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeChangeDirectoryDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     UUID parsedViewId = IdeInputs.requireViewId(viewId);
@@ -300,13 +320,16 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (directory == null) {
       throw DomainException.validation("environment", "directory must not be blank");
     }
+    bindings.requireUser(
+        Objects.requireNonNull(principal, "principal").userId(), environmentId, parsedViewId);
     Binding binding =
         bindings.requireBinding(
             environmentId,
             parsedViewId,
             browserSessionId,
             bindingEpoch,
-            request.getExpectedDaemonInstanceId());
+            request.getExpectedDaemonInstanceId(),
+            principal.userId());
     IdeCommand command =
         IdeCommand.newBuilder()
             .setAction(IdeAction.CHANGE_DIRECTORY)
@@ -330,8 +353,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   @Override
   public void focusTerminal(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    boundAction(environmentId, viewId, request, IdeAction.FOCUS_TERMINAL);
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
+    boundAction(environmentId, viewId, request, principal, IdeAction.FOCUS_TERMINAL);
   }
 
   @Override
@@ -340,6 +366,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       String viewId,
       String sessionId,
       String resourceId,
+      StudioPrincipal principal,
       EnvironmentIdeViewBindingDTO request) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
@@ -349,14 +376,18 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     UUID browserSessionId =
         IdeUuids.requireInput(request.getBrowserSessionId(), "browserSessionId");
     long bindingEpoch = IdeInputs.requireEpoch(request.getBindingEpoch());
+    bindings.requireUser(
+        Objects.requireNonNull(principal, "principal").userId(), environmentId, parsedViewId);
     Binding binding =
         bindings.requireBinding(
             environmentId,
             parsedViewId,
             browserSessionId,
             bindingEpoch,
-            request.getExpectedDaemonInstanceId());
-    resourceAccess.owner(Kind.SESSION, parsedSessionId).orElseThrow(ResourceAccess::notFound);
+            request.getExpectedDaemonInstanceId(),
+            principal.userId());
+    resourceAccess.require(
+        Objects.requireNonNull(principal, "principal"), Kind.SESSION, parsedSessionId);
     if (!sessionBlobRefManager.contains(parsedSessionId, parsedResourceId)) {
       throw DomainException.notFound("resource");
     }
@@ -388,14 +419,18 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   @Override
   public void collapseMobile(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    boundAction(environmentId, viewId, request, IdeAction.COLLAPSE_MOBILE);
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal) {
+    boundAction(environmentId, viewId, request, principal, IdeAction.COLLAPSE_MOBILE);
   }
 
   private void boundAction(
       EnvironmentId environmentId,
       String viewId,
       EnvironmentIdeViewBindingDTO request,
+      StudioPrincipal principal,
       IdeAction action) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
@@ -403,13 +438,16 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     UUID browserSessionId =
         IdeUuids.requireInput(request.getBrowserSessionId(), "browserSessionId");
     long bindingEpoch = IdeInputs.requireEpoch(request.getBindingEpoch());
+    bindings.requireUser(
+        Objects.requireNonNull(principal, "principal").userId(), environmentId, parsedViewId);
     Binding binding =
         bindings.requireBinding(
             environmentId,
             parsedViewId,
             browserSessionId,
             bindingEpoch,
-            request.getExpectedDaemonInstanceId());
+            request.getExpectedDaemonInstanceId(),
+            principal.userId());
     IdeCall result =
         caller.callConfirmed(
             environmentId,
@@ -423,7 +461,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   @Override
   public void closeView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeCloseViewDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     UUID parsedViewId = IdeInputs.requireViewId(viewId);
@@ -431,13 +472,16 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
         IdeUuids.requireInput(request.getBrowserSessionId(), "browserSessionId");
     long bindingEpoch = IdeInputs.requireEpoch(request.getBindingEpoch());
     boolean discard = request.isDiscard();
+    bindings.requireUser(
+        Objects.requireNonNull(principal, "principal").userId(), environmentId, parsedViewId);
     Binding binding =
         bindings.requireBinding(
             environmentId,
             parsedViewId,
             browserSessionId,
             bindingEpoch,
-            request.getExpectedDaemonInstanceId());
+            request.getExpectedDaemonInstanceId(),
+            principal.userId());
     IdeCommand command =
         IdeCommand.newBuilder()
             .setAction(IdeAction.CLOSE_VIEW)
@@ -483,7 +527,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   @Override
   public EnvironmentIdeViewSnapshotDTO readView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request) {
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeReadViewDTO request,
+      StudioPrincipal principal) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     UUID parsedViewId = IdeInputs.requireViewId(viewId);
@@ -501,17 +548,30 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       throw IdeProtocol.viewGone("environment daemon instance has been replaced");
     }
     bindings.requireIntent(
-        eventNodeId, connectionId, browserSessionId, environmentId, parsedViewId, claimId);
+        eventNodeId,
+        connectionId,
+        browserSessionId,
+        environmentId,
+        parsedViewId,
+        claimId,
+        principal.userId());
     IdeViewSnapshotStore.Snapshot snapshot = snapshotBoundary.refresh(environmentId, identity);
     IdeViewSnapshotStore.View view = snapshot.find(parsedViewId).orElse(null);
-    if (view != null && !view.browserSessionId().equals(browserSessionId)) {
-      throw IdeProtocol.viewOwnedByOther();
+    if (view != null) {
+      bindings.requireUser(principal.userId(), environmentId, parsedViewId);
+      if (!view.browserSessionId().equals(browserSessionId)) {
+        throw IdeProtocol.viewOwnedByOther();
+      }
     }
     EnvironmentIdeViewSnapshotDTO dto = new EnvironmentIdeViewSnapshotDTO();
     dto.setDaemonInstanceId(identity.daemonInstanceId());
     dto.setRevision(snapshot.revision());
     dto.setView(view == null ? null : IdeProtocol.toDto(identity, view));
     return dto;
+  }
+
+  UUID boundUser(EnvironmentId environmentId, UUID viewId) {
+    return bindings.boundUser(environmentId, viewId);
   }
 
   private static void requireSupportedAttachmentType(String value) {

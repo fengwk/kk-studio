@@ -128,12 +128,12 @@ test('docs check rejects unrelated SQL files next to the fixed documents', () =>
   }
 })
 
-test('docs check rejects built HTML and cache directories in the prototype source', () => {
+test('docs check rejects reintroduced workspace-prototype directories under docs', () => {
   const mirrorRoot = createRepositoryMirror()
   try {
     const prototype = path.join(mirrorRoot, 'docs/workspace-prototype')
-    writeFileSync(path.join(prototype, 'generated.html'), '<!doctype html>\n')
-    mkdirSync(path.join(prototype, '.vite'))
+    mkdirSync(prototype, { recursive: true })
+    writeFileSync(path.join(prototype, 'index.html'), '<!doctype html>\n')
     assert.throws(
       () => execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
         cwd: mirrorRoot,
@@ -142,8 +142,8 @@ test('docs check rejects built HTML and cache directories in the prototype sourc
       }),
       (error) => {
         const stderr = error.stderr || ''
-        return stderr.includes('unexpected docs file: docs/workspace-prototype/generated.html') &&
-          stderr.includes('unexpected docs directory: docs/workspace-prototype/.vite')
+        return stderr.includes('unexpected docs file: docs/workspace-prototype/index.html') &&
+          stderr.includes('unexpected docs directory: docs/workspace-prototype')
       },
     )
   } finally {

@@ -23,10 +23,10 @@ import java.util.UUID;
 /**
  * 平台侧 Session 资源内容读取器。
  *
- * <p>按 {@code resource://files/<uuid>} 读取全局 Blob，并在当前 Session 建立持有：
+ * <p>按 {@code resource://files/<uuid>} 读取当前 Session 已持有的全局 Blob：
  *
  * <ol>
- *   <li>会话身份由工具执行上下文给出；存在的 ACTIVE 资源在首次访问时被该 Session 持有；
+ *   <li>会话身份由工具执行上下文给出；资源必须已由该 Session 持有，读取不会隐式建立持有关系；
  *   <li>以授权 Blob 的权威 MIME 判定读取形态：文本继续返回有界窗口；{@code image/*}、{@code audio/*}、{@code video/*} 与
  *       {@code application/pdf} 走真实媒体路径；
  *   <li>媒体路径在读取任何内容之前，用执行上下文中该 Turn 已冻结的消费者媒体能力、权威 MIME 与内联预算共同校验：不支持或超预算都以明确英文错误拒绝；
@@ -92,11 +92,15 @@ public class PlatformResourceContentReader {
       throw new PlatformReadException("blobId must not be null");
     }
     Objects.requireNonNull(deadline, "deadline must not be null");
+    // A resource URI may only read an attachment already held by this session. Check the
+    // relationship before looking up the global blob so an arbitrary UUID cannot probe storage.
+    if (!sessionBlobRefManager.contains(sessionId, blobId)) {
+      throw new PlatformReadException("resource is not available: " + blobId);
+    }
     StorageBlob blob = storageBlobManager.getBlob(blobId);
     if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
       throw new PlatformReadException("resource is not available: " + blobId);
     }
-    sessionBlobRefManager.retainRef(sessionId, blobId);
     ModelInputModality modality = mediaModality(blob.getMediaType());
     if (modality == null) {
       return new ResourceRead.Text(

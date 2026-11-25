@@ -73,6 +73,16 @@ public class CanvasResourceJdbcStore {
         .optional();
   }
 
+  public boolean existsHeldBlob(UUID canvasId, UUID blobId) {
+    return jdbc.sql(
+            "select exists (select 1 from canvas_resource where canvas_id = :canvasId"
+                + " and blob_id = :blobId and owner_node_id is not null)")
+        .param("canvasId", canvasId)
+        .param("blobId", blobId)
+        .query(Boolean.class)
+        .single();
+  }
+
   public Optional<CanvasResourceDO> findByIdForUpdate(UUID canvasId, UUID id) {
     return jdbc.sql(
             "select "

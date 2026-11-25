@@ -25,7 +25,7 @@ import java.util.UUID;
 public class StorageUploadRepository {
 
   private static final String COLUMNS =
-      "id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, "
+      "id, owner_user_id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, "
           + "declared_sha256, image_format, original_width, original_height, stored_width, "
           + "stored_height, cleanup_requested_at, cleanup_token, cleanup_until, created_at";
 
@@ -34,11 +34,11 @@ public class StorageUploadRepository {
   private static final String INSERT_SQL =
       """
       insert into storage_upload (
-          id, candidate_blob_id, blob_id, filename, declared_media_type,
+          id, owner_user_id, candidate_blob_id, blob_id, filename, declared_media_type,
           declared_size, declared_sha256, image_format, original_width, original_height,
           stored_width, stored_height, created_at
       ) values (
-          :id, :candidateBlobId, :blobId, :filename, :declaredMediaType,
+          :id, :ownerUserId, :candidateBlobId, :blobId, :filename, :declaredMediaType,
           :declaredSize, :declaredSha256, :format, :originalWidth, :originalHeight,
           :storedWidth, :storedHeight, :createdAt
       )
@@ -66,6 +66,7 @@ public class StorageUploadRepository {
     return jdbcClient
             .sql(INSERT_SQL)
             .param("id", upload.getId())
+            .param("ownerUserId", upload.getOwnerUserId())
             .param("candidateBlobId", upload.getCandidateBlobId())
             .param("blobId", upload.getBlobId())
             .param("filename", upload.getFilename())
@@ -204,6 +205,7 @@ public class StorageUploadRepository {
   private static StorageUpload mapRow(ResultSet rs, int rowNum) throws SQLException {
     StorageUpload upload = new StorageUpload();
     upload.setId(rs.getObject("id", UUID.class));
+    upload.setOwnerUserId(rs.getObject("owner_user_id", UUID.class));
     upload.setCandidateBlobId(rs.getObject("candidate_blob_id", UUID.class));
     upload.setBlobId(rs.getObject("blob_id", UUID.class));
     upload.setFilename(rs.getString("filename"));

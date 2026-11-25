@@ -1453,7 +1453,7 @@ describe('待审批 mutation 的冻结审查材料只出现一次', () => {
       threadId: 'thread-1',
       sessionId: 'sess-dedup',
       rootThreadId: 'thread-1',
-      owner: { kind: 'CHAT', id: 'chat-1', title: 'Review' },
+      owner: { kind: 'CHAT_SPACE', id: 'space-1', title: 'Review' },
       toolCallId: `call-${invocationId}`,
       toolName,
       argumentsJson,
@@ -1464,7 +1464,7 @@ describe('待审批 mutation 的冻结审查材料只出现一次', () => {
   }
 
   /**
-   * 执行根 pane 视图：同一 provider 同时包住时间线与审批卡（与 RootAgentPane 一致），
+   * 执行根 pane 视图：同一 provider 同时包住时间线与审批卡（与 RootThreadControlArea 一致），
    * 审批位只由这些真实渲染的条目构成。
    */
   function rootPaneView(tool: ReactNode, cards: InteractionApproval[]) {
