@@ -34,6 +34,7 @@ import { createHttpClient, httpJson, listResults, loginStudio, setStudioCookie, 
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
+import { resolveRealModelSelection } from './lib/real-models.mjs'
 import { findCase } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
@@ -77,6 +78,7 @@ class CaseContext {
     baseUrlB,
     daemonEnv,
     real,
+    realModel,
     withTools,
     withBranch,
     withCanvasStorage,
@@ -90,6 +92,7 @@ class CaseContext {
     this.openWebSocket = client?.openWebSocket ?? ((path) => openStudioWebSocket(baseUrl, path))
     this.daemonEnv = daemonEnv
     this.real = real
+    this.realModel = realModel
     this.withTools = withTools
     this.withBranch = withBranch
     this.withCanvasStorage = withCanvasStorage
@@ -370,7 +373,7 @@ function distributedContainerLogs(service) {
   }
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     baseUrl: 'http://127.0.0.1:18081',
     baseUrlB: '',
@@ -407,6 +410,11 @@ function parseArgs(argv) {
         args.daemonEnv = next()
         break
       case '--real':
+        args.real = true
+        break
+      case '--real-model':
+        if (args.realModel) throw new Error('--real-model may only be specified once')
+        args.realModel = resolveRealModelSelection(next())
         args.real = true
         break
       case '--with-tools':
@@ -456,6 +464,9 @@ function parseArgs(argv) {
     }
   }
   // distributed 是正交 capability：显式开关 + 双 URL 缺一不可。
+  if (args.distributed && args.realModel) {
+    throw new Error('--distributed cannot be combined with --real-model')
+  }
   if (args.distributed && !args.baseUrlB) {
     throw new Error('--distributed requires --base-url-b')
   }
@@ -468,9 +479,10 @@ function parseArgs(argv) {
   return args
 }
 
-function caseEnabled(c, args) {
+export function caseEnabled(c, args) {
   if (c.id === 'frontend.proxy_model_contract' && !args.frontendUrl) return false
   if (c.requires.has('real') && !args.real) return false
+  if (args.realModel && c.modelIdSuffix && c.modelIdSuffix !== args.realModel.idSuffix) return false
   if (c.requires.has('tools') && !args.withTools) return false
   if (c.requires.has('branch') && !args.withBranch) return false
   if (c.requires.has('canvas-storage') && !args.withCanvasStorage) return false
@@ -500,7 +512,7 @@ async function main(argv) {
   if (args.help) {
     console.log(`Usage: node scripts/dev/verify/e2e/run-matrix.mjs [options]
   --base-url URL --base-url-b URL --frontend-url URL
-  --real --with-tools --with-branch --with-canvas-storage --with-canvas-function
+  --real --real-model ID --with-tools --with-branch --with-canvas-storage --with-canvas-function
   --distributed
   --only CASE_ID (repeatable) --level L1/L2/L3/L4/L5 (repeatable)
   --daemon-env NAME   Daemon environment name for tool cases
@@ -560,6 +572,7 @@ async function main(argv) {
     baseUrlB: args.distributed ? args.baseUrlB : '',
     daemonEnv: args.daemonEnv,
     real: args.real,
+    realModel: args.realModel,
     withTools: args.withTools,
     withBranch: args.withBranch,
     withCanvasStorage: args.withCanvasStorage,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getCase } from '../run-matrix.mjs'
+import { getCase, parseArgs } from '../run-matrix.mjs'
 
 const identity = {
   type: 'connected',
@@ -79,6 +79,27 @@ test('tool.read_turn executes the daemon.ready prerequisite', async () => {
     daemonEnv: 'fixture', vars: {},
     call: async () => { throw stopped },
   }), (error) => error === stopped)
+})
+
+test('tool.read_turn uses the explicit model after the fixture daemon is ready', async () => {
+  const { realModel } = parseArgs(['--real-model', 'openai_responses'])
+  const stopBeforeExecution = new Error('fixture stops at agent creation')
+  await assert.rejects(getCase('tool.read_turn').run({
+    realModel, daemonEnv: 'fixture', vars: {},
+    async call(method, route, body) {
+      if (method === 'GET' && route === '/api/platform/environments') return { json: [environment] }
+      if (method === 'GET' && route === '/api/platform/providers') {
+        return { json: [{ name: realModel.providerName, providerType: realModel.providerType, baseUrl: 'http://fixture.invalid', credential: { configured: true } }] }
+      }
+      if (method === 'GET' && route === '/api/platform/models') {
+        return { json: [{ name: realModel.modelName, config: { variants: realModel.variants.map((id) => ({ id })) } }] }
+      }
+      assert.equal(method, 'POST')
+      assert.equal(route, '/api/platform/agents')
+      assert.deepEqual(body.execution.settings, { modelName: realModel.modelName, variant: realModel.variant })
+      throw stopBeforeExecution
+    },
+  }), (error) => error === stopBeforeExecution)
 })
 
 test('holder-scoped attachment cases are registered in the default L1 matrix', () => {

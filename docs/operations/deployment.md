@@ -401,7 +401,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | distributed | node identity/ports | `DISTRIBUTED_*` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_MINIO_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
 | supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_MAVEN_BUILD_OPTS`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
-| 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_RESPONSES_*`、`TEST_ANTHROPIC_*`、`TEST_OPENAI_*` |
+| 显式真实模式 E2E（`--real` / `--real-model <idSuffix>`） | 仅宿主 credential 同步；`--real` 默认使用全部四组，指定模型时只使用对应 pair | `TEST_GOOGLE_*`、`TEST_OPENAI_RESPONSES_*`、`TEST_ANTHROPIC_*`、`TEST_OPENAI_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_API_KEY`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
@@ -418,9 +418,9 @@ Canvas Function runtime 变量也只在启动期读取。
   属主不符、符号链接、未知键或值缺失都直接失败。
 - local/test/reliability/distributed 的固定 PostgreSQL 与 MinIO 凭据只属于 disposable compose；
   宿主绑定地址一旦改为非 loopback，就必须显式覆盖这些默认值。
-- [`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) 只在显式 `--real` 时读取四组完整 credential pair，并经 HTTP 写入各自专用
-  database；credential 不进入 Compose environment、Dockerfile、image layer、backend/Daemon
-  command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
+- [`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) 只在显式真实模式时读取宿主 credential：`--real` 默认读取全部四组完整 pair，
+  `--real-model <idSuffix>` 只读取所选模型对应的一组，并经 HTTP 写入各自专用 database；credential 不进入 Compose environment、Dockerfile、image layer、
+  backend/Daemon command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
   mode `600` 的 Maven settings，二者都不进 command line、POM、image 或报告。
 - Plugin 凭据、Provider 密钥与 Skill 仓库令牌以明文保存在数据库中，其保护依赖数据库本身的访问控制与备份加密；

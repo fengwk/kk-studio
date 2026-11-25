@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
-import { ALL_CASES } from '../run-matrix.mjs'
+import { ALL_CASES, caseEnabled, getCase, parseArgs as parseApiArgs } from '../run-matrix.mjs'
+import { parseArgs as parseUiArgs } from '../ui-smoke.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
@@ -113,15 +114,66 @@ test('ui-smoke 必须引用共享契约且杜绝硬编码裸露的 MiniMax 供�
     )
   }
 
-  // 3. 校验关键派生用法存在
-  assert.match(
-    content,
-    /const\s+REAL_UI_MODEL_ID\s*=\s*REAL_UI_MODEL\.modelName/,
-    'ui-smoke.mjs must use the logical model name as REAL_UI_MODEL_ID',
-  )
-  assert.match(
-    content,
-    /const\s+REAL_UI_MODEL_SELECTOR_LABEL\s*=\s*`\$\{REAL_UI_MODEL_ID\} \(\$\{REAL_UI_MODEL\.variant\}\)`/,
-    'ui-smoke.mjs must derive selector label as model name with variant',
-  )
+  // 3. 预检、Agent 配置和 selector 都从已解析的 UI 模型派生。
+  assert.match(content, /requireRealUiModel\(args\.backendUrl, args\.realModel\)/)
+  assert.match(content, /settings: \{ modelName: args\.realModel\.modelName, variant: args\.realModel\.variant \}/)
+  assert.match(content, /hasText: `\$\{args\.realModel\.modelName\} \(\$\{args\.realModel\.variant\}\)`/)
+})
+
+const sharedRealIds = ['real.stop_partial_continue', 'branch.same_session_new_thread', 'real.task_delegation', 'tool.read_turn']
+
+function expectedModelIds(def) {
+  const kinds = ['text_cache', 'reasoning_levels', ...(def.imageInput ? ['image_input'] : [])]
+  return kinds.map((kind) => `real.${kind}.${def.idSuffix}`)
+}
+
+test('real selection narrows API inventory and uses the same model in UI, preserving opt-in capability gates', () => {
+  const select = (...flags) => {
+    const args = parseApiArgs(flags)
+    return ALL_CASES.filter((c) => caseEnabled(c, args) && c.requires.has('real')).map((c) => c.id).sort()
+  }
+  const optIns = ['--with-branch', '--with-tools', '--with-canvas-storage']
+  for (const def of REAL_MODEL_DEFINITIONS) {
+    const flags = ['--real-model', def.idSuffix]
+    assert.equal(parseUiArgs(flags).realModel, parseApiArgs(flags).realModel)
+    assert.deepEqual(select(...flags, ...optIns), [...expectedModelIds(def), ...sharedRealIds].sort())
+    assert.deepEqual(select(...flags), [`real.reasoning_levels.${def.idSuffix}`, 'real.stop_partial_continue', `real.text_cache.${def.idSuffix}`])
+  }
+  assert.deepEqual(select('--with-tools', '--with-canvas-storage'), [])
+  assert.equal(parseUiArgs([]).real, false)
+  assert.equal(parseUiArgs(['--real']).realModel, MINIMAX_ANTHROPIC_M3)
+  assert.deepEqual(select('--real', ...optIns), [...REAL_MODEL_DEFINITIONS.flatMap(expectedModelIds), ...sharedRealIds].sort())
+})
+
+test('shared branch, stop and task use the UI-selected model when creating their first Agent', async () => {
+  const selected = parseUiArgs(['--real-model', 'openai_responses']).realModel
+  const { realModel } = parseApiArgs(['--real-model', selected.idSuffix])
+  const stopBeforeExecution = new Error('fixture stops at agent creation')
+  // Only return the selected catalog rows; intercept the first write before any model turn.
+  for (const id of sharedRealIds.filter((id) => id !== 'tool.read_turn')) {
+    await assert.rejects(getCase(id).run({
+      realModel,
+      async call(method, route, body) {
+        if (method === 'GET' && route === '/api/platform/providers') {
+          return { json: [{ name: selected.providerName, providerType: selected.providerType, baseUrl: 'http://fixture.invalid', credential: { configured: true } }] }
+        }
+        if (method === 'GET' && route === '/api/platform/models') {
+          return { json: [{ name: selected.modelName, config: { variants: selected.variants.map((id) => ({ id })) } }] }
+        }
+        assert.equal(method, 'POST')
+        assert.equal(route, '/api/platform/agents')
+        assert.deepEqual(body.execution.settings, { modelName: selected.modelName, variant: selected.variant })
+        throw stopBeforeExecution
+      },
+    }), (error) => error === stopBeforeExecution, id)
+  }
+})
+
+test('generated docs describe model selection and preserve shared defaults', () => {
+  for (const id of sharedRealIds) {
+    const { docs } = getCase(id)
+    assert.match(docs, /--real-model/)
+    assert.match(docs, /未指定时/)
+    if (id === 'tool.read_turn' || id === 'real.task_delegation') assert.match(docs, /E2E_BUILTIN_MODEL/)
+  }
 })

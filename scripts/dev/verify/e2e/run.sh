@@ -38,6 +38,7 @@ WITH_BRANCH=false
 WITH_CANVAS_STORAGE=false
 WITH_CANVAS_FUNCTION=false
 REAL=false
+REAL_MODEL_ARGS=()
 WITH_UI=false
 DISTRIBUTED=false
 LIST_ONLY=false
@@ -53,7 +54,8 @@ Usage: scripts/dev/verify/e2e/run.sh [options]
 
 Options:
   --rebuild         Force clean package backend + restart backend/frontend (and the daemon with --with-tools)
-  --real            Enable real provider cases (requires every TEST_*_BASE_URL/API_KEY credential)
+  --real            Enable all real providers unless --real-model is set
+  --real-model ID   Enable real cases for one declared model idSuffix (implies --real)
   --with-tools      Enable daemon/tool cases (starts and cleans up an owned daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable storage-dependent real model and tool cases (default L1 Blob cases run without this flag)
@@ -71,7 +73,7 @@ Env:
   FRONTEND_PORT=5173
   # Real provider credential pairs are declared once by the synchronizer:
   #   node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env
-  # --real requires every printed name to be set non-empty before startup.
+  # Add --real-model ID to list only that provider's pair. All listed names must be non-empty.
   # Free modes never synchronize host credentials.
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
@@ -87,6 +89,13 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --rebuild) REBUILD=true; shift ;;
     --real) REAL=true; shift ;;
+    --real-model)
+      [ $# -ge 2 ] && [[ "$2" != -* && -n "$2" ]] || die "--real-model requires a model idSuffix"
+      [ ${#REAL_MODEL_ARGS[@]} -eq 0 ] || die "--real-model may only be specified once"
+      REAL_MODEL_ARGS=(--real-model "$2")
+      REAL=true
+      shift 2
+      ;;
     --with-tools) WITH_TOOLS=true; shift ;;
     --with-branch) WITH_BRANCH=true; REAL=true; shift ;;
     --with-canvas-storage) WITH_CANVAS_STORAGE=true; shift ;;
@@ -118,6 +127,11 @@ done
 
 if [ ${#UI_ONLY_ARGS[@]} -gt 0 ] && [ "$WITH_UI" != "true" ]; then
   die "UI case selection requires --ui"
+fi
+
+# Validate explicit selections even for offline inventory commands.
+if [ ${#REAL_MODEL_ARGS[@]} -gt 0 ]; then
+  load_e2e_credential_names "${REAL_MODEL_ARGS[@]}" || die "invalid --real-model selection"
 fi
 
 if [ "$LIST_ONLY" = "true" ]; then
@@ -181,8 +195,9 @@ fi
 
 # Gate real provider credentials before any process startup or HTTP request
 if [ "$REAL" = "true" ]; then
-  REAL_CREDENTIAL_VARS=()
-  load_e2e_credential_names || die "failed to load provider credential names"
+  if [ ${#REAL_MODEL_ARGS[@]} -eq 0 ]; then
+    load_e2e_credential_names || die "failed to load provider credential names"
+  fi
   missing_vars=()
   for var_name in "${REAL_CREDENTIAL_VARS[@]}"; do
     if [ -z "${!var_name-}" ]; then
@@ -190,7 +205,7 @@ if [ "$REAL" = "true" ]; then
     fi
   done
   if [ ${#missing_vars[@]} -gt 0 ]; then
-    die "--real requires every TEST_*_BASE_URL / TEST_*_API_KEY credential pair to be set non-empty; missing: ${missing_vars[*]}"
+    die "--real requires the target TEST_*_BASE_URL / TEST_*_API_KEY credential pairs to be set non-empty; missing: ${missing_vars[*]}"
   fi
 fi
 
@@ -202,11 +217,11 @@ fi
 
 # 2) synchronize provider credentials; --real uses seeded providers
 if [ "$REAL" = "true" ]; then
-  sync_e2e_provider_credentials
+  sync_e2e_provider_credentials "${REAL_MODEL_ARGS[@]}"
 fi
 if [ "$REAL" = "true" ]; then
   providers_ready=$(e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/providers" \
-    | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready)
+    | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready "${REAL_MODEL_ARGS[@]:1}")
   if [ "$providers_ready" != "ok" ]; then
     die "All target providers must be configured for --real ($providers_ready)"
   fi
@@ -223,7 +238,7 @@ fi
 if [ "$DISTRIBUTED" = "true" ]; then
   MATRIX_ARGS+=(--distributed --base-url-b "http://127.0.0.1:$APP_B_PORT")
 fi
-if [ "$REAL" = "true" ]; then MATRIX_ARGS+=(--real); fi
+if [ "$REAL" = "true" ]; then MATRIX_ARGS+=(--real "${REAL_MODEL_ARGS[@]}"); fi
 if [ "$WITH_TOOLS" = "true" ]; then MATRIX_ARGS+=(--with-tools); fi
 if [ "$WITH_BRANCH" = "true" ]; then MATRIX_ARGS+=(--with-branch); fi
 if [ "$WITH_CANVAS_STORAGE" = "true" ]; then MATRIX_ARGS+=(--with-canvas-storage); fi
@@ -260,7 +275,7 @@ if [ "$WITH_UI" = "true" ] && { [ ${#ONLY_ARGS[@]} -eq 0 ] || [ ${#UI_ONLY_ARGS[
     --report-dir "$LATEST_DIR"
   )
   if [ "$REAL" = "true" ]; then
-    UI_ARGS+=(--real)
+    UI_ARGS+=(--real "${REAL_MODEL_ARGS[@]}")
   fi
   if [ "$WITH_TOOLS" = "true" ]; then
     UI_ARGS+=(--with-tools --daemon-env "$DAEMON_ENV_NAME")

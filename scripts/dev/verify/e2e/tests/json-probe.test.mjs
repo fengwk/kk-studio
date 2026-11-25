@@ -6,6 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { REPOSITORY_ROOT } from '../../../tests/support/shell.mjs'
+import { REAL_MODEL_DEFINITIONS } from '../lib/real-models.mjs'
 
 const PROBE = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/lib/json-probe.mjs')
 const probe = (args, document) =>
@@ -39,6 +40,15 @@ test('test intent: environment-ready exits zero only for a READY named environme
   assert.equal(probe(['environment-ready', 'a'], rows).status, 0)
   assert.equal(probe(['environment-ready', 'b'], rows).status, 1)
   assert.equal(probe(['environment-ready', 'zzz'], rows).status, 1)
+})
+
+test('test intent: providers-ready checks only the selected real model provider', () => {
+  for (const { idSuffix, providerName } of REAL_MODEL_DEFINITIONS) {
+    const rows = [{ name: providerName, credential: { configured: true }, baseUrl: 'fixture-url' }]
+    assert.equal(probe(['providers-ready', idSuffix], rows).stdout, 'ok\n', idSuffix)
+    const other = REAL_MODEL_DEFINITIONS.find((def) => def.providerName !== providerName)
+    assert.equal(probe(['providers-ready', other.idSuffix], rows).stdout, `missing:${other.providerName}\n`)
+  }
 })
 
 test('test intent: unknown commands retain their exit code and diagnostic', () => {

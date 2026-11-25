@@ -3,7 +3,7 @@
  * Synchronize E2E credential pairs for the four real target providers.
  *
  * Usage:
- *     sync-provider-credentials.mjs --backend-url http://localhost:18080
+ *     sync-provider-credentials.mjs --backend-url http://localhost:18080 [--real-model ID]
  *
  * Targets:
  *     google:            TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
@@ -26,6 +26,7 @@ import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
 import { syncProviderSpecs } from '../../lib/provider-credentials.mjs'
+import { resolveRealModelSelection } from './lib/real-models.mjs'
 
 export const TEST_GOOGLE_BASE_URL = 'TEST_GOOGLE_BASE_URL'
 export const TEST_GOOGLE_API_KEY = 'TEST_GOOGLE_API_KEY'
@@ -89,30 +90,43 @@ export const RELIABILITY_PROVIDER_SPECS = [
   },
 ]
 
+export function selectProviderSpecs(idSuffix) {
+  if (idSuffix === undefined) return PROVIDER_SPECS
+  const { providerName } = resolveRealModelSelection(idSuffix)
+  const spec = PROVIDER_SPECS.find((candidate) => candidate.name === providerName)
+  if (!spec) throw new Error(`Missing credential specification for ${providerName}`)
+  return [spec]
+}
+
 /**
  * Synchronize real provider credentials from environment to backend.
  *
  * Resolves to a list of status-line strings suitable for printing.
  */
-export async function syncProviderCredentials(backendUrl, env = process.env, request = undefined) {
-  return syncProviderSpecs(backendUrl, PROVIDER_SPECS, env, request)
+export async function syncProviderCredentials(backendUrl, env = process.env, request = undefined, idSuffix) {
+  return syncProviderSpecs(backendUrl, selectProviderSpecs(idSuffix), env, request)
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { 'backend-url': { type: 'string' }, 'list-env': { type: 'boolean' } } })
-  if (values['list-env']) {
-    for (const spec of PROVIDER_SPECS) {
-      console.log(spec.baseUrlEnv)
-      console.log(spec.apiKeyEnv)
-    }
-    return 0
-  }
-  if (!values['backend-url']) {
-    process.stderr.write('error: the following arguments are required: --backend-url\n')
-    return 2
-  }
   try {
-    for (const line of await syncProviderCredentials(values['backend-url'])) {
+    const { values } = parseArgs({ options: {
+      'backend-url': { type: 'string' },
+      'list-env': { type: 'boolean' },
+      'real-model': { type: 'string' },
+    } })
+    const idSuffix = values['real-model']
+    if (values['list-env']) {
+      for (const spec of selectProviderSpecs(idSuffix)) {
+        console.log(spec.baseUrlEnv)
+        console.log(spec.apiKeyEnv)
+      }
+      return 0
+    }
+    if (!values['backend-url']) {
+      process.stderr.write('error: the following arguments are required: --backend-url\n')
+      return 2
+    }
+    for (const line of await syncProviderCredentials(values['backend-url'], process.env, undefined, idSuffix)) {
       process.stdout.write(`${line}\n`)
     }
   } catch (error) {

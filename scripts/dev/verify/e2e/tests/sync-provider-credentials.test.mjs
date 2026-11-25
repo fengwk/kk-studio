@@ -5,6 +5,7 @@ import test from 'node:test'
 
 import { ValidationError } from '../../../lib/provider-credentials.mjs'
 import { makeMockHttp } from '../../../tests/support/mock-http.mjs'
+import { REAL_MODEL_DEFINITIONS } from '../lib/real-models.mjs'
 import {
   PROVIDER_SPECS,
   TEST_ANTHROPIC_API_KEY,
@@ -115,6 +116,40 @@ test('test intent: four complete pairs issue one GET and four PUTs with normaliz
     'minimax-anthropic: configured=True baseUrl_set=True',
     'deepseek: configured=True baseUrl_set=True',
   ])
+})
+
+test('test intent: selected model sync updates only its provider and ignores malformed unselected pairs', async () => {
+  for (const { idSuffix, providerName: targetName } of REAL_MODEL_DEFINITIONS) {
+    const env = {}
+    for (const spec of PROVIDER_SPECS) {
+      env[spec.baseUrlEnv] = `https://${spec.name}.fixture.example`
+      env[spec.apiKeyEnv] = `fixture-${spec.name}-key`
+    }
+    const { request, calls } = makeMockHttp({ rows: seedRows() })
+
+    const lines = await syncProviderCredentials('http://backend', env, request, idSuffix)
+
+    assert.equal(calls.length, 2, idSuffix)
+    assert.equal(calls[0][0], 'http://backend/api/platform/providers')
+    assert.equal(calls[0][1], null)
+    assert.equal(calls[1][0], `http://backend/api/platform/providers/${targetName}`)
+    assert.equal(calls[1][1].credential.value, `fixture-${targetName}-key`)
+    assert.equal(calls[1][1].baseUrl, targetName === 'openai' || targetName === 'deepseek' ? `https://${targetName}.fixture.example/v1` : `https://${targetName}.fixture.example`)
+    assert.deepEqual(lines, [`${targetName}: configured=True baseUrl_set=True`])
+  }
+
+  const selected = PROVIDER_SPECS.find((spec) => spec.name === 'google')
+  const unselected = PROVIDER_SPECS.find((spec) => spec.name === 'openai')
+  const env = {
+    [selected.baseUrlEnv]: 'https://google.fixture.example',
+    [selected.apiKeyEnv]: 'fixture-google-key',
+    // A malformed unrelated pair must not block a model-specific run.
+    [unselected.baseUrlEnv]: 'https://unselected.fixture.example',
+  }
+  const { request, calls } = makeMockHttp({ rows: seedRows() })
+  await syncProviderCredentials('http://backend', env, request, 'google_gemini')
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1][0], 'http://backend/api/platform/providers/google')
 })
 
 test('test intent: a shared CPA gateway keeps each protocol base path without duplicate versions', async () => {

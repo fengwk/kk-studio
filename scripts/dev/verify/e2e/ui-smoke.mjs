@@ -16,9 +16,10 @@ import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
-import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
+import { MINIMAX_ANTHROPIC_M3, resolveRealModelSelection } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
 import { baseModelConfig, encodePathTail } from './lib/fixtures.mjs'
@@ -33,15 +34,10 @@ import { REPO_ROOT } from '../../lib/repo-root.mjs'
 const requireFromFrontend = createRequire(
   path.join(REPO_ROOT, 'frontend/package.json'),
 )
-const { chromium } = requireFromFrontend('@playwright/test')
-
-const REAL_UI_MODEL = MINIMAX_ANTHROPIC_M3
-const REAL_UI_MODEL_ID = REAL_UI_MODEL.modelName
-const REAL_UI_MODEL_SELECTOR_LABEL = `${REAL_UI_MODEL_ID} (${REAL_UI_MODEL.variant})`
 const STUDIO_ADMIN_USER = process.env.E2E_STUDIO_USER || 'kkstudio'
 const STUDIO_ADMIN_CREDENTIAL = process.env.E2E_STUDIO_PASS || 'kkstudio'
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     baseUrl: process.env.FRONTEND_URL || 'http://127.0.0.1:5173',
     backendUrl: process.env.BACKEND_URL || 'http://127.0.0.1:18081',
@@ -61,12 +57,17 @@ function parseArgs(argv) {
     else if (a === '--daemon-env') args.daemonEnv = argv[++i]
     else if (a === '--headed') args.headed = true
     else if (a === '--real') args.real = true
-    else if (a === '--with-tools') args.withTools = true
+    else if (a === '--real-model') {
+      if (args.realModel) throw new Error('--real-model may only be specified once')
+      args.realModel = resolveRealModelSelection(argv[++i])
+      args.real = true
+    } else if (a === '--with-tools') args.withTools = true
     else if (a === '--with-canvas-function') args.withCanvasFunction = true
     else if (a === '--only') args.only.push(argv[++i])
     else if (a === '-h' || a === '--help') args.help = true
     else throw new Error(`unknown arg: ${a}`)
   }
+  if (args.real) args.realModel ??= MINIMAX_ANTHROPIC_M3
   return args
 }
 
@@ -111,7 +112,7 @@ async function apiDeleteByName(backendUrl, resource, name) {
   return true
 }
 
-async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3) {
+async function requireRealUiModel(backendUrl, modelDef) {
   const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/platform/models')
   const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/platform/providers')
   const models = Array.isArray(modelsJson) ? modelsJson : []
@@ -350,11 +351,12 @@ async function main(argv) {
   if (args.help) {
     console.log(
       'Usage: node scripts/dev/verify/e2e/ui-smoke.mjs --base-url URL --report-dir DIR'
-        + ' [--headed] [--real] [--with-tools] [--with-canvas-function] [--daemon-env NAME] [--only CASE_ID]...',
+        + ' [--headed] [--real] [--real-model ID] [--with-tools] [--with-canvas-function] [--daemon-env NAME] [--only CASE_ID]...',
     )
     return 0
   }
 
+  const { chromium } = requireFromFrontend('@playwright/test')
   await loginStudio(args.backendUrl)
   await requireProviderExecutionBoundary(args.backendUrl, args.real)
 
@@ -368,7 +370,7 @@ async function main(argv) {
     request: (requestPath, { method = 'GET', body, headers } = {}) =>
       apiJson(args.backendUrl, method, requestPath, body, headers),
   }
-  if (args.real) await requireRealMiniMaxM3(args.backendUrl, MINIMAX_ANTHROPIC_M3)
+  if (args.real) await requireRealUiModel(args.backendUrl, args.realModel)
 
   const browserEnv = { ...process.env }
   if (!args.headed) {
@@ -843,7 +845,7 @@ async function main(argv) {
         name: realAgentName,
         description: 'Temporary real UI E2E agent.',
         systemPrompt: 'Reply concisely and never call tools.',
-        execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID, variant: REAL_UI_MODEL.variant } },
+        execution: { driver: 'builtin', settings: { modelName: args.realModel.modelName, variant: args.realModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
       assert(
@@ -863,7 +865,7 @@ async function main(argv) {
         await composer.fill(promptText)
         await page.getByRole('button', { name: /^(?:Send message|发送消息)$/ }).click()
         await page.getByRole('button', { name: /^(?:Model & Variant|Model 与 Variant)$/ })
-          .filter({ hasText: REAL_UI_MODEL_SELECTOR_LABEL })
+          .filter({ hasText: `${args.realModel.modelName} (${args.realModel.variant})` })
           .waitFor({ state: 'visible', timeout: 30_000 })
         await shot(caseArt, 'first-send-user')
 
@@ -944,10 +946,12 @@ async function main(argv) {
   return failed.length ? 1 : 0
 }
 
-main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
-  (err) => {
-    console.error(redactSecrets(err?.stack || String(err)))
-    process.exit(2)
-  },
-)
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main(process.argv.slice(2)).then(
+    (code) => process.exit(code),
+    (err) => {
+      console.error(redactSecrets(err?.stack || String(err)))
+      process.exit(2)
+    },
+  )
+}

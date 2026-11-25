@@ -159,10 +159,10 @@ test('test intent: provider credentials are synchronized only for real mode', ()
   // Free stack setup must never consume host real-provider credentials.
   const script = readText(E2E_ENTRY)
   const ensureStack = functionBody(E2E_LIB, 'ensure_stack')
-  const syncCalls = script.match(/^\s*sync_e2e_provider_credentials\s*$/gm) ?? []
+  const syncCalls = script.match(/^\s*sync_e2e_provider_credentials(?:\s+.*)?$/gm) ?? []
 
   assert.equal(syncCalls.length, 1)
-  assert.match(script, /if \[ "\$REAL" = "true" \]; then\n {2}sync_e2e_provider_credentials\nfi/)
+  assert.match(script, /if \[ "\$REAL" = "true" \]; then\n {2}sync_e2e_provider_credentials(?: "\$\{REAL_MODEL_ARGS\[@\]\}")?\nfi/)
   assert.ok(!ensureStack.includes('sync_e2e_provider_credentials'))
 })
 
