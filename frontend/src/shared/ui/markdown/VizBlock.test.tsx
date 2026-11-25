@@ -1,7 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
-  ChartRenderResult,
   ChartSpec,
   DiagramDiagnostic,
   DiagramOptions,
@@ -14,7 +13,7 @@ type DiagramResult = RenderResult<DiagramDiagnostic>
 type AttachTarget = Parameters<typeof import('@fengwk/kchart').attach>[0]
 
 const kchart = vi.hoisted(() => ({
-  render: vi.fn<(spec: ChartSpec, options: RenderOptions) => Promise<ChartRenderResult>>(),
+  render: vi.fn<(spec: ChartSpec, options: RenderOptions) => Promise<RenderResult>>(),
   diagram: vi.fn<(source: string, options: DiagramOptions) => Promise<DiagramResult>>(),
   attach: vi.fn<(svg: AttachTarget, spec?: ChartSpec) => Promise<() => void>>(),
   themes: { terminal: { id: 'terminal', fg2: '#bdd7c4', style: { radius: 0, smallRadius: 0, soft: 0.12 } } },
@@ -251,7 +250,6 @@ describe('VizBlock', () => {
     kchart.render.mockResolvedValueOnce({
       svg: null,
       scene: null,
-      table: null,
       diagnostics: [
         { code: 'BAD_CHART', message: '缺少数据', fix: '补充 data', path: '/data' },
         { code: 'LATER', message: 'later error', fix: 'later fix' },
