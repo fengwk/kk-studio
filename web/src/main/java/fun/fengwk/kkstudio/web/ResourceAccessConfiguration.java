@@ -61,6 +61,10 @@ class ResourceAccessConfiguration implements WebMvcConfigurer {
       access.require(principal, Kind.SESSION, id(session));
     } else if (path.get("canvasId") instanceof String canvas) {
       access.require(principal, Kind.CANVAS, id(canvas));
+    } else if ("/api/harness/interactions"
+            .equals(request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE))
+        && request.getParameter("rootThreadId") != null) {
+      access.requireThread(principal, id(request.getParameter("rootThreadId")));
     } else if ("/api/harness/command-batches"
             .equals(request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE))
         && principal.role() != StudioRole.ADMIN) {
