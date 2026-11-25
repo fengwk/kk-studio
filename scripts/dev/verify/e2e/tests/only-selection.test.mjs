@@ -21,6 +21,7 @@ DAEMON_ENV_NAME=fixture
 step() { :; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 ensure_stack() { :; }
+cleanup_owned_stack() { :; }
 node() {
   local script="$1"
   shift

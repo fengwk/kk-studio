@@ -12,6 +12,14 @@ const registerCase = createCaseAdder(cases)
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
+function apiRequest(ctx, method, path, body, headers) {
+  return ctx.request(path, {
+    method,
+    ...(body === undefined ? {} : { body }),
+    ...(headers === undefined ? {} : { headers }),
+  })
+}
+
 /** CanvasDocumentDTO 精确字段集合：revision 是同步坐标系。 */
 const DOCUMENT_FIELDS = ['id', 'title', 'revision', 'createdAt', 'updatedAt']
 
@@ -43,11 +51,22 @@ function transform(x, y, width = 100, height = 80) {
   return { x, y, width, height }
 }
 
-/** 创建空画布并断言 document 契约（HTTP 201 + 资源体）。 */
+/** 创建空画布并断言 workspace ResourceRef 契约（HTTP 200）。 */
 async function createCanvas(ctx, title) {
-  const created = await ctx.call('POST', '/api/canvas/canvases', { title })
-  assert(created.status === 201, `create canvas status ${created.status}`)
-  const canvas = created.json
+  const spaceId = await ctx.createSpace(`e2e-space-${cid().slice(0, 8)}`)
+  const tree = (await apiRequest(ctx, 'GET', `/api/chat-spaces/${spaceId}/tree`)).json
+  const folderId = tree.folders[0]?.id
+  assert(folderId, JSON.stringify(tree))
+  const created = await apiRequest(ctx, 'POST', `/api/chat-spaces/${spaceId}/canvases`, {
+    folderId,
+    title,
+    expectedTreeVersion: tree.treeVersion,
+  }, { 'Idempotency-Key': cid() })
+  assert(created.status === 200, `create canvas status ${created.status}`)
+  assertExactFields(created.json, ['kind', 'id', 'treeVersion'], 'created canvas ResourceRef')
+  assert(created.json.kind === 'CANVAS' && UUID_TEXT.test(created.json.id), JSON.stringify(created.json))
+  assertDecimalVersion(created.json.treeVersion, 'canvas treeVersion')
+  const canvas = (await apiRequest(ctx, 'GET', `/api/canvas/canvases/${created.json.id}`)).json.document
   assertExactFields(canvas, DOCUMENT_FIELDS, 'canvas document')
   assert(UUID_TEXT.test(canvas.id), JSON.stringify(canvas))
   assertDecimalVersion(canvas.revision, 'canvas.revision')
@@ -66,7 +85,7 @@ async function createCanvas(ctx, title) {
  * 返回 patch 供调用方断言本次前进的完整变化集。
  */
 async function applyCommands(ctx, canvasId, { idempotencyKey, commands }) {
-  const accepted = await ctx.call('POST', `/api/canvas/canvases/${canvasId}/commands`, {
+  const accepted = await apiRequest(ctx, 'POST', `/api/canvas/canvases/${canvasId}/commands`, {
     idempotencyKey,
     commands,
   })
@@ -88,7 +107,7 @@ function assertEmptyPatch(patch, revision, label) {
 
 /** 读取快照并断言读模型字段集合与 document.revision。 */
 async function readSnapshot(ctx, canvasId) {
-  const snapshot = (await ctx.call('GET', `/api/canvas/canvases/${canvasId}`)).json
+  const snapshot = (await apiRequest(ctx, 'GET', `/api/canvas/canvases/${canvasId}`)).json
   assertExactFields(snapshot, SNAPSHOT_FIELDS, 'canvas snapshot')
   assertExactFields(snapshot.document, DOCUMENT_FIELDS, 'snapshot document')
   for (const node of snapshot.nodes) assertExactFields(node, NODE_FIELDS, 'snapshot node')
@@ -227,7 +246,7 @@ registerCase({
     // 语义组前置条件过期：整批不写入，409 返回服务端权威值，revision 不前进。
     const staleRename = await expectHttpError(
       () =>
-        ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
+        apiRequest(ctx, 'POST', `/api/canvas/canvases/${canvas.id}/commands`, {
           idempotencyKey: cid(),
           commands: [
             { type: 'RENAME_NODE', nodeId, expectedName: 'stale-name', name: 'renamed' },
@@ -250,7 +269,7 @@ registerCase({
     // 布局语义组：expectedTransform 是离线积压的编辑起点，过期即冲突，基线正确才推进。
     const layoutConflict = await expectHttpError(
       () =>
-        ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
+        apiRequest(ctx, 'POST', `/api/canvas/canvases/${canvas.id}/commands`, {
           idempotencyKey: cid(),
           commands: [
             {
@@ -401,11 +420,7 @@ registerCase({
       JSON.stringify(cleared.groups),
     )
 
-    const listed = (await ctx.call('GET', '/api/canvas/canvases')).json
-    assert(Array.isArray(listed), JSON.stringify(listed))
-    const listedDocument = listed.find((candidate) => candidate.id === canvas.id)
-    assertExactFields(listedDocument, DOCUMENT_FIELDS, 'listed document')
-    assert(listedDocument.revision === '8', JSON.stringify(listedDocument))
+    // Canvas discovery is scoped to its owning Chat Space tree.
   },
 })
 
@@ -456,7 +471,7 @@ registerCase({
     const conflictsFor = async (commands) => {
       const failure = await expectHttpError(
         () =>
-          ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
+          apiRequest(ctx, 'POST', `/api/canvas/canvases/${canvas.id}/commands`, {
             idempotencyKey: cid(),
             commands,
           }),
@@ -613,7 +628,7 @@ registerCase({
     })
     await expectHttpError(
       () =>
-        ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
+        apiRequest(ctx, 'POST', `/api/canvas/canvases/${canvas.id}/commands`, {
           idempotencyKey: boundKey,
           commands: [{ type: 'RENAME_NODE', nodeId: consumerNodeId, expectedName: 'consumer', name: 'other' }],
         }),
@@ -621,7 +636,7 @@ registerCase({
     )
     await expectHttpError(
       () =>
-        ctx.call('POST', `/api/canvas/canvases/${cid()}/commands`, {
+        apiRequest(ctx, 'POST', `/api/canvas/canvases/${cid()}/commands`, {
           idempotencyKey: cid(),
           commands: [
             { type: 'RENAME_NODE', nodeId: consumerNodeId, expectedName: 'consumer-2', name: 'x' },
@@ -668,11 +683,11 @@ registerCase({
       { idempotencyKey: cid(), commands: [{ type: 'RENAME_NODE', nodeId: consumerNodeId, expectedName: 'consumer-2', name: 'w' }], extra: true },
     ]) {
       await expectHttpError(
-        () => ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, request),
+        () => apiRequest(ctx, 'POST', `/api/canvas/canvases/${canvas.id}/commands`, request),
         { status: 400, code: 'validation' },
       )
     }
-    await expectHttpError(() => ctx.call('GET', '/api/canvas/canvases/not-a-uuid'), { status: 400, code: 'validation' })
+    await expectHttpError(() => apiRequest(ctx, 'GET', '/api/canvas/canvases/not-a-uuid'), { status: 400, code: 'validation' })
 
     const finalSnapshot = await readSnapshot(ctx, canvas.id)
     assert(

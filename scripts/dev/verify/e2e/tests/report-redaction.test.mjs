@@ -49,6 +49,14 @@ test('the real API runner redacts failures in cases, summary, markdown, error ar
   const requests = []
   const server = createServer((request, response) => {
     requests.push(request.url)
+    if (request.url === '/api/auth/login') {
+      response.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': 'session=fixture; HttpOnly',
+      })
+      response.end('{}')
+      return
+    }
     if (request.url === '/api/platform/providers') {
       response.setHeader('Content-Type', 'application/json')
       response.end(JSON.stringify([{ name: 'unconfigured', credential: { configured: false }, baseUrl: null }]))
@@ -70,7 +78,7 @@ test('the real API runner redacts failures in cases, summary, markdown, error ar
     (error) => error,
   )
   assert.equal(outcome.code, 1, 'the failed HTTP case must remain a failure')
-  assert.deepEqual(requests, ['/api/platform/providers', '/api/platform/models'])
+  assert.deepEqual(requests, ['/api/auth/login', '/api/platform/providers', '/api/platform/models'])
   const latest = path.join(directory, 'latest')
   for (const relative of [
     'cases/seed.structured_model_config.json',

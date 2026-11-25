@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: kk_studio
+      POSTGRES_PASSWORD: kk_studio
+    ports:
+      - "127.0.0.1::5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kk_studio -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  minio:
+    image: fengwk/minio@sha256:ea0a48a13c701cf2c4397b3a9c0fe9e10ed65b2f58f056bf07e2ce7308123535
+    platform: linux/amd64
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: kk-studio
+      MINIO_ROOT_PASSWORD: kk-studio
+    ports:
+      - "127.0.0.1::9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z
+    pull_policy: never
+    build:
+      context: ../../../../deploy/dependencies/minio-client
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: kk-studio
+      MINIO_ROOT_PASSWORD: kk-studio
+      MINIO_BUCKET: kk-studio-e2e-matrix
+      MINIO_ENDPOINT: http://minio:9000
+    entrypoint: ["/bin/sh", "/usr/local/bin/init-bucket.sh"]
+
+volumes:
+  postgres-data:
+  minio-data:

@@ -23,7 +23,8 @@ import {
   functionBatch,
   resourceBatch,
 } from './offline-canvas-contract.mjs'
-import { buildOfflineChatBatchRequest } from './offline-chat-payload.mjs'
+import { buildOfflineSessionRequest } from './offline-chat-payload.mjs'
+import { createHttpClient } from '../e2e/lib/http.mjs'
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -31,18 +32,21 @@ const sleep = (millis) => new Promise((resolve) => setTimeout(resolve, millis))
 
 /** HTTP client for the application API: resolves to the 2xx resource body, or null for 204. */
 export function createClient(baseUrl) {
+  const http = createHttpClient({ baseUrl, origin: new URL(baseUrl).origin })
   return {
     newId: () => randomUUID(),
     sleep,
-    async jsonCall(method, requestPath, body = null) {
-      const response = await fetch(baseUrl + requestPath, {
+    async login(username, password) {
+      await http.login(username, password)
+    },
+    async jsonCall(method, requestPath, body = null, headers = {}) {
+      const response = await http.request(requestPath, {
         method,
-        headers: body === null ? {} : { 'Content-Type': 'application/json' },
+        headers: { ...(body === null ? {} : { 'Content-Type': 'application/json' }), ...headers },
         body: body === null ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(30_000),
       })
-      assert.ok(response.ok, `${method} ${requestPath} -> HTTP ${response.status}`)
-      return response.status === 204 ? null : response.json()
+      assert.ok(response.status >= 200 && response.status < 300, `${method} ${requestPath} -> HTTP ${response.status}: ${response.text}`)
+      return response.status === 204 ? null : response.json
     },
   }
 }
@@ -226,36 +230,18 @@ const entryPayload = (entry) => entry.payload
 const isMessage = (entry, role) =>
   entry.entryType.toUpperCase() === 'MESSAGE' && entryPayload(entry).message.role === role
 
-/** Offline Chat smoke: one NEW_SESSION batch, then wait for the thread to become quiescent. */
-async function offlineChat(client) {
-  const { jsonCall, newId, sleep: wait } = client
-  await createStubCatalog(client)
-  const chat = await jsonCall('POST', '/api/chat/chats', {
-    title: 'offline-chat-smoke',
-    agentName: 'default-assistant',
-    yoloEnabled: false,
-  })
-  assert.equal(chat.agentName, 'default-assistant', JSON.stringify(chat))
+/** Offline Chat Space smoke: create a session with its first user message, then wait for quiescence. */
+async function offlineChat(client, spaceId) {
+  const { jsonCall, sleep: wait } = client
   const marker = `offline-chat-smoke-${randomUUID().replaceAll('-', '').slice(0, 8)}`
-  // 唯一产品写入口：NEW_SESSION 一次原子创建 Session + ROOT + Thread 并接受首条 USER_MESSAGE。
-  const sessionId = randomUUID()
-  const threadId = randomUUID()
   const accepted = await jsonCall(
     'POST',
-    '/api/harness/command-batches',
-    buildOfflineChatBatchRequest({
-      chatId: chat.id,
-      sessionId,
-      threadId,
-      commandId: newId(),
-      marker,
-    }),
+    `/api/chat-spaces/${spaceId}/sessions`,
+    buildOfflineSessionRequest({ marker }),
+    { 'Idempotency-Key': randomUUID() },
   )
-  assert.equal(accepted.replayed, false, JSON.stringify(accepted))
-  assert.equal(accepted.acceptedCommands[0].type, 'USER_MESSAGE', JSON.stringify(accepted))
-  // 不锁定 accepted 快照的瞬时 status（processor 可能已异步消费）；只锁定 threadId 归属，
-  // 随后轮询等待 quiescent 收敛。
-  assert.equal(accepted.thread.threadId, threadId, JSON.stringify(accepted.thread))
+  const threadId = accepted.threadId
+  assert.match(threadId, UUID_V4, JSON.stringify(accepted))
   let current
   let quiescent = false
   for (let attempt = 0; attempt < 240 && !quiescent; attempt += 1) {
@@ -294,44 +280,57 @@ async function offlineChat(client) {
 export async function runSmoke({ baseUrl, imageFixture }) {
   const client = createClient(baseUrl)
   const { jsonCall, newId, sleep: wait } = client
+  await client.login('kkstudio', 'kkstudio')
   const image = readFileSync(imageFixture)
-
-  const canvas = await jsonCall('POST', '/api/canvas/canvases', { title: 'container-resource-smoke' })
-  assert.match(canvas.id, UUID_V4)
-  assert.equal(documentRevision(canvas), 0)
+  await createStubCatalog(client)
+  const space = await jsonCall('POST', '/api/chat-spaces', {
+    title: 'offline-smoke',
+    rootFolderName: 'Root',
+    defaultAgentName: 'default-assistant',
+    defaultYoloEnabled: false,
+  }, { 'Idempotency-Key': randomUUID() })
+  const tree = await jsonCall('GET', `/api/chat-spaces/${space.id}/tree`)
+  const canvasRef = await jsonCall('POST', `/api/chat-spaces/${space.id}/canvases`, {
+    folderId: null,
+    title: 'container-resource-smoke',
+    expectedTreeVersion: tree.treeVersion,
+  }, { 'Idempotency-Key': randomUUID() })
+  const canvas = await jsonCall('GET', `/api/canvas/canvases/${canvasRef.id}`)
+  assert.match(canvas.document.id, UUID_V4)
+  assert.equal(documentRevision(canvas.document), 0)
   const completed = await uploadBlob(client, image)
 
   const resourceNodeId = newId()
-  const resourceRequest = resourceBatch(resourceNodeId, completed.blobId, newId())
-  const resourcePatch = await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/commands`, resourceRequest)
+  const resourceRequest = resourceBatch(resourceNodeId, completed.id, newId())
+  const resourcePatch = await jsonCall('POST', `/api/canvas/canvases/${canvas.document.id}/commands`, resourceRequest)
   assertPatch(resourcePatch, 0)
   // 精确 replay 是空变化集，不再次创建资源或推进 revision。
-  assertPatch(await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/commands`, resourceRequest), 1, true)
+  assertPatch(await jsonCall('POST', `/api/canvas/canvases/${canvas.document.id}/commands`, resourceRequest), 1, true)
   const resource = upsertedNode(resourcePatch, resourceNodeId).resources[0]
   assert.equal(resource.blobId, completed.blobId)
   assert.equal(resource.mediaType, 'image/png')
   assert.ok(resource.width > 0 && resource.height > 0)
   assert.equal(resource.sizeBytes, String(image.length))
 
-  const resourceSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.id}`)
+  const resourceSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.document.id}`)
   assert.equal(documentRevision(resourceSnapshot.document), 1)
   assert.equal(resourceSnapshot.nodes.length, 1)
   const snapshotResourceNode = resourceSnapshot.nodes.find((node) => node.id === resourceNodeId)
   assert.equal(snapshotResourceNode.resources[0].id, resource.id)
 
-  const original = await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/resources/${resource.id}/download-url`)
+  const original = await jsonCall('POST', `/api/canvas/canvases/${canvas.document.id}/blobs/${resource.blobId}/download-url`)
   const originalResponse = await rawFetch(original.url)
   assert.equal(originalResponse.status, 200)
   assert.ok(Buffer.from(await originalResponse.arrayBuffer()).equals(image))
 
-  const preview = await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/resources/${resource.id}/preview-url`)
+  const preview = await jsonCall('POST', `/api/canvas/canvases/${canvas.document.id}/blobs/${resource.blobId}/preview-url`)
   assert.ok(!('bucket' in preview) && !('key' in preview))
   await assertWebpPreview(preview.url)
 
   const functionNodeId = newId()
   const functionPatch = await jsonCall(
     'POST',
-    `/api/canvas/canvases/${canvas.id}/commands`,
+    `/api/canvas/canvases/${canvas.document.id}/commands`,
     functionBatch(
       functionNodeId,
       'generated',
@@ -345,7 +344,7 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   const requestId = newId()
   // start 的 expectedVersion 只能来自真实目录项，绝不硬编码 epoch 或 fingerprint。
   const fakeImageVersion = definitionVersion(await jsonCall('GET', '/api/canvas/functions'), 'fake-image')
-  const runPath = `/api/canvas/canvases/${canvas.id}/nodes/${functionNode.id}/function-run`
+  const runPath = `/api/canvas/canvases/${canvas.document.id}/nodes/${functionNode.id}/function-run`
   const started = await jsonCall('POST', runPath, { requestId, expectedVersion: fakeImageVersion })
   assert.equal(started.requestId, requestId)
   let current
@@ -360,7 +359,7 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.ok(terminal, 'fake-image FunctionRun did not reach terminal state')
   assertCompletedRun(current, functionNodeId, requestId)
 
-  const generatedSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.id}`)
+  const generatedSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.document.id}`)
   const generatedNode = generatedSnapshot.nodes.find((node) => node.id === functionNode.id)
   // fake adapter 无外部副作用、不写 checkpoint；只剩 start/beginSubmit/confirmSubmitted/complete 四次推进。
   assert.equal(assertRunRevision(generatedSnapshot.document, 2, 0), 6)
@@ -370,21 +369,21 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.equal(generatedResource.name, 'generated.png')
   const generatedPreview = await jsonCall(
     'POST',
-    `/api/canvas/canvases/${canvas.id}/resources/${generatedResource.id}/preview-url`,
+    `/api/canvas/canvases/${canvas.document.id}/blobs/${generatedResource.blobId}/preview-url`,
   )
   await assertWebpPreview(generatedPreview.url)
 
   await initializeOpencliPlugin(client)
   assertFunctionDefinitions(await jsonCall('GET', '/api/canvas/functions'))
 
-  const gptNode = await createAndRun(client, canvas.id, 'gpt-image-2', 'mock-gpt', { ratio: '1:1' }, 4)
+  const gptNode = await createAndRun(client, canvas.document.id, 'gpt-image-2', 'mock-gpt', { ratio: '1:1' }, 4)
   assert.equal(gptNode.resources.length, 1)
   assert.equal(gptNode.resources[0].kind, 'IMAGE')
 
   // 默认 routes 为空；fake Hub 的首次 status 即 ready，无 generating 重试。
   const seedanceNode = await createAndRun(
     client,
-    canvas.id,
+    canvas.document.id,
     'seedance2.0fast',
     'mock-seedance',
     { ratio: '16:9', duration: 4 },
@@ -393,7 +392,7 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.equal(seedanceNode.resources.length, 1)
   assert.equal(seedanceNode.resources[0].kind, 'VIDEO')
 
-  await offlineChat(client)
+  await offlineChat(client, space.id)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

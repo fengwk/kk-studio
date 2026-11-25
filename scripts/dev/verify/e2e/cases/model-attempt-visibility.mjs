@@ -3,11 +3,10 @@ import { createServer } from 'node:http'
 import { assert, cid, sleep } from '../lib/http.mjs'
 import {
   acceptCommandBatch,
-  branchSettingsOf,
-  chatOwner,
-  createChat,
   getThreadSnapshot,
-  createNewSession,
+  createWorkspaceSpace,
+  createWorkspaceSession,
+  deleteWorkspaceSession,
   setExecutionCommand,
   stopThread,
   threadTarget,
@@ -48,7 +47,8 @@ registerCase({
     let provider = null
     let model = null
     let agent = null
-    let chat = null
+    let space = null
+    let sessionId = null
     let threadId = null
     let activeSnapshot = null
     let firstFinalSnapshot = null
@@ -102,27 +102,20 @@ registerCase({
       agent = agentResponse.json
       assert(agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name, JSON.stringify(agentResponse.json))
 
-      chat = await createChat(ctx, {
+      space = await createWorkspaceSpace(ctx, {
         title: `e2e-attempt-visibility-${suffix}`,
-        agentName: agent.name,
+        defaultAgentName: agent.name,
+      })
+      // Workspace Session creation starts the initial model turn; select an unavailable model so the turn
+      // settles without contacting the mock, then submit the real model selection on the existing Thread.
+      const created = await createWorkspaceSession(ctx, space.id, {
+        idempotencyKey: cid(),
+        message: [{ type: 'TEXT', text: `materialize ${suffix}` }],
+        modelSelection: { modelName: `e2e-unavailable-${suffix}`, variant: 'default' },
         yoloEnabled: false,
       })
-      // 使用正确 Agent 与不可用模型创建空闲 Thread（不触发 mock Provider），随后在已订阅事件通道后
-      // 通过 THREAD batch 更新执行配置并发送 USER_MESSAGE 启动 mock turn。
-      const sessionId = cid()
-      const createdThreadId = cid()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId,
-        threadId: createdThreadId,
-        rootSettings: branchSettingsOf(
-          { name: agent.name },
-          { modelName: `e2e-unavailable-${suffix}`, variant: 'default' },
-        ),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`materialize ${suffix}`, cid())],
-      })
-      threadId = String(createdThreadId)
+      sessionId = created.sessionId
+      threadId = String(created.threadId)
       const idleThread = await waitForQuiescentThread(ctx, threadId, {
         timeoutMs: 60_000,
         intervalMs: 100,
@@ -139,7 +132,6 @@ registerCase({
               signal: activeFailureAbort.signal,
             })
             return acceptCommandBatch(ctx, {
-              owner: chatOwner(chat.id),
               target: threadTarget({
                 threadId,
                 expectedHeadEntryId: idleThread.headEntryId,
@@ -191,7 +183,6 @@ registerCase({
       })
 
       const secondStart = await acceptCommandBatch(ctx, {
-        owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
         }),
@@ -314,12 +305,9 @@ registerCase({
         }
       })
       await cleanup('mock server', cleanupErrors, () => mock.close())
-      await cleanup('chat', cleanupErrors, async () => {
-        if (chat?.id) {
-          await ctx.call(
-            'DELETE',
-            `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
-          )
+      await cleanup('workspace Session', cleanupErrors, async () => {
+        if (space?.id && sessionId) {
+          await deleteWorkspaceSession(ctx, space.id, sessionId)
         }
       })
       await cleanup('agent', cleanupErrors, async () => {

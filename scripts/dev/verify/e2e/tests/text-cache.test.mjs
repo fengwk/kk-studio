@@ -12,9 +12,10 @@ const usages = JSON.parse(readFileSync(new URL('./resources/text-cache/usage.jso
 function mockContext(def, { hitAt = 2, fault } = {}) {
   const artifacts = []
   const deleted = []
-  const chatId = randomUUID()
+  const spaceId = randomUUID()
   const rootId = randomUUID()
   let thread
+  let agentName
   let entries = []
   let requestCount = 0
   let snapshotReads = 0
@@ -29,10 +30,48 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
     writeArtifact(name, text) {
       artifacts.push({ name, data: JSON.parse(text) })
     },
+    async request(url, options = {}) {
+      const method = options.method || 'GET'
+      if (method === 'POST' && url === '/api/chat-spaces') {
+        return response({ id: spaceId, title: options.body.title, version: '0', defaultAgentName: options.body.defaultAgentName }, 201)
+      }
+      if (method === 'POST' && url === `/api/chat-spaces/${spaceId}/sessions`) {
+        const sessionId = randomUUID()
+        const threadId = randomUUID()
+        thread = { threadId, sessionId, name: 'cache-test', parentThreadId: null,
+          status: 'IDLE', executionControl: 'RUNNABLE', rootThreadId: threadId, yoloEnabled: false }
+        requestCount = 1
+        snapshotReads = 0
+        const text = options.body.message[0].text
+        const marker = text.match(/MARKER-[\w-]+/)[0]
+        const hit = requestCount === hitAt
+        const usage = def.providerType === 'anthropic'
+          ? usages[hit ? 'anthropicHit' : 'anthropicMiss'] : usages[hit ? 'hit' : 'miss']
+        entries = [
+          entry('ROOT', {}),
+          entry('TURN_START', {}),
+          entry('MESSAGE', { message: { role: 'USER', contents: [{ type: 'text', text }] } }),
+          entry('MESSAGE', { message: { role: 'ASSISTANT', contents: [{ type: 'text', text: marker }] },
+            assistantMetadata: { usage: { ...usage, extraProviderData: 'excluded' } } }),
+          entry('TURN_END', { outcome: 'COMPLETED', continueModel: false }),
+        ]
+        thread = { ...thread, headEntryId: entries.at(-1).entryId, nextCommandSequence: '2', version: '1' }
+        return response({ sessionId, threadId, commandId: randomUUID(), treeVersion: '1' }, 201)
+      }
+      throw new Error(`Unexpected mock request: ${method} ${url}`)
+    },
     async call(method, url, body) {
       if (method === 'DELETE') {
         deleted.push(url)
         return response(null, 204)
+      }
+      if (method === 'GET' && url === `/api/chat-spaces/${spaceId}/tree`) return response({ treeVersion: '2' })
+      if (method === 'GET' && url === '/api/chat-spaces') {
+        return response([{ id: spaceId, version: '3', defaultAgentName: agentName }])
+      }
+      if (method === 'PATCH' && url === `/api/chat-spaces/${spaceId}`) {
+        assert.deepEqual(body, { expectedVersion: '3', defaultAgentName: null })
+        return response({ id: spaceId, version: '4', defaultAgentName: null })
       }
       if (url === '/api/platform/providers') {
         return response([{ name: def.providerName, providerType: def.providerType,
@@ -45,32 +84,16 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
       if (method === 'POST' && url === '/api/platform/agents') {
         assert.deepEqual(body.config.tools, [])
         assert.deepEqual(body.execution, { driver: 'builtin', settings: { modelName: def.modelName, variant: def.variant } })
+        agentName = body.name
         return response({ name: body.name, version: '0', execution: body.execution }, 201)
       }
-      if (method === 'POST' && url === '/api/chat/chats') {
-        return response(
-          { id: chatId, agentName: body.agentName, environmentName: body.environmentName ?? null, version: '0' },
-          201,
-        )
-      }
-      if (
-        method === 'POST'
-        && (url === '/api/harness/command-batches'
-          || url === `/api/harness/threads/${thread?.threadId}/command-batches`)
-      ) {
+      if (method === 'POST' && url === `/api/harness/threads/${thread?.threadId}/command-batches`) {
         requestCount++
         snapshotReads = 0
-        if (url === '/api/harness/command-batches') {
-          assert.equal(body.target.type, 'NEW_SESSION')
-          thread = { threadId: body.target.threadId, sessionId: body.target.sessionId,
-            name: 'cache-test', parentThreadId: null, status: 'IDLE',
-            executionControl: 'RUNNABLE', rootThreadId: body.target.threadId, yoloEnabled: false }
-        } else {
-          // 既有 Thread 续写面 owner-free：单条纯 USER_MESSAGE 只带 commands，不带 cursor。
-          assert.deepEqual(Object.keys(body), ['commands'])
-          assert.equal(Object.hasOwn(body, 'owner'), false)
-          assert.equal(Object.hasOwn(body, 'target'), false)
-        }
+        // 既有 Thread 续写面 owner-free：单条纯 USER_MESSAGE 只带 commands，不带 cursor。
+        assert.deepEqual(Object.keys(body), ['commands'])
+        assert.equal(Object.hasOwn(body, 'owner'), false)
+        assert.equal(Object.hasOwn(body, 'target'), false)
         const text = body.commands[0].contents[0].text
         const marker = text.match(/MARKER-[\w-]+/)[0]
         const hit = requestCount === hitAt

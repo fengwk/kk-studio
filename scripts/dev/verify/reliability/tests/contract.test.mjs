@@ -2,16 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { cid } from '../../e2e/lib/http.mjs'
-import {
-  branchSettingsOf,
-  chatOwner,
-  userMessageCommand,
-} from '../../e2e/lib/harness.mjs'
+import { branchSettingsOf } from '../../e2e/lib/harness.mjs'
 import { MODELS, TOOL_NAMES, VARIANT } from '../matrix.mjs'
 import { assertThreadSettings, buildNewSessionRequest } from '../run-agent-matrix.mjs'
-
-const DAEMON_ENV = 'docker-reliability'
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 test('reliability contract freezes model-visible tool names as the only selectable identity', () => {
   // Test intent: the model-visible name is the single Agent-facing tool identity used by
@@ -21,51 +14,18 @@ test('reliability contract freezes model-visible tool names as the only selectab
   assert.equal(TOOL_NAMES.includes('task'), false)
 })
 
-test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
-  const chat = fakeChat()
-  const agent = fakeAgent()
+test('run-agent-matrix contract: Chat Space Session request freezes the initial prompt and selected model', () => {
   const model = fakeModel()
   const prompt = 'repair this case'
-  const request = buildNewSessionRequest({
-    chat,
-    agent,
+  assert.deepEqual(buildNewSessionRequest({
     testCase: fakeCase(model),
-    daemonEnv: DAEMON_ENV,
     prompt,
+  }), {
+    folderId: null,
+    message: [{ type: 'TEXT', text: prompt }],
+    modelSelection: { modelName: model.modelName, variant: VARIANT },
+    yoloEnabled: true,
   })
-  assert.deepEqual(request.owner, chatOwner(chat.id))
-  assert.match(request.sessionId, UUID_RE)
-  assert.match(request.threadId, UUID_RE)
-  assert.equal(request.yoloEnabled, true)
-  assert.equal(request.commands.length, 1)
-  assert.deepEqual(request.commands[0], userMessageCommand(prompt, request.commands[0].idempotencyKey))
-  assert.equal(request.commands[0].type, 'USER_MESSAGE')
-  assert.match(request.commands[0].idempotencyKey, UUID_RE)
-  assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
-})
-
-test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentName, execution, and environmentName', () => {
-  const chat = fakeChat()
-  const agent = fakeAgent()
-  const model = fakeModel()
-  const request = buildNewSessionRequest({
-    chat,
-    agent,
-    testCase: fakeCase(model),
-    prompt: 'investigate this case',
-  })
-  assert.deepEqual(request.rootSettings, branchSettingsOf(agent, model))
-  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environmentName', 'execution'])
-  assert.deepEqual(request.rootSettings.execution, {
-    driver: 'builtin',
-    settings: {
-      modelName: model.modelName,
-      variant: VARIANT,
-    },
-  })
-  assert.deepEqual(Object.keys(request.rootSettings.execution).sort(), ['driver', 'settings'])
-  // 未选择 Environment 时必须显式携带 null，而不是省略字段。
-  assert.equal(request.rootSettings.environmentName, null)
 })
 
 test('run-agent-matrix contract: accepted snapshot assertions enforce the canonical envelope', () => {
@@ -155,21 +115,12 @@ function fakeCase(model) {
   return { model }
 }
 
-function acceptedEnvelope(chat, model) {
-  const sessionId = cid()
+function acceptedEnvelope(_chat, model) {
   const threadId = cid()
-  const promptCommandId = cid()
   return {
-    session: { sessionId },
-    rootEntry: {
-      entryId: cid(),
-      sessionId,
-      entryType: 'ROOT',
-      payload: {},
-    },
     thread: {
       threadId,
-      sessionId,
+      sessionId: cid(),
       headEntryId: cid(),
       nextCommandSequence: '2',
       version: '1',
@@ -180,14 +131,6 @@ function acceptedEnvelope(chat, model) {
       status: 'RUNNING',
       executionControl: 'RUNNABLE',
     },
-    acceptedCommands: [
-      {
-        type: 'USER_MESSAGE',
-        idempotencyKey: promptCommandId,
-        threadId,
-        sequence: '1',
-      },
-    ],
-    replayed: false,
+    acceptedCommands: [{ threadId }],
   }
 }
