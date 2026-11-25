@@ -12,7 +12,7 @@ function caseSource(id, nextId) {
   return start >= 0 && end > start ? UI_SMOKE.slice(start, end) : ''
 }
 
-const ENVIRONMENT_CASE = caseSource('ui.environments.page_loads', 'ui.canvas.page_loads')
+const ENVIRONMENT_CASE = caseSource('ui.environments.page_loads', 'ui.canvas.function_fake_flow')
 const ACTION_NAMES = [
   'Install',
   'Uninstall',
@@ -43,9 +43,10 @@ test('environment action patterns match real labels without cross-matching Insta
 })
 
 test('ui-smoke consumes the shared environment action inventory instead of a stale inline count', () => {
-  // 测试意图：真实页面断言必须引用同一 inventory，避免代码改了七项而 smoke 仍硬编码旧数量。
+  // 测试意图：真实页面断言必须引用同一 inventory（卡片 4 项 + 管理模态 3 项 = 7 项），避免代码改了七项而 smoke 仍硬编码旧数量。
   assert.ok(ENVIRONMENT_CASE, 'ui-smoke must still register the environments page case')
   assert.match(UI_SMOKE, /import \{ ENVIRONMENT_CARD_ACTIONS \} from '\.\/ui\/environment-actions\.mjs'/)
-  assert.match(ENVIRONMENT_CASE, /actions\.count\(\) === ENVIRONMENT_CARD_ACTIONS\.length/)
+  assert.match(ENVIRONMENT_CASE, /\/settings\/environments/)
+  assert.match(ENVIRONMENT_CASE, /allLabels\.length === ENVIRONMENT_CARD_ACTIONS\.length/)
   assert.doesNotMatch(ENVIRONMENT_CASE, /actions\.count\(\) === 6/)
 })
