@@ -36,4 +36,4 @@ export const LONG_HISTORY_TEXT = `${'背景说明'.repeat(60)}\n\`\`\`yaml\n${LO
 export const HISTORY_MARKDOWN = `## **结论**\n${HISTORY_TEXT.slice('结论 '.length)}`
 export const HISTORY_TABLE = '| 阶段 | 状态 |\n| --- | --- |\n| 停机 | 完成 |'
 export const HISTORY_TABLE_TEXT = '阶段 状态 停机 完成'
-export const HISTORY_MERMAID = '```mermaid\ngraph TD; Start-->Stop\n```'
+export const HISTORY_VIZ = '```mermaid\ngraph TD; Start-->Stop\n```'

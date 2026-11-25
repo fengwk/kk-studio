@@ -194,7 +194,7 @@ Entry 列表按 keyset 分页传输；控制层在打开历史树或草稿历史
 线性链始终留在同一列，只有真实 sibling 分叉才开新列；只有 ROOT 与已关闭 TURN_END 是可手工
 分叉的边界。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写任何 Thread 状态。
 历史树与 Session/Thread 选择器的消息副标题都将 Markdown 压平为单行纯文本：链接和图片只保留文字，
-表格只保留单元格内容，已闭合的 Mermaid 块替换为当前语言的图表标签，普通代码块保留代码内容。
+表格只保留单元格内容，已闭合的图表块替换为当前语言的图表标签，普通代码块保留代码内容。
 历史搜索匹配压平后的全文。首个命中完整落在 220 字预览内时沿用原预览；超出或跨过预览末尾才从全文提取命中附近的内容，
 代码块中的命中从所在代码行附近截取。窄屏优先保留完整命中，命中前的文字从左侧收缩；可访问名称始终保留普通预览。
 
@@ -563,9 +563,17 @@ Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 
 和该标签的正常关闭。Studio 只接受来自当前可见 iframe、同源且匹配当前 view 与 epoch 的固定动作。只有 Daemon
 确认目录生效后才改标签名；新窗口不覆盖已开标签，关完最后一个不会自动重开。
 
-### Mermaid 图
+### 图表与结构图
 
-闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；SVG 裁到图形范围并与正文左对齐。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
+闭合的 `kchart`、`mermaid`、`layers`、`blocks`、`swimlane` 代码块由
+[`VizBlock`](../../frontend/src/shared/ui/markdown/VizBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart)
+渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；
+SVG 裁到图形范围并与正文左对齐。`kchart` 是 JSON 数据图，图上方显示 `scene.heading` 与 `scene.subtitle`，
+图下方显示来源与注释；渲染结果带数据表时提供默认折叠的「图表数据 · N 行」，展开后沿用 Markdown 表格样式。
+`mermaid`、`layers`、`blocks`、`swimlane` 作为结构图源码交给 KChart，标题由紧凑排版直接画在图中。
+配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。
+放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。
+标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
 
 ### Resource URI 预览
 

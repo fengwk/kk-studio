@@ -246,10 +246,10 @@ describe('History tree search', () => {
     expect(historyRowMatches(row, historySearchTokens('x'.repeat(250)))).toBe(true)
   })
 
-  // 预览与全文搜索共享可见文本；链接地址和 Mermaid 源码都不能命中。
+  // 预览与全文搜索共享可见文本；链接地址和图表源码都不能命中。
   it('searches flattened Markdown instead of its source', () => {
     const row = searchRow('## **Report**\n| [Docs](https://example.test) |\n| --- |\n| Ready |\n```mermaid\ngraph TD\n```')
-    const diagram = translate('shared.mermaidDiagram')
+    const diagram = translate('shared.vizFigure')
     expect(row.preview).toBe(`Report Docs Ready ${diagram}`)
     expect(historyRowMatches(row, historySearchTokens(`report ready ${diagram}`))).toBe(true)
     for (const hidden of ['##', '|', 'example.test', 'graph TD']) {

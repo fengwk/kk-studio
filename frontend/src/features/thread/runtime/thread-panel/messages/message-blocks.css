@@ -18,7 +18,7 @@
 }
 
 /*
- * 冲突处理：鼠标在内部 ``` / mermaid 上时，隐藏外层「复制全文」，
+ * 冲突处理：鼠标在内部代码块或图表上时，隐藏外层「复制全文」，
  * 只保留代码块自己的复制按钮。
  */
 .thread-assistant-shell:has(.md-code-shell:hover) > .thread-assistant-copy,

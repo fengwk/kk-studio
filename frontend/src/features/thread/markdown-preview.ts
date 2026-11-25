@@ -61,7 +61,7 @@ export interface PreviewCodeLine {
 /** Returns single-line visible text; optionally records code line ranges in that text. */
 export function markdownPreview(
   text: string | null,
-  options?: { codeLines: PreviewCodeLine[]; mermaidLabel: string },
+  options?: { codeLines: PreviewCodeLine[]; vizLabel: string },
 ): string {
   let preview = ''
   function append(source: string, isCodeLine = false) {
@@ -80,8 +80,8 @@ export function markdownPreview(
   }
 
   for (const segment of splitMarkdownSegments(text ?? '')) {
-    if (segment.type === 'mermaid') {
-      append(options?.mermaidLabel ?? translate('shared.mermaidDiagram'))
+    if (segment.type === 'viz') {
+      append(options?.vizLabel ?? translate('shared.vizFigure'))
       continue
     }
     const source = segment.content

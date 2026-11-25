@@ -27,9 +27,14 @@ describe('markdownPreview', () => {
     expect(markdownPreview(source)).toBe(expected)
   })
 
-  // The renderer's closed Mermaid fence takes precedence over ordinary code fences.
-  it('substitutes the localized diagram label and preserves neighboring code', () => {
+  // The renderer's closed viz fence takes precedence over ordinary code fences.
+  it('substitutes the localized figure label and preserves neighboring code', () => {
     const source = 'Before\n```MERMAID\ngraph TD; A-->B\n```\n```js\nconst flags = a | b\n```\n> After'
-    expect(markdownPreview(source)).toBe(`Before ${translate('shared.mermaidDiagram')} const flags = a | b After`)
+    expect(markdownPreview(source)).toBe(`Before ${translate('shared.vizFigure')} const flags = a | b After`)
+  })
+
+  it.each(['kchart', 'layers', 'blocks', 'swimlane'] as const)('substitutes the figure label for a closed %s fence', (syntax) => {
+    expect(markdownPreview([`\`\`\`${syntax}`, 'source', '```'].join('\n')))
+      .toBe(translate('shared.vizFigure'))
   })
 })

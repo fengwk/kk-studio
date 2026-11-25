@@ -1,0 +1,364 @@
+import { memo, useEffect, useId, useRef, useState } from 'react'
+import type {
+  ChartDiagnostic,
+  ChartSpec,
+  DataTable,
+  Scene,
+  Theme,
+} from '@fengwk/kchart'
+import { CodeBlock, CopyableShell } from '@/shared/ui/markdown/CodeBlock'
+import { useI18n } from '@/shared/i18n'
+import type { VizSyntax } from '@/shared/ui/markdown/split-markdown-segments'
+import './viz-block.css'
+
+type KChart = typeof import('@fengwk/kchart')
+type Measure = (text: string, size: number, weight: number, fontFamily: string) => number
+type Renderer = { kchart: KChart; theme: Theme; measure?: Measure }
+
+type ChartFigure = { source: string; scene: Scene; table: DataTable | null }
+type CachedViz =
+  | { kind: 'chart'; spec: ChartSpec; svg: string; scene: Scene; table: DataTable | null }
+  | { kind: 'diagram'; svg: string; scene: Scene }
+type RenderOutcome =
+  | CachedViz
+  | { kind: 'failure'; detail?: string; line?: number }
+
+/**
+ * KChart 暗色 Terminal 主题换成应用调色板。KChart 只接受具体颜色，每个值重复旁注 token 的 palette 色值；
+ * 调色板没有对应项的角色沿用 Terminal：中间层级的文字灰、粉/紫色 classDef 映射到的紫色和数据系列色。
+ */
+const PALETTE_ROLES = {
+  bg: '#0d0f0e', // --stage-bg：对话区背景，图直接画在上面
+  surface: '#101412', // --bg
+  surface2: '#202723', // --surface-raised：节点填充
+  line: '#2b342f', // --border
+  line2: '#355344', // --accent-border：节点描边
+  fg1: '#edf2ed', // --fg
+  fg3: '#9aa59d', // --fg-muted
+  accent: '#71e79a', // --accent
+  ok: '#7fa38c', // --palette-moss-300：与 accent 区分，甘特图的已完成与关键任务才不同色
+  warn: '#f3ae67', // --warning
+  danger: '#f08585', // --danger
+  info: '#77c7f5', // --info
+  ext: '#9aa59d', // --fg-muted
+}
+/** 与 --font 相同的字体栈：测量和绘制使用同一字体。 */
+const FONT_FAMILY =
+  'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif'
+
+const MAX_LAYOUT_WIDTH = 720
+let rendererPromise: Promise<Renderer> | null = null
+const vizCache = new Map<string, CachedViz>()
+const SVG_TEMPLATE_PREFIX = 'kk-viz-template'
+const SVG_REFERENCE_ATTRIBUTES = ['id', 'aria-labelledby', 'aria-describedby', 'clip-path', 'marker-start', 'marker-mid', 'marker-end', 'fill', 'stroke']
+const SVG_REFERENCE_SELECTOR = SVG_REFERENCE_ATTRIBUTES.map((name) =>
+  name === 'fill' || name === 'stroke' ? `[${name}^="url(#${SVG_TEMPLATE_PREFIX}-"]` : `[${name}]`,
+).join(',')
+
+function loadRenderer(): Promise<Renderer> {
+  rendererPromise ??= import('@fengwk/kchart').then((kchart) => {
+    const base = kchart.themes.terminal
+    const theme: Theme = {
+      ...base,
+      ...PALETTE_ROLES,
+      id: 'kk-studio',
+      fontFamily: FONT_FAMILY,
+      style: { ...base.style, radius: 8, smallRadius: 6 },
+    }
+    return { kchart, theme, measure: canvasMeasure() }
+  })
+  return rendererPromise
+}
+
+/** 按浏览器实际字形宽度折行和定框。 */
+function canvasMeasure(): Measure | undefined {
+  const context = document.createElement('canvas').getContext('2d')
+  if (!context) {
+    return undefined
+  }
+  return (text, size, weight, fontFamily) => {
+    context.font = `${weight} ${size}px ${fontFamily}`
+    return context.measureText(text).width
+  }
+}
+
+type DiagramSyntax = Exclude<VizSyntax, 'kchart'>
+
+/** 结构图按给定宽度排版；放不下时才加宽并在框内横向滚动。 */
+async function renderDiagram(source: string, syntax: DiagramSyntax, width: number) {
+  const { kchart, theme, measure } = await loadRenderer()
+  const result = await kchart.diagram(source, {
+    syntax,
+    width,
+    theme,
+    frame: false,
+    compact: true,
+    measure,
+    prefix: SVG_TEMPLATE_PREFIX,
+  })
+  if (result.svg === null) {
+    const diagnostic = result.diagnostics.find(({ severity }) => severity === 'error')
+    return {
+      kind: 'failure' as const,
+      detail: diagnostic ? diagnosticText(diagnostic) : undefined,
+      line: diagnostic?.line,
+    }
+  }
+  return { kind: 'diagram' as const, svg: result.svg, scene: result.scene }
+}
+
+/** 数据图声明是 JSON：先按原文解析，再把规格交给 KChart 渲染并取回表格。 */
+async function renderChart(source: string, width: number, lang: string): Promise<RenderOutcome> {
+  let spec: ChartSpec
+  try {
+    spec = JSON.parse(source) as ChartSpec
+  } catch (error) {
+    return {
+      kind: 'failure',
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
+  const { kchart, theme, measure } = await loadRenderer()
+  const result = await kchart.render(spec, {
+    width,
+    theme,
+    lang,
+    frame: false,
+    measure,
+    prefix: SVG_TEMPLATE_PREFIX,
+  })
+  if (result.svg === null) {
+    const diagnostic = result.diagnostics[0]
+    return {
+      kind: 'failure',
+      detail: diagnostic ? chartDiagnosticText(diagnostic) : undefined,
+    }
+  }
+  return { kind: 'chart', spec, svg: result.svg, scene: result.scene, table: result.table }
+}
+
+/** 挂载前只重写 SVG 引用属性，让标题、标记和裁剪都指向当前图。 */
+function mountSvg(host: HTMLElement, svg: string, prefix: string): SVGSVGElement | null {
+  const template = document.createElement('template')
+  template.innerHTML = svg
+  for (const element of template.content.querySelectorAll(SVG_REFERENCE_SELECTOR)) {
+    for (const name of SVG_REFERENCE_ATTRIBUTES) {
+      const value = element.getAttribute(name)
+      if (value?.includes(`${SVG_TEMPLATE_PREFIX}-`)) {
+        element.setAttribute(name, value.replaceAll(`${SVG_TEMPLATE_PREFIX}-`, `${prefix}-`))
+      }
+    }
+  }
+  // 图内链接与 Markdown 链接一致：新标签页打开，不带 opener 和 referrer。
+  for (const link of template.content.querySelectorAll('a')) {
+    link.setAttribute('target', '_blank')
+    link.setAttribute('rel', 'noreferrer noopener')
+  }
+  host.replaceChildren(template.content)
+  return host.querySelector('svg')
+}
+
+function remember(key: string, result: CachedViz) {
+  vizCache.set(key, result)
+  if (vizCache.size > 48) {
+    const first = vizCache.keys().next().value
+    if (first !== undefined) {
+      vizCache.delete(first)
+    }
+  }
+}
+
+const CJK_END = /[\u3000-\u303f\u3400-\u9fff\uf900-\ufaff\uff00-\uffef]$/
+const HAS_CJK = /[\u3400-\u9fff\uf900-\ufaff]/
+
+/** 诊断用图源的语言书写：按该语言补句末标点，中文句子直接相接，西文句子以空格分隔。 */
+function diagnosticText({ message, fix }: { message?: string; fix?: string }) {
+  return [message, fix]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .map((part) => (/[.!?。！？]$/.test(part) ? part : `${part}${HAS_CJK.test(part) ? '。' : '.'}`))
+    .reduce((text, part) => (text ? `${text}${CJK_END.test(text) ? '' : ' '}${part}` : part), '')
+}
+
+function chartDiagnosticText({ path, message, fix }: ChartDiagnostic) {
+  const text = diagnosticText({ message, fix })
+  return path ? `${path}: ${text}` : text
+}
+
+function SourceView({ code, syntax }: { code: string; syntax: VizSyntax }) {
+  return (
+    <CodeBlock source={code} className={`language-${syntax}`}>
+      {code}
+    </CodeBlock>
+  )
+}
+
+/** 按紧凑布局宽度重绘和缓存；数据图另显示标题、来源、注释与可折叠数据表。 */
+export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSyntax; code: string }) {
+  const { t, locale } = useI18n()
+  const hostRef = useRef<HTMLDivElement>(null)
+  const vizPrefix = `kk-viz-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`
+  const source = code.trim()
+  const [failure, setFailure] = useState<{ source: string; detail?: string; line?: number } | null>(null)
+  const [figure, setFigure] = useState<ChartFigure | null>(null)
+  const failed = failure?.source === source
+  const chartFigure = figure?.source === source ? figure : null
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host || !source) {
+      return
+    }
+    let cancelled = false
+    let width = 0
+    let attachAttempt = 0
+    let disposeInteraction: (() => void) | null = null
+
+    const releaseInteraction = () => {
+      attachAttempt += 1
+      disposeInteraction?.()
+      disposeInteraction = null
+    }
+
+    const attachInteraction = (spec: ChartSpec, svg: SVGSVGElement) => {
+      const attempt = ++attachAttempt
+      void loadRenderer().then(({ kchart }) => kchart.attach(svg, spec)).then(
+        (dispose) => {
+          if (cancelled || attempt !== attachAttempt) {
+            dispose()
+            return
+          }
+          disposeInteraction = dispose
+        },
+        () => {
+          // 交互不可用不影响已经成功绘制的图。
+        },
+      )
+    }
+
+    const mount = (result: CachedViz) => {
+      const svg = mountSvg(host, result.svg, vizPrefix)
+      if (!svg) {
+        return
+      }
+      if (result.kind === 'chart') {
+        setFigure({ source, scene: result.scene, table: result.table })
+        if (Array.isArray(result.spec.interaction) && result.spec.interaction.length > 0) {
+          attachInteraction(result.spec, svg)
+        }
+      } else {
+        setFigure(null)
+      }
+    }
+
+    const draw = (next: number) => {
+      if (next <= 0 || next === width) {
+        return
+      }
+      width = next
+      releaseInteraction()
+      const key = `${syntax}\n${locale}\n${next}\n${source}`
+      const cached = vizCache.get(key)
+      if (cached !== undefined) {
+        mount(cached)
+        return
+      }
+      const rendering = syntax === 'kchart'
+        ? renderChart(source, next, locale)
+        : renderDiagram(source, syntax, next)
+      rendering.then(
+        (result) => {
+          if (cancelled || width !== next) {
+            return
+          }
+          if (result.kind === 'failure') {
+            setFailure({ source, detail: result.detail, line: result.line })
+            return
+          }
+          mount(result)
+          remember(key, result)
+        },
+        () => {
+          if (!cancelled && width === next) {
+            setFailure({ source })
+          }
+        },
+      )
+    }
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1]
+      if (entry) {
+        draw(Math.min(Math.floor(entry.contentRect.width), MAX_LAYOUT_WIDTH))
+      }
+    })
+    observer.observe(host)
+    return () => {
+      cancelled = true
+      releaseInteraction()
+      observer.disconnect()
+    }
+  }, [source, syntax, locale, vizPrefix])
+
+  if (!source) {
+    return <SourceView code={code} syntax={syntax} />
+  }
+
+  if (failed) {
+    const { detail, line } = failure
+    return (
+      <>
+        <SourceView code={code} syntax={syntax} />
+        <div className="md-viz-error">
+          {!detail
+            ? t('shared.vizRenderFailed')
+            : Number.isInteger(line) && line! > 0
+              ? t('shared.vizRenderFailedAt', { line: line!, detail })
+              : t('shared.vizRenderFailedWith', { detail })}
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <CopyableShell source={source} className="md-viz-shell">
+      {chartFigure?.scene.heading ? (
+        <div className="md-viz-heading">{chartFigure.scene.heading}</div>
+      ) : null}
+      {chartFigure?.scene.subtitle ? (
+        <div className="md-viz-subtitle">{chartFigure.scene.subtitle}</div>
+      ) : null}
+      <div ref={hostRef} className="md-viz" role="img" aria-label={t('shared.vizFigure')} />
+      {chartFigure?.scene.source || chartFigure?.scene.note ? (
+        <div className="md-viz-meta">
+          {chartFigure.scene.source ? (
+            <div className="md-viz-source">
+              {t('shared.vizSource', { source: chartFigure.scene.source })}
+            </div>
+          ) : null}
+          {chartFigure.scene.note ? (
+            <div className="md-viz-note">{t('shared.vizNote', { note: chartFigure.scene.note })}</div>
+          ) : null}
+        </div>
+      ) : null}
+      {chartFigure?.table && chartFigure.table.rows.length > 0 ? (
+        <details className="md-viz-data">
+          <summary>{t('shared.vizChartData', { count: chartFigure.table.rows.length })}</summary>
+          <table>
+            <thead>
+              <tr>
+                {chartFigure.table.columns.map(({ key, label }) => <th key={key} scope="col">{label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {chartFigure.table.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => <td key={cellIndex}>{cell.text}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      ) : null}
+    </CopyableShell>
+  )
+})

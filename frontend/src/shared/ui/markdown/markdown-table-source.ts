@@ -7,7 +7,7 @@ type SourcePosition = { start?: SourcePoint; end?: SourcePoint }
 /**
  * 当前 markdown segment 的原始文本。
  * react-markdown 解析的是分段后的文本，节点 offset 因此相对本段；
- * Mermaid 分段后各段重新编号，绝不能用整条消息的 offset 套用。
+ * 图表分段后各段重新编号，绝不能用整条消息的 offset 套用。
  */
 export const MarkdownSegmentSourceContext = createContext<string | null>(null)
 

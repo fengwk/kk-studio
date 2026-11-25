@@ -22,7 +22,7 @@ const LOCALES = [
   {
     locale: 'zh-CN',
     historyTree: '历史树',
-    mermaidDiagram: 'Mermaid 图表',
+    vizFigure: '图表',
     /** 历史树搜索框：ai.chat.history.search。 */
     historySearch: '搜索记录',
     /** 选择面板搜索框：ai.chat.selection.search，与历史树不是同一文案。 */
@@ -34,7 +34,7 @@ const LOCALES = [
   {
     locale: 'en-US',
     historyTree: 'History tree',
-    mermaidDiagram: 'Mermaid diagram',
+    vizFigure: 'Figure',
     historySearch: 'Search records',
     listSearch: 'Search',
     selected: 'Selected',
@@ -88,7 +88,7 @@ for (const copy of LOCALES) {
       const previews = region.locator('.history-tree-entry-preview')
       await expect(previews.getByText(HISTORY_TEXT, { exact: true })).toBeVisible()
       await expect(previews.getByText(HISTORY_TABLE_TEXT, { exact: true })).toBeVisible()
-      await expect(previews.getByText(copy.mermaidDiagram, { exact: true })).toBeVisible()
+      await expect(previews.getByText(copy.vizFigure, { exact: true })).toBeVisible()
       await captureSearchHitShot(region, testInfo, `tree-markdown-preview-${copy.locale}-${size}`)
       await region.getByRole('searchbox', { name: copy.historySearch }).fill(DEEP_HIT)
 

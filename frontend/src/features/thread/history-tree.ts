@@ -61,7 +61,7 @@ const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u
 export interface BuildHistoryTreeOptions {
   /** 当前 head Entry id；用于标记路径与当前位置，不改变图形结构。 */
   headEntryId?: string | null
-  mermaidLabel?: string
+  vizLabel?: string
   noBodyLabel?: string
 }
 
@@ -111,7 +111,7 @@ export function buildHistoryTree(
   const childrenByParent = childrenIndex(entries)
   const ancestry = new Set(activeAncestry(entries, options.headEntryId ?? null))
   const headEntryId = options.headEntryId ?? null
-  const mermaidLabel = options.mermaidLabel ?? translate('shared.mermaidDiagram')
+  const vizLabel = options.vizLabel ?? translate('shared.vizFigure')
   const noBodyLabel = options.noBodyLabel ?? translate('ai.chat.history.noBody')
   const rows: HistoryTreeRow[] = []
   const laneById = new Map<string, number>()
@@ -137,7 +137,7 @@ export function buildHistoryTree(
     }
     const parentId = entry.parentEntryId
     const codeLines: PreviewCodeLine[] = []
-    const text = markdownPreview(historyEntryVisibleText(entry), { codeLines, mermaidLabel })
+    const text = markdownPreview(historyEntryVisibleText(entry), { codeLines, vizLabel })
     rows.push({
       entry,
       kind: historyEntryKind(entry),

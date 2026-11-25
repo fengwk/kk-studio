@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 
 const kchart = vi.hoisted(() => ({
-  diagram: vi.fn<(source: string, options: object) => Promise<{ svg: string | null; diagnostics: [] }>>(),
+  diagram: vi.fn<(source: string, options: object) => Promise<{ svg: string | null; scene: object | null; diagnostics: [] }>>(),
+  render: vi.fn<(spec: object, options: object) => Promise<{ svg: string | null; scene: object | null; table: null; diagnostics: [] }>>(),
+  attach: vi.fn(),
   themes: { terminal: { style: {} } },
 }))
 
@@ -14,6 +16,7 @@ beforeEach(() => {
   kchart.diagram.mockReset()
   kchart.diagram.mockImplementation(async (source) => ({
     svg: `<svg data-source="${source}"></svg>`,
+    scene: { width: 100, height: 100, children: [] },
     diagnostics: [],
   }))
 })
@@ -74,7 +77,7 @@ describe('MarkdownRenderer', () => {
     expect(screen.getByRole('button', { name: '复制代码' })).toBeInTheDocument()
   })
 
-  it('renders a closed mermaid fence through MermaidBlock', async () => {
+  it('renders a closed mermaid fence through VizBlock', async () => {
     const view = render(
       <MarkdownRenderer
         content={['intro', '', '```mermaid', 'graph TD; A-->B', '```', '', 'outro'].join('\n')}
@@ -84,7 +87,7 @@ describe('MarkdownRenderer', () => {
     expect(screen.getByText('outro')).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(view.container.querySelector('.md-mermaid')?.innerHTML).toContain('graph TD; A-->B')
+      expect(view.container.querySelector('.md-viz')?.innerHTML).toContain('graph TD; A-->B')
     })
     expect(kchart.diagram).toHaveBeenCalledWith('graph TD; A-->B', expect.anything())
   })
@@ -114,10 +117,10 @@ describe('MarkdownRenderer', () => {
       />,
     )
     await waitFor(() => {
-      expect(view.container.querySelectorAll('.md-mermaid')).toHaveLength(2)
+      expect(view.container.querySelectorAll('.md-viz')).toHaveLength(2)
     })
     await waitFor(() => {
-      expect(view.container.querySelector('.md-mermaid')?.innerHTML).toContain('graph LR; A-->C')
+      expect(view.container.querySelector('.md-viz')?.innerHTML).toContain('graph LR; A-->C')
     })
     expect(kchart.diagram).toHaveBeenCalledTimes(2)
     expect(kchart.diagram).toHaveBeenCalledWith('graph LR; A-->C', expect.anything())
@@ -129,7 +132,7 @@ describe('MarkdownRenderer', () => {
     )
     const shell = view.container.querySelector('.md-code-shell')
     expect(shell).not.toBeNull()
-    // mermaid 不是已注册的高亮语言：rehype-highlight 保留 hljs 前缀 class 但产出无高亮 token，也绝不走 MermaidBlock。
+    // mermaid 不是已注册的高亮语言：rehype-highlight 保留 hljs 前缀 class 但产出无高亮 token，也绝不走 VizBlock。
     expect(shell?.querySelector('code.language-mermaid')).not.toBeNull()
     expect(shell?.querySelector('.hljs-keyword')).toBeNull()
     expect(screen.getByRole('button', { name: '复制代码' })).toBeInTheDocument()
@@ -170,13 +173,13 @@ describe('MarkdownRenderer', () => {
   })
 
   it('falls back to the source view when the diagram is invalid', async () => {
-    kchart.diagram.mockResolvedValueOnce({ svg: null, diagnostics: [] })
+    kchart.diagram.mockResolvedValueOnce({ svg: null, scene: null, diagnostics: [] })
     const view = render(<MarkdownRenderer content={'```mermaid\nnot a graph\n```'} />)
 
     await waitFor(() => {
       expect(view.container.querySelector('code.language-mermaid')).toHaveTextContent('not a graph')
     })
-    expect(screen.queryByRole('img', { name: 'Mermaid 图表' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: '图表' })).not.toBeInTheDocument()
   })
 })
 

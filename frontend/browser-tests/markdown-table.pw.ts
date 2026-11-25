@@ -172,7 +172,7 @@ test.describe('Markdown table copy', () => {
 
     const narrow = shells(page).nth(0)
     const wide = shells(page).nth(1)
-    // Mermaid 之后的宽表段在追加过程中 content 不变：重挂会丢掉这个标记。
+    // 图表之后的宽表段在追加过程中 content 不变：重挂会丢掉这个标记。
     await wide.evaluate((element) => {
       ;(element as HTMLElement).dataset.probe = 'mounted'
     })

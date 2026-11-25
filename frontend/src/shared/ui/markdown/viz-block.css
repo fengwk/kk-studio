@@ -1,0 +1,60 @@
+/* 复制操作占独立一行，不覆盖图内容。 */
+.md-viz-shell > .md-code-copy {
+  position: static;
+  margin-inline-start: auto;
+  margin-block-end: var(--space-1);
+}
+
+/* 紧凑结构图与正文左对齐，放不下时只在框内横向滚动。 */
+.md-viz {
+  margin: 0.45em 0;
+  overflow-x: auto;
+  min-height: 48px;
+}
+
+/* SVG 保持 1:1：缩放会让图中文字小于排版时的字号。 */
+.md-viz svg {
+  display: block;
+  margin-inline: 0 auto;
+  max-width: none;
+  height: auto;
+}
+
+.md-viz-heading {
+  margin-top: 0.45em;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.md-viz-subtitle {
+  color: var(--fg-muted);
+}
+
+.md-viz-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.md-viz-data {
+  margin-top: var(--space-2);
+}
+
+.md-viz-data > summary {
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.md-viz-data > table {
+  margin-top: var(--space-2);
+}
+
+.md-viz-error {
+  color: var(--fg-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

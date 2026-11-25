@@ -41,13 +41,13 @@ export function HistoryTree({
   onForkSession?: (entry: HarnessSessionEntryDTO) => void
 }) {
   const { t } = useI18n()
-  const mermaidLabel = t('shared.mermaidDiagram')
+  const vizLabel = t('shared.vizFigure')
   const noBodyLabel = t('ai.chat.history.noBody')
   const [searchQuery, setSearchQuery] = useState('')
   const tokens = useMemo(() => historySearchTokens(searchQuery), [searchQuery])
   const rows = useMemo(
-    () => buildHistoryTree(entries, { headEntryId, mermaidLabel, noBodyLabel }),
-    [entries, headEntryId, mermaidLabel, noBodyLabel],
+    () => buildHistoryTree(entries, { headEntryId, vizLabel, noBodyLabel }),
+    [entries, headEntryId, vizLabel, noBodyLabel],
   )
   const matchedIds = useMemo(
     () => new Set(rows.filter((row) => historyRowMatches(row, tokens)).map((row) => row.entry.entryId)),
