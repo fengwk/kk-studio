@@ -73,22 +73,6 @@ export const platformCatalog = {
     'en-US': 'The page extension is missing or has been unloaded.',
     'zh-CN': '该页面扩展不存在或已卸载。',
   },
-  'platform.backToChat': {
-    'en-US': 'Back to Chat',
-    'zh-CN': '返回对话',
-  },
-  'platform.loadingProjects': {
-    'en-US': 'Loading projects',
-    'zh-CN': '正在加载项目',
-  },
-  'platform.loadingProject': {
-    'en-US': 'Loading project',
-    'zh-CN': '正在加载项目',
-  },
-  'ai.nav.chats': {
-    'en-US': 'Chat',
-    'zh-CN': '对话',
-  },
   'ai.nav.agents': {
     'en-US': 'Agent',
     'zh-CN': 'Agent',

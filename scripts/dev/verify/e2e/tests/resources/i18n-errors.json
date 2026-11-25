@@ -4,8 +4,8 @@
     "code": "not_found",
     "reason": "WORKSPACE_NOT_FOUND",
     "messages": {
-      "en-US": "The resource was not found.",
-      "zh-CN": "未找到 resource。"
+      "en-US": "The space was not found.",
+      "zh-CN": "未找到空间。"
     },
     "detail": "Space not found"
   },

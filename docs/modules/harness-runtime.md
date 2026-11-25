@@ -74,7 +74,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 [`ThreadState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadState.java) 只保存 Thread 自己拥有的事实：创建后不可变的身份（Session、父 Thread、执行根 `rootThreadId`、[`ThreadKind`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadKind.java)、创建请求哈希、创建时间），可变的 head、名称、执行控制、输入水位、命令序号与 `version`。`kind` 在创建时确定并持久化为非空封闭枚举：`USER` 表示用户创建的普通 Thread，`SUBAGENT` 表示模型委派的子代理，`COMPACTION` 表示压缩子 Thread，`PLUGIN_TASK` 表示插件任务；它不从父关系、执行名或当前状态推断，也不会在生命周期中变化。
 
 - `version` 是结构与控制状态的 CAS 游标，不是快照内容版本：任何非精确重放的变更让它严格 +1，精确重放原样接受；Model 的流式 checkpoint 在同一 version 内推进。名称与 YOLO 由控制面直接更新，同值 no-op，不产生 Command、Entry 或 Work。
-- `rootThreadId` 是执行根：根指向自身，子代理继承父 Thread 的执行根。`yolo_enabled` 开关只属于执行根，子代理恒为 false，其有效值取自执行根。根开关只修改根行，不递归修改子行或子行版本；Chat 开关仅初始化新根。权限判定读取执行根的开关。YOLO 影响尚未完成权限决定的调用，不自动批准 `WAITING_APPROVAL`，不回答问卷，也不回滚已派发工具。
+- `rootThreadId` 是执行根：根指向自身，子代理继承父 Thread 的执行根。`yolo_enabled` 开关只属于执行根，子代理恒为 false，其有效值取自执行根。根开关只修改根行，不递归修改子行或子行版本；Chat Space 的 YOLO 开关仅初始化新根。权限判定读取执行根的开关。YOLO 影响尚未完成权限决定的调用，不自动批准 `WAITING_APPROVAL`，不回答问卷，也不回滚已派发工具。
 - 人工接口只能控制执行根：自由输入、设置、YOLO、Stop、压缩、重命名与分支创建均校验目标为执行根；审批与回答是写回子调用的合法例外。待办事实只有 ToolInvocation 的 `WAITING_APPROVAL` 与 `WAITING_INPUT`，不复制待办表。归属解析按来源 Thread 的执行根定位，再读取根的产品绑定；响应保留原始调用身份，另提供 `rootThreadId`。人工交互沿执行父关系汇聚到根；子任务结果由原始 `ThreadJoin` 的订阅方持有，结果通知与执行唤醒仍交给直接派发子任务的父 Agent。树级 Stop 与 YOLO 不改变 Join 的订阅方、预算和回执身份。
 - [`ThreadExecutionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionControl.java) 只有 `RUNNABLE` / `STOPPED`：Stop 把目标与全部后代置为 `STOPPED`，跨重启保留；显式的新用户输入或新任务只恢复目标本身。`inputThroughSequence` 由 `INPUT` 回合推进；Stop 物化已排队通知时也同步覆盖这些通知的序号，保证状态投影与 Join 判据对“已消费通知”一致。
 

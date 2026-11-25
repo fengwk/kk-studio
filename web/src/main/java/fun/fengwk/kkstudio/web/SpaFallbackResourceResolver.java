@@ -19,8 +19,8 @@ import java.util.List;
  *   <li>路径最后一段不包含点号（即无文件扩展名）。
  * </ul>
  *
- * 其余场景返回 {@code null}，由 Spring 返回 404。{@code /api/chat/chats/123} 这类已映射的 Controller 路径由 {@code
- * RequestMappingHandlerMapping} 优先匹配，本 resolver 不参与。
+ * 其余场景返回 {@code null}，由 Spring 返回 404。已映射的 Controller 路径（例如 {@code
+ * /api/chat-spaces/{spaceId}/tree}）由 {@code RequestMappingHandlerMapping} 优先匹配，本 resolver 不参与。
  *
  * @author fengwk
  */

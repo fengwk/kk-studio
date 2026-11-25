@@ -184,7 +184,7 @@ Dispatcher 与 admission 上限属于启动配置，subagent 预算由运行时 
 发布前的验证入口见[开发与测试](development-and-testing.md)。
 
 目标 Schema 与现有数据库不匹配时，先备份并按下文在独立空库初始化当前 V1。
-配置同步只覆盖配置，不恢复会话、项目、画布或运行历史；上传渠道技能包也需另行备份。
+配置同步只覆盖配置，不恢复会话、空间、画布或运行历史；上传渠道技能包也需另行备份。
 
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不会按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
@@ -207,7 +207,7 @@ Flyway 校验失败时停止切换并查明差异。标准 `repair` 只用于已
    全库 dump 与 S3 业务对象；确认备份可恢复后保留原库。
 2. 在安全边界新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用当前发行物初始化当前 Schema。
 3. 部署 App 并指向新库，通过产品导入校验写入配置 YAML，核对导入预检报错与跳过项处置、
-   Provider 凭据、Environment 注册令牌摘要与完整卡片配置（`note` 与 `daemonConfig`）。会话、项目、画布、运行历史与 Blob 引用保留在原库和备份中。
+   Provider 凭据、Environment 注册令牌摘要与完整卡片配置（`note` 与 `daemonConfig`）。会话、空间、画布、运行历史与 Blob 引用保留在原库和备份中。
 4. 启动已安装的 Daemon 并验收重连；需要安装时通过 Environment 安装弹窗生成命令并在主机执行。
    运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`，Daemon 据此执行本机受管更新；
    无法受管更新时需重新覆盖安装。
@@ -228,7 +228,7 @@ Flyway 校验失败时停止切换并查明差异。标准 `repair` 只用于已
 若目标是建立新的空数据面，按[共享数据库重建](development-and-testing.md#共享数据库重建)
 先在“设置 → 同步”导出配置，执行 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，
 再批准停机和实际执行。初始化当前 Schema 后通过产品导入 YAML，恢复八类配置及文件随带的 Provider 凭据与注册令牌摘要。
-会话、项目、画布、运行历史与 Blob 引用保留在冻结库/备份中，新的入口无法直接访问它们。
+会话、空间、画布、运行历史与 Blob 引用保留在冻结库/备份中，新的入口无法直接访问它们。
 Environment 注册令牌摘要可恢复，已安装的 Daemon 用原令牌重连；重连仍须验收，Plugin 认证和部署级配置需另行准备（如 OpenCLI 的独立 Plugin 普通配置与 `apiKey` 静态秘密，由独立 Plugin 管理）。结构调整仅允许通过配置导出备份后由数据所有者授权重建，严禁在已有部署或共享数据库上就地执行未授权改动。
 reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
 
@@ -270,7 +270,7 @@ WSS 传输不协商压缩扩展（见 [Environment Daemon 安装与运行](envir
 ### [`deploy/test`](../../deploy/test/README.md)：Canvas/Storage 离线栈
 
 `kk-studio-canvas-test` project 提供 PostgreSQL、MinIO、HTTP mock 与可选的 App，用于 Canvas
-Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。内置 fake Hub 只接受合成单 Bearer，
+Resource、fake Function、OpenCLI fake Hub adapter 和离线工作区 smoke。内置 fake Hub 只接受合成单 Bearer，
 各受保护端点严格校验；offline smoke 经统一插件配置与 secret API 初始化。bucket 由一次性的
 `minio-init` 容器创建，App 以 `service_completed_successfully` 等它成功退出；不启用 App 时没有
 这个依赖条件，smoke 只等待常驻服务 `healthy`，再显式 `compose run --rm` 执行同一份初始化：
@@ -283,7 +283,7 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。内�
 完整步骤、mock routes 与真实 Seedance prepare-only 边界见
 [deploy/test/README.md](../../deploy/test/README.md)。
 基础模式检查容器、PostgreSQL、bucket 与 mock；`--with-app` 增加 Blob、Canvas revision/typed command、
-fake Function 与 Chat 的应用契约检查。一次运行的通过范围以退出状态和实际诊断为准。
+fake Function 与工作区的应用契约检查。一次运行的通过范围以退出状态和实际诊断为准。
 
 ### [`deploy/distributed`](../../deploy/distributed)：双节点零 App-to-App 网络栈
 

@@ -9,7 +9,7 @@
 | --- | --- |
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
-| 核对 Environment、Daemon、Chat IDE 与会话恢复状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
+| 核对 Environment、Daemon、工作区、IDE 与会话恢复状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
 | 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
 | 理解 Harness 的架构、库表、模型字段、执行与接口 | [Harness](workspace-harness.md) |

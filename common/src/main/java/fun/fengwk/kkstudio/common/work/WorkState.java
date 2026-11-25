@@ -8,8 +8,8 @@ import java.util.UUID;
 /**
  * Durable Work 行的纯调度状态：due、wake 版本、租约与环境亲和性。
  *
- * <p>该类型不包含 target 身份或领域枚举，因此可以被 Harness、Project 与 Canvas 的 Store 共同使用。所有跃迁都不读取时钟，也不修改接收者：
- * 调用方传入其权威时间域中的 {@code now}，方法返回下一个状态或用 {@link Optional#empty()} 表示删除。
+ * <p>该类型不包含 target 身份或领域枚举，因此可以被各领域 Store 共同使用。所有跃迁都不读取时钟，也不修改接收者： 调用方传入其权威时间域中的 {@code
+ * now}，方法返回下一个状态或用 {@link Optional#empty()} 表示删除。
  *
  * <p>租约不变量：{@code leaseToken} 与 {@code leaseUntil} 必须同时存在或同时缺失；有效租约要求 {@code leaseUntil} 严格晚于
  * {@code now}。

@@ -458,6 +458,65 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
     }
   }
 
+  @Test
+  void listsSpacesAndMutatesFoldersThroughTheHttpController() throws Exception {
+    String space = createSpace();
+    mvc.perform(get("/api/chat-spaces").cookie(login))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].id").value(space.substring(space.lastIndexOf('/') + 1)));
+
+    String root = tree(space).at("/folders/0/id").asText();
+    var created =
+        json(
+            mvc.perform(
+                    write(
+                        post(space + "/folders"),
+                        UUID.randomUUID().toString(),
+                        "{\"parentId\":\"%s\",\"name\":\"Child\",\"expectedTreeVersion\":\"0\"}"
+                            .formatted(root)))
+                .andExpect(status().isOk())
+                .andReturn());
+    String folder = created.get("id").asText();
+    assertEquals(folder, tree(space).at("/folders/0/children/0/id").asText());
+    mvc.perform(
+            write(
+                patch(space + "/folders/" + folder),
+                UUID.randomUUID().toString(),
+                "{\"name\":\"Renamed child\"}"))
+        .andExpect(status().isOk());
+    assertEquals("Renamed child", tree(space).at("/folders/0/children/0/name").asText());
+    mvc.perform(
+            write(
+                patch(space + "/folders/" + folder),
+                UUID.randomUUID().toString(),
+                "{\"parentId\":null,\"expectedTreeVersion\":\"%s\"}"
+                    .formatted(tree(space).get("treeVersion").asText())))
+        .andExpect(status().isOk());
+    assertEquals(folder, tree(space).at("/folders/1/id").asText());
+    mvc.perform(
+            delete(space + "/folders/" + folder)
+                .cookie(login)
+                .header("Origin", "http://localhost")
+                .param("expectedTreeVersion", tree(space).get("treeVersion").asText()))
+        .andExpect(status().isOk());
+    assertEquals(1, tree(space).at("/folders").size());
+    assertEquals(0, tree(space).at("/folders/0/children").size());
+  }
+
+  @Test
+  void invalidModelSelectionIsRejectedBeforeAcceptingASession() throws Exception {
+    String space = createSpace();
+    mvc.perform(
+            write(
+                post(space + "/sessions"),
+                UUID.randomUUID().toString(),
+                """
+                    {"message":[{"type":"TEXT","text":"Invalid model"}],"modelSelection":{"modelName":" "}}
+                    """))
+        .andExpect(status().isBadRequest());
+    assertEquals(0, tree(space).at("/folders/0/resources").size());
+  }
+
   private String createSpace() throws Exception {
     var result =
         mvc.perform(

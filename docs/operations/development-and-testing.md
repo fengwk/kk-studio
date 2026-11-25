@@ -220,8 +220,13 @@ Harness 的公共 Runtime 与 Builtin Driver 分别由 [`harness/runtime/pom.xml
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl apps/workspace \
+  jacoco:merge@merge-workspace-coverage jacoco:check@check-workspace-merged-coverage
 find . -path '*/target/site/jacoco/index.html' -print
 ```
+
+Workspace 的会话、资源树、定时任务与 HTTP 控制器在 Web 集成测试完成后检查。
+合并门禁读取本次 reactor 的执行数据，仍以 Workspace 的类文件为准；CI 在 Java `verify` 后执行上述 JaCoCo 命令。
 
 关键逻辑改动查看本次报告的行覆盖率与未覆盖路径，分支覆盖率作为参考；
 低于模块配置的门禁会使 `verify` 失败。不要把静态检查、跳过测试或其它平台的结果算作本次覆盖。
@@ -310,8 +315,8 @@ COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/t
 [`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
 `compose run --rm` 执行初始化。`--with-app` 验证全局 Blob、Canvas revision 与 typed command
-变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
-Chat command batch 使用 `owner.kind=CHAT` 与 `owner.id`；画布使用 `CREATE_NODE`、
+变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线工作区。
+Harness command batch 针对 path 中的既有 Thread 提交命令；画布使用 `CREATE_NODE`、
 `SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
 
 Fat JAR 的 static 资源由 `-Pdistribution` 的前端工具链、clean 与 resources 三个插件准备；CI 的
@@ -829,7 +834,7 @@ Environment 保留注册令牌摘要与完整卡片配置，同名更新保持�
 导入会深度校验 `daemonConfig`，已知非法设置不会被条目级跳过；同名更新以文件为准覆盖备注与配置，
 令牌摘要、备注与 `daemonConfig` 在同一次原子更新中生效。
 
-配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
+配置文件不保存 Chat Space、Session、Thread、Canvas、执行历史、Blob 引用，
 连接租约和发现快照，也不包含部署级数据库/S3 参数或 Plugin 秘密。
 需要完整恢复时使用全库备份及匹配的对象存储备份，而不是配置 YAML。
 
