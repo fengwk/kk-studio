@@ -9,27 +9,27 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.junit.jupiter.api.Test;
-
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.net.URI;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.Test;
 
 class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID VIEW = UUID.fromString("22222222-2222-4222-8222-222222222222");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
 
   @Test
   void dataHttpDispatchesAfterAuth() throws Exception {
@@ -45,12 +45,14 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getMethod()).thenReturn("GET");
     when(req.getRequestURI()).thenReturn("/internal/ide/environments/" + ENV + "/data-http");
-    when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fsrc%2Fa.ts");
+    when(req.getQueryString())
+        .thenReturn("viewId=" + VIEW + "&path=%2Fsrc%2Fa.ts&userId=" + USER_ID);
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    controller.dataHttp(ENV.value(), VIEW, "/src/a.ts", req, res);
+    controller.dataHttp(ENV.value(), VIEW, "/src/a.ts", USER_ID, req, res);
 
     verify(auth).verify(any(), any(), any());
+    verify(req).setAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE, USER_ID);
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/src/a.ts"), any(), eq(res));
   }
 
@@ -68,12 +70,13 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getMethod()).thenReturn("GET");
     when(req.getRequestURI()).thenReturn("/internal/ide/environments/" + ENV + "/data-ws");
-    when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fws");
+    when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fws&userId=" + USER_ID);
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    controller.dataWebSocket(ENV.value(), VIEW, "/ws", req, res);
+    controller.dataWebSocket(ENV.value(), VIEW, "/ws", USER_ID, req, res);
 
     verify(auth).verify(any(), any(), any());
+    verify(req).setAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE, USER_ID);
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/ws"), any(), eq(res));
   }
 
@@ -98,7 +101,8 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     HttpServletResponse res = mock(HttpServletResponse.class);
 
     assertThrows(
-        DomainException.class, () -> controller.dataHttp(ENV.value(), VIEW, "/path", req, res));
+        DomainException.class,
+        () -> controller.dataHttp(ENV.value(), VIEW, "/path", USER_ID, req, res));
     verifyNoInteractions(dataPlane);
   }
 
@@ -121,7 +125,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
-        () -> controller.dataWebSocket(ENV.value(), VIEW, "/ws", req, res));
+        () -> controller.dataWebSocket(ENV.value(), VIEW, "/ws", USER_ID, req, res));
     verifyNoInteractions(dataPlane);
     verifyNoInteractions(registry);
   }

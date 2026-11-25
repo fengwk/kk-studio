@@ -4,17 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
-import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
-import jakarta.servlet.ServletOutputStream;
-import jakarta.servlet.WriteListener;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
@@ -30,7 +21,12 @@ import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeEnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeEnvironmentTunnels;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeTunnelExchange;
-
+import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.ServletOutputStream;
+import jakarta.servlet.WriteListener;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -50,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import org.junit.jupiter.api.Test;
 
 class IdeGatewayDataPlaneTest {
 
@@ -91,8 +88,9 @@ class IdeGatewayDataPlaneTest {
   }
 
   @Test
-  void rejectsDataPlaneRequestFromAnotherAccountBeforeRouting() throws IOException {
+  void rejectsMismatchedAccountAtLocalAndOwnerDataPlanes() throws IOException {
     ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
     IdeDataViewAuthorizer authorizer = browserAuthorizer();
     when(authorizer.belongsToUser(any(), any(), any(), any())).thenReturn(false);
     IdeGatewayDataPlane dataPlane =
@@ -111,7 +109,10 @@ class IdeGatewayDataPlaneTest {
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/index.html", request, response);
 
     verify(response).sendError(HttpServletResponse.SC_FORBIDDEN);
-    verify(registry, never()).route(any());
+
+    HttpServletResponse ownerResponse = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/index.html", browserRequest(), ownerResponse);
+    verify(ownerResponse).sendError(HttpServletResponse.SC_FORBIDDEN);
   }
 
   @Test
@@ -122,7 +123,7 @@ class IdeGatewayDataPlaneTest {
     when(registry.route(ENV)).thenReturn(Optional.of(remoteRoute));
 
     FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
-    IdeDataViewAuthorizer authorizer = browserAuthorizer();
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
     IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
@@ -136,6 +137,7 @@ class IdeGatewayDataPlaneTest {
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/index.html", req, res);
     verify(forwarder).forwardDataHttp(req, res, remoteRoute, ENV, VIEW, "/index.html");
+    verify(authorizer, never()).authorize(any(), any(), any());
   }
 
   @Test
@@ -891,6 +893,7 @@ class IdeGatewayDataPlaneTest {
   private static HttpServletRequest browserRequest() {
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
+    when(request.getAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE)).thenReturn(USER_ID);
     return request;
   }
 

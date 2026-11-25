@@ -12,18 +12,17 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.WriteListener;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
-import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -43,12 +42,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class IdeRemoteDataPlaneForwarderTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID VIEW = UUID.fromString("22222222-2222-4222-8222-222222222222");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(USER_ID, "test", StudioRole.USER);
+
+  private static HttpServletRequest authenticatedRequest() {
+    HttpServletRequest request = mock(HttpServletRequest.class);
+    when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
+    return request;
+  }
 
   @Test
   void readHeaderBlockParsesStatusHeadersAndRemaining() throws Exception {
@@ -103,7 +114,7 @@ class IdeRemoteDataPlaneForwarderTest {
     IdeRemoteDataPlaneForwarder forwarder =
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
 
-    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletRequest req = authenticatedRequest();
     when(req.getMethod()).thenReturn("POST");
     when(req.getContextPath()).thenReturn("");
     when(req.getHeaderNames())
@@ -149,6 +160,9 @@ class IdeRemoteDataPlaneForwarderTest {
     forwarder.forwardDataHttp(req, res, owner, ENV, VIEW, "/src/main.ts");
 
     HttpRequest sentRequest = captor.getValue();
+    String forwardedQuery = sentRequest.uri().getQuery();
+    assertEquals(
+        "userId=" + USER_ID, forwardedQuery.substring(forwardedQuery.lastIndexOf('&') + 1));
     HttpHeaders sentHeaders = sentRequest.headers();
     // Prove that restricted JDK headers are completely excluded:
     assertFalse(sentHeaders.firstValue("host").isPresent());
@@ -177,6 +191,7 @@ class IdeRemoteDataPlaneForwarderTest {
       IdeRemoteDataPlaneForwarder forwarder =
           new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
 
+      AtomicReference<String> requestLine = new AtomicReference<>();
       Executors.newSingleThreadExecutor()
           .submit(
               () -> {
@@ -184,6 +199,10 @@ class IdeRemoteDataPlaneForwarderTest {
                   AsynchronousSocketChannel accepted = server.accept().get();
                   ByteBuffer readBuf = ByteBuffer.allocate(1024);
                   accepted.read(readBuf).get();
+                  readBuf.flip();
+                  byte[] requestBytes = new byte[readBuf.remaining()];
+                  readBuf.get(requestBytes);
+                  requestLine.set(new String(requestBytes, StandardCharsets.ISO_8859_1));
                   String response =
                       "HTTP/1.1 404 Not Found\r\n"
                           + "Content-Type: text/plain\r\n\r\n"
@@ -195,7 +214,7 @@ class IdeRemoteDataPlaneForwarderTest {
                 }
               });
 
-      HttpServletRequest req = mock(HttpServletRequest.class);
+      HttpServletRequest req = authenticatedRequest();
       when(req.getContextPath()).thenReturn("");
       when(req.getHeader("Sec-WebSocket-Key")).thenReturn("dGhlIHNhbXBsZSBub25jZQ==");
       when(req.getHeader("Sec-WebSocket-Version")).thenReturn("13");
@@ -205,6 +224,14 @@ class IdeRemoteDataPlaneForwarderTest {
 
       forwarder.forwardWebSocket(req, res, owner, ENV, VIEW, "/ws");
 
+      assertEquals(
+          "/internal/ide/environments/"
+              + ENV
+              + "/data-ws?viewId="
+              + VIEW
+              + "&path=%2Fws&userId="
+              + USER_ID,
+          requestLine.get().lines().findFirst().orElseThrow().split(" ")[1]);
       verify(res).sendError(404);
     }
   }
@@ -240,7 +267,7 @@ class IdeRemoteDataPlaneForwarderTest {
                 }
               });
 
-      HttpServletRequest req = mock(HttpServletRequest.class);
+      HttpServletRequest req = authenticatedRequest();
       when(req.getContextPath()).thenReturn("");
       when(req.getHeader("Sec-WebSocket-Key")).thenReturn("dGhlIHNhbXBsZSBub25jZQ==");
       when(req.getHeader("Sec-WebSocket-Version")).thenReturn("13");
@@ -267,7 +294,7 @@ class IdeRemoteDataPlaneForwarderTest {
     IdeRemoteDataPlaneForwarder forwarder =
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
 
-    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletRequest req = authenticatedRequest();
     when(req.getMethod()).thenReturn("GET");
     HttpServletResponse res = mock(HttpServletResponse.class);
     when(res.isCommitted()).thenReturn(false);
@@ -289,7 +316,7 @@ class IdeRemoteDataPlaneForwarderTest {
     IdeRemoteDataPlaneForwarder forwarder =
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
 
-    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletRequest req = authenticatedRequest();
     HttpServletResponse res = mock(HttpServletResponse.class);
     when(res.isCommitted()).thenReturn(false);
 
@@ -325,7 +352,7 @@ class IdeRemoteDataPlaneForwarderTest {
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
 
     // 1. Management forwarding: keeps Set-Cookie and does not rebase Location
-    HttpServletRequest reqMgmt = mock(HttpServletRequest.class);
+    HttpServletRequest reqMgmt = authenticatedRequest();
     when(reqMgmt.getMethod()).thenReturn("GET");
     HttpServletResponse resMgmt = mock(HttpServletResponse.class);
     when(resMgmt.getOutputStream())
@@ -349,7 +376,7 @@ class IdeRemoteDataPlaneForwarderTest {
     verify(resMgmt).addHeader("Service-Worker-Allowed", "/sw");
 
     // 2. Data forwarding: drops Set-Cookie and rebases Location and Service-Worker-Allowed
-    HttpServletRequest reqData = mock(HttpServletRequest.class);
+    HttpServletRequest reqData = authenticatedRequest();
     when(reqData.getMethod()).thenReturn("GET");
     when(reqData.getContextPath()).thenReturn("");
     HttpServletResponse resData = mock(HttpServletResponse.class);
@@ -375,7 +402,7 @@ class IdeRemoteDataPlaneForwarderTest {
 
   @Test
   void ideCookieAndBrowserSchemeValidation() {
-    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletRequest req = authenticatedRequest();
     // null cookies
     when(req.getCookies()).thenReturn(null);
     assertNull(IdeRemoteDataPlaneForwarder.ideCookie(req, "kk_ide_session"));

@@ -9,12 +9,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
@@ -24,13 +18,17 @@ import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /** 意图：bootstrap 与数据面只接受权威快照中仍匹配的 cookie；handler 只看 cookie 与快照，不维护第二份授权真相。 */
 class IdeBrowserSessionHandlerAndAuthorizerTest {
@@ -96,13 +94,12 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
 
     assertTrue(access.isPresent(), "a zero-root view authorizes on its registered workspace file");
     assertEquals(Set.of("/workspace"), access.get().authorizedWorkspaces());
-    assertTrue(
-        authorizer.belongsToUser(ENV, VIEW, "kk_ide_session=" + zeroRootToken, USER_ID));
+    assertTrue(authorizer.belongsToUser(ENV, VIEW, "kk_ide_session=" + zeroRootToken, USER_ID));
     assertFalse(
-        authorizer.belongsToUser(
-            ENV, VIEW, "kk_ide_session=" + zeroRootToken, UUID.randomUUID()));
+        authorizer.belongsToUser(ENV, VIEW, "kk_ide_session=" + zeroRootToken, UUID.randomUUID()));
 
-    String foreignWorkspaceToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/elsewhere", USER_ID);
+    String foreignWorkspaceToken =
+        sessions.open(IDENTITY, VIEW.toString(), 1L, "/elsewhere", USER_ID);
     assertFalse(
         authorizer.authorize(ENV, VIEW, "kk_ide_session=" + foreignWorkspaceToken).isPresent(),
         "the workspace file, not a directory, is the data-plane authority");
@@ -300,6 +297,7 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     when(request.getCookies())
         .thenReturn(
             new Cookie[] {new Cookie(IdeGatewayConstants.SESSION_COOKIE_NAME, fixture.token)});
+    when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
     HttpServletResponse response = mock(HttpServletResponse.class);
 
     fixture.handler.handleSession(ENV, VIEW, request, response);
@@ -346,6 +344,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
                 "/workspace",
                 IdeViewState.CLOSING)));
     HttpServletRequest staleSnapshot = mock(HttpServletRequest.class);
+    when(staleSnapshot.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE))
+        .thenReturn(PRINCIPAL);
     when(staleSnapshot.getCookies())
         .thenReturn(
             new Cookie[] {new Cookie(IdeGatewayConstants.SESSION_COOKIE_NAME, fixture.token)});
@@ -370,6 +370,7 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     when(fixture.transport.connectionIdentity(ENV))
         .thenReturn(Optional.of(new DaemonConnectionIdentity(ENV, "daemon-2")));
     HttpServletRequest replaced = mock(HttpServletRequest.class);
+    when(replaced.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
     when(replaced.getCookies())
         .thenReturn(
             new Cookie[] {new Cookie(IdeGatewayConstants.SESSION_COOKIE_NAME, fixture.token)});

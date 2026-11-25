@@ -7,20 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.Test;
-
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import org.junit.jupiter.api.Test;
 
 class IdeDataPathsTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final UUID VIEW = UUID.fromString("22222222-2222-4222-8222-222222222222");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
 
   @Test
   void daemonPathValidation() {
@@ -32,14 +31,15 @@ class IdeDataPathsTest {
 
   @Test
   void internalDataPathsFormatting() {
-    String httpPath = IdeDataPaths.dataHttpPath(ENV, VIEW, "/src/main.ts?a=1&b=2");
+    String httpPath = IdeDataPaths.dataHttpPath(ENV, VIEW, "/src/main.ts?a=1&b=2", USER_ID);
     assertTrue(httpPath.contains("/internal/ide/environments/" + ENV + "/data-http"));
     assertTrue(httpPath.contains("viewId=" + VIEW));
     assertTrue(httpPath.contains("path="));
 
-    String wsPath = IdeDataPaths.dataWebSocketPath(ENV, VIEW, "/ws");
+    String wsPath = IdeDataPaths.dataWebSocketPath(ENV, VIEW, "/ws", USER_ID);
     assertTrue(wsPath.contains("/internal/ide/environments/" + ENV + "/data-ws"));
     assertTrue(wsPath.contains("viewId=" + VIEW));
+    assertTrue(wsPath.endsWith("&userId=" + USER_ID));
   }
 
   /** path query 值按 RFC 3986 编码：空格 %20、加号 %2B、斜杠 %2F，表单解码方仍还原原文。 */
@@ -47,11 +47,13 @@ class IdeDataPathsTest {
   void dataPathEncodesRawPathAndQueryForFormDecoding() throws Exception {
     String rawPathAndQuery = "/workspace/my dir/a+b.ts?q=1";
 
-    String path = IdeDataPaths.dataHttpPath(ENV, VIEW, rawPathAndQuery);
+    String path = IdeDataPaths.dataHttpPath(ENV, VIEW, rawPathAndQuery, USER_ID);
 
-    assertTrue(path.endsWith("&path=%2Fworkspace%2Fmy%20dir%2Fa%2Bb.ts%3Fq%3D1"), path);
+    assertTrue(
+        path.endsWith("&path=%2Fworkspace%2Fmy%20dir%2Fa%2Bb.ts%3Fq%3D1&userId=" + USER_ID), path);
     assertFalse(path.contains("+"), path);
-    String encoded = path.substring(path.indexOf("&path=") + "&path=".length());
+    String encoded =
+        path.substring(path.indexOf("&path=") + "&path=".length(), path.indexOf("&userId="));
     assertEquals(rawPathAndQuery, URLDecoder.decode(encoded, StandardCharsets.UTF_8));
   }
 

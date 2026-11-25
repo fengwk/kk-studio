@@ -1,22 +1,22 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
-
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.stereotype.Component;
 
 /**
  * 浏览器 IDE 的 bootstrap/session 入口：只处理 view 基址下的两个保留端点。
@@ -60,7 +60,10 @@ public final class IdeBrowserSessionHandler {
       return;
     }
     IdeBootstrapTicketService.Ticket ticket = consumed.get();
-    if (!ticket.environmentId().equals(environmentId)
+    UUID userId = authenticatedUserId(request);
+    if (userId == null
+        || !ticket.userId().equals(userId)
+        || !ticket.environmentId().equals(environmentId)
         || !ticket.viewId().equals(viewId.toString())) {
       response.sendError(HttpServletResponse.SC_GONE);
       return;
@@ -83,7 +86,11 @@ public final class IdeBrowserSessionHandler {
     }
     String cookieValue =
         sessions.open(
-            ticket.identity(), ticket.viewId(), ticket.bindingEpoch(), ticket.workspacePath());
+            ticket.identity(),
+            ticket.viewId(),
+            ticket.bindingEpoch(),
+            ticket.workspacePath(),
+            ticket.userId());
 
     String base = IdeDataPaths.viewBase(request, environmentId, viewId);
     StringBuilder cookie =
@@ -114,7 +121,8 @@ public final class IdeBrowserSessionHandler {
     Objects.requireNonNull(viewId, "viewId");
     response.setHeader("Cache-Control", "no-store");
     IdeBrowserSessionRegistry.Session session = session(request, environmentId, viewId);
-    if (session == null) {
+    UUID userId = authenticatedUserId(request);
+    if (session == null || userId == null || !session.userId().equals(userId)) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       return;
     }
@@ -152,6 +160,15 @@ public final class IdeBrowserSessionHandler {
       }
     }
     return null;
+  }
+
+  private static UUID authenticatedUserId(HttpServletRequest request) {
+    Object internalUserId = request.getAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE);
+    if (internalUserId instanceof UUID userId) {
+      return userId;
+    }
+    Object principal = request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE);
+    return principal instanceof StudioPrincipal studioPrincipal ? studioPrincipal.userId() : null;
   }
 
   private static int generationRejection(IdeGenerationState state) {

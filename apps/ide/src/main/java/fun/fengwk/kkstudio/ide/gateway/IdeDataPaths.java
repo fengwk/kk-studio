@@ -1,11 +1,9 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
-import jakarta.servlet.http.HttpServletRequest;
-
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
-
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.Locale;
 import java.util.Objects;
@@ -35,20 +33,25 @@ public final class IdeDataPaths {
   }
 
   public static String dataHttpPath(
-      EnvironmentId environmentId, UUID viewId, String rawPathAndQuery) {
-    return dataPath(environmentId, viewId, rawPathAndQuery, DATA_HTTP_SUFFIX);
+      EnvironmentId environmentId, UUID viewId, String rawPathAndQuery, UUID userId) {
+    return dataPath(environmentId, viewId, rawPathAndQuery, DATA_HTTP_SUFFIX, userId);
   }
 
   public static String dataWebSocketPath(
-      EnvironmentId environmentId, UUID viewId, String rawPathAndQuery) {
-    return dataPath(environmentId, viewId, rawPathAndQuery, DATA_WS_SUFFIX);
+      EnvironmentId environmentId, UUID viewId, String rawPathAndQuery, UUID userId) {
+    return dataPath(environmentId, viewId, rawPathAndQuery, DATA_WS_SUFFIX, userId);
   }
 
   private static String dataPath(
-      EnvironmentId environmentId, UUID viewId, String rawPathAndQuery, String suffix) {
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      String suffix,
+      UUID userId) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
+    Objects.requireNonNull(userId, "userId");
     return IdeInternalPaths.environmentPrefix(environmentId)
         + suffix
         + "?"
@@ -58,7 +61,9 @@ public final class IdeDataPaths {
         + "&"
         + PATH_PARAMETER
         + "="
-        + UrlEncoding.encode(rawPathAndQuery);
+        + UrlEncoding.encode(rawPathAndQuery)
+        + "&userId="
+        + userId;
   }
 
   /** 浏览器 path 必须是以 {@code /} 起始的 view 相对路径；拒绝点段、反斜杠与编码分隔符，避免 Daemon 拼接内部基址后被归一化跳出视图作用域。 */

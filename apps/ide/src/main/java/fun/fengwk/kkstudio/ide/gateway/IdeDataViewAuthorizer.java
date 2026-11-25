@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -22,6 +21,12 @@ public interface IdeDataViewAuthorizer {
    */
   Optional<IdeDataViewAccess> authorize(
       EnvironmentId environmentId, UUID viewId, String cookieHeader);
+
+  /** 校验已登记入口 cookie 是否属于当前已认证账户。 */
+  default boolean belongsToUser(
+      EnvironmentId environmentId, UUID viewId, String cookieHeader, UUID userId) {
+    return false;
+  }
 
   /** 一条已授权的视图数据入口。 */
   record IdeDataViewAccess(

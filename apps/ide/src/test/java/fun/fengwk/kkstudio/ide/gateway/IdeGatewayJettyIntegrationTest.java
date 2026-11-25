@@ -11,33 +11,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServlet;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.eclipse.jetty.ee11.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee11.servlet.ServletHolder;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.eclipse.jetty.websocket.core.CloseStatus;
-import org.eclipse.jetty.websocket.core.CoreSession;
-import org.eclipse.jetty.websocket.core.Frame;
-import org.eclipse.jetty.websocket.core.FrameHandler;
-import org.eclipse.jetty.websocket.core.OpCode;
-import org.eclipse.jetty.websocket.core.client.CoreClientUpgradeRequest;
-import org.eclipse.jetty.websocket.core.client.WebSocketCoreClient;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.springframework.beans.factory.support.StaticListableBeanFactory;
-import org.springframework.boot.ssl.DefaultSslBundleRegistry;
-import org.springframework.boot.ssl.SslBundle;
-import org.springframework.boot.ssl.SslBundles;
-import org.springframework.boot.ssl.SslStoreBundle;
-
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
@@ -58,7 +31,10 @@ import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelExchange;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
-
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -91,6 +67,28 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import org.eclipse.jetty.ee11.servlet.ServletContextHandler;
+import org.eclipse.jetty.ee11.servlet.ServletHolder;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.eclipse.jetty.websocket.core.CloseStatus;
+import org.eclipse.jetty.websocket.core.CoreSession;
+import org.eclipse.jetty.websocket.core.Frame;
+import org.eclipse.jetty.websocket.core.FrameHandler;
+import org.eclipse.jetty.websocket.core.OpCode;
+import org.eclipse.jetty.websocket.core.client.CoreClientUpgradeRequest;
+import org.eclipse.jetty.websocket.core.client.WebSocketCoreClient;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.boot.ssl.DefaultSslBundleRegistry;
+import org.springframework.boot.ssl.SslBundle;
+import org.springframework.boot.ssl.SslBundles;
+import org.springframework.boot.ssl.SslStoreBundle;
 
 /**
  * 真实嵌入式 Jetty 容器集成测试：
@@ -228,9 +226,11 @@ class IdeGatewayJettyIntegrationTest {
 
     IdeRemoteDataPlaneForwarder node1Forwarder =
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
+    IdeDataViewAuthorizer nonOwnerAuthorizer =
+        new SessionIdeDataViewAuthorizer(new IdeBrowserSessionRegistry(), snapshots, transport);
     IdeGatewayDataPlane node1DataPlane =
         new IdeGatewayDataPlane(
-            node1ClusterRegistry, ownerTunnels, authorizer, sessionHandler, node1Forwarder);
+            node1ClusterRegistry, ownerTunnels, nonOwnerAuthorizer, sessionHandler, node1Forwarder);
 
     ServletContextHandler node1Context = new ServletContextHandler();
     node1Context.setContextPath("/");
@@ -1142,12 +1142,15 @@ class IdeGatewayJettyIntegrationTest {
       EnvironmentId envId = EnvironmentId.parse(sub.substring(0, slash));
       String viewIdStr = req.getParameter(IdeDataPaths.VIEW_ID_PARAMETER);
       String rawPathAndQuery = req.getParameter(IdeDataPaths.PATH_PARAMETER);
-      if (viewIdStr == null || rawPathAndQuery == null) {
+      String userId = req.getParameter("userId");
+      if (viewIdStr == null || rawPathAndQuery == null || userId == null) {
         resp.sendError(400);
         return;
       }
       UUID viewId = UUID.fromString(viewIdStr);
       HttpServletRequest forwarded = IdeForwardedRequest.of(req, rawPathAndQuery);
+      forwarded.setAttribute(
+          IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE, UUID.fromString(userId));
       dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, resp);
     }
   }

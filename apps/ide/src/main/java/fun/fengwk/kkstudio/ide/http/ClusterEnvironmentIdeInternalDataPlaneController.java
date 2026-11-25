@@ -1,26 +1,25 @@
 package fun.fengwk.kkstudio.ide.http;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.gateway.IdeForwardedRequest;
+import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 跨节点 IDE 数据面的内部 REST / WebSocket 入口。
@@ -50,11 +49,12 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
       @PathVariable UUID environmentId,
       @RequestParam("viewId") UUID viewId,
       @RequestParam("path") String rawPathAndQuery,
+      @RequestParam("userId") UUID userId,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
     EnvironmentId envId = authenticateAndAuthorize(request, environmentId);
-    HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
+    HttpServletRequest forwarded = forwardedRequest(request, rawPathAndQuery, userId);
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
   }
 
@@ -63,12 +63,20 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
       @PathVariable UUID environmentId,
       @RequestParam("viewId") UUID viewId,
       @RequestParam("path") String rawPathAndQuery,
+      @RequestParam("userId") UUID userId,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
     EnvironmentId envId = authenticateAndAuthorize(request, environmentId);
-    HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
+    HttpServletRequest forwarded = forwardedRequest(request, rawPathAndQuery, userId);
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
+  }
+
+  private static HttpServletRequest forwardedRequest(
+      HttpServletRequest request, String rawPathAndQuery, UUID userId) {
+    HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
+    forwarded.setAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE, userId);
+    return forwarded;
   }
 
   /** 认证与 owner 核对先于任何转发；失败不会进入数据面。 */
