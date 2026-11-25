@@ -16,6 +16,19 @@ async function captureWidths(page: Page, state: string) {
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 })
     await expect.poll(async () => (await panel.boundingBox())?.width).toBe(width)
+    if (width === 320 && state === 'draft') {
+      const environment = page.getByRole('button', { name: 'Environment', exact: true })
+      await expect(environment).toHaveText('None')
+      expect(await environment.locator('span').evaluate(label => label.scrollWidth - label.clientWidth)).toBe(0)
+      const footerLine = panel.locator('.thread-status-line')
+      await expect(footerLine).toHaveCSS('overflow-x', 'auto')
+      expect(await footerLine.evaluate(line => {
+        line.scrollLeft = line.scrollWidth
+        const offset = line.scrollLeft
+        line.scrollLeft = 0
+        return offset
+      })).toBeGreaterThan(0)
+    }
     await page.screenshot({ path: `../reports/r130-thread/product-${state}-${width}.png`, animations: 'disabled' })
   }
   await page.setViewportSize({ width: 1440, height: 900 })

@@ -30,10 +30,15 @@ export function WorkspaceStatus({ index, open }: { index: ReadonlyMap<string, Tr
     const rows = groups.get(state) ?? []
     return rows.length > 0 && <section key={state} className="workspace-status-group">
       <h3>{t(stateLabels[state])}</h3>
-      {rows.map(row => <button key={row.id} type="button" className="workspace-status-row" data-ui-focus="row"
-        onClick={event => open(row, event.currentTarget)}>
-        <RowIcon row={row} /> <span className="workspace-row-label" title={row.name}>{row.name}</span>
-      </button>)}
+      {rows.map(row => {
+        const session = row.parentId == null ? undefined : index.get(row.parentId)
+        return <button key={row.id} type="button" className="workspace-status-row" data-ui-focus="row"
+          onClick={event => open(row, event.currentTarget)}>
+          <RowIcon row={row} />
+          <span className="workspace-row-label" title={row.name}>{row.name}</span>
+          {session && <> <span className="workspace-status-session" title={session.name}>{session.name}</span></>}
+        </button>
+      })}
     </section>
   })}</div>
 }

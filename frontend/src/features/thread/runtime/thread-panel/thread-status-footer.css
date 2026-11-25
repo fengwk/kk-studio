@@ -20,3 +20,11 @@
   font-variant-numeric: tabular-nums;
   text-align: left;
 }
+
+@media (max-width: 640px) {
+  .thread-status-line {
+    overflow-x: auto;
+    scrollbar-width: none;
+    text-overflow: clip;
+  }
+}

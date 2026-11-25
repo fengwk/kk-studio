@@ -521,7 +521,7 @@ describe('WorkspaceShell', () => {
 
     // Status tab shows NEEDS_YOU thread and clicking opens it (via PanePicker since pane A holds New Canvas)
     fireEvent.click(screen.getByRole('tab', { name: 'Status' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Main Thread' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Main Thread Debug Session' }))
     const statusPicker = await screen.findByRole('dialog', { name: 'Open in pane' })
     fireEvent.click(within(statusPicker).getByRole('button', { name: /^A:/ }))
     expect(await screen.findByTestId(`thread-${thread1Id}`)).toBeInTheDocument()

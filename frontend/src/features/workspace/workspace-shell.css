@@ -61,6 +61,7 @@
 .workspace-row[data-tree-drop='before']::after { inset-block-start: 0; }
 .workspace-row[data-tree-drop='after']::after { inset-block-end: 0; }
 .workspace-status-group h3 { margin: var(--space-2) 0 var(--space-1); padding-inline: var(--space-2); font-size: var(--font-size-xs); }
+.workspace-status-session { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
 .workspace-status-tab { display: flex; align-items: center; gap: var(--space-1); }
 .workspace-status-tab i { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-pill); background: var(--warning); }
 .workspace-tree [data-thread-state='RUNNING'], .workspace-tree [data-thread-state='NEEDS_YOU'] { color: var(--warning); }

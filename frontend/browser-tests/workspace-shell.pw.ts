@@ -438,7 +438,7 @@ test('verifies deep link, status grouping, open flow deduplication, unsent confi
   await page.getByRole('textbox', { name: 'Draft text' }).fill('Unsent')
 
   // Open Release notes into right pane -> Picker selects active right pane -> confirms unsent -> moves Thread without duplicating
-  await page.getByRole('button', { name: 'Release notes', exact: true }).click()
+  await page.getByRole('button', { name: 'Release notes Release planning', exact: true }).click()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('alertdialog', { name: 'Discard unsent input?' })).toBeVisible()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click()
@@ -447,15 +447,16 @@ test('verifies deep link, status grouping, open flow deduplication, unsent confi
   await expect(page.getByRole('textbox', { name: 'Draft text' })).toHaveValue('')
 
   // Clicking Checklist in Status tab opens PanePicker because right pane is focused; press 'a' to open in left clean draft
-  await page.getByRole('button', { name: 'Checklist', exact: true }).click()
+  await page.getByRole('button', { name: 'Checklist Release planning', exact: true }).click()
   await page.keyboard.press('a')
   await expect(page.getByTestId('thread')).toHaveCount(2)
 
   // openBeside from a pane with no room to split shows a close-pane notice; closing one pane lets openBeside succeed
   await page.getByLabel('Checklist').getByRole('button', { name: 'Split down' }).click()
   await page.getByRole('button', { name: 'Open beside' }).click()
-  await expect(page.getByRole('alertdialog', { name: 'Close a pane before opening another' })).toBeVisible()
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click()
+  const noRoomNotice = page.getByRole('dialog', { name: 'Close a pane before opening another' })
+  await expect(noRoomNotice).toBeVisible()
+  await noRoomNotice.getByRole('button', { name: 'Close' }).click()
   await page.getByLabel('Checklist').getByRole('button', { name: 'Close pane' }).click()
   await page.getByRole('button', { name: 'Open beside' }).click()
   await expect(page.getByTestId('canvas')).toBeVisible()

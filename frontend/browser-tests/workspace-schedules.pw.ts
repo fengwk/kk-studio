@@ -486,14 +486,19 @@ test('covers schedule controls, history pagination, unified thread open, 409 rec
   await expect(page.getByText(/Five fields: minute, hour/)).toBeVisible()
   await page.keyboard.press('Escape')
 
-  // Simulate 409 conflict on Save -> preserves user input, re-reads, and succeeds on retry.
+  // A conflict preserves the user's draft but requires an explicit reload before another save.
   const nameField = editDialog.getByLabel(/Name/)
   await nameField.fill('Weekly draft v2')
   harness.setConflictOnNextPatch()
-  await editDialog.getByRole('button', { name: 'Save' }).click()
-  await expect(editDialog.getByRole('alert')).toHaveText('The workspace changed. Review and try again.')
+  const save = editDialog.getByRole('button', { name: 'Save' })
+  await save.click()
+  await expect(editDialog.getByRole('alert')).toHaveText('This schedule changed. Reload it and review the latest settings before saving.')
   await expect(nameField).toHaveValue('Weekly draft v2')
-  await editDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(save).toBeDisabled()
+  await editDialog.getByRole('button', { name: 'Discard edits and reload' }).click()
+  await expect(nameField).toHaveValue('Weekly draft')
+  await nameField.fill('Weekly draft v2')
+  await save.click()
   await expect(editDialog).toBeHidden()
   await expect(page.getByText('Weekly draft v2')).toBeVisible()
 

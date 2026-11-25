@@ -193,13 +193,21 @@
 }
 
 @container (max-width: 520px) {
-  /* 模型名较长，先多让出一些空间，避免环境名缩成一两个字符。 */
+  .thread-composer-controls {
+    gap: var(--space-1);
+  }
+
+  .thread-composer-control {
+    padding-inline: var(--space-1);
+  }
+
+  /* 窄窗格保留最短环境值的宽度，再把余量留给模型名。 */
   .thread-composer-controls-left {
     flex: 0 1 auto;
   }
 
   .thread-composer-environment-control {
-    min-width: calc(var(--space-8) + var(--space-4));
+    min-width: calc(2 * var(--space-8));
   }
 
   .thread-composer-controls-right {
