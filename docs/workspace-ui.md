@@ -18,7 +18,7 @@
 
 1.3.0 删除的 Project 和旧 Chat 样式含其中 111 处裸 px 间距。
 
-焦点各管各的。`--focus` 是接近白色的亮色，共享控件各自画 2–3px 的环，[焦点环测试](../frontend/src/shared/ui/controls/focus-ring.test.ts)固定了这些厚度。[焦点来源判定](../frontend/src/shared/ui/focus-modality.ts)在任意按键时清除「指针聚焦」标记，所以单按 Alt 也会让输入框重新出现焦点环。
+焦点由[全局样式](../frontend/src/styles.css)中的一条规则统一绘制：可聚焦元素与输入控件都使用 1px 中性轮廓，组件只通过 `data-ui-focus` 声明自己的焦点形态（行、控件、委托给容器或不绘制）。[焦点环测试](../frontend/src/shared/ui/controls/focus-ring.test.ts)固定这条规则。
 
 离线原型把 1.3.0 的视觉决定写成了覆盖层：[外观覆盖](workspace-prototype/workspace/appearance.css)去掉按钮、卡片、菜单和弹窗的描边并改用底色，[焦点覆盖](workspace-prototype/workspace/focus.css)用一条全局规则替换各控件的焦点环。它们改写的是正式类名，例如 `.btn-primary`、`.ghost-btn`、`.resource-card`、`.ui-tab`、`.modal-card`、`.ui-select-menu`、`.field`、`.ui-select-trigger` 和 `.thread-dock`；迁移时要落进对应组件，不保留成第二层覆盖。原型的[评审外壳](workspace-prototype/presentation/shell.css)另有 `--ui-*`、`--fs-*`、`--sp-*` 和 7 套主题，只服务评审工具栏。原型工作区样式引用了 48 次 `--ui-*`，迁移时按取值换成产品 token：`--ui-sp-1…4` 对应 `--space-1…4`，`--ui-sp-5`（24px）对应 `--space-6`，`--ui-sp-6`（32px）对应 `--space-8`。
 
@@ -97,7 +97,7 @@
 | [外观覆盖](workspace-prototype/workspace/appearance.css)：去掉装饰描边，文字按钮保留底色；字段帮助与标签同排 | `Button`、`CreateCard`、`Tabs`、`FieldLabel`、交互卡片和能力选择器各自的样式 |
 | 同文件：资源卡、设置卡、徽标、菜单、弹窗和费率行去描边，卡片元信息同字号 | `ResourceCard`、`Badge`、`SelectMenu`、`Dialog`、费率表单 |
 | [焦点覆盖](workspace-prototype/workspace/focus.css)第 2–6 行：焦点色取 `--border` | 全局样式的语义层 |
-| 同文件第 8–28 行：输入底色、下拉悬停与展开底色、无错误时透明边框 | [控件样式](../frontend/src/shared/ui/controls/controls.css)、[Composer 样式](../frontend/src/features/thread/runtime/thread-panel/thread-composer.css)、设置输入和拒绝原因输入 |
+| 同文件第 8–28 行：输入底色、下拉悬停与展开底色、无错误时透明边框 | [下拉样式](../frontend/src/shared/ui/controls/Select.css)、[Composer 样式](../frontend/src/features/thread/runtime/thread-panel/thread-composer.css)、设置输入和拒绝原因输入 |
 | 同文件：全局 1px 轮廓 | 全局样式的基础层；同时删除各控件自带的焦点环和焦点来源判定 |
 
 焦点覆盖里的 `!important` 只为压过各控件自带的环；那些环删除后，正式代码不需要它。
