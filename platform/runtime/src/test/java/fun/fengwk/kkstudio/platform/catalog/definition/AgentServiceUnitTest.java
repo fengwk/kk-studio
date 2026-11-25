@@ -64,8 +64,6 @@ class AgentServiceUnitTest {
   private ModelRepository modelRepository;
   private ModelDefaultVariantResolver variants;
   private PluginAgentDependencies pluginAgentDependencies;
-  private AgentReferenceCheck productReference;
-  private AgentReferenceCheck otherProductReference;
   private AgentService service;
 
   @BeforeEach
@@ -75,8 +73,6 @@ class AgentServiceUnitTest {
     modelRepository = mock(ModelRepository.class);
     variants = mock(ModelDefaultVariantResolver.class);
     pluginAgentDependencies = mock(PluginAgentDependencies.class);
-    productReference = mock(AgentReferenceCheck.class);
-    otherProductReference = mock(AgentReferenceCheck.class);
     when(modelRepository.getByNameForUpdate(any()))
         .thenAnswer(invocation -> model(invocation.getArgument(0), ModelKind.MODEL));
     AgentDriver builtin = mock(AgentDriver.class);
@@ -109,8 +105,7 @@ class AgentServiceUnitTest {
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentConfigCodec(objectMapper),
             new AgentEditableSupport(),
-            pluginAgentDependencies,
-            List.of(productReference, otherProductReference));
+            pluginAgentDependencies);
   }
 
   /** 创建持久化规范化的能力列表与全局 model 名；更新保持名称身份并改写模型与 variant。 */
@@ -324,21 +319,14 @@ class AgentServiceUnitTest {
     verify(repository, never()).deleteByName("agent", 0L);
   }
 
-  /** 任一产品或插件配置引用 Agent 时拒绝删除，绝不触达真实删除。 */
+  /** 插件配置声明引用 Agent 时拒绝删除，绝不触达真实删除。 */
   @Test
-  void deleteRejectsReferencedAgents() {
+  void deleteRejectsPluginReferencedAgents() {
     when(resolver.requireAgentForUpdate("agent")).thenReturn(definition());
     when(pluginAgentDependencies.pluginsDeclaringAgent("agent")).thenReturn(Set.of("acme.plugin"));
-    DomainException plugin =
+    DomainException error =
         assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
-    assertTrue(plugin.getMessage().contains("referenced by plugin configuration"));
-
-    when(otherProductReference.isReferenced("agent")).thenReturn(true);
-    DomainException product =
-        assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
-    assertTrue(product.getMessage().contains("referenced by a product"));
-    verify(productReference, atLeastOnce()).isReferenced("agent");
-    verify(otherProductReference, atLeastOnce()).isReferenced("agent");
+    assertTrue(error.getMessage().contains("referenced by plugin configuration"));
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 

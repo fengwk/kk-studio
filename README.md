@@ -7,19 +7,19 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 最短使用链路：
 
 ```text
-启动 Studio -> Provider -> Model -> Agent -> Chat
-                                            |
-                                            +-> Branch 选择 Environment（需要主机工具时）
+启动 Studio -> Provider -> Model -> Agent -> Chat Space -> Session
+                                                        |             |
+                                                        |             +-> Thread 执行与分支
+                                                        +-> Branch 选择 Environment（需要主机工具时）
 ```
 
-> `kk-studio` 的登录鉴权由外部入口承担。默认本地栈只监听 `127.0.0.1`；部署到局域网或
-> 公网前，必须配置 TLS 和访问控制。
+> Studio 使用内置用户登录与资源授权。默认本地栈只监听 `127.0.0.1`；部署到局域网或公网前，必须配置 TLS 和访问控制。
 
 ## 能做什么
 
 | 能力 | 用途 |
 | --- | --- |
-| Chat 与 Agent | 流式对话、思考内容、附件、历史分支、工具调用，以及可恢复的执行状态 |
+| Workspace 与 Agent | Chat Space、目录中的 Session/Canvas 资源、流式对话、历史分支、工具调用，以及可恢复的执行状态 |
 | Model Catalog | 分别管理 Provider、真实模型 ID、上下文限制、能力、Variant、价格与按顺序降级的模型组 |
 | Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills 和 Subagents；运行环境由 Branch 选择 |
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
@@ -84,9 +84,9 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 3. 打开 [Agent](http://localhost:8080/agents)，新建 Agent。
    - 选择 Model，填写系统提示词。
    - 第一次对话可以先不配置 Tools、Skills 或 Subagents。
-4. 打开 [Chat](http://localhost:8080/chats)，新建 Chat，选择这个 Agent 并发送消息。
+4. 打开工作区，创建 Chat Space 并在其中创建 Session，发送第一条消息开始对话。
 
-如果调用失败，Chat 中会保留错误；会话的调试视图可查看请求预览、活动调用的冻结请求与执行事件。
+如果调用失败，Thread 中会保留错误；会话的调试视图可查看请求预览、活动调用的冻结请求与执行事件。
 
 ## 让 Agent 使用本机工具
 
@@ -99,7 +99,7 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 3. 创建后打开的弹窗或卡片上的**“安装 / 覆盖”**只选择目标操作系统（默认按当前浏览器平台预选），
    点击**“复制安装命令”**。命令携带 5 分钟内有效的一次性安装码，到目标主机执行后才会下载含凭据的
    脚本并部署；请勿分享该命令。
-4. Studio 的 Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在 Chat
+4. Studio 的 Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在工作区
    的 Branch 设置中选择这个 Environment。Environment 不绑定在 Agent 定义上。
 
 每张 Environment 卡片在主机上是一套独立安装，安装根固定为 `~/.kk-studio/environments/<environmentId>`

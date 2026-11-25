@@ -236,6 +236,10 @@ export const chatCatalog = {
   },
   'ai.runtime.draft.spaceSettings': { 'en-US': 'Space settings', 'zh-CN': '空间设置' },
   'ai.runtime.draft.agentSettings': { 'en-US': 'Agent settings', 'zh-CN': 'Agent 设置' },
+  'ai.runtime.draft.sendUnknown': {
+    'en-US': 'The send result is unknown. Retry to recover the original session.',
+    'zh-CN': '未收到发送结果。重试以继续原会话。',
+  },
   'ai.runtime.draft.invalidFolder': {
     'en-US': 'This folder is no longer available. Choose another folder to send your message.',
     'zh-CN': '此目录已不可用。请选择其他目录后再发送。',
@@ -369,6 +373,9 @@ export const chatCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
+  'ai.runtime.branch.branchName': { 'en-US': 'Branch name', 'zh-CN': '分支名称' },
+  'ai.runtime.branch.sessionName': { 'en-US': 'Session name', 'zh-CN': '会话名称' },
+  'ai.runtime.branch.create': { 'en-US': 'Create', 'zh-CN': '创建' },
   'ai.runtime.branch.suggestedTitle': { 'en-US': 'Branch {{number}}', 'zh-CN': '分支 {{number}}' },
   'ai.runtime.branch.suggestedFork': { 'en-US': '{{title}} · Fork', 'zh-CN': '{{title}} · 分叉' },
   'ai.chat.branch.historyTree': {

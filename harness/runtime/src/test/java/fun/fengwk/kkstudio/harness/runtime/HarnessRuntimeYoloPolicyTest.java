@@ -5,13 +5,12 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.user
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.acceptAndJoin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -69,31 +68,17 @@ class HarnessRuntimeYoloPolicyTest {
     assertEquals(childThread.id(), grandChildThread.parentThreadId());
   }
 
-  /** 独立 fork（NEW_THREAD）创建新执行根并初始化自身开关：从子来源 fork 也不混入既有 执行根 策略。 */
+  /** 空闲分支是无父执行根，初始按关闭 YOLO 创建。 */
   @Test
-  void independentForkCreatesRootWithItsOwnSwitch() {
-    HarnessRuntimeTestSupport.Baseline root = HarnessRuntimeTestSupport.seedBaseline(store);
-    AcceptedCommands child =
-        acceptAndJoin(
-            runtime,
-            childSession(root.threadId(), TestIds.id(201), TestIds.id(202)),
-            join(TestIds.id(2001), root.threadId(), root.rootEntryId()),
-            AcceptancePreflight.IDENTITY);
-    ThreadState childThread = thread(TestIds.id(202));
-    assertEquals(root.threadId(), childThread.rootThreadId());
+  void idleBranchCreatesAnIndependentRootWithYoloDisabled() {
+    HarnessRuntimeTestSupport.ContinuationBaseline root =
+        HarnessRuntimeTestSupport.seedContinuationChain(store, true);
+    ThreadState branch =
+        runtime.createIdleBranch(root.threadId(), root.turnEndEntryId(), TestIds.id(203), "branch");
 
-    // 复用子 Session 的 ROOT entry fork：新 Thread 无父、自带开关，绝不继承子线程的 执行根。
-    runtime.acceptCommands(
-        fork(child.session().id(), child.rootEntry().id(), TestIds.id(203), true),
-        AcceptancePreflight.IDENTITY);
-    ThreadState enabledFork = thread(TestIds.id(203));
-    assertTrue(enabledFork.yoloEnabled());
-    assertEquals(enabledFork.id(), enabledFork.rootThreadId());
-
-    runtime.acceptCommands(
-        fork(child.session().id(), child.rootEntry().id(), TestIds.id(204), false),
-        AcceptancePreflight.IDENTITY);
-    assertFalse(thread(TestIds.id(204)).yoloEnabled());
+    assertFalse(branch.yoloEnabled());
+    assertEquals(branch.id(), branch.rootThreadId());
+    assertNull(branch.parentThreadId());
   }
 
   /** 创建幂等 hash 不冻结 effective 开关：根 toggle 后重放同一子创建仍命中 replay，子策略与 version 不变。 */
@@ -132,14 +117,6 @@ class HarnessRuntimeYoloPolicyTest {
   private static Ticket join(UUID invocationId, UUID parentThreadId, UUID parentHead) {
     return Ticket.task(
         invocationId, parentThreadId, parentHead, JOIN_HASH, "assistant", 3, 3, 2, 3);
-  }
-
-  private static AcceptCommandsCommand fork(
-      UUID sessionId, UUID startEntryId, UUID threadId, boolean yoloEnabled) {
-    return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewThread(
-            sessionId, startEntryId, threadId, "fork-" + threadId, yoloEnabled),
-        List.of(userMessageCommand(TestIds.id(threadId.hashCode()), "fork work")));
   }
 
   private ThreadState thread(UUID threadId) {

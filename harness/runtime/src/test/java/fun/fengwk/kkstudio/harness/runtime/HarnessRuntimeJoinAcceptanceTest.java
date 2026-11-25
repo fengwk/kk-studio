@@ -793,28 +793,7 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   @Test
-  void replayInitialAndAcceptNewThreadValidation() {
-    // 测试意图：验证 acceptNewThread 起始 Entry 不存在或落在未闭合 STOP Turn 内时确定性拒绝，
-    // 以及 replayInitial 中 idempotencyKey 篡改或请求哈希不匹配的冲突拒绝。
-    AcceptedCommands root =
-        runtime.acceptCommands(session(130, 131, null), AcceptancePreflight.IDENTITY);
-    UUID sessionId = root.session().id();
-
-    // 1. acceptNewThread 指定不存在的 startEntryId -> not_found
-    DomainException missing =
-        assertThrows(
-            DomainException.class,
-            () ->
-                runtime.acceptCommands(
-                    new AcceptCommandsCommand(
-                        new AcceptCommandsTarget.NewThread(
-                            sessionId, TestIds.id(999), TestIds.id(132), "fork", false),
-                        List.of(userMessageCommand(TestIds.id(133), "fork"))),
-                    AcceptancePreflight.IDENTITY));
-    assertEquals(DomainErrorCode.NOT_FOUND, missing.code());
-    assertEquals("entry", missing.resource());
-
-    // 2. 初始请求 hash 不同首先触发创建身份冲突。
+  void initialCreationReplayRejectsTamperedRequestHashes() {
     NewThreadCommand initCmd = userMessageCommand(TestIds.id(134), "initial message");
     runtime.acceptCommands(
         new AcceptCommandsCommand(

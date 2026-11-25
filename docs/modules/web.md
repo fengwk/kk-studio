@@ -74,14 +74,14 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、归档读取；Git 令牌用 SecretUpdate，响应只回 `configured` |
 | MCP | `/api/platform/mcp-servers` | name-keyed CRUD、摘要数组、headers 用 SecretUpdate 且只回 `configured`、同步 discover |
 | Plugin | `/api/platform/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/check-connection` 按 expected 版本执行一次显式只读连接检查 |
-| Chat | `/api/chat/chats` | 由 [Chat](chat.md) 模块提供的 CRUD、整体替换 PUT、YOLO 子资源与归属 Session；Web 只做装配 |
-| Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
-| Session | `/api/harness/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）与 name |
-| Session files | `/api/harness/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；会话坐标只在路径中，不携带产品 owner |
-| Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、compact、yolo、stop、tool approval |
+| Workspace | `/api/chat-spaces` | 空间、目录树、Session/Canvas 创建与空间内资源归属、重命名和删除；新 Session 的首条命令与目录登记原子接受 |
+| Harness command | `/api/harness/threads/{threadId}/command-batches` | 既有 Thread 续写，返回 202；Session 与 Thread 的创建由 Workspace 入口负责 |
+| Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、compact、yolo、stop、tool approval；不提供 Session CRUD 或 Thread 改名 |
+| Session resource | `/api/harness/sessions/{sessionId}/blobs/{blobId}`、`/api/harness/sessions/{sessionId}/resources/{resourceId}` | 按 Session 归属和持有边提供预签名取址或流式预览／下载 |
 | Builtin | `/api/harness/builtin/...` | Model Request Debug、历史 Provider 请求重建与活动模型请求追帧 |
 | Interaction | `/api/harness/interactions`、`/api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input` | 等待分页（条目是 `INPUT`/`APPROVAL`/`ENVIRONMENT_WAIT` 判别联合，`total` 是同一过滤条件下真实可见的待处理计数）与问卷回答/拒答提交 |
-| Canvas | `/api/canvas/canvases`、`/api/canvas/canvases/{canvasId}/blobs/{blobId}/{download-url,preview-url}` | 创建、列表、Snapshot、commands、经画布归属及 Blob 持有边授权的 POST 下载/预览 URL、节点 Function Run |
+
+| Canvas | `/api/canvas/canvases/{canvasId}`、`/api/canvas/canvases/{canvasId}/blobs/{blobId}/{download-url,preview-url}` | 按已归属 ID 读取 Snapshot、commands、节点 Function Run；Canvas Blob 取址按归属与持有边授权；Canvas 创建和删除由 Workspace 空间入口控制 |
 | Function catalog | `/api/canvas/functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/platform/storage/uploads` | 登录用户 reserve/complete/delete 自己的上传；不提供通用 Blob ID 下载或预览 URL |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
@@ -94,7 +94,7 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`，�
 当前 `builtin` 的 settings 为 `{modelName, variant}`。
 Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platform.md#catalog)。
 
-`POST /api/chat/chats`、`PUT /api/chat/chats/{chatId}` 与 `PUT /api/chat/chats/{chatId}/yolo` 的字段语义见 [Chat](chat.md)。
+
 
 `POST /api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `preview-url` 分别签发短期预签名 GET URL，必须通过当前用户的 Session 归属授权和 `session_blob_ref` 持有检查，任一不满足返回 404。旧的 `GET /api/harness/sessions/{sessionId}/resources/{resourceId}?download=false` 代理流继续可用；`download=true` 强制作为附件下载。它同样检查 Session 授权、持有边与 ACTIVE Blob，其他情况返回 404；响应使用 Blob 的媒体类型，不返回对象存储地址，并设置禁止缓存与内容嗅探的安全头。Canvas 的 POST 取址在 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url|preview-url`，按 Canvas 归属和持有边授权。
 
@@ -105,18 +105,11 @@ Session 的 `GET /api/harness/sessions/{sessionId}/entries?cursor&limit` 按存�
 `limit` 默认 100、最大 200，响应为 `{items, nextCursor}`，`nextCursor` 为 null 表示末页。
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
-`/api/harness/command-batches` 只服务允许通用命令直写的创建型产品 owner（当前为 `CHAT`；`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`）；
-`/api/harness/threads/{threadId}/command-batches`
-服务既有 Thread 的 owner-free 续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。
+`/api/harness/threads/{threadId}/command-batches` 服务既有 Thread 的续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。新 Session 与首条命令经 Workspace 的空间 Session 入口创建。
 人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
-Harness 命令、target 与消息内容都是 sealed union：每个 variant 只携带自己的字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
-`NEW_FORKED_SESSION` 携带 `sourceThreadId`），未知 variant/字段由严格 HTTP mapper 拒绝，续写面仍校验精确 cursor。
-产品命令批为 SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE；
-`CUSTOM_MESSAGE` 与 `NOTIFICATION` 不在产品 HTTP 面。
-附件在接受事务转为 Resource，图片档位随消息冻结。
-Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。
+Harness 续写命令与消息内容使用 sealed union，未知 variant/字段由严格 HTTP mapper 拒绝；既有 Thread 的命令批按 SET_EXECUTION → SET_ENVIRONMENT 可选前缀与末尾 USER_MESSAGE 校验，游标规则依批次类型执行。新 Session 的创建型命令经 Workspace 创建入口接受；`CUSTOM_MESSAGE` 与 `NOTIFICATION` 不在产品 HTTP 面。附件在接受事务转为 Resource，图片档位随消息冻结。Thread 名称经 Workspace 空间资源接口修改；响应状态取 Runtime Snapshot 的分类结果。
 完整执行语义见 [Harness Runtime](harness-runtime.md)。
 
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。

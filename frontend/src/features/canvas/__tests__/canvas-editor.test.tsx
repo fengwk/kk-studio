@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
@@ -143,7 +143,6 @@ function renderEditor(options: {
   snapshot?: CanvasSnapshotDTO | null
   query?: Partial<EditorQueryState>
   commandPending?: boolean
-  withLibraryRoute?: boolean
   modelsQuery?: Partial<CanvasController['modelsQuery']>
   addMenuOpen?: boolean
 } = {}) {
@@ -182,16 +181,9 @@ function renderEditor(options: {
     )
     Object.assign(controller.modelsQuery, options.modelsQuery)
     return (
-      <MemoryRouter initialEntries={['/canvas/abc']}>
+      <MemoryRouter>
         <CanvasRuntimeContext.Provider value={controller}>
-          {options.withLibraryRoute ? (
-            <Routes>
-              <Route path="/canvas" element={<div data-testid="library" />} />
-              <Route path="/canvas/:canvasId" element={<CanvasEditor />} />
-            </Routes>
-          ) : (
-            <CanvasEditor />
-          )}
+          <CanvasEditor />
         </CanvasRuntimeContext.Provider>
       </MemoryRouter>
     )
@@ -231,13 +223,13 @@ describe('CanvasEditor state rendering', () => {
     expect(screen.getByRole('status')).toHaveTextContent('正在加载画布…')
   })
 
-  it('renders the not-found state without a retry action', () => {
+  it('renders the not-found state without a retry action or library link', () => {
     renderEditor({
       query: { isError: true, error: new ApiError('canvas gone', 404) },
     })
     expect(screen.getByRole('alert')).toHaveTextContent('画布不存在')
     expect(screen.getByText('canvas gone')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '返回画布库' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回画布库' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
   })
 
@@ -252,28 +244,17 @@ describe('CanvasEditor state rendering', () => {
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
-  it('navigates back to the library from an error state', async () => {
-    const user = userEvent.setup()
-    renderEditor({
-      query: { isError: true, error: new ApiError('canvas gone', 404) },
-      withLibraryRoute: true,
-    })
-    await user.click(screen.getByRole('button', { name: '返回画布库' }))
-    expect(await screen.findByTestId('library')).toBeInTheDocument()
-  })
-
-  it('renders the loaded document without an unsupported Agent dock or a header version badge', () => {
+  it('renders the loaded document inside a workspace pane without a library header or version badge', () => {
     const { rerenderWith } = renderEditor({
       snapshot: snapshotDTO(),
       query: { isLoading: false },
     })
     expect(screen.getByLabelText('画布资源编辑器')).toBeInTheDocument()
-    expect(screen.getByText('Board')).toBeInTheDocument()
     expect(screen.getByText('已保存')).toBeInTheDocument()
-    // 版本号留在同步协议与诊断信息里，不占编辑器头部主视觉。
+    // 版本号与返回画布库导航不占编辑器主视觉。
     expect(screen.queryByText('v3')).not.toBeInTheDocument()
     expect(screen.getByTestId('canvas-stage')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回画布库' })).toHaveAttribute('href', '/canvas')
+    expect(screen.queryByRole('link', { name: '返回画布库' })).not.toBeInTheDocument()
 
     expect(screen.queryByRole('button', { name: '切换对话面板' })).not.toBeInTheDocument()
 

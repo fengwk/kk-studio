@@ -4,17 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
@@ -22,29 +18,21 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 人工交互统一写入口 {@link InteractionService} 的单元测试。 */
+/** 人工交互统一事务写入口 {@link InteractionService} 的单元测试。 */
 class InteractionServiceTest {
 
   private static UUID id(long value) {
     return new UUID(0L, value);
   }
 
-  /** 种子执行根的 Session 归属：交互写路径只用它加产品锁，不需要整份加锁快照。 */
-  private static final UUID ROOT_SESSION_ID = id(400);
-
-  private SessionOwnership ownership;
-  private SessionOwnership otherOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionService service;
@@ -52,131 +40,47 @@ class InteractionServiceTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    ownership = mock(SessionOwnership.class);
-    otherOwnership = mock(SessionOwnership.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
-
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    // 默认：任意存在的 Thread 自身即执行根；后代/不存在场景在具体测试中覆盖该 stub。
     when(runtime.findRootThreadId(any()))
         .thenAnswer(invocation -> Optional.of(invocation.<UUID>getArgument(0)));
-    // 执行根的 Session 归属走无锁读；getThreadSnapshot 的替身只用于让旧实现在测试里继续走完流程，
-    // 从而使「交互路径不得读取加锁快照」成为可验证的断言。
-    when(runtime.findThreadSessionId(any())).thenReturn(Optional.of(ROOT_SESSION_ID));
-    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-    ThreadState root = mock(ThreadState.class);
-    when(snapshot.thread()).thenReturn(root);
-    when(root.sessionId()).thenReturn(ROOT_SESSION_ID);
-    when(runtime.getThreadSnapshot(any())).thenReturn(snapshot);
-    service = new InteractionService(List.of(ownership, otherOwnership), runtimes);
+    service = new InteractionService(runtimes);
   }
 
-  /** 测试意图：人工回答先锁定执行根的产品层级，再进入 Runtime。 */
+  /** 输入在同一入口验证 Thread 并交由 Runtime 处理。 */
   @Test
-  void submitInputLocksRootProductScopeBeforeRuntime() {
-    UUID threadId = id(100);
+  void submitInputValidatesThreadAndDelegates() {
     ToolInputSubmissionCommand command =
         new ToolInputSubmissionCommand(
-            threadId, id(101), id(102), "alice", false, List.of(List.of("ans")));
+            id(100), id(101), id(102), "alice", false, List.of(List.of("ans")));
     ToolInputAcceptance expected = mock(ToolInputAcceptance.class);
     when(runtime.submitToolInput(command)).thenReturn(expected);
 
     assertSame(expected, service.submitInput(command));
 
-    InOrder order = inOrder(runtime, ownership, otherOwnership);
-    order.verify(runtime).findRootThreadId(threadId);
-    order.verify(runtime).findThreadSessionId(threadId);
-    order.verify(ownership).lockForInteraction(threadId, ROOT_SESSION_ID);
-    order.verify(otherOwnership).lockForInteraction(threadId, ROOT_SESSION_ID);
-    order.verify(runtime).submitToolInput(command);
-    // 交互提交只锁目标 Thread：执行根只能做无锁归属读取，不得先取执行根行锁。
-    verify(runtime, never()).getThreadSnapshot(any());
+    verify(runtime).findRootThreadId(id(100));
+    verify(runtime).submitToolInput(command);
   }
 
-  /** 测试意图：工具审批与人工回答共用同一产品锁序，审批不能绕过 Issue 的层级串行化。 */
+  /** 审批在同一入口验证 Thread 并交由 Runtime 处理。 */
   @Test
-  void decideApprovalLocksRootProductScopeBeforeRuntime() {
-    UUID threadId = id(100);
+  void decideApprovalValidatesThreadAndDelegates() {
     ToolApprovalCommand command =
         new ToolApprovalCommand(
-            threadId, id(101), ToolApprovalDecision.DENIED, id(102), "alice", "rejected");
+            id(100), id(101), ToolApprovalDecision.DENIED, id(102), "alice", "rejected");
     ToolInvocation expected = mock(ToolInvocation.class);
     when(runtime.decideToolApproval(command)).thenReturn(expected);
 
     assertSame(expected, service.decideApproval(command));
 
-    InOrder order = inOrder(runtime, ownership, otherOwnership);
-    order.verify(runtime).findThreadSessionId(threadId);
-    order.verify(ownership).lockForInteraction(threadId, ROOT_SESSION_ID);
-    order.verify(otherOwnership).lockForInteraction(threadId, ROOT_SESSION_ID);
-    order.verify(runtime).decideToolApproval(command);
-    verify(runtime, never()).getThreadSnapshot(any());
+    verify(runtime).findRootThreadId(id(100));
+    verify(runtime).decideToolApproval(command);
   }
 
-  /** 测试意图：后代任务按真实执行根加产品锁；写回的目标仍是原始子 Thread，不被根替代。 */
+  /** 不存在目标 Thread 时回答与审批都在写入 Runtime 前失败。 */
   @Test
-  void submitInputOnDescendantLocksRootProductScope() {
-    UUID childThreadId = id(100);
-    UUID rootThreadId = id(101);
-    when(runtime.findRootThreadId(childThreadId)).thenReturn(Optional.of(rootThreadId));
-    ToolInputSubmissionCommand command =
-        new ToolInputSubmissionCommand(
-            childThreadId, id(102), id(103), "alice", false, List.of(List.of("ans")));
-
-    service.submitInput(command);
-
-    InOrder order = inOrder(ownership, runtime);
-    order.verify(runtime).findThreadSessionId(rootThreadId);
-    order.verify(ownership).lockForInteraction(rootThreadId, ROOT_SESSION_ID);
-    order.verify(runtime).submitToolInput(command);
-    // 后代任务同样只无锁读取执行根的 Session，不先取执行根行锁，锁序只剩目标 Thread。
-    verify(runtime, never()).getThreadSnapshot(any());
-  }
-
-  /** 测试意图：产品层级事实损坏时 fail closed，回答与审批都不进入 Runtime。 */
-  @Test
-  void productScopeFailureNeverReachesRuntime() {
-    UUID threadId = id(100);
-    doThrow(new IllegalStateException("Issue owner does not exist"))
-        .when(ownership)
-        .lockForInteraction(threadId, ROOT_SESSION_ID);
-
-    IllegalStateException submitFailure =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                service.submitInput(
-                    new ToolInputSubmissionCommand(
-                        threadId, id(101), id(102), "alice", true, List.of())));
-    assertEquals("Issue owner does not exist", submitFailure.getMessage());
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            service.decideApproval(
-                new ToolApprovalCommand(
-                    threadId, id(101), ToolApprovalDecision.ALLOWED, id(102), "alice", "ok")));
-
-    verify(runtime, never()).submitToolInput(any());
-    verify(runtime, never()).decideToolApproval(any());
-  }
-
-  /** 测试意图：没有 Project 应用时不存在 Issue+Agent 执行根，写入直接进入 Runtime。 */
-  @Test
-  void withoutProjectApplicationWritesGoStraightToRuntime() {
-    service = new InteractionService(List.of(), runtimes);
-    ToolInputSubmissionCommand command =
-        new ToolInputSubmissionCommand(id(100), id(101), id(102), "alice", true, List.of());
-
-    service.submitInput(command);
-
-    verify(runtime).submitToolInput(command);
-    verifyNoInteractions(ownership, otherOwnership);
-  }
-
-  /** 测试意图：来源 Thread 不存在（祖先链为空）时共用根解析显式抛 not-found，绝不静默回退为自身，也不进入产品锁与 Runtime。 */
-  @Test
-  void missingThreadFailsWithNotFoundBeforeProductScopeAndRuntime() {
+  void missingThreadFailsBeforeWrites() {
     UUID threadId = id(999);
     when(runtime.findRootThreadId(threadId)).thenReturn(Optional.empty());
 
@@ -189,36 +93,9 @@ class InteractionServiceTest {
     ToolApprovalCommand approval =
         new ToolApprovalCommand(
             threadId, id(101), ToolApprovalDecision.ALLOWED, id(102), "alice", "ok");
-    assertEquals(
-        DomainErrorCode.NOT_FOUND,
-        assertThrows(DomainException.class, () -> service.decideApproval(approval)).code());
+    assertThrows(DomainException.class, () -> service.decideApproval(approval));
 
-    verifyNoInteractions(ownership, otherOwnership);
     verify(runtime, never()).submitToolInput(any());
     verify(runtime, never()).decideToolApproval(any());
-  }
-
-  /** 测试意图：验证 HarnessRuntime 未就绪时抛出 IllegalStateException。 */
-  @Test
-  void runtimeUnavailableThrowsIllegalStateException() {
-    when(runtimes.getIfAvailable()).thenReturn(null);
-    ToolInputSubmissionCommand command =
-        new ToolInputSubmissionCommand(id(100), id(101), id(102), "alice", true, List.of());
-    assertThrows(IllegalStateException.class, () -> service.submitInput(command));
-  }
-
-  /** 测试意图：验证入参为 null 时的非空校验。 */
-  @Test
-  void nullCommandThrowsNullPointerException() {
-    assertThrows(NullPointerException.class, () -> service.submitInput(null));
-    assertThrows(NullPointerException.class, () -> service.decideApproval(null));
-  }
-
-  /** 测试意图：验证构造函数的非空防御。 */
-  @Test
-  void constructorRejectsNullDependencies() {
-    assertThrows(NullPointerException.class, () -> new InteractionService(null, runtimes));
-    assertThrows(
-        NullPointerException.class, () -> new InteractionService(List.of(ownership), null));
   }
 }

@@ -173,21 +173,21 @@
 **新建与编辑**
 
 - 前端：编辑弹窗。触发规则变化时调用 `POST /schedules/preview` 显示最近三次运行时间；保存时字段错误标在对应字段，冲突时保留表单并重新读取。
-- 接口：`POST /schedules` 或 `PATCH /schedules/{id}`（带 `expectedVersion`）。
+- 接口：`GET /schedules` 查询当前空间任务；`POST /schedules` 创建；`PATCH /schedules/{id}` 更新（带 `expectedVersion`）。
 - 事务：锁空间行和任务行 → 校验目标（新建位置的目录、Agent，或分支切点、续作 Thread）→ 计算 `next_due_at` → 写入任务和对应的唤醒 Work。
-- 事件：`schedule`。
+- 事件：任务配置提交后发送 `schedules`，数据为 `{scheduleId}`。
 - 失败：`INVALID_SCHEDULE`、`VERSION_CONFLICT`。
 
 **启停、立即运行和删除**
 
 - 启停：开关调用 `PATCH /schedules/{id}`（`{enabled, expectedVersion}`）。暂停只取消之后的自动触发，不停止已提交的回合。
-- 立即运行：`POST /schedules/{id}/runs`，每次操作一个 `Idempotency-Key`。与自动触发走同一个业务事务，但不推进 `next_due_at`，暂停的任务也能运行。返回本次执行记录，前端展开该任务的最新一页，不打开窗格。
+- 立即运行：`POST /schedules/{id}/runs`，每次操作一个独立的 `Idempotency-Key`。与自动触发走同一个业务事务，但不推进 `next_due_at`，暂停的任务也能运行。返回本次执行记录，前端展开该任务的最新一页，不打开窗格。
 - 删除：编辑弹窗里的「删除任务」，确认后调用 `DELETE /schedules/{id}?expectedVersion=…`。同一事务删除任务、唤醒 Work 和执行记录，已产生的会话和 Thread 保留。
 
 **执行记录**
 
-- 展开时调用 `GET /schedules/{id}/runs` 取最新五条；「较早」带上 `before` 游标，「较新」由前端保存的本次游标返回。一次只展开一个任务，收起后丢弃游标。
-- 收到 `schedule` 事件时，仍在首页则重新读取首页；已经翻页则保持当前页，避免页边界跳动。
+- 展开时调用 `GET /schedules/{id}/runs` 取最新五条；「较早」带上 `before` 游标，「较新」由前端保存的本次游标返回。游标按 `(scheduledAt,id)` 倒序分页，不查总数、不使用偏移量。一次只展开一个任务，收起后丢弃游标。
+- 收到 `schedules` 实时帧（数据 `{scheduleId}`）时，仍在首页则重新读取首页；已经翻页则保持当前页，避免页边界跳动。
 - 点击带 Thread 的记录走打开流程；Thread 已被删除时记录保留并显示「Thread 已删除」。
 
 **自动触发（服务端）**

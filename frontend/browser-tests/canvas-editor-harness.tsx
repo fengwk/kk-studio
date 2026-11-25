@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter, Route, Routes } from 'react-router'
 import '@/styles.css'
 import '@/features/canvas/canvas.css'
-import { CanvasPage } from '@/features/canvas/CanvasPage'
+import { CanvasWorkbench } from '@/features/canvas/CanvasWorkbench'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { setLocale } from '@/shared/i18n'
 import type {
@@ -16,7 +15,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /**
- * 画布编辑器的真实浏览器回归：挂载真正的 CanvasPage（真实路由、react-query、控制器、
+ * 画布编辑器的真实浏览器回归：挂载真正的 CanvasWorkbench（react-query、控制器、
  * React Flow 舞台、共享按钮与添加菜单），只在传输层把 `fetch` 换成后端替身。
  * 画布 API 走 `fetch('/api/...')`，因此替身装在 fetch 上而不是 HTTP client 上。
  *
@@ -213,11 +212,7 @@ export function CanvasEditorHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <MemoryRouter initialEntries={[`/canvas/${CANVAS_ID}`]}>
-          <Routes>
-            <Route path="/canvas/:canvasId" element={<CanvasPage />} />
-          </Routes>
-        </MemoryRouter>
+        <CanvasWorkbench canvasId={CANVAS_ID} />
       </ApplicationEventProvider>
     </QueryClientProvider>
   )

@@ -20,7 +20,7 @@
 | **Thread 读取与实时** | [快照缓存](../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts)、增量合并、流式对账、断线恢复，以及[执行树的 HTTP 引导与 WebSocket 回读](../frontend/src/features/thread/runtime/queries/useActiveThreadTree.ts)。 | 窗格绑定提供 Thread ID，缓存与订阅随登录上下文隔离。HTTP 与 WebSocket 共用公开执行树查询；Harness 批量读取各执行根的事实，工作区计算目录和状态视图的分组。 |
 | **IDE 前端** | [视图对账](../frontend/src/features/environment/ide/useIdeClaimReconciliation.ts)、浏览器标签页会话和恢复、使用凭据、终端、附件打开与[关闭命令](../frontend/src/features/environment/ide/useIdeCloseCommands.ts)。 | [VS Code 窗格](../frontend/src/features/environment/ide/VsCodePaneRenderer.tsx)处理原生动作、绑定校验、状态和强制关闭确认。[侧栏环境列表](../frontend/src/features/environment/ide/EnvironmentList.tsx)打开工作台。`/files` 和 `/shell` 用 Thread 生效的环境走统一打开流程；`/shell` 等视图就绪后执行原终端动作。 |
 | **IDE 服务端与 Daemon** | [IDE 控制面、数据面、跨节点路由和回收](modules/ide.md)、Daemon 连接与 code-server 桥接。 | 补用户绑定及访问校验，保留 Studio 到 Daemon 的视图控制协议。托管运行时升级单独验收发行件；技能安装锁单独修复。 |
-| **Canvas** | [CanvasStage](../frontend/src/features/canvas/CanvasStage.tsx)、节点编辑、Function 运行、revision 与 patch。 | 把[独立页面](../frontend/src/features/canvas/CanvasPage.tsx)改为窗格入口。按 Canvas ID 共用文档、命令与回读；把[按文档保存的视口](../frontend/src/features/canvas/useCanvasViewportPersistence.ts)改为按窗格保存，选中项、缩放和平移互不影响。补归属、整份删除及附件授权。 |
+| **Canvas** | [CanvasStage](../frontend/src/features/canvas/CanvasStage.tsx)、节点编辑、Function 运行、revision 与 patch。 | 把独立页面（原 `CanvasPage`）改为[窗格入口](../frontend/src/features/canvas/CanvasWorkbench.tsx)。按 Canvas ID 共用文档、命令与回读；把[按文档保存的视口](../frontend/src/features/canvas/useCanvasViewportPersistence.ts)改为按窗格保存，选中项、缩放和平移互不影响。补归属、整份删除及附件授权。 |
 | **Harness** | Session／Entry 历史、Command、Work、模型与工具调用、审批、Join、停止及退出确认；保留现有模块边界。 | 增加按回合切点创建空闲分支、单 Thread 深删除和可达历史回收、执行事实批量读取；修复物理事务锁序。移除 `SET_AGENT` 和 `CONTROLLER_TASK`，保留 `PLUGIN_TASK`。 |
 | **模型与工具** | [Provider 协议](modules/harness-model.md)、SSE、用量计价、缓存身份、回合内冻结请求、真实重试，以及[内置工具、技能与异步委派](modules/builtin-tools.md)的执行行为。 | Anthropic 的协议能力改由适配器决定；先验证实际 wire 行为与回退，再移除可编辑字段。托管文件的工具访问接入资源授权，Daemon 文件、LSP、MCP 和插件执行机制保持。 |
 | **Catalog、设置与共享 UI** | Agent、模型、提供商、技能包、MCP、Environment、插件、系统设置 schema、配置同步与共享控件。 | 更新设置导航和权限、Agent／模型表单分段、按钮和焦点规则。新增头像及日期、时间控件。保留校验、未保存确认、同步预检与配置冲突处理。 |
@@ -40,9 +40,9 @@
 | 范围 | 退出内容 |
 | --- | --- |
 | **Project / Issue** | 后端、前端、7 张表、`CONTROLLER_TASK`、独有的 API、文案、E2E 和模块文档。 |
-| **旧 Chat** | [后端](../apps/chat/)、前端 Chat 特性、`chat_session`、旧路由、旧目录／多面板外壳和[模块文档](modules/chat.md)。应用归属改用目录边和外键，移除 `SessionOwnership` 与 `AgentReferenceCheck` 派发。 |
-| **被替代的 UI** | 独立 Entry 历史树、旧会话／Thread 选择器、`/agent` 换 Agent 入口、[全局待处理页](../frontend/src/app/pages/InteractionsPage.tsx)、画布库、Studio IDE 浮层及外层标签。保留的行为迁入新宿主后，再删除专用组件、样式、存储和测试。 |
-| **被替代的接口** | 通用的 `POST /api/harness/command-batches` 创建入口、旧 Session／Thread 改名接口、无归属的画布创建／列表接口、通用 Blob 取址接口和 `projects` 实时资源。 |
+| **旧 Chat** | 旧 Chat 后端、`chat_session`、`/api/chat/chats` 与旧模块文档已退役。当前空间和资源归属由 Workspace 的 `chat_space`、`workspace_folder`、`workspace_resource` 与 `/api/chat-spaces` 承担；平台授权使用 `ResourceOwnership` 与 `ResourceAccess`。 |
+| **被替代的 UI** | 独立 Entry 历史树、旧会话／Thread 选择器、`/agent` 换 Agent 入口、全局待处理页（原 `InteractionsPage`）、画布库、Studio IDE 浮层及外层标签。保留的行为迁入新宿主后，再删除专用组件、样式、存储和测试。 |
+| **被替代的接口** | 通用的 `POST /api/harness/command-batches`、Session 查询/改名和 Thread 改名入口、无归属的画布创建／列表接口及 `projects` 实时资源已移除；资源创建和管理改由 `/api/chat-spaces/{spaceId}` 下的入口承担。 |
 | **专用辅助件** | 旧 SelectionPanel 与 AgentSelectionPanel、AgentSelect、选择项预览、Markdown 预览压平与命中高亮随旧入口退出；新目录只筛选名称。 |
 
 - **Agent 选择迁到空间默认配置。** 保留可用 Agent 列表及加载、失败和失效时的校验，控件统一用共享 [Select](../frontend/src/shared/ui/controls/Select.tsx)。已有 Session 固定 Agent；草稿不另设换 Agent 面板。
@@ -52,7 +52,7 @@
 
 | 行为 | 守护测试 |
 | --- | --- |
-| **Thread 面板**：草稿、上传和输入焦点随绑定保持；排队、模型失败及重试取自真实状态。 | 保留 [Composer 测试](../frontend/src/features/thread/runtime/thread-panel/ThreadComposer.test.tsx)和[交互冲突回读测试](../frontend/src/features/thread/runtime/interactions/interaction-conflict-recovery.test.tsx)。用新窗格验证首条消息、运行中排队、草稿保留和断线恢复。 |
+| **Thread 面板**：草稿、上传和输入焦点随绑定保持；排队、模型失败及重试取自真实状态。 | 保留 [Composer 测试](../frontend/src/features/thread/runtime/thread-panel/ThreadComposer.test.tsx)和[交互验收测试](../frontend/src/features/thread/runtime/interactions/interactions-acceptance.test.tsx)。用新窗格验证首条消息、运行中排队、草稿保留和断线恢复。 |
 | **回合切点**：只在真实 `TURN_END` 显示分支操作；取消名称确认没有写入。 | 延续[回合页脚测试](../frontend/src/features/thread/runtime/thread-panel/messages/MetaMessageBlock.test.tsx)的切点断言，验证两个操作各自的结果在原窗格打开。 |
 | **执行树**：重开时经 HTTP 引导，后续由 WebSocket 更新；两者可见节点一致。 | 保留[传输测试](../frontend/src/features/thread/runtime/queries/useActiveThreadTree.transport.test.tsx)。服务端补内部压缩节点过滤和订阅准入测试，在 `subscribed` 前拒绝不可公开目标。 |
 | **IDE 生命周期**：切换、全屏、拖拽交换和移入另一个窗格都不重载 iframe；刷新、重连恢复原 `viewId`。 | [窗格浏览器测试](../frontend/browser-tests/ide-pane.pw.ts)覆盖布局切换的 DOM 身份、原生 New Window、普通打开复用、连接变化与刷新对账。 |

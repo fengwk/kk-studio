@@ -26,14 +26,13 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 产品 owner 共享的 Harness 命令接受事务边界。
+ * Harness 命令接受与用户消息内容物化的事务边界。
  *
- * <p>产品 SPI 按身份锁定并校验归属和允许的操作。Runtime 接受、首次归属写入与附件物化加入同一物理事务。精确重放不执行 preflight，但仍先校验归属。
+ * <p>创建与既有 Thread 写入分别由调用方选择入口；Runtime 接受和附件物化在同一物理事务内完成。
  */
 @Service
 public class HarnessCommandAcceptanceOrchestrator {
 
-  private final List<SessionOwnership> ownerships;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final StorageUploadService uploadService;
   private final SessionBlobRefManager refManager;
@@ -41,14 +40,12 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final UserMessageContentPreparer contentPreparer;
 
   public HarnessCommandAcceptanceOrchestrator(
-      List<SessionOwnership> ownerships,
       ObjectProvider<HarnessRuntime> runtimes,
       StorageUploadService uploadService,
       SessionBlobRefManager refManager,
       StorageBlobManager blobManager,
       SystemSettingsSnapshot settingsSnapshot,
       ModelImageCountLimitResolver modelImageCountLimitResolver) {
-    this.ownerships = List.copyOf(ownerships);
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
@@ -63,42 +60,7 @@ public class HarnessCommandAcceptanceOrchestrator {
             () -> settingsSnapshot.get().storageMedia().maxImagesPerRequest());
   }
 
-  /** 接受一次 owner-aware 的命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
-  @Transactional
-  public AcceptedCommands accept(SessionOwner owner, AcceptCommandsCommand command) {
-    return accept(null, owner, command);
-  }
-
-  @Transactional
-  public AcceptedCommands accept(UUID userId, SessionOwner owner, AcceptCommandsCommand command) {
-    Objects.requireNonNull(owner, "owner");
-    Objects.requireNonNull(command, "command");
-    requireCreationTarget(command.target());
-    List<SessionOwnership> matches =
-        ownerships.stream().filter(item -> owner.kind().equals(item.kind())).toList();
-    if (matches.isEmpty()) {
-      throw DomainException.validation(
-          "owner", "Unknown or ambiguous session owner kind: " + owner.kind());
-    }
-    if (matches.size() != 1) {
-      throw new IllegalStateException("Ambiguous session owner kind: " + owner.kind());
-    }
-    SessionOwnership ownership = matches.getFirst();
-    if (!ownership.allowsDirectCommands()) {
-      throw new DirectCommandsNotAllowedException();
-    }
-    HarnessRuntime runtime = requireRuntime();
-    authorize(ownership, owner, command.target());
-    AcceptancePreflight preflight = preflight(ownership, owner, command.target(), userId);
-    return runtime.acceptCommands(command, preflight);
-  }
-
   /** The caller locks the workspace and records the new placement in this physical transaction. */
-  @Transactional(propagation = Propagation.MANDATORY)
-  public AcceptedCommands createSession(AcceptCommandsCommand command) {
-    return createSession(null, command);
-  }
-
   @Transactional(propagation = Propagation.MANDATORY)
   public AcceptedCommands createSession(UUID userId, AcceptCommandsCommand command) {
     if (!(command.target() instanceof AcceptCommandsTarget.NewRootSession)) {
@@ -112,16 +74,11 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * 接受既有 Thread 的通用命令批（非 owner-aware）：target 由调用方从 path 与精确 cursor 组合。
+   * 接受既有 Thread 的通用命令批：target 由调用方从 path 与精确 cursor 组合。
    *
    * <p>Runtime 从 Thread 解析 Session，preflight 在同一事务内完成 USER_MESSAGE 附件物化与 RESOURCE 的 Session
-   * 归属校验；owner 授权与业务规则由调用方自己的边界显式完成，本服务不改写目标 Thread 的所属事实。
+   * 校验；本服务不改写目标 Thread 的所属事实。
    */
-  @Transactional
-  public AcceptedCommands acceptOnThread(AcceptCommandsCommand command) {
-    return acceptOnThread(null, command);
-  }
-
   @Transactional
   public AcceptedCommands acceptOnThread(UUID userId, AcceptCommandsCommand command) {
     Objects.requireNonNull(command, "command");
@@ -133,93 +90,6 @@ public class HarnessCommandAcceptanceOrchestrator {
         (session, commands, copiedEntries, branchSettings) ->
             prepareUserContents(userId, session.id(), commands, branchSettings);
     return runtime.acceptCommands(command, preflight);
-  }
-
-  /**
-   * owner-aware 入口只服务产品创建（NEW_ROOT_SESSION / NEW_THREAD / NEW_FORKED_SESSION）：既有 Thread 的继续写入走
-   * {@link #acceptOnThread}，子代理与任务只由 {@code AgentTaskService} 经 {@code HarnessRuntime.spawn}
-   * 原子创建，不经产品 owner 路由（产品 owner 无法持有子 Session）。
-   */
-  private static void requireCreationTarget(AcceptCommandsTarget target) {
-    if (!(target instanceof AcceptCommandsTarget.NewRootSession)
-        && !(target instanceof AcceptCommandsTarget.NewThread)
-        && !(target instanceof AcceptCommandsTarget.NewForkedSession)) {
-      throw DomainException.validation(
-          "target",
-          "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD /"
-              + " NEW_FORKED_SESSION creation");
-    }
-  }
-
-  /**
-   * 调用 Runtime 前完成 owner 授权：NEW_SESSION 对新 Session 只要求 owner 存在且身份可绑定，但对已有 Session（包括 Runtime 精确
-   * replay）要求目标 Session 已由该 owner 持有；NEW_THREAD 始终要求目标 Session 已由该 owner 持有。
-   */
-  private void authorize(
-      SessionOwnership ownership, SessionOwner owner, AcceptCommandsTarget target) {
-    UUID rootThreadId =
-        target instanceof AcceptCommandsTarget.NewRootSession root ? root.threadId() : null;
-    ownership.lockForAcceptance(owner, rootThreadId);
-    requireTargetOwnership(ownership, owner, target);
-  }
-
-  /**
-   * 目标 Session 必须已由 owner 持有：NEW_SESSION 只在 Session 已存在（精确 replay）时校验；NEW_THREAD 直接用 target 的
-   * sessionId；NEW_FORKED_SESSION 先检查产品规则，再校验来源 Thread 所属 Session。既有 Thread 的继续写入不经 owner 授权 （{@link
-   * #acceptOnThread}）；THREAD 不属于 owner-aware 产品入口，即使上层形状校验被绕过也必须 fail closed。
-   */
-  private void requireTargetOwnership(
-      SessionOwnership ownership, SessionOwner owner, AcceptCommandsTarget target) {
-    switch (target) {
-      case AcceptCommandsTarget.NewRootSession newRootSession -> {
-        if (sessionExists(newRootSession.sessionId())) {
-          requireOwnedSession(ownership, owner, newRootSession.sessionId());
-        }
-      }
-      case AcceptCommandsTarget.NewThread newThread -> requireOwnedSession(
-          ownership, owner, newThread.sessionId());
-      case AcceptCommandsTarget.NewForkedSession forkedSession -> {
-        if (!ownership.allowsFork()) {
-          throw DomainException.validation("target", "Owner does not support NEW_FORKED_SESSION");
-        }
-        requireOwnedSession(ownership, owner, sourceSessionId(forkedSession.sourceThreadId()));
-      }
-      case AcceptCommandsTarget.Thread ignoredThread -> throw new IllegalStateException(
-          "owner-aware authorization does not support THREAD targets");
-    }
-  }
-
-  /** 由来源执行根 Thread 解析其 Session；Thread 不可解析说明来源已不一致，失败而不是回退。 */
-  private UUID sourceSessionId(UUID sourceThreadId) {
-    return requireRuntime()
-        .findThreadSessionId(sourceThreadId)
-        .orElseThrow(() -> DomainException.notFound("thread", "fork source thread does not exist"));
-  }
-
-  /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
-  private boolean sessionExists(UUID sessionId) {
-    return requireRuntime().sessionExists(sessionId);
-  }
-
-  private void requireOwnedSession(SessionOwnership ownership, SessionOwner owner, UUID sessionId) {
-    if (!ownership.ownsSession(owner, sessionId)) {
-      throw DomainException.validation("session", "Session ownership is inconsistent");
-    }
-  }
-
-  /** 全新 Session 的 preflight 调用产品归属钩子并物化 USER_MESSAGE 附件；精确 replay 不重复执行。 */
-  private AcceptancePreflight preflight(
-      SessionOwnership ownership, SessionOwner owner, AcceptCommandsTarget target, UUID userId) {
-    return (session, commands, copiedEntries, branchSettings) -> {
-      if (target instanceof AcceptCommandsTarget.NewRootSession
-          || target instanceof AcceptCommandsTarget.NewForkedSession) {
-        ownership.sessionCreated(owner, session.id());
-      }
-      if (target instanceof AcceptCommandsTarget.NewForkedSession) {
-        SessionEntryResources.retain(refManager, session.id(), copiedEntries);
-      }
-      return prepareUserContents(userId, session.id(), commands, branchSettings);
-    };
   }
 
   /**

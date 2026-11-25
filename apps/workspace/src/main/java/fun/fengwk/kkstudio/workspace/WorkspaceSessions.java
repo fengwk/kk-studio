@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.workspace;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +19,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO.TextDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery;
 import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery.PublicThread;
@@ -40,6 +42,7 @@ import java.util.UUID;
 @Service
 public class WorkspaceSessions {
   private final ChatSpaceService spaces;
+  private final JdbcClient jdbc;
   private final WorkspacePlacements placements;
   private final HarnessPlacementQuery query;
   private final WorkspaceTreeService tree;
@@ -51,6 +54,7 @@ public class WorkspaceSessions {
 
   WorkspaceSessions(
       ChatSpaceService spaces,
+      JdbcClient jdbc,
       WorkspacePlacements placements,
       HarnessPlacementQuery query,
       WorkspaceTreeService tree,
@@ -60,6 +64,7 @@ public class WorkspaceSessions {
       SessionDeletionOrchestrator deletion,
       SessionInitialSettings settings) {
     this.spaces = spaces;
+    this.jdbc = jdbc;
     this.placements = placements;
     this.query = query;
     this.tree = tree;
@@ -73,10 +78,21 @@ public class WorkspaceSessions {
   @Transactional
   public SessionCreatedDTO create(
       StudioPrincipal actor, UUID spaceId, UUID key, SessionCreateDTO request) {
+    return create(actor, spaceId, key, request, null);
+  }
+
+  SessionCreatedDTO create(
+      StudioPrincipal actor,
+      UUID spaceId,
+      UUID key,
+      SessionCreateDTO request,
+      String explicitAgent) {
     var space = spaces.lock(actor, spaceId);
     UUID session = ChatSpaceService.derivedId("session", spaceId, key);
     UUID thread = ChatSpaceService.derivedId("main", spaceId, key);
-    String hash = WorkspacePlacements.fingerprint(request);
+    String hash =
+        WorkspacePlacements.fingerprint(
+            explicitAgent == null ? request : List.of(request, explicitAgent));
     var replay = placements.replay(spaceId, session, hash);
     if (replay.isPresent()) {
       return new SessionCreatedDTO(
@@ -94,7 +110,7 @@ public class WorkspaceSessions {
     var model = request.modelSelection();
     var branch =
         settings.resolve(
-            space.defaultAgentName(),
+            explicitAgent == null ? space.defaultAgentName() : explicitAgent,
             request.environmentId() == null
                 ? space.defaultEnvironmentId()
                 : request.environmentId(),
@@ -125,6 +141,18 @@ public class WorkspaceSessions {
         space.treeVersion() + 1,
         command);
     return new SessionCreatedDTO(session, thread, command, Long.toString(spaces.advance(spaceId)));
+  }
+
+  void submitScheduledMessage(UUID userId, UUID thread, String text, UUID key) {
+    var message =
+        new AgentMessage(
+            AgentMessageRole.USER,
+            HarnessRuntimeRequestMapper.toUserMessageContents(List.of(new TextDTO(text))));
+    acceptance.acceptOnThread(
+        userId,
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(thread),
+            List.of(new NewThreadCommand(new UserMessageCommandPayload(message), key))));
   }
 
   @Transactional
@@ -210,6 +238,7 @@ public class WorkspaceSessions {
     var space = spaces.lock(actor, spaceId);
     requireThread(spaceId, id);
     ChatSpaceService.requireTreeVersion(space, treeVersion);
+    ScheduleReferences.requireUnused(jdbc, "thread_id", id);
     deletion.deleteThread(id, version);
     return spaces.advance(spaceId);
   }
@@ -219,6 +248,7 @@ public class WorkspaceSessions {
     var space = spaces.lock(actor, spaceId);
     var edge = placements.require(spaceId, id, Kind.SESSION);
     ChatSpaceService.requireTreeVersion(space, treeVersion);
+    ScheduleReferences.requireUnused(jdbc, "session_id", id);
     deletion.deleteSession(id, ids -> placements.delete(spaceId, edge));
     return spaces.advance(spaceId);
   }

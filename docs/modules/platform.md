@@ -3,7 +3,7 @@
 `platform-runtime` 组合领域端口与外部设施，为 Web 提供 Catalog、Interaction、Storage、
 Environment、Settings 和 Harness 用例。它负责跨资源事务、实时配置解析和执行网关；
 执行状态机见 [Harness Runtime](harness-runtime.md)。
-[Canvas](canvas.md)、[Chat](chat.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
+[Workspace](workspace.md)、[Canvas](canvas.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
 平台需要应用参与的地方由平台定义 SPI、应用实现（见[命令接受、产品归属与派发](#命令接受产品归属与派发)）。
 构建期 Plugin 的纯 SPI、凭据与资源端口契约独立在 [Platform Plugin API](platform-plugin-api.md)。
 
@@ -47,7 +47,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、结果观察与按 Thread 停止 |
-| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询、空闲分叉保留历史资源与深删除；[Chat](chat.md) 实现归属、锁与写钩子 |
+| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 通用执行编排：命令接受、空闲分支与复制、Session 深删除；资源归属与授权由 Workspace 的 `ResourceOwnership` 和 Platform `ResourceAccess` 协作 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Environment CRUD、注册令牌、路由租约与宿主信息 |
@@ -310,8 +310,7 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
 `config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
 能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
-Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查。Chat 只按名称软引用 Agent，
-删除后其下一回合确定性失败，同名重建即恢复。
+Agent 被其它 Agent 的 subagents、插件普通配置或工作区默认 Agent/Session 执行设置引用时不能删除；Catalog 删除事务检查这些引用并保持并发一致性。
 
 Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`）或 PUT 的必填
 `SecretUpdate`（`KEEP`/`SET`/`CLEAR`）写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
@@ -429,14 +428,9 @@ headers 作为整体秘密：创建时省略即无 header，只接受 `SET`；�
 ## 命令接受、产品归属与派发
 
 [`HarnessCommandAcceptanceOrchestrator`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestrator.java)
-在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。新 fork 的事务内 preflight 接收实际复制的历史条目，以便为新 Session 保留资源引用，不暴露存储句柄。接受锁由归属实现提供（Chat 对 `chat` 行取 KEY SHARE）；深删除使用 owner 排他锁，再由 Harness 按 Tree → Session → Thread 锁定删除闭包并复核，平台在同一物理事务中删除归属行、释放 Blob 引用。
+在同一物理事务内接受命令：`createSession` 供 Workspace 创建 Session 并接受首条命令，`acceptOnThread` 供既有 Thread 续写；附件物化与引用转移纳入接受事务。分支与复制由 Workspace 调用 Harness 的空闲分支入口。深删除由工作区先处理归属，再由 Harness 按锁序删除 Session 执行闭包并释放 Blob 引用。
 
-平台对产品归属的全部感知收敛在 [`SessionOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/SessionOwnership.java) SPI。每个实现以不透明 `{kind, id}` 身份工作，声明是否允许分叉、是否允许经通用命令接口直写，并提供接受、交互与删除的产品锁和写钩子：
-
-- Chat：[`ChatSessionOwnership`](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/ChatSessionOwnership.java) 由 [Chat](chat.md) 模块实现，`chat_session` 直接持有 Session；接受锁 `chat` KEY SHARE，允许分叉与通用命令。
-
-`findOwner(rootThreadId, rootSessionId)` 返回展示用 `{kind, id, title, link}`；交互查询只按真实执行根调用各实现，多个实现同时认领同一根时失败关闭。命令接受、Session 查询、深删除与交互待办/查询都只调用该 SPI，不按产品类型分支；未知或重复的 kind 在进入 Runtime 前拒绝。
-Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品。
+Workspace 通过 [`ResourceOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/ResourceOwnership.java) 暴露批量 Session/Canvas 归属查询，平台 [`ResourceAccess`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/ResourceAccess.java) 统一校验资源访问。工作区 HTTP 负责空间内资源创建、重命名与删除；Harness HTTP 只承接 Thread 执行快照和控制，不再提供通用 Session 或创建入口。
 
 
 

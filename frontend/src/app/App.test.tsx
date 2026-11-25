@@ -1,72 +1,43 @@
-import { render, screen } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
-import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/features/environment/environment-service'
-import { interactionService } from '@/shared/api/interaction-service'
 
-// 保留真实事件管理器及 IDE 身份契约，仅替换 WebSocket，避免连接真实服务。
-vi.mock('@/shared/app-events', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/shared/app-events')>()
-  const { FakeWebSocketHarness } = await import('@/test-support/fake-websocket')
-  const sockets = new FakeWebSocketHarness()
-  return {
-    ...actual,
-    ApplicationEventProvider: ({ children }: { children: ReactNode }) => (
-      <actual.ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-        {children}
-      </actual.ApplicationEventProvider>
-    ),
-  }
-})
+const first = '780cbbd3-a765-45df-aec6-8048b6d8ce2a'
+const recent = 'ace3d346-d464-4fa5-b02c-ffb019ecf824'
 
-vi.mock('@/shared/api/agent-service', () => ({
-  agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },
-}))
-vi.mock('@/features/environment/environment-service', () => ({
-  environmentService: {
-    listEnvironments: vi.fn(),
-    getEnvironmentRuntime: vi.fn(),
-    startEnvironmentUpdate: vi.fn(),
-  },
-}))
-vi.mock('@/shared/api/interaction-service', () => ({
-  interactionService: { listInteractions: vi.fn() },
-}))
+function renderApp(path: string) {
+  const router = createMemoryRouter([{ path: '*', element: <AppProviders><App /></AppProviders> }], { initialEntries: [path] })
+  render(<RouterProvider router={router} />)
+  return router
+}
 
-
-describe('App routes', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
+describe('workspace routes', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }), { headers: { 'Content-Type': 'application/json' } })))
-    vi.clearAllMocks()
-    vi.mocked(agentService.listProviders).mockResolvedValue([])
-    vi.mocked(agentService.listModels).mockResolvedValue([])
-    vi.mocked(agentService.listAgents).mockResolvedValue([])
-    vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-    vi.mocked(interactionService.listInteractions).mockResolvedValue({
-      items: [],
-      nextCursor: null,
-      total: 0,
-      freshnessAt: null,
-    })
+    localStorage.clear()
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      const spaces = [{ id: first, title: 'First', version: '0', defaultYoloEnabled: false },
+        { id: recent, title: 'Recent', version: '0', defaultYoloEnabled: false }]
+      const body = path === '/api/auth/me' ? { id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }
+        : path === '/api/chat-spaces' ? spaces : path.endsWith('/tree') ? { treeVersion: '0', folders: [] } : []
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
+    }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  })
+  afterEach(() => { vi.unstubAllGlobals(); localStorage.clear() })
+
+  it('restores the last active workspace without creating a resource', async () => {
+    localStorage.setItem('workspace-last-active:admin', recent)
+    const router = renderApp('/')
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/chat-spaces/${recent}`), { timeout: 5000 })
+    expect(await screen.findByRole('button', { name: 'Recent' }, { timeout: 5000 })).toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
   })
 
-  it('renders lazy interactions page with workbench shell semantics', async () => {
-    // 测试意图：验证 /interactions 路由通过 React.lazy 异步按需加载，
-    // 在挂载完成后正确渲染 InteractionsPage 内容，并保持外层 WorkbenchShell 导航结构。
-    const router = createMemoryRouter(
-      [{ path: '*', element: <AppProviders><App /></AppProviders> }],
-      { initialEntries: ['/interactions'] },
-    )
-    render(<RouterProvider router={router} />)
-
-    expect(await screen.findByRole('heading', { name: '待处理事项', level: 1 }, { timeout: 3000 })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: '暂无待处理事项' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/interactions')
+  it('does not mount the old interactions route', async () => {
+    renderApp('/interactions')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Resource unavailable')
+    expect(fetch).not.toHaveBeenCalledWith('/api/chat-spaces', expect.anything())
   })
 })

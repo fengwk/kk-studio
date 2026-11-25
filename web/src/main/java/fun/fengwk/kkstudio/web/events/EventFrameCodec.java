@@ -280,6 +280,14 @@ final class EventFrameCodec {
           node.put("name", "threads");
           node.set("data", NODES.objectNode());
         }
+        case WorkspaceNotifications.Schedules schedules -> {
+          node.put("name", "schedules");
+          var data = NODES.objectNode();
+          if (schedules.scheduleId() != null) {
+            data.put("scheduleId", schedules.scheduleId().toString());
+          }
+          node.set("data", data);
+        }
         case WorkspaceNotifications.Resync ignored -> throw new IllegalArgumentException(
             "resync is not an event frame");
       }

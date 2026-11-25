@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasReference;
@@ -100,7 +99,7 @@ class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
     assertFalse(queryService.containsHeldBlob(canvasId, blobId));
   }
 
-  /** 无引用的配置、未知画布与文档列表都必须保持空/缺失语义，不臆造连线或占位行。 */
+  /** 无引用的配置与未知画布保持空/缺失语义，不臆造连线或占位行。 */
   @Test
   void snapshotWithoutReferencesAndUnknownCanvas() {
     UUID canvasId = addDocument();
@@ -111,8 +110,6 @@ class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
     assertTrue(snapshot.groups().isEmpty());
     assertEquals(1, snapshot.nodes().size());
 
-    CanvasDocument document = canvasStore.findDocument(canvasId).orElseThrow();
-    assertEquals(List.of(document), queryService.listDocuments());
     assertTrue(queryService.findSnapshot(UUID.randomUUID()).isEmpty());
   }
 

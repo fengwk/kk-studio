@@ -26,9 +26,6 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
@@ -41,14 +38,12 @@ import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
-import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchController;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.ModelImageCountLimitResolver;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -100,18 +95,11 @@ class HarnessAcceptanceProblemWireTest {
             AcceptancePreflight.IDENTITY);
     ObjectProvider<HarnessRuntime> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(runtime);
-    SessionOwnership owner = mock(SessionOwnership.class);
-    when(owner.kind()).thenReturn("CHAT");
-    when(owner.allowsDirectCommands()).thenReturn(true);
-    when(owner.ownsSession(any(), any())).thenReturn(true);
-    SessionOwnership customOwner = mock(SessionOwnership.class);
-    when(customOwner.kind()).thenReturn("CUSTOM");
     uploads = mock(StorageUploadService.class);
     ModelImageCountLimitResolver imageLimitResolver = mock(ModelImageCountLimitResolver.class);
     when(imageLimitResolver.resolve(any())).thenReturn(null);
     HarnessCommandAcceptanceOrchestrator acceptance =
         new HarnessCommandAcceptanceOrchestrator(
-            List.of(owner, customOwner),
             provider,
             uploads,
             mock(SessionBlobRefManager.class),
@@ -121,9 +109,7 @@ class HarnessAcceptanceProblemWireTest {
     HarnessCommandBatchService service =
         new HarnessCommandBatchService(acceptance, runtime, mock(ResourceAccess.class));
     mvc =
-        MockMvcBuilders.standaloneSetup(
-                new HarnessCommandBatchController(service),
-                new HarnessThreadCommandBatchController(service))
+        MockMvcBuilders.standaloneSetup(new HarnessThreadCommandBatchController(service))
             .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
             .defaultRequest(get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, actor))
             .setMessageConverters(
@@ -134,7 +120,7 @@ class HarnessAcceptanceProblemWireTest {
             .build();
   }
 
-  /** 附件不存在与跨 Session 资源是用户输入错误，未就绪附件则保留存储冲突原因。 */
+  /** 跨 Session 的 Blob 按不存在处理，未就绪上传仍保留存储冲突原因。 */
   @Test
   void userMessageRejectsInvalidContentsAndPropagatesStorageConflict() throws Exception {
     when(uploads.lockReady(upload, actor.userId()))
@@ -149,95 +135,14 @@ class HarnessAcceptanceProblemWireTest {
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"));
     postMessage("{\"type\":\"RESOURCE\",\"blobId\":\"" + UUID.randomUUID() + "\",\"name\":\"x\"}")
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.reason").value("RESOURCE_NOT_FOUND"));
     postMessage("{\"type\":\"IMAGE\",\"source\":\"https://example.com/x\"}")
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
     postMessage("{\"type\":\"TEXT\",\"text\":\"hello\",\"unknown\":true}")
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
-  }
-
-  /** 同一批中的重复命令幂等键是请求错误，必须在分配 durable sequence 前稳定返回 400。 */
-  @Test
-  void duplicateCommandIdempotencyKeysAreValidation() throws Exception {
-    String key = UUID.randomUUID().toString();
-    mvc.perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {"owner":{"kind":"CHAT","id":"owner"},"target":{"type":"NEW_SESSION",
-                    "sessionId":"%s","threadId":"%s",
-                    "rootSettings":{"agentName":"assistant",
-                    "execution":{"driver":"fake","settings":{}}},
-                    "yoloEnabled":false},
-                    "commands":[
-                    {"type":"SET_ENVIRONMENT","idempotencyKey":"%s","environmentName":"assistant"},
-                    {"type":"USER_MESSAGE","idempotencyKey":"%s",
-                    "contents":[{"type":"TEXT","text":"hello"}]}]}
-                    """
-                        .formatted(session, thread, key, key)))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
-  }
-
-  /** 合法 ROOT 切点可 fork；跨 Session 切点和未知 owner kind 均是 validation。 */
-  @Test
-  void newThreadChecksEntrySessionAndOwnerKind() throws Exception {
-    AcceptedCommands other =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewRootSession(
-                    UUID.randomUUID(),
-                    UUID.randomUUID(),
-                    new BranchSettings("assistant", new ExecutionSelection("fake", "{}"), null),
-                    false),
-                List.of(
-                    new NewThreadCommand(
-                        new UserMessageCommandPayload(
-                            new AgentMessage(
-                                AgentMessageRole.USER, List.of(new TextMessageContent("other")))),
-                        UUID.randomUUID()))),
-            AcceptancePreflight.IDENTITY);
-    postFork("CHAT", other.rootEntry().id())
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
-    UUID nonBoundary = UUID.randomUUID();
-    store.transaction(
-        tx -> {
-          tx.entries()
-              .insert(
-                  new Entry(
-                      nonBoundary,
-                      session,
-                      root.rootEntry().id(),
-                      new TurnStartPayload(
-                          TurnStartReason.INPUT,
-                          new BranchSettings(
-                              "assistant", new ExecutionSelection("fake", "{}"), null),
-                          thread),
-                      root.rootEntry().createdAt()));
-          return null;
-        });
-    postFork("CHAT", nonBoundary)
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
-    postFork("CHAT", UUID.randomUUID())
-        .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("not_found"));
-    postFork("PROJECT", root.rootEntry().id())
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value("Unknown or ambiguous session owner kind: PROJECT"));
-    postFork("CUSTOM", root.rootEntry().id())
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("conflict"))
-        .andExpect(jsonPath("$.reason").value("DIRECT_COMMANDS_NOT_ALLOWED"))
-        .andExpect(
-            jsonPath("$.detail").value("Direct commands are not allowed for this session owner"));
-    postFork("CHAT", root.rootEntry().id()).andExpect(status().isAccepted());
   }
 
   /** 缺省 environmentName 进入同一清除命令，实际收割清除由 reducer 单测覆盖。 */
@@ -270,20 +175,5 @@ class HarnessAcceptanceProblemWireTest {
                     + "\",\"contents\":["
                     + content
                     + "]}]}"));
-  }
-
-  private ResultActions postFork(String kind, UUID entry) throws Exception {
-    return mvc.perform(
-        post("/api/harness/command-batches")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(
-                """
-                {"owner":{"kind":"%s","id":"owner"},"target":{"type":"NEW_THREAD",
-                "sessionId":"%s","startEntryId":"%s","threadId":"%s",
-                "threadName":"branch","yoloEnabled":false},
-                "commands":[{"type":"USER_MESSAGE","idempotencyKey":"%s",
-                "contents":[{"type":"TEXT","text":"hello"}]}]}
-                """
-                    .formatted(kind, session, entry, UUID.randomUUID(), UUID.randomUUID())));
   }
 }

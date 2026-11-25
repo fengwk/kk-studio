@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -21,7 +20,6 @@ import org.springframework.http.MediaType;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -34,7 +32,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Thread 人工写端点：abandon、compact、rename、yolo、stop 与执行根守卫。 */
+/** Thread 人工写端点：abandon、compact、yolo、stop 与执行根守卫。 */
 class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSupport {
 
   /** 意图：放弃执行确认严格解析字符串版本并返回最新快照，不限制目标必须为执行根。 */
@@ -150,108 +148,17 @@ class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSup
     verifyNoInteractions(runtime);
   }
 
-  /** 名称冲突保留类型化 reason，并由既有异常边界映射为 409。 */
+  /** 意图：已移除的名称更新端点返回 404，且不访问 Runtime。 */
   @Test
-  void renameNameConflictIsHttp409WithTypedReason() throws Exception {
-    when(runtime.renameThread(any(RenameThreadCommand.class)))
-        .thenThrow(DomainException.conflict("THREAD_NAME_CONFLICT", "name already used"));
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"main\"}"))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("conflict"))
-        .andExpect(jsonPath("$.reason").value("THREAD_NAME_CONFLICT"));
-  }
-
-  /** 验证重命名成功后从权威 snapshot 回读 name/version。 */
-  @Test
-  void renameThreadCallsRuntimeAndReturnsCanonicalNameAndVersion() throws Exception {
-    when(runtime.renameThread(any(RenameThreadCommand.class)))
-        .thenReturn(HarnessRuntimeTestFixtures.renamedThread(id(1)));
-    when(runtime.getThreadSnapshot(id(1)))
-        .thenReturn(HarnessRuntimeTestFixtures.renamedIdleSnapshot());
-
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"  new thread name  \"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.name").value("new thread name"))
-        .andExpect(jsonPath("$.version").value("4"));
-
-    ArgumentCaptor<RenameThreadCommand> captor = ArgumentCaptor.forClass(RenameThreadCommand.class);
-    verify(runtime).renameThread(captor.capture());
-    verify(runtime).getThreadSnapshot(id(1));
-    assertEquals(id(1), captor.getValue().threadId());
-    assertEquals("new thread name", captor.getValue().name());
-  }
-
-  /** 意图：验证 rename body 的严格边界在到达 Runtime 前被拒绝（缺失/显式 null/非字符串/blank/超长/未知字段/404）。 */
-  @Test
-  void renameThreadRejectsStrictBodyViolationsAndMapsMissingThreadToNotFound() throws Exception {
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"ok\",\"unknown\":true}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":42}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":null}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"   \"}"))
-        .andExpect(status().isBadRequest());
-    verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
-
-    when(runtime.renameThread(any(RenameThreadCommand.class)))
-        .thenThrow(DomainException.notFound("thread", "thread is missing"));
+  void removedThreadNameEndpointReturnsNotFoundWithoutRuntimeInteraction() throws Exception {
     mockMvc
         .perform(
             put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\"}"))
         .andExpect(status().isNotFound());
-  }
 
-  /** 意图：超长 name 必须 400，且错误响应绝不回显用户提交的名称值（敏感数据不外泄）。 */
-  @Test
-  void renameThreadRejectsOverlongNameWithoutEchoingTheSubmittedValue() throws Exception {
-    String overlongName = "OVERLONG-SECRET-" + "t".repeat(257);
-    String response =
-        mockMvc
-            .perform(
-                put("/api/harness/threads/" + idText(1) + "/name")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"name\":\"" + overlongName + "\"}"))
-            .andExpect(status().isBadRequest())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-    assertFalse(response.contains(overlongName), "400 响应不得回显非法名称值");
-    assertFalse(response.contains("OVERLONG-SECRET"), "400 响应不得回显敏感 marker");
-    verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
+    verifyNoInteractions(runtime);
   }
 
   /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 直接更新 YOLO policy 并返回权威当前 Thread。 */
@@ -310,7 +217,7 @@ class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSup
   }
 
   /**
-   * 测试意图：自由输入/设置/YOLO/Stop/压缩/重命名等人工控制只允许指向执行根；子 Thread 一律 409 且不产生 Runtime
+   * 测试意图：自由输入/设置/YOLO/Stop/压缩等人工控制只允许指向执行根；子 Thread 一律 409 且不产生 Runtime
    * 变更，根目标照常放行。审批与问卷回答写回子调用是合法例外，不经本判定。
    */
   @Test
@@ -319,12 +226,6 @@ class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSup
     UUID root = id(1);
     when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
 
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(7) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"ok\"}"))
-        .andExpect(status().isConflict());
     mockMvc
         .perform(
             post("/api/harness/threads/" + idText(7) + "/compact")
@@ -344,7 +245,6 @@ class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSup
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict());
 
-    verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
     verify(runtime, never()).compactThread(any(CompactThreadCommand.class));
     verify(runtime, never()).setThreadYolo(any(SetThreadYoloCommand.class));
     verify(runtime, never()).stop(any());

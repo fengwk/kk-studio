@@ -9,7 +9,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
-import fun.fengwk.kkstudio.harness.api.Names;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
@@ -63,27 +62,6 @@ public final class ThreadCreationRequestHash {
     return digest(envelope);
   }
 
-  /**
-   * 计算 NEW_THREAD target 的 creation request hash。{@code threadName} 必须已经 {@link
-   * Names#normalize}，因为分支显示名是创建请求 身份的一部分：同 threadId + 同规范化名称精确 replay，改名则 hash 变化并映射为 ID reuse 冲突。
-   */
-  public static String forNewThread(
-      UUID sessionId,
-      UUID startEntryId,
-      UUID threadId,
-      String threadName,
-      boolean yoloEnabled,
-      List<NewThreadCommand> commands) {
-    ObjectNode envelope = envelope("NEW_THREAD");
-    envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
-    envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
-    envelope.put("threadId", requireId(threadId, "threadId").toString());
-    envelope.put("threadName", requireNonNull(threadName, "threadName"));
-    envelope.put("yoloEnabled", yoloEnabled);
-    envelope.set("commands", commandsNode(commands));
-    return digest(envelope);
-  }
-
   static String forIdleRoot(
       UUID sourceThreadId, UUID turnEndEntryId, UUID sessionId, UUID threadId, String name) {
     ObjectNode envelope = envelope(sessionId == null ? "IDLE_BRANCH" : "IDLE_FORK");
@@ -117,27 +95,6 @@ public final class ThreadCreationRequestHash {
     envelope.put("yoloEnabled", yoloEnabled);
     envelope.put("kind", requireNonNull(kind, "kind").name());
     envelope.set("constraints", constraintsNode(constraints));
-    envelope.set("commands", commandsNode(commands));
-    return digest(envelope);
-  }
-
-  /**
-   * 计算 NEW_FORKED_SESSION target 的 creation request hash：来源 Thread、切点、新 Session/Thread、YOLO 开关 与
-   * ordered 命令对。同一 raw 请求稳定得到同一 hash，内容变化（含切点或命令顺序）得到不同 hash。
-   */
-  public static String forNewForkedSession(
-      UUID sourceThreadId,
-      UUID startEntryId,
-      UUID sessionId,
-      UUID threadId,
-      boolean yoloEnabled,
-      List<NewThreadCommand> commands) {
-    ObjectNode envelope = envelope("NEW_FORKED_SESSION");
-    envelope.put("sourceThreadId", requireId(sourceThreadId, "sourceThreadId").toString());
-    envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
-    envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
-    envelope.put("threadId", requireId(threadId, "threadId").toString());
-    envelope.put("yoloEnabled", yoloEnabled);
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
   }

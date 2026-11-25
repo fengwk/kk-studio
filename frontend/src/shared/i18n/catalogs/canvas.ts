@@ -5,70 +5,6 @@ export const canvasCatalog = {
     'en-US': 'Loading canvas',
     'zh-CN': '正在加载画布',
   },
-  'canvas.library.title': {
-    'en-US': 'Your canvases',
-    'zh-CN': '你的画布',
-  },
-  'canvas.library.searchLabel': {
-    'en-US': 'Search canvases',
-    'zh-CN': '搜索画布',
-  },
-  'canvas.library.searchPlaceholder': {
-    'en-US': 'Search canvas names...',
-    'zh-CN': '搜索画布名称...',
-  },
-  'canvas.library.empty.noMatch': {
-    'en-US': 'No matching canvases',
-    'zh-CN': '暂无匹配画布',
-  },
-  'canvas.library.loading': {
-    'en-US': 'Loading canvases',
-    'zh-CN': '正在加载画布',
-  },
-  'canvas.library.loadError': {
-    'en-US': 'Failed to load canvases: {{message}}',
-    'zh-CN': '画布列表加载失败：{{message}}',
-  },
-  'canvas.library.createTitle': {
-    'en-US': 'New Canvas',
-    'zh-CN': '新建画布',
-  },
-  'canvas.library.createSubtitle': {
-    'en-US': 'Blank canvas · Create and open',
-    'zh-CN': '空白画布 · 创建并进入',
-  },
-  'canvas.library.name': {
-    'en-US': 'Canvas name',
-    'zh-CN': '画布名称',
-  },
-  'canvas.library.namePlaceholder': {
-    'en-US': 'e.g. Research board',
-    'zh-CN': '例如：研究看板',
-  },
-  'canvas.library.nameRequired': {
-    'en-US': 'Enter a canvas name',
-    'zh-CN': '请输入画布名称',
-  },
-  'canvas.library.createConfirm': {
-    'en-US': 'Create and open',
-    'zh-CN': '创建并进入',
-  },
-  'canvas.library.open': {
-    'en-US': 'Open',
-    'zh-CN': '进入',
-  },
-  'canvas.library.openAria': {
-    'en-US': 'Open canvas “{{title}}”',
-    'zh-CN': '进入画布「{{title}}」',
-  },
-  'canvas.library.updatedAt': {
-    'en-US': 'Last updated',
-    'zh-CN': '最近更新',
-  },
-  'canvas.toast.library.createError': {
-    'en-US': 'Failed to create canvas',
-    'zh-CN': '创建画布失败',
-  },
   'canvas.toast.operationFailed': {
     'en-US': 'The canvas action failed. Try again.',
     'zh-CN': '画布操作失败，请重试。',
@@ -248,10 +184,6 @@ export const canvasCatalog = {
   'canvas.editor.loading': {
     'en-US': 'Loading canvas…',
     'zh-CN': '正在加载画布…',
-  },
-  'canvas.editor.backToLibrary': {
-    'en-US': 'Back to canvas library',
-    'zh-CN': '返回画布库',
   },
   'canvas.editor.retry': {
     'en-US': 'Retry',

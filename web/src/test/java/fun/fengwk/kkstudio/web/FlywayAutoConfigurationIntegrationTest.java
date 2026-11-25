@@ -64,19 +64,19 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet history =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
-                  + " where success = true and ((version in ('1', '2', '3', '4'))"
+                  + " where success = true and (version = '1'"
                   + " or (version is null and description = 'fixture seed'))")) {
         assertTrue(history.next());
-        assertEquals(5L, history.getLong(1), "V1–V4 and fixture seed must be recorded");
+        assertEquals(2L, history.getLong(1), "V1 and fixture seed must be recorded");
       }
       try (ResultSet unexpectedMigration =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
                   + " where version is not null"
-                  + " and version not in ('1', '2', '3', '4')")) {
+                  + " and version <> '1'")) {
         assertTrue(unexpectedMigration.next());
         assertEquals(
-            0L, unexpectedMigration.getLong(1), "only the canonical V1–V4 migrations are known");
+            0L, unexpectedMigration.getLong(1), "only the canonical V1 migration is known");
       }
       // model_id 只对 MODEL 行必填（GROUP 行为 null），由 kind 形状约束而不是列级 NOT NULL 保证。
       try (ResultSet modelIdColumn =
@@ -126,29 +126,6 @@ class FlywayAutoConfigurationIntegrationTest {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "fixture seed must be visible through the data-source");
       }
-      try (ResultSet chatSessionTable =
-          st.executeQuery(
-              "select count(*) from information_schema.tables"
-                  + " where table_schema = 'public'"
-                  + " and table_name = 'chat_session'")) {
-        assertTrue(chatSessionTable.next());
-        assertEquals(
-            1L,
-            chatSessionTable.getLong(1),
-            "the product Chat Session association must be part of V1");
-      }
-      try (ResultSet chatSessionForeignKeys =
-          st.executeQuery(
-              "select count(*) from information_schema.table_constraints"
-                  + " where table_schema = 'public'"
-                  + " and table_name = 'chat_session'"
-                  + " and constraint_type = 'FOREIGN KEY'")) {
-        assertTrue(chatSessionForeignKeys.next());
-        assertEquals(
-            2L,
-            chatSessionForeignKeys.getLong(1),
-            "the chat_session association keeps the Harness Session FK and Chat FK");
-      }
       // 业务表清单与当前 V1 的结构保持一致。
       try (ResultSet businessTables =
           st.executeQuery(
@@ -157,9 +134,16 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name <> 'flyway_schema_history'")) {
         assertTrue(businessTables.next());
         assertEquals(
-            47L,
+            43L,
             businessTables.getLong(1),
-            "the canonical V1 baseline must expose exactly 47 business tables");
+            "the canonical V1 baseline must expose exactly 43 business tables");
+      }
+      try (ResultSet retiredTables =
+          st.executeQuery(
+              "select count(*) from information_schema.tables"
+                  + " where table_schema = 'public' and table_name in ('chat', 'chat_session')")) {
+        assertTrue(retiredTables.next());
+        assertEquals(0L, retiredTables.getLong(1));
       }
       try (ResultSet clusterNode =
           st.executeQuery(

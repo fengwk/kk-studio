@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -176,6 +177,15 @@ public final class HarnessRuntime {
         });
   }
 
+  /** 验证 source Thread 当前路径上的回合结束切点是否可用于分支。 */
+  public void validateBranchCut(UUID source, UUID cut) {
+    store.transaction(
+        tx -> {
+          ThreadCreations.validateBranchCut(tx, source, cut);
+          return null;
+        });
+  }
+
   /** 在同一 Session 的可见回合切点创建无父执行根，不登记输入或 Work。 */
   public ThreadState createIdleBranch(
       UUID sourceThreadId, UUID turnEndEntryId, UUID threadId, String threadName) {
@@ -293,6 +303,36 @@ public final class HarnessRuntime {
         tx -> {
           SessionDeletion.deleteThread(tx, rootThreadId, expectedVersion, cleanup, driverRegistry);
           return null;
+        });
+  }
+
+  /** Hold all participating trees before a caller combines multiple runtime operations. */
+  public void lockExecutionTrees(Collection<UUID> roots) {
+    store.transaction(
+        tx -> {
+          roots.stream().distinct().sorted(UuidOrder.COMPARATOR).forEach(tx.threads()::lockTree);
+          return null;
+        });
+  }
+
+  /** Caller holds the execution tree lock, preventing admission of new obligations. */
+  public boolean executionSettled(UUID root, boolean requireRunnable) {
+    return store.transaction(
+        tx -> {
+          tx.threads().lockTree(root);
+          var roots = List.of(root);
+          var members = tx.threads().listThreadIdsByRoots(roots);
+          var facts =
+              tx.threads().findExecutionFacts(roots, driverRegistry.readActiveWork(tx, members));
+          return facts.stream()
+              .findFirst()
+              .map(
+                  fact ->
+                      !fact.hasWork()
+                          && !fact.waitingForHuman()
+                          && !fact.blocked()
+                          && (!requireRunnable || !fact.stopped()))
+              .orElse(!requireRunnable);
         });
   }
 

@@ -157,8 +157,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentConfigCodec(JsonMapper.builder().build()),
             new AgentEditableSupport(),
-            pluginAgentDependencies,
-            List.of());
+            pluginAgentDependencies);
 
     configurationRepository.insertIfMissing(DECLARING_PLUGIN_ID, VALUES_NO_DECLARATION);
   }

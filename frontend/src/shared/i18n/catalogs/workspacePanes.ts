@@ -13,5 +13,11 @@ export const workspacePanesCatalog = {
   'pane.choice': { 'en-US': '{{letter}}: {{title}}', 'zh-CN': '{{letter}}：{{title}}' },
   'pane.drag': { 'en-US': 'Drag pane {{letter}} to swap', 'zh-CN': '拖动窗格 {{letter}} 交换位置' },
   'pane.resize': { 'en-US': 'Resize panes (double-click to reset)', 'zh-CN': '调整窗格大小（双击重置）' },
+  'pane.newSession': { 'en-US': 'New session', 'zh-CN': '新会话' },
+  'pane.thread': { 'en-US': 'Thread', 'zh-CN': 'Thread' },
+  'pane.canvas': { 'en-US': 'Canvas', 'zh-CN': '画布' },
+  'pane.closeBeforeOpening': { 'en-US': 'Close a pane before opening another', 'zh-CN': '请先关闭一个窗格' },
+  'pane.discardUnsent': { 'en-US': 'Discard unsent input?', 'zh-CN': '丢弃未发送内容？' },
+  'pane.discardUnsentPrompt': { 'en-US': 'This pane has unsent input.', 'zh-CN': '此窗格有未发送内容。' },
   'pane.pick': { 'en-US': 'Open in pane', 'zh-CN': '打开到窗格' },
 } satisfies LocaleCatalog

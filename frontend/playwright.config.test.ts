@@ -158,9 +158,8 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(42)
+    expect(allTestFiles.length).toBe(40)
     expect(allTestFiles).toContain('shared-ui-visual.pw.ts')
-    expect(allTestFiles).toContain('workbench-not-found.pw.ts')
     expect(allTestFiles).toContain('canvas-editor.pw.ts')
     expect(allTestFiles).toContain('resource-attachment-ide.pw.ts')
     expect(allTestFiles).toContain('custom-message-queue.pw.ts')
@@ -242,6 +241,7 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('tool-card-harness')
     expect(keys).toContain('subagent-tree-harness')
     expect(keys).toContain('environment-install-harness')
+    expect(keys).toContain('workspace-shell-harness')
     expect(keys).toContain('composer-editor-harness')
     expect(keys).toContain('composer-controls-harness')
     expect(keys).toContain('model-browser-harness')
@@ -250,10 +250,9 @@ describe('vite browser build contract', () => {
       path.resolve(__dirname, 'browser-tests/custom-message-queue-harness.html'),
     )
     expect(keys).toContain('resource-attachment-ide-harness')
-    expect(keys).toContain('workbench-not-found-harness')
     expect(keys).toContain('questionnaire-card-harness')
     expect(keys).toContain('canvas-editor-harness')
-    expect(keys.length).toBe(37)
+    expect(keys.length).toBe(35)
   })
 
   // 验证静态构建目标与 MPA 模式

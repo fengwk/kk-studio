@@ -99,7 +99,7 @@ HTTP 的 BLOB 输入使用 READY 上传的 `uploadId`，而 Canvas 领域资源�
 
 持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`CanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
 
-`CanvasCommandService.createCanvas(title)` 是 HTTP 创建与工作区编排共用的 Java API，返回文档 ID 和初始 revision。`deleteCanvas(canvasId, expectedRevision)` 仅供 Java 调用，归属目录由调用方在同一事务中维护。两者均加入调用方事务。
+`CanvasCommandService.createCanvas(canvasId, title)` 供工作区编排创建带归属的画布，返回文档 ID 和初始 revision；`deleteCanvas(canvasId, expectedRevision)` 由工作区编排调用。两者均加入调用方事务。
 
 深删除先锁文档并核对 revision，再按节点 → Run → Work 的顺序加锁。版本不符返回 `VERSION_CONFLICT`；若有 `READY`、`RUNNING` 或 `UNKNOWN` Run，则返回冲突原因 `EXECUTION_NOT_SETTLED`，不删除任何行，也不重新提交任务。删除释放 pin、清理 Run 和 Work、删除资源边及节点（引用随节点参数删除），最后删除组、命令回执与文档。每条 Blob 资源边只释放一次引用，文件对象仍由 Storage 异步回收；任一步失败均回滚。
 
@@ -217,11 +217,11 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 [`CanvasHttpAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasHttpAutoConfiguration.java)
 自动配置扫描并注册到宿主 MVC，因此宿主不需要知道具体控制器类型：
 
-- [`CanvasController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasController.java)：`/api/canvas/canvases` 的列表、快照与 typed command 批；接受时返回 patch，语义组前置条件过期返回 409 与受影响对象及服务端权威值。
+- [`CanvasController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasController.java)：按 ID 读取画布快照与提交 typed command 批；接受时返回 patch，语义组前置条件过期返回 409 与受影响对象及服务端权威值。
 - [`CanvasFunctionController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionController.java)：`/api/canvas/functions` 目录与 `/api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run` 的启动、查询、取消与 UNKNOWN 决议。
 - [`CanvasResourceController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceController.java)：资源下载与预览 URL 直读，从不返回 bucket 或对象 key。
 
-控制器只声明路由与类型，直接返回资源：创建画布 201，启动 Function run 202，其余 200；路径与查询参数使用 `UUID`，
+控制器只声明路由与类型，直接返回资源：启动 Function run 202，其余 200；路径与查询参数使用 `UUID`，
 Function run 的 `requestId` 在 runtime 入口统一校验为 canonical lowercase UUID。请求体的必填、未知字段、标量强转与其它
 canonical UUID 由宿主的严格 HTTP mapper 统一校验，客户端输入错误在产生处抛
 `DomainException`（见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)）。

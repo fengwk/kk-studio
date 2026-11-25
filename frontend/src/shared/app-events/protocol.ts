@@ -25,6 +25,7 @@
  *   - thread-tree changed：仅旧版内部提示，不用于浏览器数据流。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
+ *   - chat-space tree {treeVersion} / threads {} / space {version}：仅提示回读，不带 cursor。
  * - {"type":"snapshot-ref","resource":{...}[,"version":"<canonical>"]}：该资源快照本身超出单帧预算，
  *   服务端不发送它，客户端必须回读 HTTP 权威事实。Thread 必带顶层真实权威 version（canonical
  *   非负十进制，取自 DTO 而不是合成游标），thread-tree 不带 version。它只是该资源的恢复提示，
@@ -80,6 +81,7 @@ type ApplicationEventResourceKind =
   | 'thread-tree'
   | 'interactions'
   | 'environments'
+  | 'chat-space'
 
 export type ApplicationEventResource =
   | { kind: 'thread'; id: string }
@@ -87,8 +89,9 @@ export type ApplicationEventResource =
   | { kind: 'thread-tree'; id: string }
   | { kind: 'interactions' }
   | { kind: 'environments' }
+  | { kind: 'chat-space'; id: string }
 
-export type ApplicationEventName = 'realtime' | 'changed' | 'revision' | 'snapshot'
+export type ApplicationEventName = 'realtime' | 'changed' | 'revision' | 'snapshot' | 'tree' | 'threads' | 'space'
 
 /**
  * 资源快照超出单帧预算的提示；{@link ApplicationEventServerMessage} 中的 snapshot-ref 帧。
@@ -224,6 +227,13 @@ type ApplicationEventEnvironmentsChangedEvent = {
   data: Record<string, never>
 }
 
+type ApplicationEventChatSpaceEvent = {
+  type: 'event'
+  resource: Extract<ApplicationEventResource, { kind: 'chat-space' }>
+} & ({ name: 'tree'; data: { treeVersion: string } }
+  | { name: 'threads'; data: Record<string, never> }
+  | { name: 'space'; data: { version: string } })
+
 export type ApplicationEventServerMessage =
   | { type: 'connected'; eventNodeId: string; connectionId: string; heartbeatIntervalMillis: string }
   | { type: 'heartbeat' }
@@ -235,6 +245,7 @@ export type ApplicationEventServerMessage =
   | ApplicationEventTreeChangedEvent
   | ApplicationEventInteractionsChangedEvent
   | ApplicationEventEnvironmentsChangedEvent
+  | ApplicationEventChatSpaceEvent
   | { type: 'resync'; resource: ApplicationEventResource }
   | SnapshotRefMessage
   | { type: 'ide-use-accepted'; revision: ApplicationEventRevision }
@@ -450,6 +461,20 @@ function decodeEventData(
       return decodeInteractionsChangedEvent(parsed, resource)
     case 'environments':
       return decodeEnvironmentsChangedEvent(parsed, resource)
+    case 'chat-space': {
+      const data = parsed.data
+      if (!isRecord(data)) return null
+      if (name === 'threads' && hasExactFields(data, [])) return { type: 'event', resource, name, data: {} }
+      if (name === 'tree' && hasExactFields(data, ['treeVersion'])) {
+        const treeVersion = parseCursor(data.treeVersion)
+        if (treeVersion !== null) return { type: 'event', resource, name, data: { treeVersion } }
+      }
+      if (name === 'space' && hasExactFields(data, ['version'])) {
+        const version = parseCursor(data.version)
+        if (version !== null) return { type: 'event', resource, name, data: { version } }
+      }
+      return null
+    }
   }
 }
 
@@ -492,6 +517,8 @@ function isEventNameFor(
       return name === 'revision'
     case 'thread-tree':
       return name === 'snapshot' || name === 'changed'
+    case 'chat-space':
+      return name === 'tree' || name === 'threads' || name === 'space'
     default:
       return name === 'changed'
   }
@@ -821,7 +848,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
     return hasExactFields(value, ['kind']) ? { kind: value.kind } : null
   }
   if (
-    (value.kind !== 'thread' && value.kind !== 'canvas' && value.kind !== 'thread-tree')
+    (value.kind !== 'thread' && value.kind !== 'canvas' && value.kind !== 'thread-tree' && value.kind !== 'chat-space')
     || !hasExactFields(value, ['kind', 'id'])
     || !isCanonicalUuid(value.id)
   ) {
@@ -833,7 +860,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
 /** 提示型资源没有持久游标：ack 恒为 '0'，事件绝不携带 cursor。 */
 function isHintResourceKind(kind: ApplicationEventResourceKind): boolean {
   return (
-    kind === 'thread-tree' || kind === 'interactions' || kind === 'environments'
+    kind === 'thread-tree' || kind === 'interactions' || kind === 'environments' || kind === 'chat-space'
   )
 }
 
@@ -842,6 +869,9 @@ function isEventName(value: unknown): value is ApplicationEventName {
     || value === 'changed'
     || value === 'revision'
     || value === 'snapshot'
+    || value === 'tree'
+    || value === 'threads'
+    || value === 'space'
 }
 
 function parseCursor(value: unknown): ApplicationEventCursor | null {

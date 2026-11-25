@@ -15,7 +15,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | 层 | 模块 | 职责 |
 | --- | --- | --- |
 | L5 组合根 | [`web`](../web/pom.xml) | 装配模块与插件；HTTP 边界、浏览器事件通道、Daemon 接入、错误映射、SPA 与链路追踪 |
-| L4 产品 | [`apps/chat`](../apps/chat/pom.xml) | Chat 列表与会话归属；自带的 HTTP 接口与 DTO；拥有 `chat`、`chat_session` |
+| L4 产品 | [`apps/workspace`](../apps/workspace/pom.xml) | Chat Space、目录树与 Session/Canvas 资源归属；`/api/chat-spaces` 接口与 DTO |
 
 | L4 产品 | [`apps/canvas/spi`](../apps/canvas/spi/pom.xml) | 画布函数 SPI，插件只依赖它 |
 | L4 产品 | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | 画布领域、typed command、持久化、Function Run、HTTP 接口、DTO 与版本通知 |
@@ -59,13 +59,13 @@ L5                                       │ web │
                                          └──┬──┘
         ┌────────────┬───────────┬──────────┴───┬────────────────────────────┐
         ▼            ▼           ▼              ▼                            ▼
-    ┌────────┐  ┌─────────┐  ┌───────┐  ┌────────────────┐   ┌────────────────────────────────┐
-L4  │  chat  │  │ project │  │  ide  │  │ canvas-runtime │   │ plugins: comfyui media opencli │
-    └───┬────┘  └────┬────┘  └───┬───┘  └────┬───────┬───┘   │          minimax-mavis         │
-        │            │           │           │       ▼       └────┬──────────┬────────────────┘
-        └────────────┴───────────┴───────────┤ ┌────────────┐     │          │
-                                             │ │ canvas-spi │◀────┘          │
-                                             ▼ └────────────┘                ▼
+    ┌───────────┐  ┌───────┐  ┌────────────────┐   ┌────────────────────────────────┐
+L4  │ workspace │  │  ide  │  │ canvas-runtime │   │ plugins: comfyui media opencli │
+    └─────┬─────┘  └───┬───┘  └────┬───────┬───┘   │          minimax-mavis         │
+          │            │            │       ▼       └────┬──────────┬────────────────┘
+          └────────────┴────────────┤ ┌────────────┐     │          │
+                                     │ │ canvas-spi │◀────┘          │
+                                     ▼ └────────────┘                ▼
     ┌────────────────────────┐    ┌────────────────────┐          ┌─────────────────────┐
 L3  │ platform-daemon-server │◀───│  platform-runtime  │─────────▶│ platform-plugin-api │
     └────────────┬───────────┘    └──────────┬─────────┘          └──────────┬──────────┘
@@ -118,7 +118,7 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 
 `/api` 后的业务域表达资源归属：`/api/platform` 是目录、环境、设置与存储等平台资源；
 `/api/harness` 是执行事实与控制，`/api/harness/builtin` 是内置 Driver 的接口；
-`/api/chat`、`/api/canvas`、`/api/ide` 分别由相应产品模块提供。
+`/api/chat-spaces` 由 Workspace 管理空间、目录与资源归属；`/api/harness` 提供已归属 Thread 的执行快照与控制；`/api/canvas` 提供 Canvas 文档快照、命令与 Function Run，创建和删除经 `/api/chat-spaces/{spaceId}/canvases`；`/api/ide` 由 IDE 产品提供。
 浏览器事件与 Daemon 连接分别使用 `/ws/events`、`/ws/daemon`，IDE 数据面使用
 `/ide/{environmentId}/{viewId}/`，节点间接口使用 `/internal`。完整的公开路由及其请求、
 响应类型由生成的 [`ApiRoutes`](../frontend/src/shared/api/generated/contracts.ts) 定义。
@@ -272,18 +272,9 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 - 回收先登记耐久清理记录，再由后台在事务外幂等删除对象；`DELETING` 是终态，迟到写入不会把它改回 `ACTIVE`。
 - 过期上传按数据库时钟的 TTL 判定，claim 后不再受 TTL 影响；清理中断由 token 围栏重试。
 
-### 会话归属 SPI
+### 工作区资源归属
 
-平台定义 `SessionOwnership`、`SessionOwner`（不透明 `{kind, id}`）与 `SessionOwnerDisplay`
-（`{kind, id, title, link}`），产品实现归属事实。每个实现回答：类型、是否允许分叉与通用直写、接受前的锁、是否拥有
-某个 Session、创建与列举 Session、删除前的锁与清理钩子、按根线程与根会话解析展示信息、交互判定前的锁。
-
-- 消费者是平台编排，不是产品：命令接受、会话删除、交互查询与交互裁决、会话查询统一通过这个 SPI 交互，避免按
-  具体产品类型分支。Chat 的实现允许分叉与直写。
-- Agent 引用检查同属这一类：`AgentReferenceCheck` 由产品实现，平台删除 Agent 前
-  逐实现询问，不用 SQL 读产品表。
-- 跨模块传输区分写入口与展示：命令接受的 `HarnessCommandOwnerDTO` 只携带不透明的 `{kind, id}`，不接收客户端
-  提供的展示字段；`InteractionOwnerDTO` 的 `title` 与 `link` 由服务端解析，只用于展示，不参与授权。
+工作区应用拥有 Chat Space、目录与资源归属关系，Session 与 Canvas 均通过 `workspace_resource` 关联所属空间；平台通过 `ResourceOwnership` 批量查询归属并由 `ResourceAccess` 执行授权，不维护产品类型分发 SPI。新 Session、分支、复制及 Canvas 创建经 `/api/chat-spaces/{spaceId}` 下的工作区入口完成，Harness 与 Canvas runtime 继续承担各自执行与文档职责。Agent 删除时不再询问产品引用检查 SPI；Catalog 在其自身事务边界验证引用。
 
 ### Daemon 连接服务
 
@@ -339,15 +330,13 @@ URI 编码与解析、读取鉴权、Session 持有与释放见 [Common：Resour
 产品是完整的纵向切片：领域、持久化、HTTP 接口、DTO、实时通知与运行配置都在自己的模块里，页面在前端自己的功能
 目录里。产品之间不互相调用。
 
-| 产品 | 模块 | 拥有 | 实现的平台 SPI |
+| 产品 | 模块 | 拥有 | 平台协作 |
 | --- | --- | --- | --- |
-| Chat | [`apps/chat`](../apps/chat/pom.xml) | `chat`、`chat_session`；`ChatController` 与模块内 DTO | 会话归属 `CHAT` |
-
-| Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；三个控制器与模块内 DTO | 无（不参与会话归属） |
+| Workspace | [`apps/workspace`](../apps/workspace/pom.xml) | `chat_space`、`workspace_folder`、`workspace_resource`；`/api/chat-spaces` 控制器与 DTO | 实现 `ResourceOwnership`，提供空间内资源归属与创建管理 |
+| Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；Canvas 文档快照、命令与 Function Run | 资源创建/删除经 Workspace 入口，访问由平台校验归属 |
 | IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
 
-**Chat**：控制器以 `/api/chat/chats` 提供列表、创建、详情、整体替换、YOLO 子资源、删除与会话列表，DTO 在模块内，删除按预期版本校验。
-会话归属允许分叉与通用直写，`chat_session` 记录 Chat 与 Session 的关联。
+**Workspace**：`/api/chat-spaces` 管理空间、目录、会话和画布的资源归属。Session 创建及首条命令、分支、复制、改名与删除均在空间上下文完成；Harness Runtime 只提供执行能力，不再暴露通用创建型 command-batch 或 Session 查询/改名 HTTP 入口。
 
 
 **Canvas**：[`apps/canvas/spi`](../apps/canvas/spi/pom.xml) 只有画布函数 SPI（adapter、冻结运行计划、执行上下
@@ -424,7 +413,7 @@ Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_
 - 强制关闭只在 bridge 不可达或状态未知时可用：先把未保存文档备份到恢复配额内，再关闭并清理。
 - 视图自最后一次被接受的使用证明起 600 秒才进入到期检查；到期时只有 bridge 报告没有未保存修改才自动回收，
   否则保留视图等待用户决定。
-- Studio 管标签，VS Code 管文件和目录。新标签从登记的零根 `.code-workspace` 启动；Open Folder 由 bridge 走原生保存、
+- 工作区 IDE 窗格管理视图，VS Code 管文件和目录。新标签从登记的零根 `.code-workspace` 启动；Open Folder 由 bridge 走原生保存、
   放弃或取消，Daemon 以新宿主的目录确认结果。窄屏布局可由 bridge 收起侧栏与面板，不修改用户设置。
 
 ### 代理与在线更新
@@ -446,7 +435,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
 ## 一次请求的执行链
 
 ```text
-产品（Chat） ──▶ HarnessRuntime.acceptCommands
+产品（Workspace 创建入口 / 已有 Thread 续写） ──▶ HarnessRuntime
   ──▶ 短事务：Session / Thread / Command CAS，命令邮箱 + THREAD Work
   ──▶ Worker claim
   ──▶ ThreadProcessor 选择下一项 durable action
@@ -456,7 +445,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
   ──▶ 围栏写回 checkpoint 或终态 ──▶ Thread Snapshot 推送
 ```
 
-- 接受阶段校验 owner 与目标，物化附件，冻结本回合设置。Session 拥有 append-only Entry Tree，Thread 保存 head、
+- Workspace 创建阶段在工作区边界校验归属并接受首条命令；续写阶段校验 Thread 与目标，物化附件，冻结本回合设置。Session 拥有 append-only Entry Tree，Thread 保存 head、
   命令 cursor、控制状态与单调 version，命令邮箱与 Work 在同一事务登记。
 - system prompt 由平台在回合解析时组装：Agent 正文、当前环境、已配置技能的名称与描述及 task/subagent 说明按实际注入的工具与
   目录快照生成，模板由 `PromptRenderer` 以严格 section 渲染；未注入的内容不出现，日期等易变信息不进入固定文案。
@@ -502,11 +491,11 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 ```
 
 - Thread 按 Entry 游标推送快照，辅以有损 realtime 增量；执行树按根 Thread 推送完整快照。Canvas 的 revision 与
-  Chats、Interactions、Environments 的变更事件提示浏览器回读。
+  Chat Space、Interactions、Environments 的变更事件提示浏览器回读。
 - Thread 和执行树的单帧快照放不下时，服务端只对该资源发送回读提示。能定位资源的坏载荷也仅影响该资源；
   无法解析的连接级帧仍会终止连接。终态始终来自数据库事实，不从有损增量推断。
 - 通知的生产方拥有 channel 与 payload 协议：Harness 的 thread version、执行树、交互，Canvas 的 revision，
-  Chat 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
+  Chat Space 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
   `NotificationInvalidationHub` 只做定点失效；组合根持有 LISTEN 循环（durable 通知与 realtime 各一条）并按绑定投递与 resync。
 - 通道与帧格式见 [Web](modules/web.md)，合并与恢复见 [Frontend](modules/frontend.md)。
 
@@ -516,15 +505,14 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 | --- | --- |
 | `app` | 组合根：路由、providers、页面与弹窗贡献的组装 |
 | `platform` | 应用外壳与扩展契约：`AppShell`、`WorkbenchShell`、贡献类型 |
-| `features` | 业务特性：通用 `thread` 与 `canvas`、`catalog`、`chat`、`environment`、`extensions`、`projects`、`settings` |
+| `features` | 业务特性：通用 `thread` 与 `canvas`、`catalog`、`workspace`、`environment`、`extensions`、`settings` |
 | `shared` | API 客户端与生成契约、事件通道客户端、冲突处理、国际文案、通用 UI |
 
 - 页面、弹窗与工具渲染由应用贡献在组装时冻结：重复 id 直接报错，没有运行时注册、卸载或优先级。
 - 生成契约 [`contracts.ts`](../frontend/src/shared/api/generated/contracts.ts) 由 web 测试源码的生成器产出，
   用 [`write.sh`](../scripts/dev/verify/generated-contracts/write.sh) 重新生成，漂移由 `TsContractArtifactTest`
   拦截。
-- IDE 是仅属于 Chat 详情页的持久宿主：`/chats/:chatId` 保留同一 iframe，离开 Chat 时隐藏并 inert，无布局占位；
-  非 Chat 页面使用独立全宽布局，不被 IDE shell 包装。切换 Chat 时按 Environment 聚焦已有视图，不自动创建。
+- IDE 视图可由工作区的 IDE pane 承载：窗格切换与布局变化保留同一 iframe；常规页面仍使用独立全宽布局。按 Environment 打开时复用已有视图，不自动创建重复视图。
 - `shared/app-events` 是唯一的事件通道客户端：严格 codec、重连退避、按资源同步的 hook；页面只消费资源信号。
 
 ## 数据模型
@@ -536,7 +524,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 | 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）、图片档位模型视图（`storage_image_model_view`）与对象清理（`storage_object_cleanup`） |
 | 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`） |
 | 3 | 平台 Driver 存储：目录（`provider`、`model`、`agent`、`model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
-| 4 | 产品表：Canvas（`canvas_*`）与 Chat（`chat`、`chat_session`） |
+| 4 | 产品表：Canvas（`canvas_*`）与 Workspace（`chat_space`、`workspace_folder`、`workspace_resource`） |
 
 - 表与 SQL 只由归属模块访问：产品表由产品模块维护，目录、设置、存储、环境与插件由平台维护，`harness_*` 由平台的
   内核存储适配包维护，`builtin_model_invocation` 由平台的 Builtin 适配包维护。

@@ -80,29 +80,6 @@ class HarnessRuntimeApiRecordsTest {
         NullPointerException.class,
         () -> new AcceptCommandsTarget.NewRootSession(TestIds.id(1), TestIds.id(2), null, false));
 
-    // NEW_THREAD 必需字段（含必填 threadName）。
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AcceptCommandsTarget.NewThread(
-                null, TestIds.id(3), TestIds.id(4), "branch", false));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AcceptCommandsTarget.NewThread(
-                TestIds.id(1), null, TestIds.id(4), "branch", false));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AcceptCommandsTarget.NewThread(
-                TestIds.id(1), TestIds.id(3), TestIds.id(4), null, false));
-    // blank threadName 是非法名称（经 Names.normalize 拒绝）。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new AcceptCommandsTarget.NewThread(
-                TestIds.id(1), TestIds.id(3), TestIds.id(4), "   ", false));
-
     // THREAD cursor 可省略（纯 USER_MESSAGE 按邮箱尾部入队）但必须成对；非空 sequence 必须为正。
     assertThrows(
         IllegalArgumentException.class,

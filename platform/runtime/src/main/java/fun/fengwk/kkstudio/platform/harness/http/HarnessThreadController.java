@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
@@ -19,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
@@ -110,19 +108,6 @@ public class HarnessThreadController {
             threadId.toString(), executionId.toString(), request);
     return threadService.abandonExecution(
         target.threadId(), target.executionId(), target.expectedVersion());
-  }
-
-  /**
-   * 直接重命名 Thread（name 由 Core 权威规范化；同名 no-op、version 精确 +1 仅在实际改名时发生），返回权威当前 Thread。
-   *
-   * <p>认证、实际资源权限与请求形状是硬边界，业务命名规则由对应业务工作流显式维护。
-   */
-  @PutMapping("/{threadId}/name")
-  public HarnessThreadDTO rename(
-      @PathVariable UUID threadId, @RequestBody HarnessNameUpdateDTO request) {
-    RenameThreadCommand command =
-        HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId.toString(), request);
-    return threadService.rename(command);
   }
 
   /**

@@ -1,7 +1,6 @@
 import { request } from '@/shared/api/client'
 import type {
   ApplyCanvasCommandsRequestDTO,
-  CanvasDocumentDTO,
   CanvasFunctionCancelRequestDTO,
   CanvasFunctionDefinitionDTO,
   CanvasFunctionRunDTO,
@@ -10,7 +9,6 @@ import type {
   CanvasPatchDTO,
   CanvasPresignedUrlDTO,
   CanvasSnapshotDTO,
-  CreateCanvasRequestDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
@@ -19,18 +17,6 @@ import type {
 
 export interface CanvasRequestOptions {
   signal?: AbortSignal
-}
-
-export function listCanvases(options?: CanvasRequestOptions): Promise<CanvasDocumentDTO[]> {
-  return request('GET /api/canvas/canvases', {}, { signal: options?.signal })
-}
-
-export function createCanvas(
-  title: string,
-  options?: CanvasRequestOptions,
-): Promise<CanvasDocumentDTO> {
-  const body: CreateCanvasRequestDTO = { title }
-  return request('POST /api/canvas/canvases', { body }, { signal: options?.signal })
 }
 
 export function getCanvas(

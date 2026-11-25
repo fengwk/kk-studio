@@ -8,7 +8,6 @@ import type { TrustedReactExtension } from '@/platform/extensions/types'
 /** 非组件导出单独放文件，避免 React Fast Refresh 整页失效导致白屏。 */
 export const aiExtension: TrustedReactExtension = {
   id: 'builtin.ai',
-  pages: [],
   dialogs: [
     { id: 'ai.resource-editor', component: ResourceEditorDialog },
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },

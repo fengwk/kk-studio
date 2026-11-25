@@ -10,7 +10,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -53,7 +52,6 @@ import fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasTransformDTO;
-import fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.http.CanvasController;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
@@ -134,22 +132,8 @@ class CanvasControllerTest {
 
   /** 测试意图：snapshot 用 revision 表达同步位置，并把 Function args 投影成引用连线与服务端媒体事实。 */
   @Test
-  void listAndSnapshotExposeRevisionReferencesAndBlobFacts() throws Exception {
-    when(queryService.listDocuments()).thenReturn(List.of(document()));
+  void snapshotExposesRevisionReferencesAndBlobFacts() throws Exception {
     when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));
-
-    MvcResult list =
-        mockMvc
-            .perform(get("/api/canvas/canvases"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].id").value(CANVAS.toString()))
-            .andExpect(jsonPath("$[0].revision").value("3"))
-            .andExpect(jsonPath("$[0].version").doesNotExist())
-            .andReturn();
-    JsonNode listJson = readTree(list);
-    assertEquals(
-        true, listJson.at("/0/revision").isTextual(), "revision wire must be a JSON string");
-    assertEquals("3", listJson.at("/0/revision").asText());
 
     MvcResult snapshotResult =
         mockMvc
@@ -201,9 +185,9 @@ class CanvasControllerTest {
         .andExpect(status().isNotFound());
   }
 
-  /** 测试意图：TEXT 资源没有媒体事实，创建画布必须显式提供非空白标题。 */
+  /** 测试意图：TEXT 资源没有媒体事实。 */
   @Test
-  void textResourceHasNoBlobFactsAndCreateRequiresTitle() throws Exception {
+  void textResourceHasNoBlobFacts() throws Exception {
     when(queryService.findSnapshot(CANVAS))
         .thenReturn(
             Optional.of(
@@ -223,8 +207,6 @@ class CanvasControllerTest {
                             null)),
                     List.of(),
                     List.of())));
-    when(commandService.createCanvas(any(UUID.class), any())).thenReturn(document());
-
     mockMvc
         .perform(get("/api/canvas/canvases/" + CANVAS))
         .andExpect(status().isOk())
@@ -234,30 +216,6 @@ class CanvasControllerTest {
         .andExpect(jsonPath("$.nodes[0].resources[0].blobId").doesNotExist())
         .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").doesNotExist())
         .andExpect(jsonPath("$.nodes[0].resources[0].sizeBytes").doesNotExist());
-
-    CreateCanvasRequestDTO body = new CreateCanvasRequestDTO();
-    body.setTitle("board");
-    mockMvc
-        .perform(
-            post("/api/canvas/canvases")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.revision").value("3"))
-        .andExpect(jsonPath("$.id").value(CANVAS.toString()));
-    verify(commandService).createCanvas(any(UUID.class), eq("board"));
-
-    // 边界只保证 title 必填；空白与超长标题是领域规则，由真实服务拒绝。
-    mockMvc
-        .perform(
-            post("/api/canvas/canvases")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"title\":null}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(post("/api/canvas/canvases").contentType(MediaType.APPLICATION_JSON))
-        .andExpect(status().isBadRequest());
-    verify(commandService, times(1)).createCanvas(any(UUID.class), eq("board"));
   }
 
   /** 测试意图：11 种 typed command 直映射为领域命令，前置条件是各语义组的编辑起点旧值。 */

@@ -266,8 +266,8 @@ flowchart TB
 | `POST /sessions` | `{folderId, message, modelSelection?, environmentId?, yoloEnabled?}`；同事务接受首条命令并建目录边；返回 `{sessionId,threadId,commandId,treeVersion}`。保存草稿不调用此接口。它与下一行的分支、复制一起取代通用的 `/api/harness/command-batches` 创建入口。 |
 | `POST /sessions/{id}/branches`；`POST /sessions/{id}/forks` | `{sourceThreadId,turnEndEntryId,title}`；前者返回同一 Session 的新 Thread，后者返回新 Session 和 Thread。`title` 是名称框确认的分支名或新会话名。定时分支与手动分支用同一事务入口。 |
 | `GET/PATCH/DELETE /threads/{id}`；`DELETE /sessions/{id}` | 读取 `ThreadPlacement {sessionId, sessionTitle, folderId, title, state, reason, version}`，供深链和窗格标题使用；执行快照仍读 Harness 接口。改名带 `expectedVersion`；删除带 `expectedTreeVersion`，对 Thread 带 `expectedVersion`，Session 删除重验全部子执行事实。已有 Thread 的命令批拒绝更换 Agent。 |
-| `GET/POST /schedules`；`PATCH/DELETE /schedules/{id}` | `ScheduleDraft {title, message, enabled, trigger, timeZone, target}`；编辑、启停和删除带 `expectedVersion`。`trigger` 是 `{type:'ONCE',localDate,time}` 或 `{type:'REPEAT', frequency, time?,weekday?,minute?,cron?}`，每种只接收用到的字段；`target` 是 `NEW_SESSION {folderId,agentName}`、`BRANCH {sessionId, sourceThreadId, turnEndEntryId}` 或 `CONTINUE {sessionId,threadId}`。`ScheduleDTO` 含 `nextDueAt,version`，不携带执行记录；试算用 `POST /schedules/preview` 返回 `next[]` 而不写入。 |
-| `POST /schedules/{id}/runs` | 手动触发，返回本次 `ScheduleRun`；响应不代表模型执行完成。 |
+| `GET/POST /schedules`；`PATCH/DELETE /schedules/{id}` | `GET` 列出当前空间任务；`POST` 创建，输入 `ScheduleDraft {title, message, enabled, trigger, timeZone, target}`。`PATCH` 更新或启停，`DELETE` 删除；更新与删除带 `expectedVersion`。`trigger` 是 `{type:'ONCE',localDate,time}` 或 `{type:'REPEAT', frequency, time?,weekday?,minute?,cron?}`，每种只接收用到的字段；`target` 是 `NEW_SESSION {folderId,agentName}`、`BRANCH {sessionId, sourceThreadId, turnEndEntryId}` 或 `CONTINUE {sessionId,threadId}`。`ScheduleDTO` 含 `nextDueAt,version`，不携带执行记录；试算用 `POST /schedules/preview` 返回 `next[]` 而不写入。 |
+| `POST /schedules/{id}/runs` | 手动触发，每次请求携带独立 `Idempotency-Key`；返回本次 `ScheduleRun`，响应不代表模型执行完成，也不推进 `nextDueAt`。 |
 | `GET /schedules/{id}/runs?before={cursor}` | 展开时才查；省略游标取最新五条，`before` 取下一页较早记录，返回 `{items,olderCursor}`。游标是 `(scheduledAt,id)` 的不透明表示，同一任务内严格按该组合倒序，不查总数、不用偏移量。客户端保留本次展开的页游标以返回较新页，收起后丢弃。`ScheduleRun` 含 `id, scheduledAt, startedAt, timeZone, result, reason` 和可选的 `thread:{sessionId,id,title}`；只返回当前空间可读的公开 Thread，点击时仍按统一打开流程复验。未提交的记录显示调度原因；已提交但没有可读 Thread 时不返回链接。 |
 | `GET /api/harness/interactions`（保留） | 带 `rootThreadId` 时返回该根及子执行的待处理审批和问卷；不带时按当前用户可访问的全部空间查询，管理员另含插件后台任务。条目含执行根 ID、标题、最后活动时间及来源；空间来源另带空间 ID 和名称。「待处理」按执行根合并，同根最后一项处理完才移出。 |
 
@@ -295,7 +295,7 @@ flowchart TB
 | 409 | `USERNAME_EXISTS` / `LAST_ADMIN` | 用户名重复时保留输入；拒绝降级或禁用最后一名启用的管理员。 |
 | 409 | `FOLDER_NOT_EMPTY` / `LAST_ROOT_FOLDER` / `RESOURCE_IN_USE` / `EXECUTION_NOT_SETTLED` | 解释具体目录、公开 Thread 或定时任务；返回安全的 ID/标题供用户打开。Canvas 活跃或未知运行走同一阻塞规则。 |
 
-浏览器沿用 `/ws/events` 的订阅帧，握手时凭登录 cookie 认证。按空间订阅 `{kind:'chat-space', id}`，服务端确认空间属于当前用户后回 `subscribed`。登录后的工作区订阅现有 `interactions` 资源，更新「待处理」；插件后台任务只进入管理员的交互投影。目录结构提交或 Session、Thread、画布改名后发 `tree`（结构变化带新 `treeVersion`）；空间内任一公开 Thread 的版本变化发 `threads`；任务配置或触发记录提交后发 `schedule{scheduleId}`；空间改名、归档或默认配置变化发 `space{version}`。客户端按空间合并 500ms 内的提示，重拉一份含状态的目录树或对应任务。尚未翻页时同步刷新已展开的首页；开始翻页后保留本次已读的页与游标，后台新增记录不改变页边界，收起再展开可查新首页。Thread 改名或删除时从当前目录快照更新记录的标题和可用链接，不改变分页；点击时仍复验。Thread 正文、Canvas patch 与 IDE 事件沿用原有资源订阅。Event 丢失、重连或版本落后时按服务端最新快照对账，旧版本事件不回退状态。事件送达晚于用户另一次操作时，不抢当前焦点或擅自打开刚创建的资源。
+浏览器沿用 `/ws/events` 的订阅帧，握手时凭登录 cookie 认证。按空间订阅 `{kind:'chat-space', id}`，服务端确认空间属于当前用户后回 `subscribed`。登录后的工作区订阅现有 `interactions` 资源，更新「待处理」；插件后台任务只进入管理员的交互投影。目录结构提交或 Session、Thread、画布改名后发 `tree`（结构变化带新 `treeVersion`）；空间内任一公开 Thread 的版本变化发 `threads`；任务配置或触发记录提交后发送 `schedules`，帧数据为 `{scheduleId}`；空间改名、归档或默认配置变化发 `space{version}`。客户端按空间合并 500ms 内的提示，重拉一份含状态的目录树或对应任务。尚未翻页时同步刷新已展开的首页；开始翻页后保留本次已读的页与游标，后台新增记录不改变页边界，收起再展开可查新首页。Thread 改名或删除时从当前目录快照更新记录的标题和可用链接，不改变分页；点击时仍复验。Thread 正文、Canvas patch 与 IDE 事件沿用原有资源订阅。Event 丢失、重连或版本落后时按服务端最新快照对账，旧版本事件不回退状态。事件送达晚于用户另一次操作时，不抢当前焦点或擅自打开刚创建的资源。
 
 ## 交付
 

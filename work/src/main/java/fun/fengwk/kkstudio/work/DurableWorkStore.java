@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * {@code durable_work} 的唯一 SQL 实现。
@@ -147,6 +148,12 @@ public final class DurableWorkStore {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 
+  /** 请求绝对时点的 wake；已有行保留较早的 due。 */
+  public DurableWork requestAt(UUID targetId, Instant dueAt) {
+    Instant due = MillisecondTime.requireMillisecondPrecision(dueAt, "dueAt");
+    return request(targetId, () -> due, null);
+  }
+
   /** 请求一次立即 wake：新行 wakeVersion=1；已有行递增 wakeVersion、due 取更早值并保留当前租约。 */
   public DurableWork request(UUID targetId) {
     return request(targetId, Duration.ZERO, null);
@@ -169,14 +176,18 @@ public final class DurableWorkStore {
    * {@code delay} 只作用于本次请求的 due，不改变已有更早的 due。
    */
   public DurableWork request(UUID targetId, Duration delay, UUID requiredEnvironmentId) {
-    Objects.requireNonNull(targetId, "targetId");
     Duration delayValue =
         MillisecondTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
+    return request(targetId, () -> databaseNow().plus(delayValue), requiredEnvironmentId);
+  }
+
+  private DurableWork request(
+      UUID targetId, Supplier<Instant> resolveDue, UUID requiredEnvironmentId) {
+    Objects.requireNonNull(targetId, "targetId");
     return jdbc.inTransaction(
         () -> {
           while (true) {
-            Instant now = databaseNow();
-            Instant due = now.plus(delayValue);
+            Instant due = resolveDue.get();
             WorkState initial = WorkState.initial(due, requiredEnvironmentId);
             Optional<DurableWork> inserted =
                 jdbc.queryOne(
@@ -295,10 +306,9 @@ public final class DurableWorkStore {
     return jdbc.inTransaction(
         () -> {
           Row row = lockRow(claim.targetId());
+          Instant now = databaseNow();
           Optional<WorkState> next =
-              row.work()
-                  .state()
-                  .complete(claim.leaseToken(), claim.claimedWakeVersion(), row.now());
+              row.work().state().complete(claim.leaseToken(), claim.claimedWakeVersion(), now);
           if (next.isEmpty()) {
             int deleted = jdbc.update(DELETE_WORK, targetType, claim.targetId());
             if (deleted != 1) {
@@ -333,6 +343,24 @@ public final class DurableWorkStore {
                       claim.claimedWakeVersion(),
                       row.now(),
                       row.now().plus(delayValue));
+          update(claim.targetId(), next);
+          notifyIfClaimable(claim.targetId());
+          return null;
+        });
+  }
+
+  /** 按精确绝对时间归还 claim；租约所有权在锁行后用新数据库时间复验。 */
+  public void rescheduleAt(WorkClaim claim, Instant dueAt) {
+    Objects.requireNonNull(claim, "claim");
+    Instant due = MillisecondTime.requireMillisecondPrecision(dueAt, "dueAt");
+    jdbc.inTransaction(
+        () -> {
+          Row row = lockRow(claim.targetId());
+          Instant now = databaseNow();
+          WorkState next =
+              row.work()
+                  .state()
+                  .reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, due);
           update(claim.targetId(), next);
           notifyIfClaimable(claim.targetId());
           return null;
