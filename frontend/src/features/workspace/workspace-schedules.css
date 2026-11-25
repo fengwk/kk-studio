@@ -271,7 +271,7 @@ button.workspace-schedule-record:hover {
   width: fit-content;
   padding: var(--space-1);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--bg);
   gap: var(--space-1);
 }
 
@@ -296,7 +296,7 @@ button.workspace-schedule-record:hover {
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
   line-height: 1.45;

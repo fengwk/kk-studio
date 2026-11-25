@@ -47,6 +47,7 @@
 语义层补齐当前缺的部分：
 
 - 状态底色 `--hover`（前景色 6% 透明叠加）；次要按钮的常驻底色 `--control` 和按钮、下拉触发器的悬停底色 `--control-hover`，都是白色透明叠加，在页面、卡片、弹窗和费率行上都看得出，也和输入框的深色底区分开；
+- 弹窗表面用 `--surface`，使内嵌的 `--surface-raised` 输入控件无需装饰描边即可保持可见；弹窗内需要独立成块但无装饰描边的分组行、分段槽与预览块（如模型费率行、定时任务分段切换与运行预览）用 `--bg` 沉降底色与弹窗表面区分，同时继续衬托内部的 `--surface-raised` 输入框与 `--control` 按钮；
 - 尺寸 `--control-h`（32px）、`--control-h-compact`（28px）、`--row-h`（28px）、`--touch-target`（44px）；
 - 排版与动效 `--line-height-body`（1.5）、`--ease-standard`；
 - `--focus` 与 `--focus-ring` 改为 `--border`。
@@ -68,7 +69,7 @@
 | `Checkbox`、`Switch` | 只换成统一的焦点规则。 |
 | `FieldLabel`、`FieldError`、`HelpHint` | `FieldLabel` 增加可选的 `help`，在标签文字后放 `HelpHint`，标签保持单行、同行字段的控件对齐；`HelpHint` 是字段说明的唯一位置，悬停、聚焦或点按时显示。错误 `id` 由控件引用，见规则 11。 |
 | `Tabs` | 选中用 `--accent-soft`，无边框。 |
-| `Dialog`、`ConfirmActionModal` | 无边框，用 `--shadow-lg`。 |
+| `Dialog`、`ConfirmActionModal` | 底色 `--surface`，无边框，用 `--shadow-lg`；弹窗内的无边框分组行、分段槽与预览块用 `--bg` 与弹窗底区分，内部输入控件保持 `--surface-raised`。 |
 | `ResourceCard`、`ResourceGrid`、`ResourceCardSkeleton`、`CreateCard` | 无边框、无阴影，底色 `--surface`；元信息的标签与值同字号，值用 `--fg`。 |
 | `Badge` | 无边框。 |
 | `StateBlock`、`Toast`、`LoadingSpinner` | 不变。 |
