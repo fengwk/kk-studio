@@ -14,14 +14,6 @@ export const environmentCatalog = {
     'en-US': 'Show or collapse IDE',
     'zh-CN': '显示或收起 IDE',
   },
-  'ai.ide.selectChatEnvironment': {
-    'en-US': 'Select an environment for this conversation first',
-    'zh-CN': '请先为当前对话选择环境',
-  },
-  'ai.ide.chatEnvironmentUnavailable': {
-    'en-US': 'The conversation environment is unavailable',
-    'zh-CN': '当前对话的环境不可用',
-  },
   'ai.ide.collapse': {
     'en-US': 'Collapse',
     'zh-CN': '收起',

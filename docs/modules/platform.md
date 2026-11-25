@@ -440,7 +440,7 @@ Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事�
 
 `DatabaseAgentTurnContextResolver` 每个 live turn 只租用一次工具目录，解析 Agent、Environment、工具、Skill、
 subagent 与 system instruction，形成与模型无关的 `AgentTurnContext`。`DatabaseTurnResolver` 只在这份快照上规划 Model、Variant、
-模型组、压缩、缓存与输出预算；它不判断 Thread 属于哪个 Chat，也不据此覆写 Environment 或注入工具；工具与身份上下文由 Agent 配置和执行请求明确提供。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
+模型组、压缩、缓存与输出预算；它不查询 Thread 的工作区归属，也不据此覆写 Environment 或注入工具；工具与身份上下文由 Agent 配置和执行请求明确提供。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
 本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。

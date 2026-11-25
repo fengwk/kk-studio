@@ -153,7 +153,7 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   /**
-   * 从最新 Agent 配置派生本 turn 的模型可见工具名；Issue Run 的业务工具由 Agent 配置显式声明。
+   * 从最新 Agent 配置派生本 turn 的模型可见工具名；运行所需工具由 Agent 配置显式声明。
    *
    * <p>Agent 只能声明 SELECTABLE 工具；Catalog 缺该工具时按通用规则拒绝规划，绝不静默少一个受控工具。
    */

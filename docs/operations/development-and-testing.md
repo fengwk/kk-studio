@@ -310,8 +310,8 @@ COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/t
 [`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
 `compose run --rm` 执行初始化。`--with-app` 验证全局 Blob、Canvas revision 与 typed command
-变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
-Chat command batch 使用 `owner.kind=CHAT` 与 `owner.id`；画布使用 `CREATE_NODE`、
+变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线工作区。
+Harness command batch 针对 path 中的既有 Thread 提交命令；画布使用 `CREATE_NODE`、
 `SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
 
 Fat JAR 的 static 资源由 `-Pdistribution` 的前端工具链、clean 与 resources 三个插件准备；CI 的
@@ -424,7 +424,7 @@ Backend 只连接本次 Compose 项目创建的数据库 `kk_studio_e2e_matrix` 
 执行 `--ui` 前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
 [frontend/package.json](../../frontend/package.json) 加载。
 生成期间重载的 Thread 恢复回归可用 `./scripts/dev/verify/e2e/run.sh --ui --only ui.chat.thread_snapshot_reload` 单独执行。
-该用例仅替换模型 Provider：真实 Chromium 通过 Chat 绑定 Thread、发送消息并在生成期间重载，检查新 WebSocket
+该用例仅替换模型 Provider：真实 Chromium 在工作区中绑定 Thread、发送消息并在生成期间重载，检查新 WebSocket
 订阅的快照使用十进制字符串游标、回复完成不依赖再次导航或 Thread GET，并从浏览器外确认 `IDLE` 与持久化 `TURN_END`。
 不需要 `--real` 或 Daemon。
 
@@ -828,7 +828,7 @@ Environment 保留注册令牌摘要与完整卡片配置，同名更新保持�
 导入会深度校验 `daemonConfig`，已知非法设置不会被条目级跳过；同名更新以文件为准覆盖备注与配置，
 令牌摘要、备注与 `daemonConfig` 在同一次原子更新中生效。
 
-配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
+配置文件不保存 Chat Space、Session、Thread、Canvas、执行历史、Blob 引用，
 连接租约和发现快照，也不包含部署级数据库/S3 参数或 Plugin 秘密。
 需要完整恢复时使用全库备份及匹配的对象存储备份，而不是配置 YAML。
 

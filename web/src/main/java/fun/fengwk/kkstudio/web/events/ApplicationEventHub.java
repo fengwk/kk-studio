@@ -28,8 +28,8 @@ import java.util.function.IntSupplier;
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
  *
- * <p>每个资源只有一组共享上游：Thread 使用快照失效订阅 + realtime source，Canvas 使用 version
- * source，Projects、Interactions、Environments 使用全局失效 source，Tree 使用按执行根的失效
+ * <p>每个资源只有一组共享上游：Thread 使用快照失效订阅 + realtime source，Canvas 使用 version source，Chat
+ * Spaces、Interactions、Environments 使用全局失效 source，Tree 使用按执行根的失效
  * source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack
  * 游标（全局提示型资源固定为 0，无持久游标的 Tree 资源同样为 0）。
  *
