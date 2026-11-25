@@ -4,7 +4,7 @@ import { minimumSize, projectLayout, type Layout, type Rect } from './model'
 import type { PaneLabel } from './PaneHeader'
 import './panes.css'
 
-export type PanePickerActions = { onSelect: (paneId: string) => void; onCancel: () => void }
+export type PanePickerActions = { onSelect: (paneId: string) => void; onCancel: () => void; returnFocusTo?: HTMLElement | null }
 export type PanePickerProps = PanePickerActions & {
   choices: readonly PaneLabel[]
   layout: Layout
@@ -14,7 +14,7 @@ export type PanePickerProps = PanePickerActions & {
   overview: boolean
 }
 
-export function PanePicker({ choices, layout, focusedPaneId, bounds, anchor, overview, onSelect, onCancel }: PanePickerProps) {
+export function PanePicker({ choices, layout, focusedPaneId, bounds, anchor, overview, onSelect, onCancel, returnFocusTo }: PanePickerProps) {
   const { t } = useI18n()
   const dialog = useRef<HTMLDialogElement>(null)
   const current = useRef<HTMLButtonElement>(null)
@@ -23,14 +23,14 @@ export function PanePicker({ choices, layout, focusedPaneId, bounds, anchor, ove
   const { panes } = projectLayout(layout, { x: 0, y: 0, width, height })
   useLayoutEffect(() => {
     const element = dialog.current!
-    const source = document.activeElement
+    const source = returnFocusTo ?? document.activeElement
     element.showModal()
     current.current?.focus({ preventScroll: true })
     return () => {
       element.close()
       if (source instanceof HTMLElement && source.isConnected) source.focus({ preventScroll: true })
     }
-  }, [])
+  }, [returnFocusTo])
 
   useLayoutEffect(() => {
     const box = anchor?.current?.getBoundingClientRect()

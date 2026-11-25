@@ -11,29 +11,15 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 [`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下用 BrowserRouter 包裹
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent。
+QueryClient → ApplicationContributions → BrowserPreferences → Account → ApplicationEvent。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
-[`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
-[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 汇总所有待处理的问卷与审批，并按
-`owner` 提供来源导航；无产品页面的独立 `AGENT_TASK` 只在这里显示来源标签，不生成导航入口。
-AppRouter 在唯一 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx) 中组合路由，
-通过 `renderContent` 组合 Chat 持久宿主与页面；即使进入 `/interactions`，宿主也不卸载。
-非 Chat 内容在宿主外独立渲染，注册页面的路由与 OverlayHost 仍由平台管理。
-AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
-[`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。
-PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
-合法 Chat/Thread/Canvas 工作区隐藏 topbar。Escape 按阻塞弹层、菜单、编辑焦点的优先级处理。
+[`AppRouter`](../../frontend/src/app/router.tsx) 声明 `/`、`/chat-spaces/:spaceId` 和 `/settings/:section`。登录不改变地址；`/` 进入本浏览器最近访问的活跃空间，或服务端返回的首个活跃空间，不隐式创建资源。
 
-一级特性按用户心智划分：[`thread`](../../frontend/src/features/thread)（Thread 运行时、新会话与编辑区）、
-[`catalog`](../../frontend/src/features/catalog)（Agent、模型、Provider、Skill Package 与 MCP Server）、
-[`environment`](../../frontend/src/features/environment)（执行环境与 IDE）、
-[`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas 与 settings。
-四个内置扩展提供页面：应用层的 [`ai-console`](../../frontend/src/app/ai-console) 把 chat、catalog、environment
-的页面组装进同一个 AI 导航分组，Canvas、Settings 各自声明扩展。
+[`WorkspaceRoute`](../../frontend/src/app/WorkspaceRoute.tsx) 将账号菜单（`AccountMenu`）、[`ThreadPaneRenderer`](../../frontend/src/features/thread/workspace/ThreadPaneRenderer.tsx)、[`DraftPaneRenderer`](../../frontend/src/features/thread/workspace/DraftPaneRenderer.tsx)、Canvas（复用 `CanvasWorkbench`）与 [`VsCodePaneRenderer`](../../frontend/src/features/environment/ide/VsCodePaneRenderer.tsx)、IDE 异步关闭守卫（`IdePaneCloseContext` / `IdeWorkspaceProvider`）及 [`EnvironmentList`](../../frontend/src/features/environment/ide/EnvironmentList.tsx) 组装进 [`WorkspaceShell`](../../frontend/src/features/workspace/WorkspaceShell.tsx)。外壳只认识窗格契约（`PaneTarget` / `PaneRendererProps` / `PaneRenderers`）与通用 `PaneLayout`：目录与当前空间状态入口、跨空间 [`WorkspaceInbox`](../../frontend/src/features/workspace/WorkspaceInbox.tsx)、环境操作、窗格内替换/openBeside 和 `?thread=` / `?canvas=` 深链共用打开流程（空草稿直接打开，否则弹出目标选择层；替换或关闭含未发送输入的窗格先确认，IDE 视图先等待关闭守卫；已在别处打开的 Thread 或同环境同 viewId 的 VS Code 移到目标窗格并让原窗格回到新会话，Canvas 可多窗格打开）。目录和目录菜单支持行内新建目录、行内改名与桌面原生 / 触屏长按拖拽移动。窗格布局、目录展开和侧栏宽度以 `(userId, spaceId)` 为键保存在浏览器。`chat-space` WebSocket 的 `tree`、`threads`、`space` 只经 500ms 合并后失效回读，不直接写入缓存；`WorkspaceInbox` 分页读取无 `rootThreadId` 的 `GET /api/harness/interactions`（排除 `ENVIRONMENT_WAIT`，按 `rootThreadId` 去重并优先 `CHAT_SPACE`），通过全局 `interactions` `changed` 帧刷新，点击切入所属空间并打开对应 Thread。更多工作区设计见 [工作区设计](../workspace-design.md) 与 [工作区交互契约](../workspace-interactions.md)。
 i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 按业务领域维护固定前缀。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
-把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
+把扩展一次性展开为只读的 dialogs、overlays 与按 id 索引的 toolRenderers；
 重复 extension/contribution id 在组装时拒绝，运行时不动态注册、覆盖或订阅。
 扩展是编译期受信任 React module，安装集合由应用组装确定。
 tool renderer id 对应后端冻结 rendererKey，缺失时使用默认展示。
@@ -70,7 +56,7 @@ Provider、MCP 与 Git 技能包的创建请求把密钥放在可空 `SecretUpda
 [`contracts`](../../frontend/src/shared/api/contracts) 保留前端细化、便捷类型和选择逻辑；
 HTTP 的命令、上传与资源等联合类型消费生成契约，在使用点按 `type` 分支。
 浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
-service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
+service 按职责归属：Workspace、Thread、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Session-file/Storage/Interaction 平台客户端。
 [Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 由 Canvas feature 持有。
 公开 HTTP 路由事实源是生成的 `ApiRoutes`，JSON 字段规则见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)。
@@ -117,7 +103,7 @@ Thread Snapshot 只有一份 query 缓存，通过
 `resync` 和手动刷新发送 `refresh` 控制帧，不新增订阅。仅收到不带 version 的 `snapshot-ref` 时才合并
 并发提示、按原 query 回读权威树；较新的合法 WS 快照取消并取代迟到的 HTTP 结果。投影失败或坏载荷
 保留旧树并显示刷新失败，继续接收后续推送。没有定时回读。
-交互待办变化订阅全局 interactions；导航角标读服务端返回的真实 total，不用首页长度伪装计数。
+待处理交互列表订阅全局 `interactions`：[`WorkspaceInbox`](../../frontend/src/features/workspace/WorkspaceInbox.tsx) 在 `changed`、首次订阅与 `resync` 时失效重读 `GET /api/harness/interactions`（分页排空并排除 `ENVIRONMENT_WAIT`，按 `rootThreadId` 去重、优先归属 `CHAT_SPACE` 的条目）。
 环境注册表与连接租约订阅 environments：changed、subscribed 与 resync 都回读权威列表；
 连接失效是时间事实而非写入事实，客户端只按最早的 `statusExpiresAt` 排一次回读（越过截止点一个短容差），
 不轮询、也不维护本地过期集合，租约续期或任何 changed 更新数据后自动重排。
@@ -160,7 +146,7 @@ RUNNABLE 时提供“停止并处理”的既有 Stop 入口，不开放放弃�
 
 Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，保留原 layout，
 其他原可见 pane 保持稳定挂载且置为 hidden 与 inert，输入控制区挂起，上传注册表保持挂载；
-单顶栏左上角提供“关闭 Debug”，不导航 `/chats`，不渲染会话返回行并隐藏布局选择器；
+单顶栏左上角提供“关闭 Debug”，不渲染会话返回行并隐藏布局选择器；
 退出时完整恢复原 layout、可见 pane、阅读滚动与焦点。主区域包含下一次请求预览、事件与详情：
 宽 Pane 三列等宽，窄 Pane 页签切换，选择/关闭详情保留焦点返回路径；Escape 优先由内部检查器或
 弹层消费，未消费时才触发外层退出 Debug。Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
@@ -173,19 +159,131 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 运行中的 Thread 另给 FROZEN_INVOCATION：只读取当时已存在的活动 Invocation 的冻结请求，不新建、
 复制或延长任何持久事实。事件详情可按需重建某个历史模型输出的请求：
 普通模型输出的请求前缀严格截断在该输出的 parent，压缩结果使用冻结的子执行重建；
-展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。
+展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。本地新建分支草稿进入 Debug 可只读检查已有事件与历史请求，
+绝不为此预创建 Thread。
 
-## 工作区 Thread 窗格
+## Workspace 与 Thread 提交控制
 
-应用从 `features/thread/workspace` 导入 `ThreadPaneRenderer` 和 `DraftPaneRenderer`，分别装配为工作区的 `thread` 与 `draft` renderer。窗格只持有目标与布局；renderer 以 Thread ID 读取共享快照和实时流，以目标 ID 恢复浏览器草稿。执行根复用 Composer 和审批/问卷控制区，子执行线在窗格内只读查看，不改变外层绑定。
+工作区以 `(userId, space.id)` 挂载：Chat Space 在 [`SpaceDefaults`](../../frontend/src/features/workspace/SpaceDefaults.tsx) 中配置默认 Agent、Environment 与 YOLO 开关；新建空间继承当前空间默认值，新空白草稿窗格继承当前空间的默认设置，已有 Thread、分支草稿与 fork 沿各自历史恢复设置，不被改写。
+Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A，旧绑定的迟到结果
+也不能改写当前 UI 或清除新 pending 记录，原 Thread 的草稿持久化仍按自身身份处理。
 
-新会话采用空间默认 Agent。首条消息以草稿 ID 作为 `Idempotency-Key` 调用空间的 `/sessions`，成功后原窗格绑定返回的 Thread；后续消息仍进入该 Thread 的命令队列。Session 与 Thread 的改名属于目录行操作，不改变窗格绑定。
+Session 的完整 Entry 历史是一棵树，Thread 只是树上一条已命名的分支；pane 自身只保存
+view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态。
+Entry 列表按 keyset 分页传输；控制层在打开历史树或草稿历史时逐页排空并累积完整历史，
+历史树与草稿路径的渲染、搜索与分叉交互仍以完整视图为准。
+`/history` 打开当前 Session 的历史树：每个真实 Entry 恰好一行，按 Git commit lanes 画节点与连线，
+线性链始终留在同一列，只有真实 sibling 分叉才开新列；只有 ROOT 与已关闭 TURN_END 是可手工
+分叉的边界。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写任何 Thread 状态。
+历史树与 Session/Thread 选择器的消息副标题都将 Markdown 压平为单行纯文本：链接和图片只保留文字，
+表格只保留单元格内容，已闭合的 Mermaid 块替换为当前语言的图表标签，普通代码块保留代码内容。
+历史搜索匹配压平后的全文。首个命中完整落在 220 字预览内时沿用原预览；超出或跨过预览末尾才从全文提取命中附近的内容，
+代码块中的命中从所在代码行附近截取。窄屏优先保留完整命中，命中前的文字从左侧收缩；可访问名称始终保留普通预览。
 
-## 工作区 Thread 控制
+命名分支有两个等价入口并汇入同一次命名与目标选择：`/history` 面板底部对选中行的“从此处分支”，
+以及对话中已关闭 TURN_END 回合 footer 的分支按钮。弹窗要求一个按后端规则规范化的名称，
+并选择目标位置 1..8；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
+焦点随之移动），名称是创建 target 的必需事实，此处不预创建 Thread。目标有在途操作时拒绝路由，
+已有未发送草稿时要求二次确认覆盖，用户输入的本地草稿按 pane 作用域持久化。
+面板底部另提供“从此处新建会话”（`FORK_SESSION_DRAFT`）：把选中 ROOT 或已关闭 TURN_END 处的有效上下文
+复制到新 Session 并创建独立执行根，不走命名弹窗。
+目标列表明确区分 thread 草稿与已持久化 Thread。隐藏位置有在途接受、重命名、队列或未发送附件时，
+其控制层保持挂载但不可聚焦、不可响应快捷键，隐藏布局不解除 busy 门禁。缩小布局不改变同一页面内的草稿：
+已就绪附件可直接发送，在途上传继续；若失败，可在恢复 pane 后从附件条重试。附件草稿只在当前页面有效，
+刷新不恢复已就绪附件；纯文本草稿继续按原规则持久化。
+打开前按需读取 Session 的 Thread 摘要，只对执行根名称查重，同时检查同 Session 的本地草稿
+（包含隐藏位置和待消费目标，排除当前目标自身）。名称按 Unicode White_Space 折叠为单空格、
+去除首尾 ASCII 空格，最多 256 码点；大小写与兼容字符保持原值。读取失败留在弹窗中供重试，
+关闭、修改名称/目标或来源/目标变化会作废旧检查，等待期间的新输入不能被旧返回覆盖。
 
-工作区 pane 绑定 Thread 视图或新会话草稿；Thread 的 Snapshot 与实时事件由共享运行时提供，pane 不复制执行状态。根 Thread 的 Composer 编辑并提交人工消息，发送命令经 Thread 命令队列处理；排队中的消息可在队列中查看和管理。每个 Thread 的停止控制作用于该 Thread，执行树的 Stop 可停止当前根及其后代；停止事实按 Thread 分别呈现。
+草稿复用按页排空后的完整 Session Entries，只沿 parentEntryId 显示 ROOT 到 startEntryId 的闭合祖先路径；
+设置回放、Conversation 与 Debug events 消费同一路径，不混入兄弟、后续消息或源 Thread 的
+queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明确失败，提供加载重试，
+并禁止首次发送与预览；从 ROOT 打开的草稿有明确空态。
+首次发送才在一次原子命令批里创建该命名 Thread（`NEW_THREAD` = settings diff + `USER_MESSAGE`），
+随后 pane 绑定到返回的 Thread，在权威 Snapshot 就绪前保留同一历史前缀，不重写历史。
+`THREAD_NAME_CONFLICT` 409 保留起点、输入、附件和设置，打开既有名称面板供本地改名；
+`/rename-thread` 也可修改此草稿名称，不预创建 Thread、不自动添加后缀。服务端仍裁决并发竞争。
+草稿改名复用 workspace 的根名称与本地/pending 草稿检查，失败保留旧名和编辑输入；
+关闭宿主或更换目标使迟到校验失效。
+选择 Thread 或路由草稿记录一次目标身份的输入焦点意图，等可编辑且 pane 仍 focused、
+未被只读层或 Debug 覆盖时复用 Composer 聚焦并把光标放在既有文字末尾；选择其他 pane
+会作废迟到意图，后台 Snapshot 更新不会再次抢焦点。
+已计划但尚未执行的 Composer 聚焦也在 pane 失去 workspace 焦点时取消。
+pane 与布局的存储键分别以 owner 身份和 pane 隔离，
+独立地址不落 Chat target 存储。
+本地快照按 `(userId, spaceId)` 保存布局、各窗格的 `PaneTarget` 绑定、目录展开与侧栏宽度；与当前槽位或格式不兼容的旧快照整份丢弃并回到默认单草稿状态，
+不迁移其中的布局与目标。服务端已保存的对话与画布仍保留在当前空间的目录树与状态视图中，点击即经打开流程恢复到目标窗格。
+打开历史后，可用 `/history` 查看并延续该对话的完整历史。
 
-Composer 维护未发送文本草稿，附件上传进度由工作区上传注册表管理；已就绪附件随消息提交，上传失败可从附件条重试。Thread Debug 是工作区临时视图，展示下一次请求预览、事件与详情；打开期间挂起输入控制区但保持上传注册表挂载，退出后恢复原工作区布局与 pane 状态。Debug 诊断只读，不创建 Thread、不触发执行，也不写入历史。
+PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
+`NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、
+`FORK_SESSION_DRAFT`（携带 `sourceThreadId`、`startEntryId`，会话 fork 为新建的 `sessionId`/`threadId`）、
+`BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
+显式选 Agent 同步其 execution 并保留环境、YOLO、输入与附件；Builtin 的模型和默认变体由目录解析，
+其他 Driver 的 settings 原样保留；
+已有执行根 Thread可调整 Agent，子任务 Thread 只读。
+配置差异按 SET_EXECUTION → SET_ENVIRONMENT
+前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。
+执行根仍有正在运行的子代理时，环境菜单显示“切换对正在运行的子 Agent 同样生效”；
+提示只说明生效范围，不改变切换与提交路径。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
+根面板与草稿 pane 不渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
+其真实身份（agent 名称与 `modelName (variant)`；默认 main
+不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
+模型与变体组合统一使用括号格式，包括输入区底栏及其提示、设置变更记录、执行树和 Agent 卡片；
+变体来自实际选择，不换算为 reasoningEffort。模型引用和单独选择模型的选项都使用全局逻辑
+`modelName`，不拼接 `providerName`；名称本身可以包含斜杠。GROUP 选择不带组级 Variant。
+
+对话按持久 ROOT、SETTINGS 与普通 TURN_START 的设置快照计算 Agent、模型及环境变更。
+回合间的 SETTINGS 成为最新 head 时立即展示变化；后续相同快照不重复展示。
+无效快照明确提示并中断差值基准，Debug 仍保留一条已识别的 SETTINGS 事件及完整原始数据。
+
+`AgentPane` 持有根投影，各子代理查看层由 `ConnectedThreadView` 读取自己的投影。
+`ThreadView` 与命令控制 Hook 只消费必填投影；命令批直接从该投影构建。
+
+命令批在发送前冻结幂等键、payload 与顺序；设置批次还冻结 cursor。
+`pending-request-store` 保存这些未决请求：容器创建按 owner/pane 隔离，既有 Thread 按 threadId 隔离，
+与 IndexedDB 离线草稿分开保存。写入失败中止发送；未知结果保留相同请求供精确重试或显式放弃。
+恢复与清理核对 request identity，避免常规路径覆盖其他 Pane 的记录；先读后写并非跨标签页原子操作。
+放弃只清理本地记录，不撤销服务端可能已经接受的请求。
+单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
+
+Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
+`stoppedThreads` 保留逐 Thread 取消事实，根 Composer 与目标编辑区只恢复该根的
+人工 `USER_MESSAGE`，子代理不建立人工草稿；
+`CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令不恢复草稿。
+IndexedDB 在同一事务保存草稿与已合并的回执身份；响应和 snapshot 共用幂等恢复通道。
+恢复 generation 拒绝跨标签页的陈旧覆盖写，失败明确提示并支持手动重试。
+NOTIFICATION 使用系统样式展示，不进入人类消息队列、上下键历史或草稿。
+审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
+`/threads/:threadId` 按执行身份分流：根 Thread 提供人工输入与控制，子代理只读取
+Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属父 Agent 入口（直接导航到
+`/threads/{parentId}`）；身份未确认时不挂载控制 Hook。
+根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
+来自子线程的待办在归属旁提供 `subagent` 链接：根面板就地打开只读视图，工作区通过所属空间与执行根 Thread 打开；链接不显示 UUID。进入子代理后，标题区显示
+Thread ID 前 8 位，悬停查看完整值，复制按钮复制完整 ID。
+执行结果与任务回执始终交给直接派发的父 Agent，不走根订阅。
+子线程只读视图在顶部显示“环境：<名称> · 跟随主对话”：环境名取该 Thread Snapshot 冻结的值，
+即规划该回合时执行根已生效的环境；执行根此后切换环境不会改写既有快照，子线程下一回合才使用新环境。
+执行根没有环境时显示“环境：未选择 · 跟随主对话”，执行根自身不显示该行。
+子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
+保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
+应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
+`task` 同步返回结果，工具卡片只读取规范 `task.result` details 中的 thread_id 生成子 Thread 导航：
+持久 Entry 的 detailsJson 与 live invocation 的 result.details 使用同一投影。
+`running` 进度回执只表示运行中且不重复正文；`completed`/`failed`/`cancelled` 终态在卡片正文展示
+子任务报告或失败原文，失败时导航与错误原文同时保留。
+续接参数中已有的 thread_id 原样保留；缺失或损坏 details 时完整展示正文，
+不从自然语言或正文 JSON 推断链接。
+
+全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
+默认权限原因本地化，额外原因完整展示；允许是唯一主动作，拒绝复用共享 Button 的 ghost + danger。
+归属统一显示为“<类型> · <标题>”：类型与标题都来自会话归属 SPI 的 `owner`，
+标题缺失时只显示类型，不逐卡获取 Snapshot，也不用来源 Thread 的 UUID 或名称冒充归属。有产品页面的归属
+点击后携带执行根 `thread` 参数跳转。
+审批与问卷的写回仍使用原始 Thread 与 invocation 身份，来源导航不改变它。两者遇到 409 时与成功提交一样
+先回读最新事实（失效交互列表并请求 Thread 快照刷新）：事项已不在待处理列表就按已由其他端处理移出列表，
+仍在待处理就解除锁定、改用新的决定或提交身份，等用户重新确认，不重放被拒的旧决定。
 
 ### 文件变更审查与工具卡片
 
@@ -240,7 +338,7 @@ RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 标记 `ar
 没有 invocation 的模型调用草稿不表示已运行或成功。task 卡片将子 Thread 的冻结 Join 结果呈现为完成、失败或取消，并保留子 Thread 导航；仅 Join 的完成状态表达执行成功，不替用户验证报告内容。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
-`/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。单选题使用圆形单选控件，方向键在组内移动，空格或回车选定；多选题使用独立复选控件，已回答时只读展示所选答案。问卷参数无法解析时以告警横幅说明无法显示该问题，原始参数默认收起，拒答仍是可用的退出路径。
+Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。单选题使用圆形单选控件，方向键在组内移动，空格或回车选定；多选题使用独立复选控件，已回答时只读展示所选答案。问卷参数无法解析时以告警横幅说明无法显示该问题，原始参数默认收起，拒答仍是可用的退出路径。
 
 ### 思考、系统通知与压缩卡片
 
@@ -266,9 +364,7 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 
 ## Canvas 编辑与上传
 
-画布库与其他资源列表共用紧凑资源卡。点击“创建新画布”后填写名称并确认才创建；
-取消不会写入。创建期间不能重复提交，失败保留表单供修改重试。
-已有画布的“进入”仅打开该画布，不创建新对象。编辑器标题旁显示保存状态，不显示协议版本；
+从目录菜单新建画布，确认名称后写入当前空间和目录，再选择打开窗格。取消选择窗格不会删除已创建的画布；打开已有画布不做写入。同一 Canvas 可在多个窗格打开，共用文档缓存，各自保存选中项和视口。
 空画布提供与左侧“+”相同的添加入口，说明如何添加资源和运行 Function，添加首个节点后引导消失。
 
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
@@ -322,9 +418,7 @@ assistantMetadata 缺失或为 null 的人工 ASSISTANT 消息不计用量；显
 
 ## 功能入口
 
-AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作区。
-新库没有任何 Catalog 资源：Chat 列表在没有可用 Agent 时查询 Provider 与 Model，展示
-Provider → Model → Agent → Chat 的首次使用引导并链接到对应页面，已有可用 Agent 时不再查询。
+AI feature 维护 Catalog、Environment、MCP、Skill 等平台管理页面；工作区草稿（[`DraftPaneRenderer`](../../frontend/src/features/thread/workspace/DraftPaneRenderer.tsx)）在没有可用 Agent 时提示配置或跳转 `/settings/agents`（管理员）与空间默认设置。
 新建 Model 时可从已保存的 Provider 拉取上游模型 ID 作为 Model ID 候选，Name 默认跟随 Model ID，
 上游失败时就地展示状态与原因。
 Agent 目录不区分所有权类型：每个 Agent 都可编辑与删除。表单选择 execution Driver，当前提供
@@ -423,7 +517,7 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 并透传 WebSocket。
 
 测试入口：[`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide) 的状态机、存储与
-对账单测。真实浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 从
+对账单测，[`frontend/src/features/thread/workspace`](../../frontend/src/features/thread/workspace) 的工作区接入与 [`workspace`](../../frontend/src/features/workspace) 的单测及 [`workspace-shell.pw.ts`](../../frontend/browser-tests/workspace-shell.pw.ts) 浏览器契约测试。真实浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 从
 [开发与测试](../operations/development-and-testing.md#真实-ide-与-daemon-验收) 的真实 IDE 入口执行；只记录实际
 运行结果，不预设固定用例数。
 
@@ -476,7 +570,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 ### 从任务选择页面结构
 
-资源列表采用“标题与搜索 → 新建卡和资源卡”。AI 列表把搜索放在子导航右侧；环境搜索按名称或 ID 筛选卡片，不影响运行状态刷新或已打开的管理弹窗。环境卡片用本地化文字展示连接状态。项目、画布与待处理页共用左对齐标题的页头，右侧放适用的搜索与页面操作，待处理计数紧随标题。列表不添加营销副标题或没有数据来源的预览图。卡片只呈现识别资源和作出下一步决定所需的信息，标识符与版本保留在诊断和并发协议，不占主视觉。
+资源列表采用“标题与搜索 → 新建卡和资源卡”。AI 列表把搜索放在子导航右侧；环境搜索按名称或 ID 筛选卡片，不影响运行状态刷新或已打开的管理弹窗。环境卡片用本地化文字展示连接状态。工作区待处理交互保留独立侧栏入口与计数角标。列表不添加营销副标题或没有数据来源的预览图。卡片只呈现识别资源和作出下一步决定所需的信息，标识符与版本保留在诊断和并发协议，不占主视觉。
 
 设置分类在桌面左侧显示，窄屏则通过返回箭头旁的选择器切换。返回箭头回到进入设置前的位置，直接打开设置时回到 `/`。
 
@@ -501,7 +595,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 ### Token 分层与门禁
 
 样式 token 只有一个事实源：[`styles.css`](../../frontend/src/styles.css) 的 `:root`，分三层，组件只消费后两层。
-功能布局样式跟随各自 feature（如 `features/thread` 的对话/调试、`features/chat` 的工作区、`features/settings`、
+功能布局样式跟随各自 feature（如 `features/workspace` 的侧栏与窗格、`features/thread` 的对话/调试、`features/settings`、
 `features/thread/runtime/interactions` 的待办），`styles.css` 只保留 reset、通用控件与跨功能共享样式。
 
 1. **Palette**（`--palette-*`）：原始色板，是唯一允许写色值的地方，位于 `@palette:start/end` 标记之间。

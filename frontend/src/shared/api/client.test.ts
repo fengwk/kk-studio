@@ -50,6 +50,18 @@ describe('HTTP client', () => {
     expect(fetchMock.mock.calls[1]![1]).toMatchObject({ method: 'DELETE' })
   })
 
+  it('sends creation idempotency as a request header without changing the JSON body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const body = { title: 'Space', rootFolderName: 'Files' }
+    const idempotencyKey = '51da3dff-990a-47d6-8742-4057699b9374'
+    await request('POST /api/chat-spaces', { body }, { idempotencyKey })
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat-spaces', expect.objectContaining({
+      method: 'POST', body: JSON.stringify(body),
+      headers: expect.objectContaining({ 'Idempotency-Key': idempotencyKey }),
+    }))
+  })
+
   // problem 扩展字段位于顶层，非 problem 不得被当作错误信封解析。
   it('maps problem details and uses a safe fallback for other responses', async () => {
     vi.stubGlobal('fetch', vi.fn()

@@ -8,6 +8,7 @@ import { settingsCatalog } from '@/shared/i18n/catalogs/settings'
 import { sharedCatalog } from '@/shared/i18n/catalogs/shared'
 import { shortcutsCatalog } from '@/shared/i18n/catalogs/shortcuts'
 import { syncCatalog } from '@/shared/i18n/catalogs/sync'
+import { workspaceCatalog } from '@/shared/i18n/catalogs/workspace'
 import { workspacePanesCatalog } from '@/shared/i18n/catalogs/workspacePanes'
 
 export const messageCatalog = {
@@ -21,6 +22,7 @@ export const messageCatalog = {
   ...settingsCatalog,
   ...shortcutsCatalog,
   ...syncCatalog,
+  ...workspaceCatalog,
   ...workspacePanesCatalog,
 } as const
 

@@ -15,6 +15,7 @@ export type PaneHeaderProps = {
   fullscreen: boolean
   splitBlocked?: Partial<Record<Axis, string>>
   actions?: ReactNode
+  leading?: ReactNode
   onSplit: (axis: Axis) => void
   onSwitch: (paneId: string) => void
   onFullscreenChange: (fullscreen: boolean) => void
@@ -24,7 +25,7 @@ export type PaneHeaderProps = {
 
 const DRAG_TYPE = 'application/x-kkstudio-pane'
 
-export function PaneHeader({ pane, choices, active, narrow, fullscreen, splitBlocked, actions,
+export function PaneHeader({ pane, choices, active, narrow, fullscreen, splitBlocked, actions, leading,
   onSplit, onSwitch, onFullscreenChange, onClose, onSwap }: PaneHeaderProps) {
   const { t } = useI18n()
   const [menu, setMenu] = useState<{ kind: 'switch' | 'split'; anchor: HTMLButtonElement }>()
@@ -78,6 +79,7 @@ export function PaneHeader({ pane, choices, active, narrow, fullscreen, splitBlo
       event.preventDefault()
       onSwap(event.dataTransfer.getData(DRAG_TYPE), pane.id)
     } }}>
+    {leading}
     {switchable ? <button className="ws-pane-switch" type="button" data-ui-focus="row"
       aria-label={t('pane.switch', pane)} aria-haspopup="menu" aria-expanded={menuKind === 'switch'}
       onClick={event => showMenu('switch', event.currentTarget)}>
