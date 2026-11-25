@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,7 +22,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -38,13 +36,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.function.Function;
 
-/** Session authorization precedes resource ownership checks, then streams only ACTIVE content. */
+/** Streams only ACTIVE content held by the requested session. */
 class HarnessResourceControllerTest {
 
   private static final UUID SESSION_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
   private static final UUID RESOURCE_ID = UUID.fromString("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
 
-  private HarnessOwnerQueryService ownerQueryService;
   private SessionBlobRefManager refManager;
   private StorageBlobRepository blobRepository;
   private StorageBlobContentService contentService;
@@ -52,25 +49,10 @@ class HarnessResourceControllerTest {
 
   @BeforeEach
   void setUp() {
-    ownerQueryService = Mockito.mock(HarnessOwnerQueryService.class);
     refManager = Mockito.mock(SessionBlobRefManager.class);
     blobRepository = Mockito.mock(StorageBlobRepository.class);
     contentService = Mockito.mock(StorageBlobContentService.class);
-    controller =
-        new HarnessResourceController(
-            ownerQueryService, refManager, blobRepository, contentService);
-  }
-
-  @Test
-  void rejectsUnauthorizedSessionBeforeCheckingResourceOwnership() {
-    doThrow(DomainException.notFound("session"))
-        .when(ownerQueryService)
-        .requireOwnedSession(SESSION_ID);
-
-    assertThrows(
-        DomainException.class, () -> controller.getResource(SESSION_ID, RESOURCE_ID, false));
-
-    verifyNoInteractions(refManager, blobRepository, contentService);
+    controller = new HarnessResourceController(refManager, blobRepository, contentService);
   }
 
   @Test
@@ -80,9 +62,7 @@ class HarnessResourceControllerTest {
     assertThrows(
         DomainException.class, () -> controller.getResource(SESSION_ID, RESOURCE_ID, false));
 
-    InOrder order = inOrder(ownerQueryService, refManager);
-    order.verify(ownerQueryService).requireOwnedSession(SESSION_ID);
-    order.verify(refManager).contains(SESSION_ID, RESOURCE_ID);
+    verify(refManager).contains(SESSION_ID, RESOURCE_ID);
     verifyNoInteractions(blobRepository, contentService);
   }
 
@@ -115,8 +95,7 @@ class HarnessResourceControllerTest {
         "default-src 'none'; sandbox", response.getHeaders().getFirst("Content-Security-Policy"));
     assertEquals("resource bytes", output.toString(StandardCharsets.UTF_8));
 
-    InOrder order = inOrder(ownerQueryService, refManager, blobRepository);
-    order.verify(ownerQueryService).requireOwnedSession(SESSION_ID);
+    InOrder order = inOrder(refManager, blobRepository);
     order.verify(refManager).contains(SESSION_ID, RESOURCE_ID);
     order.verify(blobRepository).getById(RESOURCE_ID);
     verify(contentService).withBlobStream(eq(RESOURCE_ID), any(ReadDeadline.class), any());

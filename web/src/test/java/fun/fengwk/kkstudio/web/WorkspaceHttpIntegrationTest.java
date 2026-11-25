@@ -12,6 +12,7 @@ import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -31,14 +32,24 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.platform.account.StudioAccountService;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.WebSocket;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
   @Autowired private WebApplicationContext context;
   @Autowired private StudioAccountFilter filter;
   @Autowired private ObjectMapper mapper;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private StudioAccountService accounts;
+  @LocalServerPort private int port;
   @Autowired private WebAccountMockMvcTestConfiguration.AdminCredentials admin;
   private MockMvc mvc;
   private Cookie login;
@@ -318,6 +329,118 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
                 .param("expectedVersion", "0"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.reason").value("RESOURCE_IN_USE"));
+  }
+
+  /** Ownership is checked at the real MVC boundary, including for other administrators. */
+  @Test
+  void harnessAndCanvasDoNotExposeAnotherUsersResources() throws Exception {
+    String space = createSpace();
+    String folder = tree(space).at("/folders/0/id").asText();
+    var session =
+        json(
+            mvc.perform(
+                    write(
+                        post(space + "/sessions"),
+                        UUID.randomUUID().toString(),
+                        "{\"message\":[{\"type\":\"TEXT\",\"text\":\"Default folder\"}]}"))
+                .andExpect(status().isOk())
+                .andReturn());
+    var canvas =
+        json(
+            mvc.perform(
+                    write(
+                        post(space + "/canvases"),
+                        UUID.randomUUID().toString(),
+                        "{\"folderId\":\"%s\",\"title\":\"Board\",\"expectedTreeVersion\":\"1\"}"
+                            .formatted(folder)))
+                .andExpect(status().isOk())
+                .andReturn());
+    String threadUrl = "/api/harness/threads/" + session.get("threadId").asText();
+    String canvasUrl = "/api/canvas/canvases/" + canvas.get("id").asText();
+    mvc.perform(get(threadUrl).cookie(login)).andExpect(status().isOk());
+    mvc.perform(get(canvasUrl).cookie(login)).andExpect(status().isOk());
+    accounts.create("other-admin", "workspace-test-account", StudioRole.ADMIN);
+    Cookie outsider =
+        new Cookie(
+            "studio_session", accounts.login("other-admin", "workspace-test-account").token());
+    for (String url :
+        new String[] {
+          threadUrl,
+          threadUrl + "/tree",
+          canvasUrl,
+          "/api/harness/sessions/"
+              + session.get("sessionId").asText()
+              + "/resources/"
+              + UUID.randomUUID()
+        }) {
+      mvc.perform(get(url).cookie(outsider))
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.reason").value("RESOURCE_NOT_FOUND"));
+    }
+    assertEquals(session.get("sessionId"), tree(space).at("/folders/0/resources/1/id"));
+    try (HttpClient client = HttpClient.newHttpClient()) {
+      var ownerFrames = new SocketFrames();
+      var outsiderFrames = new SocketFrames();
+      var ownerSocket = connect(client, login, ownerFrames);
+      var outsiderSocket = connect(client, outsider, outsiderFrames);
+      try {
+        assertEquals("connected", ownerFrames.next("connected").get("type").asText());
+        assertEquals("connected", outsiderFrames.next("connected").get("type").asText());
+        for (var resource :
+            new String[][] {
+              {"thread", session.get("threadId").asText()},
+              {"thread-tree", session.get("threadId").asText()},
+              {"canvas", canvas.get("id").asText()}
+            }) {
+          String subscribe =
+              "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"%s\",\"id\":\"%s\"}}"
+                  .formatted(resource[0], resource[1]);
+          ownerSocket.sendText(subscribe, true).join();
+          outsiderSocket.sendText(subscribe, true).join();
+          assertEquals(resource[0], ownerFrames.next("subscribed").at("/resource/kind").asText());
+          assertEquals("RESOURCE_NOT_FOUND", outsiderFrames.next("error").get("code").asText());
+        }
+      } finally {
+        ownerSocket.abort();
+        outsiderSocket.abort();
+      }
+    }
+  }
+
+  private WebSocket connect(HttpClient client, Cookie cookie, SocketFrames frames) {
+    return client
+        .newWebSocketBuilder()
+        .header("Origin", "http://localhost:" + port)
+        .header("Cookie", cookie.getName() + "=" + cookie.getValue())
+        .buildAsync(URI.create("ws://localhost:" + port + "/ws/events"), frames)
+        .join();
+  }
+
+  private final class SocketFrames implements WebSocket.Listener {
+    private final LinkedBlockingQueue<JsonNode> frames = new LinkedBlockingQueue<>();
+    private final StringBuilder pending = new StringBuilder();
+
+    @Override
+    public CompletionStage<?> onText(WebSocket socket, CharSequence data, boolean last) {
+      pending.append(data);
+      if (last) {
+        frames.add(mapper.readTree(pending.toString()));
+        pending.setLength(0);
+      }
+      socket.request(1);
+      return null;
+    }
+
+    JsonNode next(String type) throws InterruptedException {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (System.nanoTime() < deadline) {
+        var frame = frames.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+        if (frame != null && type.equals(frame.get("type").asText())) {
+          return frame;
+        }
+      }
+      throw new AssertionError("Missing " + type + " frame");
+    }
   }
 
   private String createSpace() throws Exception {

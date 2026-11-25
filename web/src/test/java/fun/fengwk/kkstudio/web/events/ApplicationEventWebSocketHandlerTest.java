@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
@@ -181,6 +182,9 @@ class ApplicationEventWebSocketHandlerTest {
     accounts = mock(StudioAccountService.class);
     var principal = new StudioPrincipal(EVENT_NODE, "event-admin", StudioRole.ADMIN);
     when(accounts.authenticate("test-session")).thenReturn(Optional.of(principal));
+    var access = mock(ResourceAccess.class);
+    when(access.allowsThread(any(), any())).thenReturn(true);
+    when(access.allows(any(), any(), any())).thenReturn(true);
     handler =
         new ApplicationEventWebSocketHandler(
             hub,
@@ -191,7 +195,8 @@ class ApplicationEventWebSocketHandlerTest {
             browserUseRegistry,
             heartbeatScheduler,
             nowNanos::get,
-            accounts);
+            accounts,
+            access);
     recorder = new SentRecorder();
     Session jettySession = mock(Session.class);
     doAnswer(
