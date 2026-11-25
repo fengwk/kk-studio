@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasReference;

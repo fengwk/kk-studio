@@ -202,7 +202,6 @@ class CanvasControllerTest {
         .andExpect(jsonPath("$.nodes[0].resources[0].blobId").doesNotExist())
         .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").doesNotExist())
         .andExpect(jsonPath("$.nodes[0].resources[0].sizeBytes").doesNotExist());
-
   }
 
   /** 测试意图：11 种 typed command 直映射为领域命令，前置条件是各语义组的编辑起点旧值。 */

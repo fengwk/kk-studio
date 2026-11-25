@@ -144,7 +144,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   @Autowired private IdeBootstrapTicketService bootstrapTickets;
 
-
   @Autowired private HarnessCommandAcceptanceOrchestrator commandAcceptance;
 
   @Autowired private StorageUploadService storageUploadService;

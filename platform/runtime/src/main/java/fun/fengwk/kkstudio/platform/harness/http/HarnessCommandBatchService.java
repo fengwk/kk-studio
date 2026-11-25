@@ -11,9 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 
-/**
- * 既有 Thread 命令批的应用编排：通过人工写入边界后交给平台接受服务，再回读权威快照。
- */
+/** 既有 Thread 命令批的应用编排：通过人工写入边界后交给平台接受服务，再回读权威快照。 */
 @Service
 @AllArgsConstructor
 public class HarnessCommandBatchService {

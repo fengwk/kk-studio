@@ -13,6 +13,7 @@ function CanvasPageBody() {
       <CanvasEditor />
       <CanvasOverlays />
     </div>
+  )
 }
 
 export function CanvasPage() {

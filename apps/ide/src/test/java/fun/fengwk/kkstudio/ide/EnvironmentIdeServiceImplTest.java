@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -38,7 +37,9 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Owner;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -86,7 +87,7 @@ class EnvironmentIdeServiceImplTest {
   private FakeBrowserUse browserUse;
   private IdeBootstrapTicketService tickets;
   private IdeViewSnapshotStore snapshots;
-  private HarnessOwnerQueryService ownerQueryService;
+  private ResourceAccess resourceAccess;
   private SessionBlobRefManager sessionBlobRefManager;
   private StorageBlobRepository blobRepository;
   private StorageBlobContentService blobContentService;
@@ -98,7 +99,9 @@ class EnvironmentIdeServiceImplTest {
     browserUse = new FakeBrowserUse();
     tickets = new IdeBootstrapTicketService();
     snapshots = new IdeViewSnapshotStore(transport);
-    ownerQueryService = mock(HarnessOwnerQueryService.class);
+    resourceAccess = mock(ResourceAccess.class);
+    when(resourceAccess.owner(Kind.SESSION, ATTACHMENT_SESSION_ID))
+        .thenReturn(Optional.of(new Owner(UUID.randomUUID(), "test", UUID.randomUUID())));
     sessionBlobRefManager = mock(SessionBlobRefManager.class);
     blobRepository = mock(StorageBlobRepository.class);
     blobContentService = mock(StorageBlobContentService.class);
@@ -109,7 +112,7 @@ class EnvironmentIdeServiceImplTest {
             browserUse,
             snapshots,
             Duration.ofMillis(150),
-            ownerQueryService,
+            resourceAccess,
             sessionBlobRefManager,
             blobRepository,
             blobContentService);
@@ -443,7 +446,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals("hello attachment", command.getAttachmentText());
     assertFalse(command.hasDirectory());
     assertFalse(command.hasDiscard());
-    verify(ownerQueryService).requireOwnedSession(ATTACHMENT_SESSION_ID);
+    verify(resourceAccess).owner(Kind.SESSION, ATTACHMENT_SESSION_ID);
   }
 
   @Test
@@ -467,9 +470,7 @@ class EnvironmentIdeServiceImplTest {
   void openAttachmentRequiresOwnedSessionAndSessionResourceReference() {
     transport.replies.add(openSnapshot(5L, 7L));
     service.openView(ENV, openRequest("create", 0L, null));
-    doThrow(DomainException.notFound("session"))
-        .when(ownerQueryService)
-        .requireOwnedSession(ATTACHMENT_SESSION_ID);
+    when(resourceAccess.owner(Kind.SESSION, ATTACHMENT_SESSION_ID)).thenReturn(Optional.empty());
 
     assertThrows(
         DomainException.class,
@@ -933,7 +934,7 @@ class EnvironmentIdeServiceImplTest {
             browserUse,
             snapshots,
             Duration.ofMillis(150),
-            ownerQueryService,
+            resourceAccess,
             sessionBlobRefManager,
             blobRepository,
             blobContentService);

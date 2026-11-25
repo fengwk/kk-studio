@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -250,7 +250,7 @@ class IdeLeaseCoordinatorTest {
           mock(IdeBrowserUseGateway.class),
           mock(IdeViewSnapshotStore.class),
           EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT,
-          mock(HarnessOwnerQueryService.class),
+          mock(ResourceAccess.class),
           mock(SessionBlobRefManager.class),
           mock(StorageBlobRepository.class),
           mock(StorageBlobContentService.class));

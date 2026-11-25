@@ -21,7 +21,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -63,7 +64,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   private final IdeCommandCaller caller;
   private final IdeSnapshots snapshotBoundary;
   private final IdeBindings bindings;
-  private final HarnessOwnerQueryService ownerQueryService;
+  private final ResourceAccess resourceAccess;
   private final SessionBlobRefManager sessionBlobRefManager;
   private final StorageBlobRepository blobRepository;
   private final StorageBlobContentService blobContentService;
@@ -74,7 +75,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       IdeBrowserUseGateway browserUse,
       IdeViewSnapshotStore snapshots,
       Duration commandTimeout,
-      HarnessOwnerQueryService ownerQueryService,
+      ResourceAccess resourceAccess,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobRepository blobRepository,
       StorageBlobContentService blobContentService) {
@@ -86,7 +87,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     this.snapshotBoundary =
         new IdeSnapshots(caller, transport, requiredSnapshots, bootstrapTickets);
     this.bindings = new IdeBindings(transport, requiredBrowserUse, snapshotBoundary);
-    this.ownerQueryService = Objects.requireNonNull(ownerQueryService, "ownerQueryService");
+    this.resourceAccess = Objects.requireNonNull(resourceAccess, "resourceAccess");
     this.sessionBlobRefManager =
         Objects.requireNonNull(sessionBlobRefManager, "sessionBlobRefManager");
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
@@ -355,7 +356,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             browserSessionId,
             bindingEpoch,
             request.getExpectedDaemonInstanceId());
-    ownerQueryService.requireOwnedSession(parsedSessionId);
+    resourceAccess.owner(Kind.SESSION, parsedSessionId).orElseThrow(ResourceAccess::notFound);
     if (!sessionBlobRefManager.contains(parsedSessionId, parsedResourceId)) {
       throw DomainException.notFound("resource");
     }

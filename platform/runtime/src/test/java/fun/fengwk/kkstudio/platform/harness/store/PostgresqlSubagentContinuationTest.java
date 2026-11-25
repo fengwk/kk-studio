@@ -278,29 +278,25 @@ class PostgresqlSubagentContinuationTest {
   }
 
   @Test
-  void forkDoesNotTakeRunningChildOrItsReceiptAndCannotJoinOldChild() {
+  void idleBranchDoesNotTakeRunningChildOrItsReceipt() {
     Delegation delegation = runningChild();
     UUID parentId = delegation.parent().thread().id();
     UUID childId = delegation.child().thread().id();
     ThreadSnapshot running = snapshot(childId);
-    AcceptedCommands fork =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(
-                    delegation.parent().session().id(),
-                    delegation.parent().rootEntry().id(),
-                    UUID.randomUUID(),
-                    "fork",
-                    false),
-                List.of(prompt("fork task"))),
-            AcceptancePreflight.IDENTITY);
-    UUID forkId = fork.thread().id();
-    assertEquals(delegation.parent().session().id(), fork.session().id());
-    assertNull(fork.thread().parentThreadId());
+    var fork =
+        runtime.createIdleBranch(
+            parentId, delegation.parent().thread().headEntryId(), UUID.randomUUID(), "fork");
+    UUID forkId = fork.id();
+    assertEquals(delegation.parent().session().id(), fork.sessionId());
+    assertNull(fork.parentThreadId());
     assertEquals(parentId, snapshot(childId).thread().parentThreadId());
     assertEquals(Set.of(parentId, childId), treeIds(parentId));
     assertEquals(Set.of(forkId), treeIds(forkId));
     assertEquals(running, snapshot(childId));
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(forkId), List.of(prompt("fork task"))),
+        AcceptancePreflight.IDENTITY);
 
     // 新分支企图为旧 child 添加 Join：direct-parent mismatch 必须在任何新 command/join 写入前拒绝。
     UUID stolenJoin = UUID.randomUUID();

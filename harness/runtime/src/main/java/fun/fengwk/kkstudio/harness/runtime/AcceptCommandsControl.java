@@ -33,9 +33,10 @@ import java.util.UUID;
 /**
  * HarnessRuntime 内部的同步 acceptCommands 控制面。
  *
- * <p>编排命令接受（NEW_ROOT_SESSION / THREAD 两条路径），向 Store 写入 Session / ROOT / Thread / Commands / Work。批量形状、cursor 与执行配置校验委托给 {@link
- * AcceptCommandsValidation}，initial creation replay 与 ordered replay 委托给 {@link
- * AcceptCommandsReplay}。Session 与 ROOT Thread 的初始名称在创建事务内由首条 user-like 文本派生（缺省回退到 id 前缀）；后期改名走独立的 rename 控制面。
+ * <p>编排命令接受（NEW_ROOT_SESSION / THREAD 两条路径），向 Store 写入 Session / ROOT / Thread / Commands /
+ * Work。批量形状、cursor 与执行配置校验委托给 {@link AcceptCommandsValidation}，initial creation replay 与 ordered
+ * replay 委托给 {@link AcceptCommandsReplay}。Session 与 ROOT Thread 的初始名称在创建事务内由首条 user-like 文本派生（缺省回退到
+ * id 前缀）；后期改名走独立的 rename 控制面。
  */
 final class AcceptCommandsControl {
 

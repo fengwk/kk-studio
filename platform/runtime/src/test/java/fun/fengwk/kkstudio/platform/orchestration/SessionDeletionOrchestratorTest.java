@@ -42,11 +42,9 @@ class SessionDeletionOrchestratorTest {
     service.deleteSession(sessionId, ignored -> {});
 
     @SuppressWarnings("unchecked")
-    ArgumentCaptor<Consumer<List<UUID>>> relations =
-        ArgumentCaptor.forClass(Consumer.class);
+    ArgumentCaptor<Consumer<List<UUID>>> relations = ArgumentCaptor.forClass(Consumer.class);
     @SuppressWarnings("unchecked")
-    ArgumentCaptor<Consumer<List<UUID>>> refs =
-        ArgumentCaptor.forClass(Consumer.class);
+    ArgumentCaptor<Consumer<List<UUID>>> refs = ArgumentCaptor.forClass(Consumer.class);
     verify(runtime).deleteSessions(eq(List.of(sessionId)), relations.capture(), refs.capture());
     relations.getValue().accept(List.of(sessionId));
     refs.getValue().accept(List.of(sessionId));

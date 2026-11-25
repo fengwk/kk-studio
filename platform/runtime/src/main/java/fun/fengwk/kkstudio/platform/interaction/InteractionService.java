@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * 人工交互（问卷回答与工具审批）的统一事务写入口。写入前校验目标 Thread 存在，Runtime 写回来源 invocation 本身。

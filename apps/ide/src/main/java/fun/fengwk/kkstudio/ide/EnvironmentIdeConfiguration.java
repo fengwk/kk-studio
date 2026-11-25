@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.ide.gateway.IdeBrowserSessionRegistry;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -51,7 +51,7 @@ public class EnvironmentIdeConfiguration {
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserUseGateway browserUse,
       IdeViewSnapshotStore snapshots,
-      HarnessOwnerQueryService ownerQueryService,
+      ResourceAccess resourceAccess,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobRepository blobRepository,
       StorageBlobContentService blobContentService) {
@@ -61,7 +61,7 @@ public class EnvironmentIdeConfiguration {
         browserUse,
         snapshots,
         EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT,
-        ownerQueryService,
+        resourceAccess,
         sessionBlobRefManager,
         blobRepository,
         blobContentService);

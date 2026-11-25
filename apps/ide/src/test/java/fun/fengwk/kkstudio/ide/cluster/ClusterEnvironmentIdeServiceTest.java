@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -84,7 +84,7 @@ class ClusterEnvironmentIdeServiceTest {
             new AllowGateway(),
             new IdeViewSnapshotStore(localTransport),
             Duration.ofSeconds(1),
-            mock(HarnessOwnerQueryService.class),
+            mock(ResourceAccess.class),
             mock(SessionBlobRefManager.class),
             mock(StorageBlobRepository.class),
             mock(StorageBlobContentService.class));

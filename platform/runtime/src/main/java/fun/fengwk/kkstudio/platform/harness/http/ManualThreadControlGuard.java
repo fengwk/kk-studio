@@ -25,5 +25,4 @@ final class ManualThreadControlGuard {
           "manual thread control is limited to the execution root");
     }
   }
-
 }

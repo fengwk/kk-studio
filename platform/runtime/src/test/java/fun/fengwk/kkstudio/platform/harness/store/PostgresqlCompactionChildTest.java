@@ -671,22 +671,16 @@ class PostgresqlCompactionChildTest {
     assertNotNull(settledJoin.finalAnswerEntryId());
 
     EntryPath compactionPath = path(childThreadId);
+    UUID rejectedBranchId = UUID.randomUUID();
     assertThrows(
         DomainException.class,
         () ->
-            runtime.acceptCommands(
-                new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewThread(
-                        compactionPath.root().sessionId(),
-                        compactionPath.head().id(),
-                        UUID.randomUUID(),
-                        "invalid compaction fork",
-                        false),
-                    List.of(
-                        new NewThreadCommand(
-                            new UserMessageCommandPayload(AgentMessage.user("fork")),
-                            UUID.randomUUID()))),
-                AcceptancePreflight.IDENTITY));
+            runtime.createIdleBranch(
+                childThreadId,
+                compactionPath.head().id(),
+                rejectedBranchId,
+                "invalid compaction fork"));
+    assertTrue(store.transaction(tx -> tx.threads().find(rejectedBranchId)).isEmpty());
 
     // 父 THREAD Work 被重新请求
     assertTrue(hasWork(WorkTargetType.THREAD, parentId));

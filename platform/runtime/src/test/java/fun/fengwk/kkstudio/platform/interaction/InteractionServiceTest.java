@@ -52,7 +52,8 @@ class InteractionServiceTest {
   @Test
   void submitInputValidatesThreadAndDelegates() {
     ToolInputSubmissionCommand command =
-        new ToolInputSubmissionCommand(id(100), id(101), id(102), "alice", false, List.of(List.of("ans")));
+        new ToolInputSubmissionCommand(
+            id(100), id(101), id(102), "alice", false, List.of(List.of("ans")));
     ToolInputAcceptance expected = mock(ToolInputAcceptance.class);
     when(runtime.submitToolInput(command)).thenReturn(expected);
 

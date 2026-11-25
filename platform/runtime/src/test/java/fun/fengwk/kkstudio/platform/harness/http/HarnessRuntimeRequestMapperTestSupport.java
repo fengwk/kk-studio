@@ -1,17 +1,20 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 final class HarnessRuntimeRequestMapperTestSupport {
@@ -93,6 +96,13 @@ final class HarnessRuntimeRequestMapperTestSupport {
 
   static HarnessUserMessageContentDTO userContent() {
     return new HarnessUserMessageContentDTO.TextDTO("hello");
+  }
+
+  static HarnessExecutionSelectionDTO executionSelection() {
+    HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
+    selection.setDriver("builtin");
+    selection.setSettings(jsonObject(Map.of("modelName", "gpt-5", "variant", "default")));
+    return selection;
   }
 
   static HarnessModelSelectionDTO modelSelection() {

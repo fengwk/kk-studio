@@ -1,168 +1,102 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.ForkMode;
-import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
-import javax.sql.DataSource;
-
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.List;
 import java.util.UUID;
 
-/**
- * 真实 PostgreSQL / Testcontainers 下的 fork 契约：持久化依赖 {@code
- * schema/src/main/resources/db/migration/V1__schema.sql} 中 {@code ck_harness_entry_type} 包含的 {@code
- * FORK} 约束。本测试验证 FORK 事实经真实 SQL / jsonb 往返保真，且会话 fork 的 initial creation replay 幂等。
- *
- * <p>测试意图：
- *
- * <ul>
- *   <li><b>往返保真</b>：session fork 的新 Session 只产生 ROOT + FORK，FORK 的 mode / sourceThreadId /
- *       sourceEntryId 与 branch settings 经 jsonb 读回一致；
- *   <li><b>同 Session 分支 fork</b>：FORK 事实节点挂在共享前缀边界上（parent = 切点，且不携带 sourceThreadId）；
- *   <li><b>幂等</b>：同 raw 请求 replay 不新增行。
- * </ul>
- */
+/** 真实 PostgreSQL 验证 idle branch/fork 的历史持久化及创建重放。 */
 class PostgresqlForkContractTest {
 
-  private HarnessStore store;
-  private HarnessRuntime runtime;
-
-  @BeforeEach
-  void setUp() {
-    PostgresqlHarnessStoreFixture.reset();
-    store = PostgresqlHarnessStoreFixture.create();
-    runtime =
-        new HarnessRuntime(
-            store,
-            builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null),
-            () -> new CompactionConfig(20_000));
-  }
-
-  /** 会话 fork：ROOT + FORK 往返保真，branch settings 从来源切点推导，且 initial creation replay 幂等。 */
   @Test
-  void sessionForkRoundTripsForkFactAndReplaysIdempotently() {
-    applyDocumentedForkEntryTypeConstraint();
+  void idleForkCopiesHistoryAndReplaysIdempotently() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
     Baseline baseline = seedThreadBaseline(store);
-    UUID newSessionId = UUID.randomUUID();
-    UUID newThreadId = UUID.randomUUID();
-    AcceptCommandsCommand command =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewForkedSession(
-                baseline.threadId(), baseline.rootEntryId(), newSessionId, newThreadId, false),
-            List.of(userMessage("fork")));
-
-    AcceptedCommands accepted = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
-    assertFalse(accepted.replayed());
-    assertEquals(newSessionId, accepted.session().id());
-
-    EntryPath path =
-        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
-    assertEquals(2, path.entries().size());
-    ForkPayload payload = assertInstanceOf(ForkPayload.class, path.head().payload());
-    assertEquals(ForkMode.SESSION, payload.mode());
-    assertEquals(baseline.threadId(), payload.sourceThreadId());
-    assertEquals(baseline.rootEntryId(), payload.sourceEntryId());
-    // 切点是来源 ROOT：不复制前缀，FORK 直接挂在新 Session 的 ROOT 上。
-    assertEquals(path.root().id(), path.head().parentEntryId());
-    // 新 Session 的 ROOT settings 从来源切点（ROOT）推导，经真实 SQL 读回一致。
-    BranchSettings sourceSettings =
-        store.transaction(tx -> tx.entries().loadBranchSettings(baseline.rootEntryId()));
-    BranchSettings forkedSettings =
-        store.transaction(tx -> tx.entries().loadBranchSettings(accepted.thread().headEntryId()));
-    assertEquals(sourceSettings, forkedSettings);
-
-    AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
-    assertTrue(replay.replayed());
-    assertEquals(accepted.thread().id(), replay.thread().id());
-    assertEquals(
-        2,
-        store
-            .transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()))
-            .entries()
-            .size());
-  }
-
-  /** 同 Session 分支 fork：FORK 事实节点挂在共享前缀边界上，不携带来源 Thread。 */
-  @Test
-  void branchForkAppendsForkFactOnSharedPrefix() {
-    applyDocumentedForkEntryTypeConstraint();
-    Baseline baseline = seedThreadBaseline(store);
+    UUID cut = stopAtVisibleTurn(runtime, baseline);
+    var sourcePath = store.transaction(tx -> tx.entries().loadPath(cut));
+    UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
 
-    AcceptedCommands accepted =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(
-                    baseline.sessionId(), baseline.rootEntryId(), threadId, "branch", false),
-                List.of(userMessage("branch"))),
-            AcceptancePreflight.IDENTITY);
-    assertFalse(accepted.replayed());
+    var fork =
+        runtime.createIdleFork(
+            baseline.threadId(),
+            cut,
+            sessionId,
+            threadId,
+            "fork",
+            (retainedSessionId, copiedEntries) -> {
+              assertEquals(sessionId, retainedSessionId);
+              assertEquals(sourcePath.entries().size() - 1, copiedEntries.size());
+            });
+    assertEquals(sessionId, fork.sessionId());
+    assertEquals(threadId, fork.id());
+    assertNull(fork.parentThreadId());
 
-    EntryPath path =
-        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
-    assertEquals(2, path.entries().size());
-    Entry fork = path.head();
-    ForkPayload payload = assertInstanceOf(ForkPayload.class, fork.payload());
-    assertEquals(ForkMode.BRANCH, payload.mode());
-    assertEquals(baseline.rootEntryId(), payload.sourceEntryId());
-    assertNull(payload.sourceThreadId());
-    assertEquals(baseline.rootEntryId(), fork.parentEntryId());
-    assertEquals(baseline.sessionId(), accepted.session().id());
-  }
-
-  private static NewThreadCommand userMessage(String text) {
-    return new NewThreadCommand(
-        new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)))),
-        UUID.randomUUID());
-  }
-
-  /**
-   * 确保独占测试容器内生效与 {@code schema/src/main/resources/db/migration/V1__schema.sql} 一致的 {@code
-   * ck_harness_entry_type} 约束。
-   */
-  private static void applyDocumentedForkEntryTypeConstraint() {
-    DataSource dataSource = PostgresqlHarnessStoreFixture.dataSource();
-    try (Connection connection = dataSource.getConnection();
-        Statement statement = connection.createStatement()) {
-      statement.execute("alter table harness_entry drop constraint ck_harness_entry_type");
-      statement.execute(
-          "alter table harness_entry add constraint ck_harness_entry_type check (entry_type in"
-              + " ('ROOT','TURN_START','MESSAGE','CUSTOM','MODEL_ATTEMPT_FAILURE','CUSTOM_MESSAGE',"
-              + "'ASSISTANT_ERROR','ASSISTANT_ABORTED','COMPACTION','TURN_END','NOTIFICATION',"
-              + "'SETTINGS','FORK'))");
-    } catch (SQLException error) {
-      throw new IllegalStateException("cannot apply documented FORK entry type constraint", error);
+    var forkPath = store.transaction(tx -> tx.entries().loadPath(fork.headEntryId()));
+    assertEquals(sourcePath.entries().size(), forkPath.entries().size());
+    assertEquals(sessionId, forkPath.root().sessionId());
+    var sourceSettings =
+        store.transaction(tx -> tx.entries().loadBranchSettings(baseline.rootEntryId()));
+    var forkSettings =
+        store.transaction(tx -> tx.entries().loadBranchSettings(forkPath.root().id()));
+    assertEquals(sourceSettings, forkSettings);
+    for (int index = 1; index < forkPath.entries().size(); index++) {
+      assertNotEquals(sourcePath.entries().get(index).id(), forkPath.entries().get(index).id());
+      assertEquals(sessionId, forkPath.entries().get(index).sessionId());
     }
+
+    var replay =
+        runtime.createIdleFork(
+            baseline.threadId(),
+            cut,
+            sessionId,
+            threadId,
+            "fork",
+            (retainedSessionId, copiedEntries) -> {
+              throw new AssertionError("replay must not retain copied resources");
+            });
+    assertEquals(fork, replay);
+    assertTrue(store.transaction(tx -> loadCommandsByThread(tx, threadId)).isEmpty());
+  }
+
+  @Test
+  void idleBranchSharesCutWithoutCopyingHistory() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    Baseline baseline = seedThreadBaseline(store);
+    UUID cut = stopAtVisibleTurn(runtime, baseline);
+    UUID threadId = UUID.randomUUID();
+
+    var branch = runtime.createIdleBranch(baseline.threadId(), cut, threadId, "branch");
+    assertEquals(baseline.sessionId(), branch.sessionId());
+    assertEquals(cut, branch.headEntryId());
+    assertNull(branch.parentThreadId());
+    assertNotEquals(baseline.threadId(), branch.id());
+    var sourcePath = store.transaction(tx -> tx.entries().loadPath(cut));
+    var branchPath = store.transaction(tx -> tx.entries().loadPath(branch.headEntryId()));
+    assertEquals(
+        sourcePath.entries().stream().map(entry -> entry.id()).toList(),
+        branchPath.entries().stream().map(entry -> entry.id()).toList());
+    assertEquals(branch, runtime.createIdleBranch(baseline.threadId(), cut, threadId, "branch"));
+  }
+
+  private static UUID stopAtVisibleTurn(HarnessRuntime runtime, Baseline baseline) {
+    return runtime
+        .stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), 0))
+        .thread()
+        .headEntryId();
   }
 }

@@ -223,8 +223,8 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /**
-   * 既有 Thread HTTP 命令批的 shape admission：SET_EXECUTION 与 SET_ENVIRONMENT 按固定顺序出现，各至多一次且位于消息之前；user-like
-   * 输入（USER_MESSAGE）至多一条且必须位于末尾。
+   * 既有 Thread HTTP 命令批的 shape admission：SET_EXECUTION 与 SET_ENVIRONMENT
+   * 按固定顺序出现，各至多一次且位于消息之前；user-like 输入（USER_MESSAGE）至多一条且必须位于末尾。
    */
   private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
     List<ThreadCommandType> prefixOrder =

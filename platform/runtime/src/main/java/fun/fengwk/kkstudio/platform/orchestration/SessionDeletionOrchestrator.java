@@ -13,9 +13,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-/**
- * Harness 执行树与 Session 深删除协调器：在单一事务内删除 Thread 执行事实与 join 回执，并释放 Session blob 引用。
- */
+/** Harness 执行树与 Session 深删除协调器：在单一事务内删除 Thread 执行事实与 join 回执，并释放 Session blob 引用。 */
 @Service
 public class SessionDeletionOrchestrator {
 

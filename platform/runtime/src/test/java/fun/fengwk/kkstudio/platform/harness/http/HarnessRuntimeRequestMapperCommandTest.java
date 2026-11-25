@@ -7,8 +7,6 @@ import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMap
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.id;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.idText;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.mapContent;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newThreadTarget;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.request;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setEnvironment;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setExecution;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.threadBatch;
@@ -262,6 +260,5 @@ class HarnessRuntimeRequestMapperCommandTest {
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), null, "user"));
-
   }
 }

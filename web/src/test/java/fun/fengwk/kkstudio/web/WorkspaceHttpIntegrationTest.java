@@ -363,12 +363,7 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
     Cookie outsider =
         new Cookie(
             "studio_session", accounts.login("other-admin", "workspace-test-account").token());
-    for (String url :
-        new String[] {
-          threadUrl,
-          threadUrl + "/tree",
-          canvasUrl
-        }) {
+    for (String url : new String[] {threadUrl, threadUrl + "/tree", canvasUrl}) {
       mvc.perform(get(url).cookie(outsider))
           .andExpect(status().isNotFound())
           .andExpect(jsonPath("$.reason").value("RESOURCE_NOT_FOUND"));
