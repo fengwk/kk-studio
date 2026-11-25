@@ -24,7 +24,7 @@ export function ComposerControlSettingsButtons({
   const permissionLabel = settings.yoloEnabled
     ? t('ai.runtime.composer.permissionYolo')
     : t('ai.runtime.composer.permissionDefault')
-  const environmentLabel = settings.environmentName ?? t('ai.runtime.composer.environmentNone')
+  const environmentLabel = settings.environmentName ?? settings.defaultEnvironmentLabel ?? t('ai.runtime.composer.environmentNone')
   const settingsStatus = settings.status ?? null
   return (
     <>

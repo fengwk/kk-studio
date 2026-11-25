@@ -6,7 +6,7 @@ import {
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
-import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentSummaryDTO } from '@/shared/api/generated/contracts'
 import { environmentDisplayStatus } from '@/features/environment/environment-utils'
 import {
   type IdePendingClaim,
@@ -56,7 +56,7 @@ export interface UseIdeClaimReconciliationOptions {
   storage?: IdeSessionStorage
   initial: IdeSessionLoadResult
   session: IdeBrowserSessionState
-  getEnvironmentMap: () => Map<string, EnvironmentDTO>
+  getEnvironmentMap: () => Map<string, EnvironmentSummaryDTO>
   onStorageStatusChange: (unavailable: boolean) => void
 }
 

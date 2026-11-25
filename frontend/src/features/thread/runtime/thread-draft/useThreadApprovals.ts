@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createDecisionId } from '@/features/thread/command-batch-plan'
+import { createDecisionId } from '@/features/thread/thread-commands-plan'
 import { harnessService } from '@/shared/api/harness-service'
 import type { TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'

@@ -2,20 +2,19 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { EnvironmentList } from './EnvironmentList'
 import { useIdeWorkspace } from './ide-workspace-context'
-import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentSummaryDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('./ide-workspace-context', () => ({ useIdeWorkspace: vi.fn() }))
 
-const environment = (overrides: Partial<EnvironmentDTO> = {}): EnvironmentDTO => ({
-  id: 'env-1', name: 'Dev', daemonConfig: {} as EnvironmentDTO['daemonConfig'], status: 'READY', ready: true,
-  statusExpiresAt: Date.now() + 60_000, capabilities: [], version: '1', createdAt: 0, updatedAt: 0, ...overrides,
+const environment = (overrides: Partial<EnvironmentSummaryDTO> = {}): EnvironmentSummaryDTO => ({
+  id: 'env-1', name: 'Dev', status: 'READY', ready: true, capabilities: [], ...overrides,
 })
 
 describe('EnvironmentList', () => {
-  it('shows environments with status and opens available environment using resolved target', () => {
+  it('opens the resolved target when the server says ready even after the client deadline', () => {
     const target = { kind: 'vscode', environmentId: 'env-1', viewId: 'view-1' } as const
     const resolveTarget = vi.fn(() => target)
-    vi.mocked(useIdeWorkspace).mockReturnValue({ environments: [environment()], resolveTarget } as never)
+    vi.mocked(useIdeWorkspace).mockReturnValue({ environments: [environment({ statusExpiresAt: 1 })], resolveTarget } as never)
     const open = vi.fn()
     render(<EnvironmentList open={open} findOpenView={() => 'view-1'} />)
     const button = screen.getByRole('button', { name: '在 Dev 打开 VS Code' })

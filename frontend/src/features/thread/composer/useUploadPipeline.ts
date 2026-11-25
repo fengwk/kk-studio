@@ -17,7 +17,7 @@ import { request } from '@/shared/api/client'
 import type { StorageUploadDTO } from '@/shared/api/generated/contracts'
 import type { StorageService } from '@/shared/api/storage-service'
 import { mediaKindOf, type HashFile } from '@/shared/lib/upload-file'
-import { isImageTier } from '@/features/thread/runtime/agent-pane/pane-target'
+import { isImageTier } from '@/features/thread/runtime/state/thread-message-validation'
 
 export interface UploadPipelineOptions {
   registry: UploadRegistry

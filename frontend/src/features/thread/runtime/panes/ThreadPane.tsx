@@ -19,7 +19,7 @@ import type { EnvironmentStatusIdentity } from '@/features/thread/runtime/thread
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import { isExitPendingStatus } from '@/features/thread/runtime/thread-panel/thread-status-format'
-import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentSummaryDTO } from '@/shared/api/generated/contracts'
 import { deriveThreadWorkPhase } from '@/features/thread/runtime/thread-timeline/thread-work-phase'
 
 /** 只读 Footer facts；缺失字段整段省略。 */
@@ -64,7 +64,7 @@ export function ThreadPane({
   views,
 }: {
   projection: ThreadProjection
-  environments: EnvironmentDTO[]
+  environments: EnvironmentSummaryDTO[]
   heading?: ReactNode
   /** 输入与控制区：仅根面板传入；只读身份与导航由宿主单一顶栏呈现。 */
   controls?: ReactNode

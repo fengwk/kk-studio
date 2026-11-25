@@ -34,17 +34,6 @@
   "src/features/catalog/skills/skill-packages.css": {
     "spacing": 7
   },
-  "src/features/chat/chat-cards.css": {
-    "spacing": 1
-  },
-  "src/features/chat/chat-workspace.css": {
-    "spacing": 8,
-    "box-shadow": 1,
-    "outline": 1
-  },
-  "src/features/chat/new-branch-dialog.css": {
-    "spacing": 1
-  },
   "src/features/environment/environment-config.css": {
     "spacing": 1
   },
@@ -72,9 +61,6 @@
   "src/features/thread/composer/attachment-strip.css": {
     "spacing": 6
   },
-  "src/features/thread/history-tree.css": {
-    "spacing": 10
-  },
   "src/features/thread/runtime/interactions/interaction-card-content.css": {
     "spacing": 30,
     "box-shadow": 1,
@@ -87,9 +73,6 @@
   },
   "src/features/thread/runtime/interactions/interactions-page.css": {
     "spacing": 13
-  },
-  "src/features/thread/runtime/panes/agent-pane.css": {
-    "spacing": 3
   },
   "src/features/thread/runtime/panes/child-thread-view.css": {
     "spacing": 3
@@ -132,9 +115,6 @@
     "spacing": 25,
     "outline": 10
   },
-  "src/features/thread/runtime/thread-panel/name-rename-panel.css": {
-    "spacing": 5
-  },
   "src/features/thread/runtime/thread-panel/thread-command-palette.css": {
     "spacing": 6
   },
@@ -168,10 +148,6 @@
   },
   "src/features/thread/runtime/thread-panel/thread-widgets.css": {
     "spacing": 9
-  },
-  "src/features/thread/thread-selection.css": {
-    "spacing": 13,
-    "outline": 4
   },
   "src/features/thread/thread-state.css": {
     "spacing": 2

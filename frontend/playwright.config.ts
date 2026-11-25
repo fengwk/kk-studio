@@ -22,7 +22,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'npm run preview:browser',
-    url: `http://127.0.0.1:${browserPort}/browser-tests/chat-layout-harness.html`,
+    url: `http://127.0.0.1:${browserPort}/browser-tests/workspace-thread-harness.html`,
     reuseExistingServer: false,
     timeout: 30000,
   },
@@ -36,6 +36,7 @@ export default defineConfig({
         '**/plugin-*.pw.ts',
         '**/mutation-review.pw.ts',
         '**/account-settings.pw.ts',
+        '**/workspace-thread.pw.ts',
       ],
       outputDir: '../reports/layout',
       use: {
@@ -44,7 +45,7 @@ export default defineConfig({
     },
     {
       name: 'pane',
-      testMatch: ['**/pane-control.browser.ts', '**/chat-branch.browser.ts'],
+      testMatch: '**/workspace-thread.pw.ts',
       outputDir: '../reports/pane',
       timeout: 60000,
       use: {

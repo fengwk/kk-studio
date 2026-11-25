@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
-import { createStopRequestId } from '@/features/thread/command-batch-plan'
+import { createStopRequestId } from '@/features/thread/thread-commands-plan'
 import {
   projectCompactionBranch,
   type CompactionBranchProjection,

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router'
+import { Route, Routes } from 'react-router'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { OverlayHost } from '@/platform/workbench/WorkbenchSlots'
@@ -26,7 +26,6 @@ export function AppRouter() {
       <Route path="/*" element={(
         <WorkbenchShell navItems={PRIMARY_NAV_ITEMS} renderContent={(registeredContent) => (
           <Routes>
-            <Route path="/" element={<Navigate to="/chats" replace />} />
             <Route path="/interactions" element={(
               <>
                 <Suspense fallback={<StateBlock title={t('ai.common.loadingResources')} />}>

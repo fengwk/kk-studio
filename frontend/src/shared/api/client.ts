@@ -8,14 +8,12 @@ export interface RequestOptions {
   signal?: AbortSignal
   timeoutMs?: number
   jsonParser?: JsonParser
+  idempotencyKey?: string
 }
 
-interface FetchRequestConfig {
+interface FetchRequestConfig extends RequestOptions {
   method?: string
   body?: unknown
-  signal?: AbortSignal
-  timeoutMs?: number
-  jsonParser?: JsonParser
   responseType?: 'json' | 'text' | 'blob'
   readResponse?: (response: Response) => Promise<unknown>
 }
@@ -196,6 +194,7 @@ export async function executeFetch<T = unknown>(
     'Accept-Language': getLocale(),
     Accept: 'application/json, text/plain, */*',
   }
+  if (config.idempotencyKey !== undefined) headers['Idempotency-Key'] = config.idempotencyKey
 
   let bodyPayload: BodyInit | undefined
   if (config.body !== undefined) {
@@ -365,6 +364,7 @@ export function request<R extends keyof ApiRoutes>(
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
     jsonParser: options?.jsonParser,
+    idempotencyKey: options?.idempotencyKey,
     responseType: API_RESPONSE_TYPES[route],
   })
 }

@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useContext, useMemo } from 'react'
+import { AccountContext } from '@/features/account/account-context'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -7,13 +8,11 @@ import { fetchThreadSnapshot, isThreadSnapshotUnavailable } from '@/features/thr
 
 export function useAgentThreadQueries(threadId: string) {
   const queryClient = useQueryClient()
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents.list,
-    queryFn: () => agentService.listAgents(),
-  })
+  const account = useContext(AccountContext)
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
+    enabled: account?.user?.role === 'ADMIN',
   })
   const snapshotQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
@@ -25,7 +24,6 @@ export function useAgentThreadQueries(threadId: string) {
   const sessionId = thread?.sessionId ?? ''
 
   // 为派生数组提供稳定的身份，避免依赖它们的 hook 在每次渲染时都重跑。
-  const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data])
   const models = useMemo(
     () => modelsQuery.data ?? [],
     [modelsQuery.data],
@@ -47,13 +45,11 @@ export function useAgentThreadQueries(threadId: string) {
   const threadSnapshotSync = useThreadSnapshotSync(threadId, snapshot != null)
 
   return {
-    agentsQuery,
     modelsQuery,
     snapshotQuery,
     unavailable: threadSnapshotSync.unavailable,
     snapshotSyncError: threadSnapshotSync.error,
     retrySnapshotSync: threadSnapshotSync.retry,
-    agents,
     models,
     thread,
     sessionId,

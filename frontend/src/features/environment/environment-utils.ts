@@ -41,10 +41,8 @@ export function filterEnvironments(
 }
 
 /** READY 且租约有效才是就绪；过期租约明确降级为不可用。 */
-export function environmentDisplayStatus(environment: EnvironmentDTO): EnvironmentDisplayStatus {
-  const expired = environment.statusExpiresAt != null && environment.statusExpiresAt <= Date.now()
-  if (environment.status === 'READY' && (!environment.ready || expired)) return 'UNAVAILABLE'
-  return environment.status === 'CONNECTING' && expired ? 'UNAVAILABLE' : environment.status
+export function environmentDisplayStatus(environment: Pick<EnvironmentDTO, 'status' | 'ready'>): EnvironmentDisplayStatus {
+  return environment.status === 'READY' && !environment.ready ? 'UNAVAILABLE' : environment.status
 }
 
 /** 事件级别是封闭枚举，因此 class 映射只在这里定义一次，避免遗漏样式。 */

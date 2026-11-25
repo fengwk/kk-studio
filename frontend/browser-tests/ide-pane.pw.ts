@@ -1,5 +1,5 @@
 import { expect, test, type Page } from './fixture'
-import { testEnvironment } from '@/test-support/environment-test-fixtures'
+import type { EnvironmentSummaryDTO } from '@/shared/api/generated/contracts'
 import { IDE_SESSION_STORAGE_KEY } from '@/features/environment/ide/ide-session-state'
 
 const URL = '/browser-tests/ide-pane-harness.html'
@@ -16,6 +16,7 @@ async function mockIde(page: Page) {
   let epoch = 10
   let connections = 0
   let usage: Record<string, unknown>[] = []
+  const adminRequests: string[] = []
   await page.routeWebSocket(/\/ws\/events$/, (socket) => {
     const connectionId = `f1000000-0000-4000-8000-${String(++connections).padStart(12, '0')}`
     let connected = false
@@ -37,11 +38,16 @@ async function mockIde(page: Page) {
     const request = route.request()
     const url = new globalThis.URL(request.url())
     if (url.pathname === '/api/platform/environments') {
+      adminRequests.push(request.method())
+      await route.fulfill({ status: 403, contentType: 'application/problem+json', json: { status: 403, reason: 'ADMIN_REQUIRED' } })
+      return
+    }
+    if (url.pathname === '/api/platform/environment-summaries') {
       await route.fulfill({ json: [
-        testEnvironment({ id: ENV, name: 'local-node', ready: true, status: 'READY' }),
-        testEnvironment({ id: 'a1000000-0000-4000-8000-000000000002', name: 'remote-node', ready: false, status: 'CONNECTING' }),
-        testEnvironment({ id: 'a1000000-0000-4000-8000-000000000003', name: 'spare-node', ready: false, status: 'OFFLINE' }),
-      ] })
+        { id: ENV, name: 'local-node', ready: true, status: 'READY', capabilities: [] },
+        { id: 'a1000000-0000-4000-8000-000000000002', name: 'remote-node', ready: false, status: 'CONNECTING', capabilities: [] },
+        { id: 'a1000000-0000-4000-8000-000000000003', name: 'spare-node', ready: false, status: 'OFFLINE', capabilities: [] },
+      ] satisfies EnvironmentSummaryDTO[] })
       return
     }
     const path = `/api/ide/environments/${ENV}/views`
@@ -109,7 +115,7 @@ async function mockIde(page: Page) {
         type: 'kk-studio.ide.native-action', action: 'new-window', viewId: id, bindingEpoch: view.bindingEpoch,
       })}, location.origin)</script></body></html>` })
   })
-  return { opens, closes, closeResults }
+  return { opens, closes, closeResults, adminRequests }
 }
 
 async function openIde(page: Page) {
@@ -129,6 +135,17 @@ async function stableHost(page: Page) {
     frame.isConnected && frame.contentDocument === document && frame.parentElement === parent && frame.closest('[data-pane-id]') === pane
   ))).toBe(true)
 }
+
+test('a non-admin can see environments and open VS Code without querying the admin list', async ({ page }) => {
+  const { adminRequests } = await mockIde(page)
+  await openIde(page)
+  const sidebar = page.getByRole('navigation', { name: '环境列表' })
+  for (const name of ['local-node', 'remote-node', 'spare-node']) {
+    await expect(sidebar.getByText(name, { exact: true })).toBeVisible()
+  }
+  await expect(sidebar.getByRole('button')).toHaveCount(1)
+  expect(adminRequests).toEqual([])
+})
 
 test('keeps the iframe Document across split, swap, fullscreen, narrow hiding, and sibling close', async ({ page }) => {
   await mockIde(page)

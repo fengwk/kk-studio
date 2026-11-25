@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, CircleAlert, Download, SlidersHorizontal } from 'lucide-react'
@@ -30,6 +30,7 @@ import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import { useEnvironmentCardActions } from '@/features/environment/useEnvironmentCardActions'
+import { useEnvironmentStatusRecheck } from '@/features/environment/useEnvironmentStatusRecheck'
 import './environment-page.css'
 import type {
   EnvironmentDTO,
@@ -56,28 +57,6 @@ function formatUpdateProgress(update: EnvironmentUpdateProgressDTO, t: Translate
     total: progress.total,
     percent: progress.percent,
   })
-}
-
-/**
- * 状态截止点回读的容差：越过截止点一个很小的余量再回读，避免与服务端时钟在边界上竞争。
- *
- * 它是「一次回读」的容差而非轮询周期：每个截止点只排一次，截止点变化才会重排。
- */
-const STATUS_EXPIRY_RECHECK_SLACK_MS = 250
-
-/** 权威列表里最早的状态截止时间（毫秒）；没有任何截止时间时为 null。 */
-function earliestStatusExpiresAt(cards: EnvironmentDTO[]): number | null {
-  let earliest: number | null = null
-  for (const card of cards) {
-    const at = card.statusExpiresAt
-    if (at == null) {
-      continue
-    }
-    if (earliest == null || at < earliest) {
-      earliest = at
-    }
-  }
-  return earliest
 }
 
 /** 连接状态与配置状态是两个事实：READY 且租约有效才展示为 READY，过期租约明确降级。 */
@@ -153,23 +132,7 @@ export function EnvironmentsPage() {
   const runtimeById = new Map(environments.map(({ id }, index) => [id, runtimeQueries[index]]))
   const cards = filterEnvironments(environments, deferredSearch)
 
-  // 连接失效是时间事实，不是写入事实：服务端已给出每个有效状态的截止时间，这里只按最早的截止点排一次回读，
-  // 不轮询、也不维护客户端过期集合。心跳续租或任何 changed 推送更新权威数据后，这个定时器会被取消并按新截止点重排；
-  // 回读得到 OFFLINE（statusExpiresAt 为 null）后自然停止。
-  const statusExpiresAt = useMemo(
-    () => earliestStatusExpiresAt(environmentsQuery.data ?? []),
-    [environmentsQuery.data],
-  )
-
-  useEffect(() => {
-    if (statusExpiresAt == null) {
-      return
-    }
-    // 截止点只是状态成立的上界：稍微越过它再回读，避免与服务端时钟在边界上竞争。
-    const delay = Math.max(statusExpiresAt - Date.now(), 0) + STATUS_EXPIRY_RECHECK_SLACK_MS
-    const timer = setTimeout(invalidateEnvironments, delay)
-    return () => clearTimeout(timer)
-  }, [statusExpiresAt, invalidateEnvironments])
+  useEnvironmentStatusRecheck(environments, invalidateEnvironments)
 
   const managedEnvironment = environments.find(({ id }) => id === manageId)
   const retryList = () => void environmentsQuery.refetch({ cancelRefetch: false })
