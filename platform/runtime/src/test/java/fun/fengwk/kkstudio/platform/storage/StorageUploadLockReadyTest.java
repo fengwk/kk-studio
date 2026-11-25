@@ -30,8 +30,10 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
@@ -79,6 +81,63 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
         s3Storage.networkCalls().stream()
             .noneMatch(InMemoryS3StorageService.NetworkCall::transactionActive),
         "S3 calls must run outside database transactions: " + s3Storage.networkCalls());
+  }
+
+  @Test
+  void ownershipSeparatesUsersAndTrustedStaging() {
+    UUID first = UUID.randomUUID();
+    UUID second = UUID.randomUUID();
+    jdbc.update(
+        "insert into studio_user(id, username, password_hash, role) values (?, ?, 'x', 'USER'), (?, ?, 'x', 'USER')",
+        first,
+        "owner-" + first.toString().substring(0, 8),
+        second,
+        "owner-" + second.toString().substring(0, 8));
+    byte[] bytes = "ownership".getBytes(StandardCharsets.UTF_8);
+    StorageUploadReserveRequestDTO request = new StorageUploadReserveRequestDTO();
+    request.setFilename("own.txt");
+    request.setMediaType("text/plain");
+    request.setSizeBytes((long) bytes.length);
+    request.setSha256(storage.sha256Hex(bytes));
+    StorageUploadDTO pending = storageUploadService.reserve(request, first);
+    storage.putUploadContent(pending.getId(), bytes, "text/plain");
+    assertThrows(
+        DomainException.class,
+        () -> storageUploadService.complete(UUID.fromString(pending.getId()), second));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_blob where sha256 = ?",
+            Integer.class,
+            storage.sha256Hex(bytes)));
+    storageUploadService.complete(UUID.fromString(pending.getId()), first);
+    assertThrows(
+        DomainException.class,
+        () -> storageUploadService.peekReady(UUID.fromString(pending.getId()), second));
+    assertEquals(
+        storageUploadService.peekReady(UUID.fromString(pending.getId()), first),
+        tx.execute(
+            status -> storageUploadService.lockReady(UUID.fromString(pending.getId()), first)));
+    assertThrows(
+        DomainException.class,
+        () -> storageUploadService.delete(UUID.fromString(pending.getId()), second));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ? and cleanup_requested_at is null",
+            Integer.class,
+            UUID.fromString(pending.getId())));
+    storageUploadService.delete(UUID.fromString(pending.getId()), first);
+    assertThrows(
+        DomainException.class,
+        () -> storageUploadService.peekReady(UUID.fromString(pending.getId()), first));
+
+    StorageUploadService.StagedUpload staged =
+        storageUploadService.stage(
+            "trusted.txt", "text/plain", new ByteArrayInputStream(bytes), bytes.length);
+    assertEquals(
+        staged.blobId(),
+        tx.execute(status -> storageUploadService.lockReady(staged.uploadId())).blobId());
   }
 
   @Test

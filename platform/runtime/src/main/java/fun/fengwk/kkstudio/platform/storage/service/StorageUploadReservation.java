@@ -78,7 +78,11 @@ final class StorageUploadReservation {
 
   /** 预约用户上传：图片必须携带客户端缩放后的 MIME 与像素事实。 */
   StorageUploadDTO reserve(StorageUploadReserveRequestDTO request) {
-    return reserve(request, true);
+    return reserve(request, true, null);
+  }
+
+  StorageUploadDTO reserve(StorageUploadReserveRequestDTO request, UUID userId) {
+    return reserve(request, true, Objects.requireNonNull(userId, "userId"));
   }
 
   /** 预约服务端受控 staging：媒体事实由服务端在 complete 时探测。 */
@@ -88,6 +92,11 @@ final class StorageUploadReservation {
 
   private StorageUploadDTO reserve(
       StorageUploadReserveRequestDTO request, boolean requireImageMetadata) {
+    return reserve(request, requireImageMetadata, null);
+  }
+
+  private StorageUploadDTO reserve(
+      StorageUploadReserveRequestDTO request, boolean requireImageMetadata, UUID ownerUserId) {
     Objects.requireNonNull(request, "request must not be null");
     String filename = validateFilename(request.getFilename());
     String mediaType = normalizeMediaType(request.getMediaType());
@@ -140,6 +149,7 @@ final class StorageUploadReservation {
                       sha256,
                       imageMetadata,
                       createdAt);
+              upload.setOwnerUserId(ownerUserId);
               if (!uploadRepository.insert(upload)) {
                 throw new IllegalStateException("insert storage upload failed: " + uploadId);
               }

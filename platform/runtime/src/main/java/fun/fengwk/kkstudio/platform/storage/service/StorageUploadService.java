@@ -163,6 +163,10 @@ public class StorageUploadService {
     return reservation.reserve(request);
   }
 
+  public StorageUploadDTO reserve(StorageUploadReserveRequestDTO request, UUID userId) {
+    return reservation.reserve(request, userId);
+  }
+
   /** 预约服务端受控 staging：媒体事实由服务端在 complete 时探测。 */
   public StorageUploadDTO reserveStaged(StorageUploadReserveRequestDTO request) {
     return reservation.reserveStaged(request);
@@ -199,18 +203,28 @@ public class StorageUploadService {
 
   /** 完成上传：校验直传对象并绑定 blob，返回 READY。 */
   public StorageUploadDTO complete(UUID uploadId) {
+    return complete(uploadId, null);
+  }
+
+  public StorageUploadDTO complete(UUID uploadId, UUID userId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
     // 一次操作读取同一份 TTL 快照，complete 全程用它判定过期与绑定阈值。
     long uploadTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
     // 整个「校验/写对象 + 绑定」窗口独占持有该 upload 的操作锁（必须先于任何业务事务取锁）：
     // 后台清理只有拿到同一把锁才能 claim、删对象或删行，因此 copy 落盘与 bind 之间不可能出现「行已被删、对象成孤儿」的交错。
     try (StorageUploadOperationLock.Handle ignored = operationLock.acquire(uploadId)) {
-      return completeLocked(uploadId, uploadTtl);
+      return completeLocked(uploadId, uploadTtl, userId);
     }
   }
 
   private StorageUploadDTO completeLocked(UUID uploadId, long uploadTtl) {
-    StorageUpload upload = requireAvailableUpload(uploadId, uploadTtl);
+    return completeLocked(uploadId, uploadTtl, null);
+  }
+
+  private StorageUploadDTO completeLocked(UUID uploadId, long uploadTtl, UUID userId) {
+    StorageUpload upload = uploadRepository.getById(uploadId);
+    requireOwner(upload, userId);
+    requireCleanupAvailable(upload, uploadTtl);
     if (upload.getBlobId() != null) {
       // READY 重试：幂等并自愈最终对象，随后尽力清理残留的临时对象与未使用的候选对象。
       ensureBlobOriginal(upload.getBlobId(), uploadId);
@@ -426,14 +440,19 @@ public class StorageUploadService {
    *     STORAGE_VERIFICATION}：上传仍为 PENDING、已过期、 已请求 cleanup 或已被 claim
    */
   public ReadyUpload lockReady(UUID uploadId) {
+    return lockReady(uploadId, null);
+  }
+
+  /**
+   * Locks a ready upload owned by {@code userId}; null selects trusted ownerless staging uploads.
+   */
+  public ReadyUpload lockReady(UUID uploadId, UUID userId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
     long uploadTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
     return mandatoryTransactionTemplate.execute(
         status -> {
           StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
-          if (locked == null) {
-            throw DomainException.notFound("upload", "unknown upload: " + uploadId);
-          }
+          requireOwner(locked, userId);
           if (locked.getBlobId() == null) {
             throw DomainException.conflict(
                 "STORAGE_VERIFICATION",
@@ -455,13 +474,18 @@ public class StorageUploadService {
    *     STORAGE_VERIFICATION}：上传仍为 PENDING、已过期、 已请求 cleanup 或已被 claim
    */
   public ReadyUpload peekReady(UUID uploadId) {
+    return peekReady(uploadId, null);
+  }
+
+  /**
+   * Reads a ready upload owned by {@code userId}; null selects trusted ownerless staging uploads.
+   */
+  public ReadyUpload peekReady(UUID uploadId, UUID userId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
     long uploadTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
     // 只读：不起事务、不加行锁、不推进任何 lifecycle marker；最终消费仍由 lockReady 独占。
     StorageUpload upload = uploadRepository.getById(uploadId);
-    if (upload == null) {
-      throw DomainException.notFound("upload", "unknown upload: " + uploadId);
-    }
+    requireOwner(upload, userId);
     if (upload.getBlobId() == null) {
       throw DomainException.conflict(
           "STORAGE_VERIFICATION",
@@ -540,6 +564,18 @@ public class StorageUploadService {
       }
     } catch (RuntimeException error) {
       log.warn("failed to request cleanup for staged upload {}", upload.getId());
+    }
+  }
+
+  public void delete(UUID uploadId, UUID userId) {
+    StorageUpload upload = uploadRepository.getById(uploadId);
+    requireOwner(upload, userId);
+    delete(uploadId);
+  }
+
+  private static void requireOwner(StorageUpload upload, UUID userId) {
+    if (upload == null || !Objects.equals(userId, upload.getOwnerUserId())) {
+      throw DomainException.notFound("upload", "unknown upload");
     }
   }
 

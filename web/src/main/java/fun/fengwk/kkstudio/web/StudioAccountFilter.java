@@ -83,7 +83,9 @@ public class StudioAccountFilter extends OncePerRequestFilter {
       }
       boolean admin =
           under(path, "/api/users")
-              || (under(path, "/api/platform") && !(read && DIRECTORIES.contains(path)));
+              || (under(path, "/api/platform")
+                  && !under(path, "/api/platform/storage/uploads")
+                  && !(read && DIRECTORIES.contains(path)));
       if (admin && principal.role() != StudioRole.ADMIN) {
         reject(
             request,
