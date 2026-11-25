@@ -11,29 +11,15 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 [`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下用 BrowserRouter 包裹
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent。
+QueryClient → ApplicationContributions → BrowserPreferences → Account → ApplicationEvent。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
-[`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
-[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 汇总所有待处理的问卷与审批，并按
-`owner` 提供来源导航；无产品页面的独立 `AGENT_TASK` 只在这里显示来源标签，不生成导航入口。
-AppRouter 在唯一 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx) 中组合路由，
-通过 `renderContent` 组合 Chat 持久宿主与页面；即使进入 `/interactions`，宿主也不卸载。
-非 Chat 内容在宿主外独立渲染，注册页面的路由与 OverlayHost 仍由平台管理。
-AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
-[`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。
-PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
-合法 Chat/Thread/Canvas 工作区隐藏 topbar。Escape 按阻塞弹层、菜单、编辑焦点的优先级处理。
+[`AppRouter`](../../frontend/src/app/router.tsx) 声明 `/`、`/chat-spaces/:spaceId` 和 `/settings/:section`。登录不改变地址；`/` 进入本浏览器最近访问的活跃空间，或服务端返回的首个活跃空间，不隐式创建资源。
 
-一级特性按用户心智划分：[`chat`](../../frontend/src/features/chat)（Chat 工作区、Thread 运行时与编辑区）、
-[`catalog`](../../frontend/src/features/catalog)（Agent、模型、Provider、Skill Package 与 MCP Server）、
-[`environment`](../../frontend/src/features/environment)（执行环境与 IDE）、
-[`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas 与 settings。
-四个内置扩展提供页面：应用层的 [`ai-console`](../../frontend/src/app/ai-console) 把 chat、catalog、environment
-的页面组装进同一个 AI 导航分组，Canvas、Settings 各自声明扩展。
+[`WorkspaceRoute`](../../frontend/src/app/WorkspaceRoute.tsx) 将账号菜单、Canvas 和 VS Code 的 renderer、IDE 关闭守卫及环境列表组装进 [`WorkspaceShell`](../../frontend/src/features/workspace/WorkspaceShell.tsx)。外壳只认识窗格绑定与 renderer 契约；目录与状态入口、环境操作和深链共用打开流程。窗格布局、目录展开和侧栏宽度以用户与空间为键保存在浏览器。`chat-space` WebSocket 的 `tree`、`threads`、`space` 只触发回读，不直接写入缓存。
 i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 按业务领域维护固定前缀。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
-把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
+把扩展一次性展开为只读的 dialogs、overlays 与按 id 索引的 toolRenderers；
 重复 extension/contribution id 在组装时拒绝，运行时不动态注册、覆盖或订阅。
 扩展是编译期受信任 React module，安装集合由应用组装确定。
 tool renderer id 对应后端冻结 rendererKey，缺失时使用默认展示。
@@ -358,7 +344,7 @@ RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 标记 `ar
 没有 invocation 的模型调用草稿不表示已运行或成功。task 卡片将子 Thread 的冻结 Join 结果呈现为完成、失败或取消，并保留子 Thread 导航；仅 Join 的完成状态表达执行成功，不替用户验证报告内容。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
-`/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。单选题使用圆形单选控件，方向键在组内移动，空格或回车选定；多选题使用独立复选控件，已回答时只读展示所选答案。问卷参数无法解析时以告警横幅说明无法显示该问题，原始参数默认收起，拒答仍是可用的退出路径。
+Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。单选题使用圆形单选控件，方向键在组内移动，空格或回车选定；多选题使用独立复选控件，已回答时只读展示所选答案。问卷参数无法解析时以告警横幅说明无法显示该问题，原始参数默认收起，拒答仍是可用的退出路径。
 
 ### 思考、系统通知与压缩卡片
 
@@ -384,9 +370,7 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 
 ## Canvas 编辑与上传
 
-画布库与其他资源列表共用紧凑资源卡。点击“创建新画布”后填写名称并确认才创建；
-取消不会写入。创建期间不能重复提交，失败保留表单供修改重试。
-已有画布的“进入”仅打开该画布，不创建新对象。编辑器标题旁显示保存状态，不显示协议版本；
+从目录菜单新建画布，确认名称后写入当前空间和目录，再选择打开窗格。取消选择窗格不会删除已创建的画布；打开已有画布不做写入。同一 Canvas 可在多个窗格打开，共用文档缓存，各自保存选中项和视口。
 空画布提供与左侧“+”相同的添加入口，说明如何添加资源和运行 Function，添加首个节点后引导消失。
 
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
