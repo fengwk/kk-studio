@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /** PostgreSQL-backed workspace thread deletion coverage. */
@@ -101,12 +103,27 @@ class WorkspaceThreadDeletionHttpIntegrationTest extends WebPostgresTestSupport 
             "select count(*) from harness_thread_command where thread_id = ?",
             Integer.class,
             branchThread));
-    jdbc.update("delete from harness_thread_command where thread_id = ?", branchThread);
     jdbc.update(
         "delete from durable_work where target_type = 'THREAD' and target_id = ?", branchThread);
 
     JsonNode continueSchedule =
         createSchedule(space, "CONTINUE", session, null, null, branchThread);
+    var busy = manualRun(space, continueSchedule.get("id").asText());
+    assertEquals("SKIPPED", busy.get("result").asText());
+    assertEquals("EXECUTION_NOT_SETTLED", busy.get("reason").asText());
+    jdbc.update("delete from harness_thread_command where thread_id = ?", branchThread);
+    UUID idleHead =
+        jdbc.queryForObject(
+            "select head_entry_id from harness_thread where id=?", UUID.class, branchThread);
+    UUID open =
+        insertEntry(
+            session,
+            idleHead,
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, branchThread));
+    jdbc.update("update harness_thread set head_entry_id=? where id=?", open, branchThread);
+    assertEquals(
+        "SKIPPED", manualRun(space, continueSchedule.get("id").asText()).get("result").asText());
+    jdbc.update("update harness_thread set head_entry_id=? where id=?", idleHead, branchThread);
     JsonNode continueRun = manualRun(space, continueSchedule.get("id").asText());
     assertEquals("SUBMITTED", continueRun.get("result").asText());
     assertEquals(branchId, continueRun.at("/thread/id").asText());
@@ -158,6 +175,34 @@ class WorkspaceThreadDeletionHttpIntegrationTest extends WebPostgresTestSupport 
     assertTrue(
         persistedBranchRuns.at("/items/0/thread").isMissingNode()
             || persistedBranchRuns.at("/items/0/thread").isNull());
+    assertNull(
+        jdbc.queryForObject(
+            "select output_thread_id from workspace_schedule_run where id=?",
+            UUID.class,
+            UUID.fromString(branchRun.get("id").asText())));
+
+    // Same derived title on a different branch reaches the genuine Harness name rejection.
+    String schedule = branchSchedule.get("id").asText();
+    UUID rejectedKey = UUID.randomUUID();
+    UUID commandKey =
+        UUID.nameUUIDFromBytes(
+            (schedule + ":manual:" + rejectedKey).getBytes(StandardCharsets.UTF_8));
+    mvc.perform(
+            post(space + "/sessions/" + session + "/branches")
+                .cookie(login)
+                .header("Origin", "http://localhost")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType("application/json")
+                .content(
+                    """
+                {"sourceThreadId":"%s","turnEndEntryId":"%s","title":"Scheduled %s"}
+                """
+                        .formatted(sourceThread, end, commandKey)))
+        .andExpect(status().isOk());
+    var rejected = manualRun(space, schedule, rejectedKey);
+    assertEquals("NOT_SUBMITTED", rejected.get("result").asText());
+    assertEquals("THREAD_NAME_EXISTS", rejected.get("reason").asText());
+    assertEquals(rejected, manualRun(space, schedule, rejectedKey));
   }
 
   private JsonNode createSchedule(
@@ -189,12 +234,16 @@ class WorkspaceThreadDeletionHttpIntegrationTest extends WebPostgresTestSupport 
   }
 
   private JsonNode manualRun(String space, String id) throws Exception {
+    return manualRun(space, id, UUID.randomUUID());
+  }
+
+  private JsonNode manualRun(String space, String id, UUID key) throws Exception {
     return mapper.readTree(
         mvc.perform(
                 post(space + "/schedules/" + id + "/runs")
                     .cookie(login)
                     .header("Origin", "http://localhost")
-                    .header("Idempotency-Key", UUID.randomUUID().toString()))
+                    .header("Idempotency-Key", key.toString()))
             .andExpect(status().isOk())
             .andReturn()
             .getResponse()

@@ -225,8 +225,13 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
       // The live claim above still fences the same configuration and mailbox.
       recordRejection(space.get(), rejected);
     }
+    // A later minute can become due between the failed submission and its outcome transaction.
+    // Keep that occurrence pending instead of advancing it without a submission attempt.
+    Instant advanceFrom = rejected == null ? now : rejected.scheduled;
     Instant following =
-        next(schedule.trigger(), schedule.timeZone(), now, 1).stream().findFirst().orElse(null);
+        next(schedule.trigger(), schedule.timeZone(), advanceFrom, 1).stream()
+            .findFirst()
+            .orElse(null);
     repository.advance(id, following);
     if (following == null) {
       work.complete(claim);

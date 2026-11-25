@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -32,6 +35,7 @@ import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -80,7 +84,7 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
         jdbc.update(
             "with due as (select date_trunc('minute', clock_timestamp()) as at), "
                 + "updated_schedule as (update workspace_schedule set next_due_at=due.at, "
-                + "trigger=jsonb_build_object('type','ONCE','localDate', "
+                + "trigger=trigger || jsonb_build_object('localDate', "
                 + "to_char(due.at at time zone 'UTC','YYYY-MM-DD'),'time', "
                 + "to_char(due.at at time zone 'UTC','HH24:MI')) from due where id=? "
                 + "returning id,next_due_at) update durable_work dw set available_at=updated_schedule.next_due_at "
@@ -89,14 +93,27 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
     Timestamp dueAt =
         jdbc.queryForObject(
             "select next_due_at from workspace_schedule where id=?", Timestamp.class, scheduleId);
+    int sessionsBefore = jdbc.queryForObject("select count(*) from harness_session", Integer.class);
+    int threadsBefore = jdbc.queryForObject("select count(*) from harness_thread", Integer.class);
+    int commandsBefore =
+        jdbc.queryForObject("select count(*) from harness_thread_command", Integer.class);
     var claim = schedules.claim().orElseThrow();
     String function = "lose_schedule_lease_" + UUID.randomUUID().toString().replace("-", "");
     jdbc.execute(
         "create function public."
             + function
             + "() returns trigger language plpgsql as $$"
-            + "begin update durable_work set lease_token=gen_random_uuid() where target_type='SCHEDULE' and target_id=new.schedule_id; return new; end $$");
-    try {
+            + """
+            begin
+              if new.result <> 'SUBMITTED' or not exists (
+                select 1 from harness_thread_command where thread_id=new.output_thread_id
+              ) then raise exception 'expected a submitted command before lease loss'; end if;
+              perform pg_advisory_xact_lock(130, 7810);
+              return new;
+            end $$
+            """);
+    UUID replacement = UUID.randomUUID();
+    try (var executor = Executors.newSingleThreadExecutor()) {
       jdbc.execute(
           "create trigger lose_schedule_lease before insert on workspace_schedule_run "
               + "for each row when (new.schedule_id = '"
@@ -104,7 +121,54 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
               + "'::uuid) execute function public."
               + function
               + "()");
-      assertThrowsExactly(IllegalArgumentException.class, () -> schedules.auto(claim));
+      var competitorSource =
+          new DriverManagerDataSource(sharedJdbcUrl(), sharedJdbcUsername(), sharedJdbcPassword());
+      var competitor = new JdbcTemplate(competitorSource);
+      var worker =
+          new TransactionTemplate(new JdbcTransactionManager(competitorSource))
+              .execute(
+                  status -> {
+                    competitor.execute("select pg_advisory_xact_lock(130, 7810)");
+                    var attempt = executor.submit(() -> schedules.auto(claim));
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    while (!Boolean.TRUE.equals(
+                        competitor.queryForObject(
+                            """
+            select exists (select 1 from pg_locks where locktype='advisory'
+              and classid=130 and objid=7810 and objsubid=2 and not granted)
+            """,
+                            Boolean.class))) {
+                      if (attempt.isDone()) {
+                        try {
+                          attempt.get();
+                        } catch (ExecutionException ex) {
+                          throw new AssertionError(
+                              "worker failed before run insertion", ex.getCause());
+                        } catch (InterruptedException ex) {
+                          Thread.currentThread().interrupt();
+                          throw new AssertionError(ex);
+                        }
+                        throw new AssertionError("worker returned before run insertion");
+                      }
+                      assertTrue(
+                          System.nanoTime() < deadline, "worker did not reach run insertion");
+                      Thread.yield();
+                    }
+                    assertEquals(
+                        1,
+                        competitor.update(
+                            """
+            update durable_work set lease_token=?, lease_until=statement_timestamp()+interval '2 minutes'
+            where target_type='SCHEDULE' and target_id=? and lease_token=?
+            """,
+                            replacement,
+                            scheduleId,
+                            claim.leaseToken()));
+                    return attempt;
+                  });
+      var failure =
+          assertThrowsExactly(ExecutionException.class, () -> worker.get(5, TimeUnit.SECONDS));
+      assertInstanceOf(IllegalArgumentException.class, failure.getCause());
     } finally {
       jdbc.execute("drop trigger if exists lose_schedule_lease on workspace_schedule_run");
       jdbc.execute("drop function if exists public." + function + "()");
@@ -120,7 +184,7 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
             Timestamp.class,
             scheduleId));
     assertEquals(
-        claim.leaseToken(),
+        replacement,
         jdbc.queryForObject(
             "select lease_token from durable_work where target_type='SCHEDULE' and target_id=?",
             UUID.class,
@@ -138,27 +202,12 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
             Integer.class,
             scheduleId));
     assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from harness_session s where exists (select 1 from workspace_resource r "
-                + "where r.workspace_id=(select workspace_id from workspace_schedule where id=?) and r.session_id=s.id)",
-            Integer.class,
-            scheduleId));
+        sessionsBefore, jdbc.queryForObject("select count(*) from harness_session", Integer.class));
     assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from harness_thread t where exists (select 1 from workspace_resource r "
-                + "where r.workspace_id=(select workspace_id from workspace_schedule where id=?) and r.session_id=t.session_id)",
-            Integer.class,
-            scheduleId));
+        threadsBefore, jdbc.queryForObject("select count(*) from harness_thread", Integer.class));
     assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from harness_thread_command c where exists (select 1 from harness_thread t "
-                + "join workspace_resource r on r.session_id=t.session_id where "
-                + "r.workspace_id=(select workspace_id from workspace_schedule where id=?) and t.id=c.thread_id)",
-            Integer.class,
-            scheduleId));
+        commandsBefore,
+        jdbc.queryForObject("select count(*) from harness_thread_command", Integer.class));
   }
 
   @Test
