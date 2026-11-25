@@ -99,8 +99,7 @@ public class IdeBrowserUseGateway {
     }
   }
 
-  private static Proofs toProofs(
-      UUID expectedBrowserSessionId, UUID userId, IdeBrowserUse usage) {
+  private static Proofs toProofs(UUID expectedBrowserSessionId, UUID userId, IdeBrowserUse usage) {
     if (!usage.browserSessionId().equals(expectedBrowserSessionId)) {
       throw unavailable("browser event node returned a mismatched browser session usage", null);
     }
@@ -112,11 +111,7 @@ public class IdeBrowserUseGateway {
       }
       proofs.add(
           new Proof(
-              view.environmentId(),
-              view.viewId(),
-              usage.browserSessionId(),
-              userId,
-              bindingEpoch));
+              view.environmentId(), view.viewId(), usage.browserSessionId(), userId, bindingEpoch));
     }
     return new Proofs(usage.browserSessionId(), userId, usage.revision(), proofs);
   }

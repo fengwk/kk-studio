@@ -108,11 +108,18 @@ public final class IdeLeaseCoordinator {
     Map<Group, List<EnvironmentIdeViewDTO>> groups = new LinkedHashMap<>();
     for (EnvironmentIdeViewDTO view : views) {
       try {
+        UUID userId =
+            localEnvironmentIdeService.boundUser(
+                environmentId, Uuids.parseCanonical(view.getViewId(), "viewId"));
+        if (userId == null) {
+          continue;
+        }
         Group group =
             new Group(
                 Uuids.parseCanonical(view.getEventNodeId(), "eventNodeId"),
                 Uuids.parseCanonical(view.getConnectionId(), "connectionId"),
-                Uuids.parseCanonical(view.getBrowserSessionId(), "browserSessionId"));
+                Uuids.parseCanonical(view.getBrowserSessionId(), "browserSessionId"),
+                userId);
         groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(view);
       } catch (IllegalArgumentException error) {
         // UI 服务返回的 DTO 已在写入时校验；这里仍然 fail-closed 地跳过坏条目。
@@ -127,7 +134,7 @@ public final class IdeLeaseCoordinator {
       try {
         proofs =
             browserUse.activeBoundProofs(
-                group.eventNodeId, group.connectionId, group.browserSessionId);
+                group.eventNodeId, group.connectionId, group.browserSessionId, group.userId);
       } catch (RuntimeException error) {
         // 事件节点不可达/查询失败：该组不续租，不把失败当成不活跃以外的任何事实。
         log.warn(
@@ -192,5 +199,5 @@ public final class IdeLeaseCoordinator {
     return false;
   }
 
-  private record Group(UUID eventNodeId, UUID connectionId, UUID browserSessionId) {}
+  private record Group(UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {}
 }

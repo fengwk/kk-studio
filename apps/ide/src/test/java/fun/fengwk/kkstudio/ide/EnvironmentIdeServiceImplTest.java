@@ -1049,8 +1049,7 @@ class EnvironmentIdeServiceImplTest {
     return transport.allActions;
   }
 
-  private EnvironmentIdeOpenViewDTO openRequest(
-      String mode, long expectedEpoch, String directory) {
+  private EnvironmentIdeOpenViewDTO openRequest(String mode, long expectedEpoch, String directory) {
     createPreflightExpected = "create".equals(mode);
     EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
     request.setViewId(VIEW.toString());

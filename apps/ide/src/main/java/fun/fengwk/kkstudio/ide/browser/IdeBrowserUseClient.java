@@ -115,8 +115,8 @@ public final class IdeBrowserUseClient {
     Objects.requireNonNull(claimId, "claimId");
     if (isLocal(identity)) {
       return localRegistry
-          .findExactIntent(identity, browserSessionId, environmentId, viewId, claimId)
-          .isPresent()
+              .findExactIntent(identity, browserSessionId, environmentId, viewId, claimId)
+              .isPresent()
           && (userId == null || localRegistry.userId(identity).filter(userId::equals).isPresent());
     }
     IdeBrowserUseIntentQuery query =

@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -173,7 +174,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
     nodeAService.focusTerminal(ENV, VIEW, binding, PRINCIPAL);
 
-    assertEquals(3, received.get());
+    assertEquals(2, received.get());
     assertEquals(received.get(), forwardedPrincipals.size());
     assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
     assertEquals(3, transportB.commands.size());

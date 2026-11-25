@@ -1,5 +1,10 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioOriginPolicy;
@@ -10,8 +15,7 @@ import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelExchange;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -24,8 +28,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 /**
  * IDE 数据面网关核心：负责同源校验、路由调度、本地隧道交付与远程单跳转发。

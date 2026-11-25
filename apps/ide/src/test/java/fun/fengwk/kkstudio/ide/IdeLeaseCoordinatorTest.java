@@ -100,7 +100,8 @@ class IdeLeaseCoordinatorTest {
     views.response = views(zeroRoot);
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
 
     coordinator.onHeartbeat(ENV, IDENTITY, 44L);
 
@@ -120,7 +121,8 @@ class IdeLeaseCoordinatorTest {
     gateway.failures.add(new Group(EVENT_NODE, CONNECTION, DOCUMENT));
     gateway.proofs.put(
         new Group(otherNode, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_2, DOCUMENT, 8L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_2, DOCUMENT, 8L))));
 
     coordinator.onHeartbeat(ENV, IDENTITY, 43L);
 
@@ -145,7 +147,8 @@ class IdeLeaseCoordinatorTest {
     views.response = views(view(VIEW_1, 7L));
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
     gateway.afterQuery =
         () -> transport.identity = new DaemonConnectionIdentity(ENV, "other-daemon");
 
@@ -164,7 +167,8 @@ class IdeLeaseCoordinatorTest {
     views.response = views(reported);
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_2, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, USER_ID, 1L, List.of(proof(VIEW_2, DOCUMENT, 7L))));
 
     coordinator.onHeartbeat(ENV, IDENTITY, 44L);
 

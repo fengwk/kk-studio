@@ -74,13 +74,13 @@ public class IdeBrowserUseInternalController {
       UUID userId = query.user();
       boolean matched =
           registry
-              .findExactIntent(
-                  query.identity(),
-                  query.browserSession(),
-                  query.environment(),
-                  query.view(),
-                  query.claim())
-              .isPresent()
+                  .findExactIntent(
+                      query.identity(),
+                      query.browserSession(),
+                      query.environment(),
+                      query.view(),
+                      query.claim())
+                  .isPresent()
               && registry.userId(query.identity()).filter(userId::equals).isPresent();
       return new IdeBrowserUseIntentReply(matched);
     } catch (RuntimeException error) {
@@ -109,7 +109,8 @@ public class IdeBrowserUseInternalController {
       throw DomainException.validation("browserUse", "browser-use query is invalid");
     }
     Optional<IdeBrowserUse> proofs = registry.activeBoundProofs(identity, browserSessionId);
-    UUID userId = registry.userId(identity).orElseThrow(() -> DomainException.notFound("browserUse"));
+    UUID userId =
+        registry.userId(identity).orElseThrow(() -> DomainException.notFound("browserUse"));
     return ResponseEntity.ok(
         IdeBrowserUseSnapshot.from(
             identity, userId, proofs.orElseThrow(() -> DomainException.notFound("browserUse"))));

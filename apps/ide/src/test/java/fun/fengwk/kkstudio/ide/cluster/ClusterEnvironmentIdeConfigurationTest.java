@@ -113,8 +113,7 @@ class ClusterEnvironmentIdeConfigurationTest {
             context.registerBean(
                 JdbcTemplate.class, () -> new JdbcTemplate(mock(DataSource.class)));
             context.registerBean(IdeCommandTransport.class, () -> mock(IdeCommandTransport.class));
-            context.registerBean(
-                ResourceAccess.class, () -> mock(ResourceAccess.class));
+            context.registerBean(ResourceAccess.class, () -> mock(ResourceAccess.class));
             context.registerBean(
                 SessionBlobRefManager.class, () -> mock(SessionBlobRefManager.class));
             context.registerBean(
