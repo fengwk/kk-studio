@@ -10,8 +10,6 @@ import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.ForkMode;
-import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
@@ -28,7 +26,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * HarnessRuntime 内部的同步 acceptCommands 控制面。
@@ -212,25 +209,6 @@ final class AcceptCommandsControl {
             false,
             false),
         ticket);
-  }
-
-  static boolean isCompactionBranchEntry(
-      HarnessStore.Transaction tx, UUID sessionId, UUID entryId) {
-    for (ThreadState thread : tx.threads().listBySession(sessionId)) {
-      if (thread.kind() != ThreadKind.COMPACTION) {
-        continue;
-      }
-      boolean inCompactionBranch = false;
-      for (Entry entry : tx.entries().loadPath(thread.headEntryId()).entries()) {
-        if (entry.payload() instanceof ForkPayload fork && fork.mode() == ForkMode.BRANCH) {
-          inCompactionBranch = true;
-        }
-        if (inCompactionBranch && entry.id().equals(entryId)) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /** 全新 batch 的共性写入：preflight、插入 Commands、推进 version/next sequence、请求 THREAD Work。 */

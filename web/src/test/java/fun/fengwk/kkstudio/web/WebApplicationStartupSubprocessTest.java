@@ -8,6 +8,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -53,7 +55,11 @@ class WebApplicationStartupSubprocessTest {
           Thread.sleep(500);
         }
         assertTrue(ready, "production entry readiness timed out");
-        var models = entry.get("/api/platform/models");
+        // 用空库 V1 自带的管理员登录，验证迁移、会话签发和受保护的目录读取。
+        assertEquals(401, entry.get("/api/platform/models").statusCode());
+        String cookie = entry.loginAsBootstrapAdmin();
+        var models =
+            entry.send(entry.request("/api/platform/models").header("Cookie", cookie).GET());
         assertEquals(200, models.statusCode());
         assertTrue(JsonMapper.builder().build().readTree(models.body()).isArray());
       }
@@ -173,13 +179,37 @@ class WebApplicationStartupSubprocessTest {
       this.log = log;
     }
 
+    String loginAsBootstrapAdmin() throws Exception {
+      var login =
+          send(
+              request("/api/auth/login")
+                  .header("Origin", origin())
+                  .header("Content-Type", "application/json")
+                  .POST(
+                      HttpRequest.BodyPublishers.ofString(
+                          "{\"username\":\"kkstudio\",\"password\":\"kkstudio\"}")));
+      assertEquals(200, login.statusCode());
+      return login.headers().allValues("Set-Cookie").stream()
+          .map(value -> value.split(";", 2)[0])
+          .filter(value -> value.startsWith(StudioBrowserSession.COOKIE + "="))
+          .findFirst()
+          .orElseThrow();
+    }
+
+    String origin() {
+      return "http://127.0.0.1:" + port;
+    }
+
+    HttpRequest.Builder request(String path) {
+      return HttpRequest.newBuilder(URI.create(origin() + path)).timeout(Duration.ofSeconds(5));
+    }
+
     HttpResponse<String> get(String path) throws Exception {
-      return http.send(
-          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
-              .timeout(Duration.ofSeconds(5))
-              .GET()
-              .build(),
-          HttpResponse.BodyHandlers.ofString());
+      return send(request(path).GET());
+    }
+
+    HttpResponse<String> send(HttpRequest.Builder request) throws Exception {
+      return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     public void close() throws Exception {

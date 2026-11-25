@@ -24,7 +24,7 @@ import java.util.UUID;
 /** Thread 的 Tool approval 人工决策端点。 */
 class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSupport {
 
-  /** 测试意图：审批身份只能来自服务端认证主体。请求体携带 actor（无论伪造与否）都是未知字段 → 400，且绝不触达交互服务。 */
+  /** 测试意图：审批身份只能来自认证主体。请求体携带 actor（无论伪造与否）都是未知字段 → 400，且绝不触达交互服务。 */
   @Test
   void approvalRejectsForgedActorFieldWithoutTouchingService() throws Exception {
     mockMvc
@@ -38,8 +38,7 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
                 .content(
                     "{\"decision\":\"ALLOW\",\"decisionId\":\""
                         + idText(1)
-                        + "\",\"actor\":\"admin\"}")
-                .principal(() -> "alice"))
+                        + "\",\"actor\":\"admin\"}"))
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(interactionService);
@@ -67,8 +66,7 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
                 .content(
                     "{\"decision\":\"DENY\",\"decisionId\":\""
                         + idText(1)
-                        + "\",\"reason\":\"denied\"}")
-                .principal(() -> "alice"))
+                        + "\",\"reason\":\"denied\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("WAITING_APPROVAL"));
 
@@ -83,8 +81,7 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
                 .content(
                     "{\"decision\":\"DENY\",\"decisionId\":\""
                         + idText(1)
-                        + "\",\"reason\":\"denied\",\"operator\":\"admin\"}")
-                .principal(() -> "alice"))
+                        + "\",\"reason\":\"denied\",\"operator\":\"admin\"}"))
         .andExpect(status().isBadRequest());
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
@@ -115,8 +112,7 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
                       + idText(100)
                       + "/approval")
                   .contentType(MediaType.APPLICATION_JSON)
-                  .content(body)
-                  .principal(() -> "alice"))
+                  .content(body))
           .andExpect(status().isBadRequest());
     }
 
@@ -124,7 +120,7 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
     verifyNoInteractions(runtime);
   }
 
-  /** 意图：审批路由返回决策后的权威 Invocation，并证明 actor 来自认证主体。 */
+  /** 意图：审批路由返回决策后的权威 Invocation，并证明 actor 来自认证主体 userId。 */
   @Test
   void approvalRouteReturnsWaitingInvocationAndActorFromPrincipal() throws Exception {
     when(interactionService.decideApproval(any(ToolApprovalCommand.class)))
@@ -137,16 +133,15 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
                     + idText(100)
                     + "/approval")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(1) + "\"}")
-                .principal(() -> "alice"))
+                .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(1) + "\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("WAITING_APPROVAL"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService).decideApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
-    // 审批 actor 只能来自认证主体，请求体不携带身份。
-    assertEquals("alice", captor.getValue().actor());
+    // 审批 actor 只能来自认证主体 userId，请求体不携带身份。
+    assertEquals(PRINCIPAL.userId().toString(), captor.getValue().actor());
   }
 
   /**
@@ -168,8 +163,7 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
                     + idText(100)
                     + "/approval")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(51) + "\"}")
-                .principal(() -> "alice"))
+                .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(51) + "\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("WAITING_APPROVAL"));
 
@@ -178,6 +172,6 @@ class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSup
     assertEquals(childThreadId, captor.getValue().threadId());
     assertEquals(toolInvocationId, captor.getValue().toolInvocationId());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
-    assertEquals("alice", captor.getValue().actor());
+    assertEquals(PRINCIPAL.userId().toString(), captor.getValue().actor());
   }
 }

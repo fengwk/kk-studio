@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
@@ -10,6 +11,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessModelRequestDebugController;
@@ -39,6 +44,8 @@ abstract class HarnessThreadControllerTestSupport {
   protected UsageCostProjectionService usageCostProjectionService;
   protected EnvironmentService environmentService;
   protected MockMvc mockMvc;
+  protected static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(id(1), "alice", StudioRole.USER);
 
   @BeforeEach
   void setUpThreadController() {
@@ -59,6 +66,9 @@ abstract class HarnessThreadControllerTestSupport {
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 controller, new HarnessModelRequestDebugController(modelRequestDebugService))
+            .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
+            .defaultRequest(
+                get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(new ProblemAdvice(new MessageService()))

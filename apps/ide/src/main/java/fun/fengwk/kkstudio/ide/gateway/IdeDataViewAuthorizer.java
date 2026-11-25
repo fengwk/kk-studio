@@ -9,7 +9,6 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 浏览器入口的视图授权端口：数据面只接受绑定到当前 Environment、Daemon 实例、viewId 与 bindingEpoch 的入口凭据。 */
-@FunctionalInterface
 public interface IdeDataViewAuthorizer {
 
   /**
@@ -24,10 +23,7 @@ public interface IdeDataViewAuthorizer {
       EnvironmentId environmentId, UUID viewId, String cookieHeader);
 
   /** 校验已登记入口 cookie 是否属于当前已认证账户。 */
-  default boolean belongsToUser(
-      EnvironmentId environmentId, UUID viewId, String cookieHeader, UUID userId) {
-    return false;
-  }
+  boolean belongsToUser(EnvironmentId environmentId, UUID viewId, String cookieHeader, UUID userId);
 
   /** 一条已授权的视图数据入口。 */
   record IdeDataViewAccess(

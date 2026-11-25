@@ -11,12 +11,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 
 /**
  * SPA fallback 行为测试。
@@ -63,9 +66,16 @@ public class SpaFallbackTest extends WebPostgresTestSupport {
 
   @Test
   public void shouldNotFallbackForChannelAndIdePaths() throws Exception {
-    // 根路径和子路径均不属于 SPA；相似前缀仍是正常前端路由。
-    for (String path : new String[] {"/ws", "/ws/missing", "/ide", "/ide/missing"}) {
+    // WebSocket 路径不属于 SPA；IDE 路径用管理员会话验证已认证请求仍返回 404。
+    for (String path : new String[] {"/ws", "/ws/missing"}) {
       mockMvc.perform(get(path)).andExpect(status().isNotFound());
+    }
+    Cookie adminCookie =
+        new Cookie(
+            StudioBrowserSession.COOKIE,
+            adminCookieHeader().substring((StudioBrowserSession.COOKIE + "=").length()));
+    for (String path : new String[] {"/ide", "/ide/missing"}) {
+      mockMvc.perform(get(path).cookie(adminCookie)).andExpect(status().isNotFound());
     }
     for (String path : new String[] {"/workspace", "/ideas"}) {
       mockMvc
