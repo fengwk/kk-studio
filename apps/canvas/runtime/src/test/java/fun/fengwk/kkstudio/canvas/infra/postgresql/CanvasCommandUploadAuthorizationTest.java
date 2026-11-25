@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.common.error.DomainException;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -44,10 +45,8 @@ class CanvasCommandUploadAuthorizationTest {
     when(ownershipProvider.getIfAvailable()).thenReturn(uploadOwnership);
     when(canvasStore.lockDocument(canvasId))
         .thenReturn(
-            Optional.of(
-                new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH)));
-    when(uploadOwnership.lockReady(uploadId, userId))
-        .thenThrow(DomainException.notFound("upload"));
+            Optional.of(new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH)));
+    when(uploadOwnership.lockReady(uploadId, userId)).thenThrow(DomainException.notFound("upload"));
     CanvasCommandService service =
         new CanvasCommandService(
             canvasStore,
@@ -95,8 +94,7 @@ class CanvasCommandUploadAuthorizationTest {
     when(ownershipProvider.getIfAvailable()).thenReturn(uploadOwnership);
     when(canvasStore.lockDocument(canvasId))
         .thenReturn(
-            Optional.of(
-                new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH)));
+            Optional.of(new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH)));
     when(canvasStore.findCommandDedup(eq(canvasId), any())).thenReturn(Optional.empty());
     when(canvasStore.listNodes(canvasId)).thenReturn(List.of());
     when(canvasStore.listGroups(canvasId)).thenReturn(List.of());

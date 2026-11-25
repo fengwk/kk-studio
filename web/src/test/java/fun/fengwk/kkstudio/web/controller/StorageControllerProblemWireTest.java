@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -84,7 +85,7 @@ class StorageControllerProblemWireTest {
   /** 领域校验保留类别，未知运行时故障保持 500：HTTP 边界不再把宽泛 IllegalArgumentException 映射成 400。 */
   @Test
   void domainValidationAndUnexpectedFailuresKeepTheirCategories() throws Exception {
-    when(uploads.reserve(any(), ACTOR.userId()))
+    when(uploads.reserve(any(), eq(ACTOR.userId())))
         .thenThrow(DomainException.validation("filename", "filename is required"))
         .thenThrow(new IllegalArgumentException("internal storage fault"));
     mvc.perform(

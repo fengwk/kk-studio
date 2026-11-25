@@ -83,6 +83,11 @@ class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
     UUID canvasId = addDocument();
     NodeFixture node = addFunctionNode(canvasId, "image.crop");
     UUID blobId = UUID.randomUUID();
+    jdbc.update(
+        "insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state)"
+            + " values (?, ?, 1, 'application/octet-stream', 1, 'ACTIVE')",
+        blobId,
+        "a".repeat(64));
     CanvasResource resource =
         new CanvasResource(
             UUID.randomUUID(), canvasId, node.nodeId, 0, blobId, "image.png", null, Instant.EPOCH);

@@ -271,8 +271,6 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
     UUID firstFolder = UUID.randomUUID();
     UUID secondFolder = UUID.randomUUID();
     UUID secondSession = UUID.randomUUID();
-    UUID firstPlacement = UUID.randomUUID();
-    UUID secondPlacement = UUID.randomUUID();
     jdbc.update(
         "insert into studio_user(id, username, password_hash, role) values (?, ?, 'x', 'USER'), (?, ?, 'x', 'USER')",
         firstUser,
@@ -300,13 +298,15 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
         secondFolder,
         secondSpace);
     jdbc.update(
-        "insert into workspace_resource(id, workspace_id, folder_id, session_id, position)"
-            + " values (?, ?, ?, ?, 0), (?, ?, ?, ?, 0)",
-        firstPlacement,
+        "insert into agent(name, config) values ('attachment-test', '{}'::jsonb) on conflict do nothing");
+    jdbc.update(
+        "insert into workspace_resource(id, workspace_id, folder_id, session_id, position, agent_name)"
+            + " values (?, ?, ?, ?, 0, 'attachment-test'), (?, ?, ?, ?, 0, 'attachment-test')",
+        SESSION_ID,
         firstSpace,
         firstFolder,
         SESSION_ID,
-        secondPlacement,
+        secondSession,
         secondSpace,
         secondFolder,
         secondSession);

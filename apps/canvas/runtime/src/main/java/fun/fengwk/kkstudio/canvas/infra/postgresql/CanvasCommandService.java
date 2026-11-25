@@ -5,7 +5,6 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
-import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.CanvasCommandHash;
 import fun.fengwk.kkstudio.canvas.CanvasCommandPlan;
 import fun.fengwk.kkstudio.canvas.CanvasCommandPlanner;
@@ -21,6 +20,7 @@ import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -235,9 +235,7 @@ public class CanvasCommandService {
   }
 
   private CanvasCommand resolveUploads(
-      CanvasCommand command,
-      UUID userId,
-      Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads) {
+      CanvasCommand command, UUID userId, Map<UUID, CanvasUploadOwnership.ReadyUpload> uploads) {
     if (command instanceof CanvasCommand.CreateNode create) {
       return new CanvasCommand.CreateNode(
           create.nodeId(),
@@ -261,8 +259,7 @@ public class CanvasCommandService {
       if (input instanceof CanvasResourceInput.Blob blob) {
         CanvasUploadOwnership owner = requireUploadOwnership();
         CanvasUploadOwnership.ReadyUpload ready =
-            uploads.computeIfAbsent(
-                blob.blobId(), uploadId -> owner.lockReady(uploadId, userId));
+            uploads.computeIfAbsent(blob.blobId(), uploadId -> owner.lockReady(uploadId, userId));
         resolved.add(new CanvasResourceInput.Blob(ready.filename(), ready.blobId()));
       } else {
         resolved.add(input);

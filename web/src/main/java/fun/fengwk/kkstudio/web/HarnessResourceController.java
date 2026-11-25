@@ -62,17 +62,13 @@ public class HarnessResourceController {
 
   @PostMapping("/{sessionId}/blobs/{blobId}/download-url")
   public StoragePresignedUrlDTO downloadUrl(
-      @PathVariable UUID sessionId,
-      @PathVariable UUID blobId,
-      StudioPrincipal principal) {
+      @PathVariable UUID sessionId, @PathVariable UUID blobId, StudioPrincipal principal) {
     return presign(principal, sessionId, blobId, true);
   }
 
   @PostMapping("/{sessionId}/blobs/{blobId}/preview-url")
   public StoragePresignedUrlDTO previewUrl(
-      @PathVariable UUID sessionId,
-      @PathVariable UUID blobId,
-      StudioPrincipal principal) {
+      @PathVariable UUID sessionId, @PathVariable UUID blobId, StudioPrincipal principal) {
     return presign(principal, sessionId, blobId, false);
   }
 
