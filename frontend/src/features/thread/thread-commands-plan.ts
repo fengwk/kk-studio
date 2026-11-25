@@ -5,11 +5,11 @@ import type {
 import {
   buildBranchDiffCommands,
   type BranchDraft,
-} from '@/features/thread/branch-draft'
+} from '@/features/thread/thread-settings'
 import {
   buildThreadCommandBatchRequest,
   copyBranchDraft,
-} from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
+} from '@/features/thread/thread-commands-request'
 import {
   hasMessageContent,
   partsKey,

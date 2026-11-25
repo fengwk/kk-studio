@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentSelectionPanel } from '@/features/thread/SelectionPanel'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
 import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorModal'
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
@@ -14,7 +13,6 @@ import { environmentService } from '@/features/environment/environment-service'
 import { setLocale, translate } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
-import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
@@ -23,21 +21,6 @@ vi.mock('@/features/environment/environment-service', () => ({
     startEnvironmentUpdate: vi.fn(),
   },
 }))
-
-const agent: AgentDTO = {
-  name: 'assistant',
-  description: null,
-  systemPrompt: null,
-  execution: { driver: 'builtin', settings: { modelName: 'm1', variant: 'default' } },
-  config: {
-    tools: [],
-    skills: [],
-    subagents: [],
-  },
-  version: '1',
-  createdAt: 1790503200,
-  updatedAt: 1790503200,
-}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -108,22 +91,6 @@ describe('AI i18n live-switch contracts', () => {
     act(() => setLocale('zh-CN'))
     expect(screen.getByRole('form', { name: '创建 提供商' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeInTheDocument()
-  })
-
-  it('switches the Agent selection panel labels live', () => {
-    act(() => setLocale('en-US'))
-    render(
-      <AgentSelectionPanel
-        agents={[agent]}
-        onSelect={() => undefined}
-        onClose={() => undefined}
-      />,
-    )
-
-    expect(screen.getByRole('heading', { name: 'Select Agent' })).toBeInTheDocument()
-
-    act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('heading', { name: '选择 Agent' })).toBeInTheDocument()
   })
 
   it('switches Environment empty-state labels live', async () => {

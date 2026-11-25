@@ -7,18 +7,18 @@ import {
   buildBranchDiffCommands,
   projectPendingTarget,
   type BranchDraft,
-} from '@/features/thread/branch-draft'
+} from '@/features/thread/thread-settings'
 import {
   buildMessageBatchPlan,
   createCommandId,
   type CommandBatchPlan,
-} from '@/features/thread/command-batch-plan'
+} from '@/features/thread/thread-commands-plan'
 import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import {
   useAgentThreadController,
 } from '@/features/thread/runtime/controllers/useAgentThreadController'
-import { buildThreadCommandBatchRequest } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
+import { buildThreadCommandBatchRequest } from '@/features/thread/thread-commands-request'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 import { isConflictReason } from '@/shared/api/client'

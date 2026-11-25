@@ -14,7 +14,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessModelSelectionDTO } from '@/shared/api/generated/contracts'
-import { useI18n, translate } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
 import { usePaneDraft } from './usePaneDraft'
@@ -51,24 +51,16 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   const yoloEnabled = yolo ?? space.defaultYoloEnabled
 
   const send = useMutation({
-    mutationFn: async (payload: ComposerPart[]) => {
-      const folderId = target.folderId ?? (await cache.fetchQuery({
-        queryKey: workspaceKeys.tree(space.id),
-        queryFn: ({ signal }) => request('GET /api/chat-spaces/{spaceId}/tree', { path: { spaceId: space.id } }, { signal }),
-        staleTime: Infinity,
-      })).folders[0]?.id
-      if (!folderId) throw new ApiError(translate('ai.runtime.draft.invalidFolder'), 400, undefined, undefined, 'INVALID_FOLDER')
-      return request('POST /api/chat-spaces/{spaceId}/sessions', {
+    mutationFn: (payload: ComposerPart[]) => request('POST /api/chat-spaces/{spaceId}/sessions', {
         path: { spaceId: space.id },
         body: {
-          folderId,
+          folderId: target.folderId,
           message: partsToMessageContents(payload),
           modelSelection,
           environmentId: environmentName == null ? undefined : environment?.id,
           yoloEnabled,
         },
-      }, { idempotencyKey: target.draftId })
-    },
+      }, { idempotencyKey: target.draftId }),
     onSuccess: ({ threadId }) => {
       clearStoredComposerDraft(scope)
       // 接受后读取服务端快照，不制造临时历史；首条命令在快照中是排队项或已物化的消息。

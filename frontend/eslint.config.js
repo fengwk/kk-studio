@@ -8,14 +8,12 @@ import path from 'node:path'
 // Cross-feature entry points currently allowed; `entry/*` allows the whole feature-owned slice.
 // New dependencies require review.
 const featureDependencies = {
-  projects: ['thread/runtime/panes/AgentPane', 'thread/AgentSelect', 'environment/environment-service'],
   settings: [
     'thread/runtime/state/thread-notifications',
     'extensions/PluginsTab',
     'catalog/agent-capability-candidates',
   ],
-  chat: ['thread/*', 'environment/ide/ide-panel-context', 'environment/environment-service'],
-  thread: ['account/account-context', 'catalog', 'environment/ide/ide-panel-context', 'workspace/pane-target', 'workspace/queries'],
+  thread: ['account/account-context', 'catalog', 'workspace/pane-target', 'workspace/queries'],
   catalog: ['environment/environment-service'],
   environment: ['workspace/pane-target'],
 }

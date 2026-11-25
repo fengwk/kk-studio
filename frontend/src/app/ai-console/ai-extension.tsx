@@ -1,6 +1,5 @@
 import { lazy, Suspense } from 'react'
 import { useOptionalCatalogRuntime } from '@/features/catalog/CatalogRuntimeContext'
-import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
 
 const ResourceEditorModal = lazy(async () => {

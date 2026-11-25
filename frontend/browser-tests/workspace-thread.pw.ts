@@ -70,7 +70,8 @@ test('a draft stays in the same pane, shows its first message, and cuts a comple
   await expect(page.getByText('First workspace message', { exact: true })).toBeVisible()
   await expect(pane).toHaveAttribute('data-pane-id', id!)
   await expect(unsent(page)).toHaveAttribute('data-unsent', 'false')
-  expect(posts[0]).toMatchObject({ path: `${api}/sessions`, key: draftId, body: { folderId, message: [{ type: 'TEXT', text: 'First workspace message' }] } })
+  expect(posts[0]).toMatchObject({ path: `${api}/sessions`, key: draftId, body: { message: [{ type: 'TEXT', text: 'First workspace message' }] } })
+  expect(posts[0].body).not.toHaveProperty('folderId')
   await page.getByRole('textbox').fill('Thread draft')
   await expect(unsent(page)).toHaveAttribute('data-unsent', 'true')
 

@@ -7,12 +7,10 @@ import {
 } from '@/shared/api/contracts/ai-runtime'
 import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
 import type {
-  AgentDTO,
   HarnessBranchSettingsDTO,
   HarnessExecutionSelectionDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
-  ModelDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
@@ -23,80 +21,6 @@ export interface BranchDraft {
   execution: HarnessExecutionSelectionDTO
   environmentName: string | null
   yoloEnabled: boolean
-}
-
-/**
- * 使用 Chat 默认值（agent + yolo）和 catalog，为空面板构建完整的 branch draft：
- * - agent 的全局模型名 -> 模型选择（组没有组级 Variant）
- * - variant = agent override 或 model 的 defaultVariant
- */
-export function materializeBlankBranchDraft(
-  agent: AgentDTO | undefined,
-  yoloEnabled: boolean,
-  models: ModelDTO[],
-  environmentName?: string | null,
-): BranchDraft | null {
-  if (!agent?.execution) {
-    return null
-  }
-  if (agent.execution.driver !== 'builtin') {
-    return { agentName: agent.name, execution: agent.execution, environmentName: environmentName ?? null, yoloEnabled }
-  }
-  const selection = getBuiltinModelSelection(agent.execution)
-  const model = models.find((item) => item.name === selection?.modelName)
-  if (!model) {
-    return null
-  }
-  if (model.type === 'GROUP') {
-    // 组没有组级 Variant；成员的 Variant 已固化在组配置中。
-    return {
-      agentName: agent.name,
-      execution: createBuiltinExecution(model.name, null),
-      environmentName: environmentName ?? null,
-      yoloEnabled,
-    }
-  }
-  const variantId = selection?.variant || model.config?.defaultVariant || ''
-  const variant = model.config?.variants.find((item) => item.id === variantId)
-  if (!variantId || !variant) {
-    return null
-  }
-  return {
-    agentName: agent.name,
-    execution: createBuiltinExecution(model.name, variantId),
-    environmentName: environmentName ?? null,
-    yoloEnabled,
-  }
-}
-
-/**
- * 根据明确选中的 Agent + catalog 构建完整 draft。
- * 始终采用目标 Agent 所选取的 model 与 variant，同时保留已有 draft 的 environmentName 与 yoloEnabled。
- */
-export function materializeAgentBranchDraft(
-  agent: AgentDTO,
-  models: ModelDTO[],
-  existing: BranchDraft | null,
-  fallbackYoloEnabled?: boolean,
-  fallbackEnvironmentName?: string | null,
-): BranchDraft | null {
-  const materialized = materializeBlankBranchDraft(
-    agent,
-    existing?.yoloEnabled ?? fallbackYoloEnabled ?? false,
-    models,
-    existing != null ? existing.environmentName : (fallbackEnvironmentName ?? null),
-  )
-  if (materialized == null) {
-    return null
-  }
-  if (existing == null) {
-    return materialized
-  }
-  return {
-    ...materialized,
-    environmentName: existing.environmentName,
-    yoloEnabled: existing.yoloEnabled,
-  }
 }
 
 /** 从持久化的 Thread snapshot 初始化绑定面板 draft；子代理的 FOLLOW 不代表本地开关。 */

@@ -12,7 +12,7 @@ import {
   storePendingStop,
   type PendingStopOperation,
 } from '@/features/thread/runtime/state/pending-stop-sidecar'
-import { createStopRequestId } from '@/features/thread/command-batch-plan'
+import { createStopRequestId } from '@/features/thread/thread-commands-plan'
 import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
 
 /**

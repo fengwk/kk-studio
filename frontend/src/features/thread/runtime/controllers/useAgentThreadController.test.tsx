@@ -5,12 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAgentThreadController } from '@/features/thread/runtime/controllers/useAgentThreadController'
 import { retireStaleStopPending } from '@/features/thread/runtime/thread-draft/useThreadStopOperation'
 import { useThreadProjection, type ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
-import { isCursorFreeThreadBatch } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
+import { isCursorFreeThreadBatch } from '@/features/thread/thread-commands-request'
 import {
   buildMessageBatchPlan,
   type CommandBatchPlan,
-} from '@/features/thread/command-batch-plan'
-import { branchDraftFromThread, type BranchDraft } from '@/features/thread/branch-draft'
+} from '@/features/thread/thread-commands-plan'
+import { branchDraftFromThread, type BranchDraft } from '@/features/thread/thread-settings'
 import {
   createAttachmentPart,
   createTextPart,

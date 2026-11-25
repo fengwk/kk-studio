@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   buildMessageBatchPlan,
   type CommandBatchPlan,
-} from '@/features/thread/command-batch-plan'
+} from '@/features/thread/thread-commands-plan'
 import {
   createAttachmentPart,
   createTextPart,
   type ComposerPart,
 } from '@/features/thread/composer/composer-parts'
-import type { BranchDraft } from '@/features/thread/branch-draft'
+import type { BranchDraft } from '@/features/thread/thread-settings'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 

@@ -1,6 +1,4 @@
 import type {
-  HarnessCommandOwnerDTO,
-  HarnessCommandTargetDTO,
   HarnessExecutionSelectionDTO,
   HarnessImageInputTier,
   HarnessModelSelectionDTO,
@@ -8,17 +6,10 @@ import type {
 
 export type {
   EntryType,
-  HarnessCommandBatchDTO,
   HarnessCommandCreateDTO,
   HarnessThreadCommandBatchDTO,
   HarnessUserMessageContentDTO,
 } from '@/shared/api/generated/contracts'
-
-/** 创建型命令 target；后端联合类型直接复用生成契约。 */
-export type AgentCommandTargetDTO = HarnessCommandTargetDTO
-
-/** 不透明的产品归属身份。 */
-export type AgentRuntimeOwnerDTO = HarnessCommandOwnerDTO
 
 /** 图片输入档位；Wire 与 durable 均采用 720P / 1080P / ORIGINAL。 */
 export type ImageInputTier = HarnessImageInputTier

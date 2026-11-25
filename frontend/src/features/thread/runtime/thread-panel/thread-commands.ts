@@ -1,4 +1,4 @@
-import { translate, type TranslationKey } from '@/shared/i18n'
+import type { TranslationKey } from '@/shared/i18n'
 
 interface ManualCompactionAvailability {
   available: boolean
@@ -52,7 +52,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('files', ['explorer', 'browse', 'directory', 'fs']),
 ]
 
-function command(id: string, keywords: string[]): ThreadCommand {
+function command(id: 'yolo' | 'models' | 'stop' | 'new' | 'upload' | 'debug' | 'subagent' | 'shortcuts' | 'compact' | 'files', keywords: string[]): ThreadCommand {
   return {
     id,
     label: id,
@@ -67,7 +67,7 @@ export function filterThreadCommands(
   query: string,
   commands: ThreadCommand[] = THREAD_COMMANDS,
 ): ThreadCommand[] {
-  const normalized = query.trim().replace(/^\\//, '').toLowerCase()
+  const normalized = query.trim().replace(/^\//, '').toLowerCase()
   if (!normalized) {
     return commands
   }
