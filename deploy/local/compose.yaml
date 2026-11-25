@@ -30,7 +30,7 @@ name: kk-studio-local
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
     environment:
       POSTGRES_DB: ${KK_STUDIO_PG_DATABASE:-kk_studio}
       POSTGRES_USER: ${KK_STUDIO_PG_USER:-kk_studio}
