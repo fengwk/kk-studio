@@ -11,7 +11,7 @@ import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-c
 import type { PaneRendererProps } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
 import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
-import type { HarnessModelSelectionDTO } from '@/shared/api/generated/contracts'
+import type { HarnessModelSelectionDTO, SessionCreateDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
@@ -53,16 +53,10 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   const yoloEnabled = yolo ?? space.defaultYoloEnabled
 
   const send = useMutation({
-    mutationFn: (payload: ComposerPart[]) => request('POST /api/chat-spaces/{spaceId}/sessions', {
-      path: { spaceId: space.id },
-      body: {
-        folderId: target.folderId,
-        message: partsToMessageContents(payload),
-        modelSelection,
-        environmentId: environmentName == null ? undefined : environment?.id,
-        yoloEnabled,
-      },
+    mutationFn: (body: SessionCreateDTO) => request('POST /api/chat-spaces/{spaceId}/sessions', {
+      path: { spaceId: space.id }, body,
     }, { idempotencyKey: target.draftId }),
+    retry: false,
     onSuccess: ({ threadId }) => {
       clearStoredComposerDraft(scope)
       // 接受后读取服务端快照，不制造临时历史；首条命令在快照中是排队项或已物化的消息。
@@ -74,7 +68,24 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     },
   })
 
-  const notice = agents.isError
+  // A lost response may hide a committed session. Retry the submitted body, not the current settings.
+  const retryBody = send.error instanceof ApiError
+    && (send.error.code === 'network_error' || send.error.code === 'timeout') ? send.variables : undefined
+  const locked = send.isPending || retryBody != null
+  function submit(body: SessionCreateDTO) {
+    send.mutate(body, {
+      onSuccess: ({ threadId }) => {
+        changeParts([])
+        onUnsentChange(false)
+        replace({ kind: 'thread', threadId })
+      },
+    })
+  }
+
+  const notice = retryBody ? <div className="thread-draft-notice" role="alert">
+    {t('ai.runtime.draft.sendUnknown')}
+    <Button variant="secondary" onClick={() => submit(retryBody)}>{t('ai.interaction.retry')}</Button>
+  </div> : agents.isError
     ? <div className="thread-draft-notice" role="alert">
       {apiErrorDetail(agents.error) ?? t('shared.requestFailed')}
       <Button variant="secondary" onClick={() => void agents.refetch()}>{t('ai.interaction.retry')}</Button>
@@ -83,9 +94,9 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
       {t(agents.data.length ? 'ai.runtime.draft.defaultAgentMissing' : 'ai.chat.noAgents')}
       {agents.data.length > 0
         ? <Button variant="secondary" onClick={openSpaceSettings}>{t('ai.runtime.draft.spaceSettings')}</Button>
-        : user?.role === 'ADMIN' && <Link to="/settings/agents">{t('ai.runtime.draft.agentSettings')}</Link>}
+        : user?.role === 'ADMIN' && <Link className="btn-secondary" to="/settings/agents">{t('ai.runtime.draft.agentSettings')}</Link>}
     </div>
-  const actionError = send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
+  const actionError = retryBody ? null : send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
     ? t('ai.runtime.draft.invalidFolder')
     : send.error ? apiErrorDetail(send.error) ?? send.error.message : null
 
@@ -96,18 +107,21 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
       composer={{
         parts,
         pending: send.isPending,
-        disabled: send.isPending,
+        disabled: locked,
         sendDisabled: !agent || agents.isError,
         focusOnEscape: active,
         scope,
         onPartsChange: changeParts,
-        onSubmit: (payload) => send.mutate(payload, {
-          onSuccess: ({ threadId }) => {
-            changeParts([])
-            onUnsentChange(false)
-            replace({ kind: 'thread', threadId })
-          },
-        }),
+        onSubmit: (payload: ComposerPart[]) => {
+          if (locked) return
+          submit({
+            folderId: target.folderId,
+            message: partsToMessageContents(payload),
+            modelSelection,
+            environmentId: environmentName == null ? undefined : environment?.id,
+            yoloEnabled,
+          })
+        },
         commands: draftCommands,
         onCommand: () => {},
         settings: {
