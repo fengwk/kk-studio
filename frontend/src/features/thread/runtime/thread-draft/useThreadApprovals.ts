@@ -4,7 +4,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createDecisionId } from '@/features/thread/thread-commands-plan'
 import { harnessService } from '@/shared/api/harness-service'
 import type { TranslationKey } from '@/shared/i18n'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 
 interface ThreadApprovalsInput {
@@ -63,10 +62,7 @@ export function useThreadApprovals({
       if (decisionIdByInvocationRef.current.get(key) === variables.decisionId) {
         decisionIdByInvocationRef.current.delete(key)
       }
-      await Promise.all([
-        requestThreadSnapshotRefresh(queryClient, applicationEvents, variables.targetThreadId),
-        queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-      ])
+      await requestThreadSnapshotRefresh(queryClient, applicationEvents, variables.targetThreadId)
     },
   })
 

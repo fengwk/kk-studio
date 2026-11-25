@@ -1,18 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { setLocale } from '@/shared/i18n'
 import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import {
   interactionIdentity,
-  interactionOwnerLabel,
-  interactionOwnerLink,
   manualInteractions,
 } from '@/shared/lib/interactions'
 
 const owner = {
-  kind: 'CHAT',
-  id: 'chat-1',
-  title: null,
-  link: '/chats/chat-1',
+  kind: 'CHAT_SPACE',
+  id: 'space-1',
+  title: 'Workspace',
+  link: '/chat-spaces/space-1',
 }
 
 const input: InteractionDTO = {
@@ -55,39 +52,6 @@ describe('interactionIdentity', () => {
     const second = interactionIdentity(environmentWait('root-2', 'env-a'))
     const third = interactionIdentity(environmentWait('root-1', 'env-b'))
     expect(new Set([first, second, third]).size).toBe(3)
-  })
-})
-
-describe('interactionOwnerLabel', () => {
-  it('归属固定为“类型 · 标题”，标题来自会话归属 SPI', () => {
-    expect(interactionOwnerLabel({ ...owner, title: '产品对话' })).toBe('对话 · 产品对话')
-    setLocale('en-US')
-    expect(interactionOwnerLabel({ ...owner, kind: 'CHAT', title: '修复缺陷' }))
-      .toBe('Chat · 修复缺陷')
-    expect(interactionOwnerLabel({ ...owner, kind: 'AGENT_TASK', title: 'reporter' }))
-      .toBe('Agent task · reporter')
-    setLocale('zh-CN')
-  })
-
-  it('标题缺失时只显示类型，未知类型不猜测产品名', () => {
-    setLocale('zh-CN')
-    expect(interactionOwnerLabel(owner)).toBe('对话')
-    expect(interactionOwnerLabel({ ...owner, kind: 'FUTURE_OWNER', title: ' ' })).toBe('FUTURE_OWNER')
-  })
-})
-
-describe('interactionOwnerLink', () => {
-  it('产品归属返回应用内路径，AGENT_TASK 永远不跳转', () => {
-    expect(interactionOwnerLink(owner)).toBe('/chats/chat-1')
-    expect(interactionOwnerLink({ ...owner, kind: 'AGENT_TASK', link: '/threads/root-1' })).toBeNull()
-    expect(interactionOwnerLink({ ...owner, link: null })).toBeNull()
-  })
-
-  it('协议相对地址、反斜杠与控制字符都不采纳', () => {
-    expect(interactionOwnerLink({ ...owner, link: '//example.com/x' })).toBeNull()
-    expect(interactionOwnerLink({ ...owner, link: 'https://example.com/x' })).toBeNull()
-    expect(interactionOwnerLink({ ...owner, link: '/x\\y' })).toBeNull()
-    expect(interactionOwnerLink({ ...owner, link: '/x\n/y' })).toBeNull()
   })
 })
 

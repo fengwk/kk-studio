@@ -1427,13 +1427,13 @@ describe('useAgentThreadController', () => {
     expect(allowCalls[0]?.[2].decisionId).toBe(allowCalls[1]?.[2].decisionId)
 
     vi.mocked(harnessService.decideApproval).mockClear()
-    // 决策成功后会同时刷新 snapshot 与 Chat-scoped 列表。
+    // 决策成功后会刷新对应 Thread 的 snapshot，切换决策会生成新的 decisionId。
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
     await act(async () => {
       await result.current.decideApproval('inv-1', 'DENY')
     })
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['chats'] }),
+      expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
     )
     invalidateSpy.mockRestore()
     const denyCall = vi.mocked(harnessService.decideApproval).mock.calls[0]?.[2]
@@ -1802,11 +1802,10 @@ describe('useAgentThreadController', () => {
         stoppedThreads: [],
       } as HarnessThreadStopResultDTO)
     })
-    // 旧 Thread 的 snapshot 与 chats 都被失效；旧 sidecar 保留供返回后精确回放。
+    // 旧 Thread 的 snapshot 被失效；旧 sidecar 保留供返回后精确回放。
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
     )
-    expect(invalidateSpy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['chats'] }))
     expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).not.toBeNull()
     // 新面板未受影响：无错误、无 cancelled 消息、无 replay 阻塞。
     expect(result.current.actionError).toBeNull()

@@ -1,4 +1,4 @@
-/* 交互归属后的 subagent 入口：根面板与全局待处理页共用，只显示入口词。 */
+/* 交互待办的 subagent 入口：根面板只显示入口词。 */
 
 .interaction-subagent-source {
   display: inline-flex;

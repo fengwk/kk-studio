@@ -186,7 +186,7 @@ export function RootInteractionList() {
       {manualItems.map((item) => (
         <div key={interactionIdentity(item)} className="interaction-feed-item">
           <div className="interaction-item-body">
-            <InteractionOwnerSource item={item} showOwnerSource={false} />
+            <InteractionOwnerSource item={item} />
             <InteractionCardBody item={item} onSuccess={() => removeItem(item.toolInvocationId)} />
           </div>
         </div>

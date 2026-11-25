@@ -24,7 +24,6 @@ import {
 } from '@/features/thread/composer/composer-parts'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { translate, useI18n, type TranslationKey } from '@/shared/i18n'
 import {
@@ -194,10 +193,7 @@ export function useAgentThreadController(
         }
       }
       // 成功后绝不再清空 draft，保留用户飞行期间输入的下一条草稿内容
-      await Promise.all([
-        requestThreadSnapshotRefresh(queryClient, applicationEvents, originThreadId),
-        queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-      ])
+      await requestThreadSnapshotRefresh(queryClient, applicationEvents, originThreadId)
       return
     } catch (error: unknown) {
       // 确切已发 request / currentPending 贯穿错误处理，绝不使用旧闭包覆盖

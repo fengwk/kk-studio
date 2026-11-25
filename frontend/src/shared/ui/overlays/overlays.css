@@ -24,18 +24,6 @@
   overflow: hidden;
 }
 
-.create-chat-modal-card {
-  width: min(680px, 100%);
-  max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-}
-
-.create-chat-modal-card .modal-body {
-  min-height: 0;
-  overflow-y: auto;
-}
-
 .resource-modal-card {
   width: min(680px, 100%);
   max-height: calc(100vh - 48px);
