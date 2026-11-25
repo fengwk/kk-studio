@@ -110,6 +110,9 @@
                             <rules>
                                 <rule>
                                     <element>CLASS</element>
+                                    <!-- Workspace verify runs before web tests. The HTTP controllers and
+                                         cross-module session, tree, and schedule paths are checked below
+                                         after web has produced its execution data. -->
                                     <includes>
                                         <include>fun.fengwk.kkstudio.workspace.ChatSpaceService</include>
                                         <include>fun.fengwk.kkstudio.workspace.WorkspacePlacements</include>
@@ -117,6 +120,59 @@
                                         <include>fun.fengwk.kkstudio.workspace.WorkspaceInput</include>
                                         <include>fun.fengwk.kkstudio.workspace.ThreadStatus</include>
                                         <include>fun.fengwk.kkstudio.workspace.ScheduleTiming</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>merge-workspace-coverage</id>
+                        <phase>none</phase>
+                        <goals>
+                            <goal>merge</goal>
+                        </goals>
+                        <configuration>
+                            <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.basedir}/../..</directory>
+                                    <includes>
+                                        <include>apps/workspace/target/jacoco.exec</include>
+                                        <include>platform/runtime/target/jacoco.exec</include>
+                                        <include>harness/runtime/target/jacoco.exec</include>
+                                        <include>apps/canvas/runtime/target/jacoco.exec</include>
+                                        <include>web/target/jacoco.exec</include>
+                                    </includes>
+                                </fileSet>
+                            </fileSets>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>check-workspace-merged-coverage</id>
+                        <phase>none</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <!-- Gate the named business services and HTTP controllers, not
+                                         DTOs, generated record classes, or wiring. -->
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.workspace.WorkspaceSessions</include>
+                                        <include>fun.fengwk.kkstudio.workspace.WorkspaceTreeService</include>
+                                        <include>fun.fengwk.kkstudio.workspace.WorkspaceSchedules</include>
+                                        <include>fun.fengwk.kkstudio.workspace.ScheduleRepository</include>
+                                        <include>fun.fengwk.kkstudio.workspace.http.*</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,6 +72,34 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
     String space = createSpace();
     String id = createSchedule(space, false);
     checkHistory(space, id);
+  }
+
+  @Test
+  void scheduleListPreviewAndPatchAreAvailableOverHttp() throws Exception {
+    String space = createSpace();
+    String id = createSchedule(space, false);
+
+    mvc.perform(get(space + "/schedules").cookie(login))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].id").value(id));
+    mvc.perform(
+            post(space + "/schedules/preview")
+                .cookie(login)
+                .header("Origin", "http://localhost")
+                .contentType("application/json")
+                .content(
+                    "{\"trigger\":{\"type\":\"ONCE\",\"localDate\":\"2099-01-01\",\"time\":\"12:00\"},\"timeZone\":\"UTC\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.next.length()").value(1));
+    mvc.perform(
+            patch(space + "/schedules/" + id)
+                .cookie(login)
+                .header("Origin", "http://localhost")
+                .contentType("application/json")
+                .content("{\"expectedVersion\":\"1\",\"title\":\"Updated schedule\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.title").value("Updated schedule"))
+        .andExpect(jsonPath("$.version").value(2));
   }
 
   @Test

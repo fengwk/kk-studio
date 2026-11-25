@@ -220,8 +220,13 @@ Harness 的公共 Runtime 与 Builtin Driver 分别由 [`harness/runtime/pom.xml
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl apps/workspace \
+  jacoco:merge@merge-workspace-coverage jacoco:check@check-workspace-merged-coverage
 find . -path '*/target/site/jacoco/index.html' -print
 ```
+
+Workspace 的会话、资源树、定时任务与 HTTP 控制器在 Web 集成测试完成后检查。
+合并门禁读取本次 reactor 的执行数据，仍以 Workspace 的类文件为准；CI 在 Java `verify` 后执行上述 JaCoCo 命令。
 
 关键逻辑改动查看本次报告的行覆盖率与未覆盖路径，分支覆盖率作为参考；
 低于模块配置的门禁会使 `verify` 失败。不要把静态检查、跳过测试或其它平台的结果算作本次覆盖。

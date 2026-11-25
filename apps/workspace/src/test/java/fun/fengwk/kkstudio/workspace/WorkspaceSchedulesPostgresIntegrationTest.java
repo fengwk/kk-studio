@@ -114,7 +114,11 @@ class WorkspaceSchedulesPostgresIntegrationTest {
           .update();
       var claim = schedules.claim().orElseThrow();
       assertEquals(created.id(), claim.targetId());
-      schedules.auto(claim);
+      // Releasing an acquired due item makes it available to another dispatcher attempt.
+      schedules.release(claim);
+      var reclaimed = schedules.claim().orElseThrow();
+      assertEquals(created.id(), reclaimed.targetId());
+      schedules.auto(reclaimed);
       var run = schedules.runs(owner, space.id(), created.id(), null).items().getFirst();
       assertEquals("SKIPPED", run.result().name());
       assertEquals("EXECUTION_NOT_SETTLED", run.reason());
