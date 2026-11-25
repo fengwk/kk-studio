@@ -1,6 +1,6 @@
 import { createUuid } from '@/shared/lib/uuid'
 import type { PaneTarget } from './pane-target'
-import { canSplit, needsSinglePane, paneIds, projectLayout, splitPane, type PaneState, type Rect } from './panes/model'
+import { canSplit, needsSinglePane, paneIds, projectLayout, splitPane, swapPanes, type PaneState, type Rect } from './panes/model'
 
 type BindingState = PaneState<PaneTarget>
 type Unsent = (paneId: string) => boolean
@@ -30,8 +30,19 @@ export function sameTarget(a: PaneTarget | undefined, b: PaneTarget): boolean {
 export function bindPane(state: BindingState, paneId: string, target: PaneTarget): BindingState {
   const ids = paneIds(state.layout)
   if (!ids.includes(paneId)) return state
+  if (target.kind === 'vscode') {
+    const source = ids.find(id => id !== paneId && sameTarget(state.bindings[id], target))
+    if (source) {
+      // Move the leaf, not its renderer: the host keyed by source remains mounted.
+      return {
+        ...swapPanes(state, source, paneId),
+        bindings: { ...state.bindings, [paneId]: newDraft() },
+        focusedPaneId: source,
+      }
+    }
+  }
   const bindings = { ...state.bindings, [paneId]: target }
-  if (target.kind === 'thread' || target.kind === 'vscode') {
+  if (target.kind === 'thread') {
     for (const id of ids) {
       if (id !== paneId && sameTarget(bindings[id], target)) bindings[id] = newDraft()
     }

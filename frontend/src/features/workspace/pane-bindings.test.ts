@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { bindBeside, bindPane, canOpenDirectly, reconcileBindings } from './pane-bindings'
 import type { PaneTarget } from './pane-target'
-import { initialPaneState, splitPane } from './panes/model'
+import { initialPaneState, paneIds, splitPane } from './panes/model'
 
 const thread: PaneTarget = { kind: 'thread', threadId: 'thread' }
 const canvas: PaneTarget = { kind: 'canvas', canvasId: 'canvas' }
@@ -26,12 +26,17 @@ describe('workspace pane bindings', () => {
   it('moves a Thread or identical IDE view without duplicating it, but permits Canvas views', () => {
     const { state, first, second } = twoPanes()
     const ide: PaneTarget = { kind: 'vscode', environmentId: 'environment', viewId: 'view' }
-    for (const target of [thread, ide, canvas]) {
+    for (const target of [thread, canvas]) {
       const moved = bindPane(bindPane(state, first, target), second, target)
       expect(moved.bindings[second]).toBe(target)
       expect(moved.bindings[first]?.kind).toBe(target.kind === 'canvas' ? 'canvas' : 'draft')
       expect(moved.focusedPaneId).toBe(second)
     }
+    const movedIde = bindPane(bindPane(state, first, ide), second, ide)
+    expect(paneIds(movedIde.layout)).toEqual([second, first])
+    expect(movedIde.bindings[first]).toBe(ide)
+    expect(movedIde.bindings[second]?.kind).toBe('draft')
+    expect(movedIde.focusedPaneId).toBe(first)
   })
 
   it('opens beside in a clean draft before splitting; preserves an unsent draft', () => {

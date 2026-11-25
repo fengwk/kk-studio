@@ -13,6 +13,8 @@ export type PaneLayoutProps<T> = {
   onFullscreenChange: (fullscreen: boolean) => void
   describePane: (paneId: string, binding: T | undefined) => { title: string; content: ReactNode; actions?: ReactNode }
   picker?: PanePickerActions
+  onClosePane?: (paneId: string) => void
+  onSizeChange?: (bounds: Rect) => void
 }
 
 function position(rect?: Rect) {
@@ -49,19 +51,23 @@ function Divider({ view, onResize }: { view: SplitView; onResize: (ratio: number
     }} />
 }
 
-export function PaneLayout<T>({ state, setState, fullscreen, onFullscreenChange, describePane, picker }: PaneLayoutProps<T>) {
+export function PaneLayout<T>({ state, setState, fullscreen, onFullscreenChange, describePane, picker, onClosePane, onSizeChange }: PaneLayoutProps<T>) {
   const { t } = useI18n()
   const stage = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef(false)
   const [bounds, setBounds] = useState<Rect>({ x: 0, y: 0, width: 0, height: 0 })
   useLayoutEffect(() => {
     const element = stage.current!
-    const measure = () => setBounds({ x: 0, y: 0, width: element.clientWidth, height: element.clientHeight })
+    const measure = () => {
+      const next = { x: 0, y: 0, width: element.clientWidth, height: element.clientHeight }
+      setBounds(next)
+      onSizeChange?.(next)
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [onSizeChange])
   const { focusedPaneId, layout, bindings } = state
   const narrow = needsSinglePane(layout, bounds)
   const singleView = narrow || fullscreen
@@ -119,7 +125,11 @@ export function PaneLayout<T>({ state, setState, fullscreen, onFullscreenChange,
             onSplit={axis => { pendingFocus.current = true; setState(previous => splitPane(previous, id, axis)) }}
             onSwitch={next => { if (next !== id) { pendingFocus.current = true; focus(next) } }}
             onFullscreenChange={next => { if (next) focus(id); onFullscreenChange(next) }}
-            onClose={() => { pendingFocus.current = true; setState(previous => closePane(previous, id)) }}
+            onClose={() => {
+              pendingFocus.current = true
+              if (onClosePane) onClosePane(id)
+              else setState(previous => closePane(previous, id))
+            }}
             onSwap={(from, to) => setState(previous => swapPanes(previous, from, to))} />
         </div>
         <div className="ws-pane-content" data-pane-content onFocus={() => focus(id)} onPointerDown={() => focus(id)}>{pane.content}</div>
