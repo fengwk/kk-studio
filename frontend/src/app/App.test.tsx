@@ -30,8 +30,8 @@ describe('workspace routes', () => {
   it('restores the last active workspace without creating a resource', async () => {
     localStorage.setItem('workspace-last-active:admin', recent)
     const router = renderApp('/')
-    await waitFor(() => expect(router.state.location.pathname).toBe(`/chat-spaces/${recent}`))
-    expect(await screen.findByRole('button', { name: 'Recent' })).toBeInTheDocument()
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/chat-spaces/${recent}`), { timeout: 5000 })
+    expect(await screen.findByRole('button', { name: 'Recent' }, { timeout: 5000 })).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
   })
 

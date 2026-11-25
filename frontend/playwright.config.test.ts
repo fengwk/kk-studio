@@ -95,7 +95,7 @@ describe('playwright projects inventory', () => {
   it('configures unified preview webServer with fail-closed timeout and strict readiness', () => {
     expect(playwrightConfig.webServer).toEqual({
       command: 'npm run preview:browser',
-      url: 'http://127.0.0.1:5174/browser-tests/chat-layout-harness.html',
+      url: 'http://127.0.0.1:5174/browser-tests/workspace-thread-harness.html',
       reuseExistingServer: false,
       timeout: 30000,
     })
@@ -158,7 +158,7 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(48)
+    expect(allTestFiles.length).toBe(40)
     expect(allTestFiles).toContain('shared-ui-visual.pw.ts')
     expect(allTestFiles).toContain('canvas-editor.pw.ts')
     expect(allTestFiles).toContain('resource-attachment-ide.pw.ts')
@@ -237,11 +237,11 @@ describe('vite browser build contract', () => {
     const inputs = effective.inputs
     const keys = Object.keys(inputs)
     expect(keys).toContain('compaction-card')
-    expect(keys).toContain('chat-layout-harness')
+    expect(keys).toContain('workspace-thread-harness')
     expect(keys).toContain('tool-card-harness')
     expect(keys).toContain('subagent-tree-harness')
     expect(keys).toContain('environment-install-harness')
-    expect(keys).toContain('pane-control-harness')
+    expect(keys).toContain('workspace-shell-harness')
     expect(keys).toContain('composer-editor-harness')
     expect(keys).toContain('composer-controls-harness')
     expect(keys).toContain('model-browser-harness')
@@ -252,7 +252,7 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('resource-attachment-ide-harness')
     expect(keys).toContain('questionnaire-card-harness')
     expect(keys).toContain('canvas-editor-harness')
-    expect(keys.length).toBe(40)
+    expect(keys.length).toBe(35)
   })
 
   // 验证静态构建目标与 MPA 模式
