@@ -147,11 +147,11 @@ test('test intent: the daemon environment root is exported to the Node matrix as
   assert.ok(!realCase.includes('/tmp/kk-studio-e2e-env'))
 })
 
-test('test intent: the free Canvas Function rebuild loads the e2e and canvas-test seeds', () => {
-  // The documented free Function command must enable S3 on a fresh database.
+test('test intent: the free Canvas Function rebuild loads the disposable account and feature seeds', () => {
+  // The documented free Function command must support login and enable S3 on a fresh database.
   const script = readText(E2E_ENTRY)
   assert.ok(script.includes('if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then'))
-  assert.ok(script.includes('classpath:db/migration,classpath:db/seed/e2e,classpath:db/seed/canvas-test'))
+  assert.ok(script.includes('classpath:db/migration,classpath:db/seed/disposable,classpath:db/seed/e2e,classpath:db/seed/canvas-test'))
   assert.ok(script.includes('SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-'))
 })
 
@@ -162,7 +162,7 @@ test('test intent: provider credentials are synchronized only for real mode', ()
   const syncCalls = script.match(/^\s*sync_e2e_provider_credentials(?:\s+.*)?$/gm) ?? []
 
   assert.equal(syncCalls.length, 1)
-  assert.match(script, /if \[ "\$REAL" = "true" \]; then\n {2}sync_e2e_provider_credentials(?: "\$\{REAL_MODEL_ARGS\[@\]\}")?\nfi/)
+  assert.match(script, /if \[ "\$REAL" = "true" \]; then\n {2}sync_e2e_provider_credentials "\$\{REAL_MODEL_ARGS\[@\]\}"\n {2}unset "\$\{REAL_CREDENTIAL_VARS\[@\]\}"/)
   assert.ok(!ensureStack.includes('sync_e2e_provider_credentials'))
 })
 

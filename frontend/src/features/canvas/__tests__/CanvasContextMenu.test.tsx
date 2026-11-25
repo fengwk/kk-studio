@@ -513,7 +513,7 @@ describe('CanvasContextMenu resource original actions', () => {
     await userEvent.click(open)
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, 'blob-asset')
+    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, 'blob-asset', undefined)
   })
 
   it('shows the signing error when the original request fails', async () => {

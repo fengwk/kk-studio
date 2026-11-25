@@ -146,7 +146,7 @@ fi
 # Free Canvas Function regression needs both the E2E catalog/permission seed and the
 # disposable canvas-test S3/integration seed. Preserve an explicit caller override.
 if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then
-  export SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-classpath:db/migration,classpath:db/seed/e2e,classpath:db/seed/canvas-test}
+  export SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-classpath:db/migration,classpath:db/seed/disposable,classpath:db/seed/e2e,classpath:db/seed/canvas-test}
 fi
 
 DISTRIBUTED_RUNNER="$SCRIPT_DIR/distributed.sh"
@@ -207,6 +207,8 @@ if [ "$REAL" = "true" ]; then
   if [ ${#missing_vars[@]} -gt 0 ]; then
     die "--real requires the target TEST_*_BASE_URL / TEST_*_API_KEY credential pairs to be set non-empty; missing: ${missing_vars[*]}"
   fi
+  # Hold the selected credentials as shell variables; only the synchronizer exports them.
+  export -n "${REAL_CREDENTIAL_VARS[@]}"
 fi
 
 # 1) ensure stack（--distributed 时栈即 deploy/distributed，跳过宿主单实例栈）
@@ -218,8 +220,7 @@ fi
 # 2) synchronize provider credentials; --real uses seeded providers
 if [ "$REAL" = "true" ]; then
   sync_e2e_provider_credentials "${REAL_MODEL_ARGS[@]}"
-fi
-if [ "$REAL" = "true" ]; then
+  unset "${REAL_CREDENTIAL_VARS[@]}"
   providers_ready=$(e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/providers" \
     | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready "${REAL_MODEL_ARGS[@]:1}")
   if [ "$providers_ready" != "ok" ]; then
