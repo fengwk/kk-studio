@@ -46,6 +46,11 @@ public interface HarnessStore {
    */
   <T> T transaction(Function<Transaction, T> callback);
 
+  /** 在一个一致快照内执行只读回调，沿用 {@link #transaction} 的生命周期。仅当普通事务本身提供一致快照时才能沿用默认实现。 */
+  default <T> T readSnapshot(Function<Transaction, T> callback) {
+    return transaction(callback);
+  }
+
   /**
    * 把进程内副作用登记到当前 {@link #transaction} 的物理提交之后。
    *

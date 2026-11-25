@@ -1,15 +1,20 @@
 package fun.fengwk.kkstudio.harness.builtin.store.testing;
 
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessTransaction;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryState;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -77,6 +82,20 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
     @Override
     public List<ModelInvocation> findModelInvocationsByThread(UUID threadId) {
       return models.findByThread(threadId);
+    }
+
+    @Override
+    public List<DriverActiveWork> readActiveModelWork(List<UUID> threadIds) {
+      Set<UUID> members = Set.copyOf(threadIds);
+      return models.rows().stream()
+          .filter(model -> members.contains(model.threadId()) && !model.status().isTerminal())
+          .map(
+              model ->
+                  new DriverActiveWork(
+                      model.threadId(),
+                      new WorkTarget(BuiltinWorkType.MODEL, model.id()),
+                      model.status() == ModelInvocationStatus.RUNNING))
+          .toList();
     }
 
     @Override

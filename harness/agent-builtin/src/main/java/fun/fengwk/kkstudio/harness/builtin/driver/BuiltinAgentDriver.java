@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverCapabilities;
@@ -85,6 +86,11 @@ public final class BuiltinAgentDriver implements AgentDriver {
   @Override
   public boolean hasActiveWork() {
     return processor != null && processor.hasActiveExecution();
+  }
+
+  @Override
+  public List<DriverActiveWork> readActiveWork(HarnessStore.Transaction tx, List<UUID> threadIds) {
+    return threadIds.isEmpty() ? List.of() : store.in(tx).readActiveModelWork(threadIds);
   }
 
   @Override

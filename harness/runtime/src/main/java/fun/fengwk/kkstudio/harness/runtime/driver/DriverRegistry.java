@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverWork;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -100,6 +101,12 @@ public final class DriverRegistry implements DriverThreadDeletion {
       }
     }
     return false;
+  }
+
+  public List<DriverActiveWork> readActiveWork(HarnessStore.Transaction tx, List<UUID> threadIds) {
+    return orderedDrivers().stream()
+        .flatMap(driver -> driver.readActiveWork(tx, threadIds).stream())
+        .toList();
   }
 
   @Override

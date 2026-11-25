@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -91,11 +92,17 @@ class PostgresqlHarnessTransactionNotificationTest {
 
   private HarnessStore store;
   private DataSource dataSource;
+  private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     dataSource = PostgresqlHarnessStoreFixture.dataSource();
+    runtime =
+        new HarnessRuntime(
+            store,
+            builtinRegistry(store, (threadId, sessionId, path, preparation) -> null),
+            () -> null);
   }
 
   /**
@@ -301,9 +308,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     requestEnvironmentWork(
         store, root.threadId(), new WorkTarget(WorkTargetType.TOOL, root.toolId()), ENVIRONMENT);
     jdbc.update("delete from environment_connection where environment_id = ?", ENVIRONMENT.value());
-    var facts =
-        store.transaction(
-            tx -> tx.threads().findExecutionFacts(List.of(root.threadId(), question.threadId())));
+    var facts = runtime.getExecutionRootFacts(List.of(root.threadId(), question.threadId()));
     assertEquals(2, facts.size());
     var parent =
         facts.stream()
@@ -328,7 +333,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     SessionRoot session = seedSessionRoot(store);
     ToolChain root = seedToolChain(store, session, null, null, ToolKind.BASH);
     updateTool(store, root.toolId(), tool -> tool.requestApproval("needs approval", T2));
-    var before = store.transaction(tx -> tx.threads().findExecutionFacts(List.of(root.threadId())));
+    var before = runtime.getExecutionRootFacts(List.of(root.threadId()));
     assertTrue(before.getFirst().waitingForHuman());
     assertFalse(before.getFirst().hasWork());
     JdbcTemplate jdbc = new JdbcTemplate(dataSource);
@@ -367,8 +372,7 @@ class PostgresqlHarnessTransactionNotificationTest {
         """,
             root.threadId(),
             root.threadId()));
-    assertEquals(
-        before, store.transaction(tx -> tx.threads().findExecutionFacts(List.of(root.threadId()))));
+    assertEquals(before, runtime.getExecutionRootFacts(List.of(root.threadId())));
   }
 
   /** 测试意图：人工输入等待（WAITING_INPUT）的进入、等待态内重写与离开都要失效交互列表。 */
@@ -404,10 +408,7 @@ class PostgresqlHarnessTransactionNotificationTest {
       listener.assertSilent();
       updateTool(store, chain.toolId(), tool -> tool.markRunning(T4));
       listener.assertSilent();
-      var facts =
-          store
-              .transaction(tx -> tx.threads().findExecutionFacts(List.of(chain.threadId())))
-              .getFirst();
+      var facts = runtime.getExecutionRootFacts(List.of(chain.threadId())).getFirst();
       assertTrue(facts.hasWork());
       assertFalse(facts.waitingForHuman());
     }

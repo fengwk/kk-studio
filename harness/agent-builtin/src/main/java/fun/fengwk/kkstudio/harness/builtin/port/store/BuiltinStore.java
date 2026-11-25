@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.port.store;
 
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.List;
@@ -29,6 +30,9 @@ public interface BuiltinStore {
 
     /** 读取 Thread 的全部模型状态行，按 id 升序；Thread 深删的 Driver 生命周期使用。 */
     List<ModelInvocation> findModelInvocationsByThread(UUID threadId);
+
+    /** 批量读取 READY / RUNNING 的模型调用对应的 Work，不加锁。 */
+    List<DriverActiveWork> readActiveModelWork(List<UUID> threadIds);
 
     void insertModelInvocation(ModelInvocation invocation);
 

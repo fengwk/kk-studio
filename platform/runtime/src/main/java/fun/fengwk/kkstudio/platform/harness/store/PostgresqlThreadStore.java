@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
@@ -170,7 +171,16 @@ final class PostgresqlThreadStore implements ThreadStore {
   }
 
   @Override
-  public List<ExecutionRootFacts> findExecutionFacts(List<UUID> rootThreadIds) {
+  public List<UUID> listThreadIdsByRoots(List<UUID> rootThreadIds) {
+    return tx.queryList(
+        "select id from harness_thread where root_thread_id = any(?::uuid[])",
+        (rs, ignored) -> rs.getObject("id", UUID.class),
+        new SqlArrayValue("uuid", rootThreadIds.toArray(UUID[]::new)));
+  }
+
+  @Override
+  public List<ExecutionRootFacts> findExecutionFacts(
+      List<UUID> rootThreadIds, List<DriverActiveWork> driverWork) {
     tx.checkOpen();
     Objects.requireNonNull(rootThreadIds, "rootThreadIds");
     if (rootThreadIds.isEmpty()) {
@@ -188,14 +198,14 @@ final class PostgresqlThreadStore implements ThreadStore {
             select t.root_thread_id, i.id, i.status
             from tree t join harness_tool_invocation i on i.thread_id = t.id
             where i.status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_CHILD', 'READY', 'RUNNING')
-        ), models as (
-            select t.root_thread_id, m.id, m.status
-            from tree t join builtin_model_invocation m on m.thread_id = t.id
-            where m.status in ('READY', 'RUNNING')
+        ), active_driver_work as (
+            select t.root_thread_id, d.kind, d.id, d.running
+            from unnest(?::uuid[], ?::text[], ?::uuid[], ?::boolean[]) as d(thread_id, kind, id, running)
+            join tree t on t.id = d.thread_id
         ), targets as (
             select root_thread_id, 'THREAD' as kind, id from tree
             union all select root_thread_id, 'TOOL', id from tools
-            union all select root_thread_id, 'MODEL', id from models
+            union all select root_thread_id, kind, id from active_driver_work
         ), work as (
             select t.root_thread_id,
                    bool_or(coalesce(w.lease_until > statement_timestamp(), false) or
@@ -217,7 +227,7 @@ final class PostgresqlThreadStore implements ThreadStore {
                        and i.status in ('WAITING_APPROVAL', 'WAITING_INPUT')) as waiting_human,
                    coalesce(w.runnable, false)
                        or exists (select 1 from tools i where i.root_thread_id = t.root_thread_id and i.status = 'RUNNING')
-                       or exists (select 1 from models m where m.root_thread_id = t.root_thread_id and m.status = 'RUNNING') as has_work,
+                       or exists (select 1 from active_driver_work d where d.root_thread_id = t.root_thread_id and d.running) as has_work,
                    coalesce(w.blocked, false)
                        or exists (select 1 from tools i where i.root_thread_id = t.root_thread_id and i.status = 'WAITING_CHILD')
                        or exists (select 1 from tree member join harness_thread_join j on j.child_thread_id = member.id
@@ -248,7 +258,16 @@ final class PostgresqlThreadStore implements ThreadStore {
                     ? null
                     : TurnEndOutcome.valueOf(rs.getString("outcome")),
                 rs.getTimestamp("last_activity_at").toInstant()),
-        new SqlArrayValue("uuid", rootThreadIds.toArray(UUID[]::new)));
+        new SqlArrayValue("uuid", rootThreadIds.toArray(UUID[]::new)),
+        new SqlArrayValue(
+            "uuid", driverWork.stream().map(DriverActiveWork::threadId).toArray(UUID[]::new)),
+        new SqlArrayValue(
+            "text",
+            driverWork.stream().map(work -> work.target().type().value()).toArray(String[]::new)),
+        new SqlArrayValue(
+            "uuid", driverWork.stream().map(work -> work.target().id()).toArray(UUID[]::new)),
+        new SqlArrayValue(
+            "boolean", driverWork.stream().map(DriverActiveWork::running).toArray(Boolean[]::new)));
   }
 
   @Override

@@ -1,15 +1,19 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.store;
 
+import org.springframework.jdbc.support.SqlArrayValue;
+
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.store.CommandStore;
 import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
 import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
@@ -20,6 +24,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlDriverWorkStorage;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
@@ -52,6 +57,22 @@ final class PostgresqlModelTransaction
                 threadId));
     models.sort(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR));
     return List.copyOf(models);
+  }
+
+  @Override
+  public List<DriverActiveWork> readActiveModelWork(List<UUID> threadIds) {
+    return tx.queryList(
+        """
+        select thread_id, id, status = 'RUNNING' as running
+        from builtin_model_invocation
+        where thread_id = any(?::uuid[]) and status in ('READY', 'RUNNING')
+        """,
+        (rs, ignored) ->
+            new DriverActiveWork(
+                rs.getObject("thread_id", UUID.class),
+                new WorkTarget(BuiltinWorkType.MODEL, rs.getObject("id", UUID.class)),
+                rs.getBoolean("running")),
+        new SqlArrayValue("uuid", threadIds.toArray(UUID[]::new)));
   }
 
   @Override
