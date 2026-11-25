@@ -80,10 +80,17 @@ async function cardFor(name: string): Promise<HTMLElement> {
   return card
 }
 
-/** 卡片只保留管理入口：动作与诊断都在管理弹窗里。 */
+/** 从指定卡片进入管理，避免误打开其他环境。 */
 async function openManagement(user: TestUser, name: string): Promise<HTMLElement> {
   await user.click(within(await cardFor(name)).getByRole('button', { name: `管理 ${name}` }))
   return screen.findByRole('dialog', { name: `管理环境：${name}` })
+}
+
+function expectCardActions(card: HTMLElement, name: string) {
+  const labels = ['安装 / 覆盖', '管理', '编辑配置', '删除环境']
+  const buttons = within(card).getAllByRole('button')
+  expect(buttons).toHaveLength(labels.length)
+  labels.forEach((label, index) => expect(buttons[index]).toHaveAccessibleName(`${label} ${name}`))
 }
 
 /** 管理动作执行前先关闭管理弹窗，再打开原有的确认/命令流程。 */
@@ -127,15 +134,16 @@ describe('EnvironmentsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(environmentService.getEnvironment).mockResolvedValue(environment({}))
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     // 默认没有本代 READY 运行快照；具体用例按需覆盖为 live runtime 或更新进度。
     vi.mocked(environmentService.getEnvironmentRuntime).mockRejectedValue(runtimeUnavailableError())
   })
 
   /**
-   * 测试意图：卡片只呈现当前状态、版本来源与更新状态，动作收敛为一个管理入口；
+   * 测试意图：卡片呈现当前状态、版本来源与更新状态，各种连接状态下动作顺序一致；
    * 能力清单、最近活动等诊断事实不再铺在卡片上。
    */
-  it('renders cards with status, note subtitle, version row and only the manage entry', async () => {
+  it('renders status, note, version and ordered actions on every environment card', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({
         id: 'env-1',
@@ -186,7 +194,9 @@ describe('EnvironmentsPage', () => {
       'offline-unknown',
       'offline-known',
     ]) {
-      expect((await cardFor(name)).querySelectorAll('.resource-card-meta-row')).toHaveLength(2)
+      const card = await cardFor(name)
+      expect(card.querySelectorAll('.resource-card-meta-row')).toHaveLength(2)
+      expectCardActions(card, name)
     }
     // 同一信息行在兄弟卡片间共用同一标签；有版本记录的卡片与从未上报的卡片不改写行名。
     expect(screen.getAllByText('Daemon 版本')).toHaveLength(5)
@@ -201,15 +211,12 @@ describe('EnvironmentsPage', () => {
     expect(await screen.findAllByText('状态不可用，等待 Daemon 重连')).toHaveLength(5)
     expect(screen.queryByText('无进行中的更新')).toBeNull()
 
-    // 动作只剩管理；只有既离线又没有版本记录的卡片才额外提供安装入口。
-    expect(within(localDev).getAllByRole('button')).toHaveLength(1)
-    expect(within(localDev).getByRole('button', { name: '管理 local-dev' })).toBeInTheDocument()
-    const offlineUnknown = await cardFor('offline-unknown')
-    expect(within(offlineUnknown).getAllByRole('button')).toHaveLength(2)
-    expect(
-      within(offlineUnknown).getByRole('button', { name: '安装 / 覆盖 offline-unknown' }),
-    ).toBeInTheDocument()
-    expect(within(await cardFor('offline-known')).queryByRole('button', { name: /安装/u })).toBeNull()
+    // 已有版本记录仍可从卡片进入覆盖安装，且会先提示执行中断。
+    await userEvent.setup().click(within(await cardFor('offline-known')).getByRole('button', {
+      name: '安装 / 覆盖 offline-known',
+    }))
+    const install = await screen.findByRole('dialog', { name: '安装 / 覆盖' })
+    expect(within(install).getByText(/覆盖安装会中断当前工具调用/u)).toBeVisible()
   })
 
   it('shows empty state when no environments configured', async () => {
@@ -334,14 +341,14 @@ describe('EnvironmentsPage', () => {
         proxyUrl: null,
       },
     })
-    expect(await screen.findByRole('dialog', { name: '安装/覆盖环境' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '安装 / 覆盖' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '新建环境' })).toBeNull()
     expect(screen.queryByText('secret-token-12345')).not.toBeInTheDocument()
     expect(clipboard.writeText).not.toHaveBeenCalled()
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('secret-token-12345')
   })
 
-  it('edits a card configuration from the management modal with CAS and keeps the draft when the version conflicts', async () => {
+  it('edits configuration directly from the card with CAS and keeps the draft when the version conflicts', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({
@@ -371,8 +378,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    await screen.findByText('my-box')
-    await runManagementAction(user, 'my-box', '编辑配置')
+    await user.click(within(await cardFor('my-box')).getByRole('button', { name: '编辑配置 my-box' }))
     const modal = await screen.findByRole('dialog', { name: '编辑环境：my-box' })
     expect(within(modal).getByRole('textbox', { name: '环境名称' })).toBeDisabled()
     expect(within(modal).getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
@@ -535,7 +541,7 @@ describe('EnvironmentsPage', () => {
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('rotated-tok-999')
   })
 
-  it('deletes an environment card from the management modal after confirmation', async () => {
+  it('deletes an environment directly from the card after confirmation', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'to-delete', version: '1' }),
@@ -543,8 +549,7 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.deleteEnvironment).mockResolvedValue(undefined)
     renderPage()
 
-    await screen.findByText('to-delete')
-    await runManagementAction(user, 'to-delete', '删除环境')
+    await user.click(within(await cardFor('to-delete')).getByRole('button', { name: '删除环境 to-delete' }))
 
     const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
     const confirmBtn = within(modal).getByRole('button', { name: '删除环境' })
@@ -575,13 +580,14 @@ describe('EnvironmentsPage', () => {
     const card = await cardFor('my-box')
     expect(await within(card).findByText('无进行中的更新')).toBeInTheDocument()
 
-    // 管理弹窗承载全部动作，标签与确认流程一致。
+    // 管理仍提供 Daemon 运维动作；编辑和删除等入口在卡片上。
     const management = await openManagement(user, 'my-box')
-    const managementLabels = ['编辑配置', '安装 / 覆盖', '更新 Daemon', '卸载', '重新生成 Token', '删除环境']
-    for (const label of managementLabels) {
-      expect(within(management).getByRole('button', { name: label })).toBeInTheDocument()
+    const controls = within(management)
+    for (const name of ['更新 Daemon', '卸载', '重新生成 Token']) {
+      expect(controls.getByRole('button', { name })).toBeVisible()
     }
-    await user.click(within(management).getByRole('button', { name: '更新 Daemon' }))
+    expect(controls.queryByRole('button', { name: /安装 \/ 覆盖|编辑配置|删除环境/u })).not.toBeInTheDocument()
+    await user.click(controls.getByRole('button', { name: '更新 Daemon' }))
 
     const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
     expect(within(modal).getByText(/my-box/)).toBeInTheDocument()
@@ -981,8 +987,8 @@ describe('EnvironmentsPage', () => {
     // 统一标签：降级后同一行仍是同一个行名，值保留上次上报的版本，不再宣称当前进程。
     expect(screen.getAllByText('Daemon 版本')).toHaveLength(1)
     expect(screen.getByText('1.2.1')).toBeInTheDocument()
-    // 有版本记录后不再提供安装入口，只剩管理。
-    expect(within(await cardFor('flaky-box')).getAllByRole('button')).toHaveLength(1)
+    // 离线并保留上次版本时，卡片动作及顺序不变。
+    expectCardActions(await cardFor('flaky-box'), 'flaky-box')
   })
 
   // 验证 Environment rotate 失败时在确认弹窗中可见展示错误（防止静默失败），并在 409 时走共享 ConflictPresenter 语义
@@ -1034,8 +1040,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    await screen.findByText('to-delete')
-    await runManagementAction(user, 'to-delete', '删除环境')
+    await user.click(within(await cardFor('to-delete')).getByRole('button', { name: '删除环境 to-delete' }))
 
     const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
     const confirmBtn = within(modal).getByRole('button', { name: '删除环境' })
@@ -1078,9 +1083,9 @@ describe('EnvironmentsPage', () => {
 
   /**
    * 测试意图：卡片只呈现当前状态，不内嵌历史事件；同一环境的历史 WARN 与后续 READY 事件
-   * 只在管理弹窗的诊断详情里可见，折叠时不读取事件端点。
+   * 只在管理弹窗里可见，进入管理前不读取事件端点。
    */
-  it('renders only the current status on the card and keeps event history in the management diagnostics', async () => {
+  it('shows host, configuration and localized event history as soon as management opens', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-recovered', name: 'recovered-box', status: 'READY', ready: true }),
@@ -1109,14 +1114,16 @@ describe('EnvironmentsPage', () => {
     expect(within(card).queryByText('READY')).not.toBeInTheDocument()
     expect(within(card).queryByText('daemon connection lost')).not.toBeInTheDocument()
 
-    const management = await openManagement(user, 'recovered-box')
-    expect(within(management).queryByText('daemon connection lost')).toBeNull()
     expect(environmentService.listEnvironmentEvents).not.toHaveBeenCalled()
-
-    await user.click(within(management).getByText('诊断详情'))
-    // 展开诊断后完整历史可见：历史 WARN 与后续 READY 都被保留。
-    expect(await screen.findByText('daemon connection lost')).toBeInTheDocument()
-    expect(screen.getByText('environment ready')).toBeInTheDocument()
+    const management = within(await openManagement(user, 'recovered-box'))
+    expect(management.getByRole('region', { name: '宿主信息' })).toBeVisible()
+    expect(management.getByRole('region', { name: '配置' })).toBeVisible()
+    const events = within(management.getByRole('region', { name: '事件记录' }))
+    // 不需展开；保留历史断连与后续就绪，并按当前语言显示。
+    expect(await events.findByText('Daemon 连接已断开。')).toBeVisible()
+    expect(events.getByText('环境已就绪。')).toBeVisible()
+    expect(events.queryByText('daemon connection lost')).not.toBeInTheDocument()
+    expect(environmentService.listEnvironmentEvents).toHaveBeenCalledWith('env-recovered')
   })
 
   /**

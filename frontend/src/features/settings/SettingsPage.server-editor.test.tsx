@@ -109,8 +109,12 @@ describe('SettingsPage server editor', () => {
     const panel = screen.getByRole('region', { name: '设置内容' })
     expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
-    expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
-      '后端发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后后端新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
+    expect(within(panel).getByLabelText('代理地址')).toHaveAttribute('placeholder', '直连')
+    const proxyHelp = within(panel).getByRole('button', { name: '帮助：代理地址' })
+    await userEvent.click(proxyHelp)
+    expect(proxyHelp).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      '使用无认证的 http://host:port 代理。保存后只影响新发起的 HTTP 请求。',
     )
     const proxy = within(panel).getByLabelText('代理地址')
     const bypass = within(panel).getByLabelText('代理绕过规则')

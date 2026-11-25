@@ -201,7 +201,10 @@ describe('EnvironmentConfigModal', () => {
   it('shows direct proxy and hot update help hints', async () => {
     const user = userEvent.setup()
     open()
-    expect(screen.getAllByText(/留空表示直连/).length).toBeGreaterThan(0)
+    expect(screen.getByRole('textbox', { name: 'Daemon 代理' })).toHaveAttribute(
+      'placeholder',
+      'http://127.0.0.1:7890',
+    )
     const applyHelp = screen.getByRole('button', { name: /帮助：保存后的配置无需重装 Daemon 即可生效/ })
     await user.click(applyHelp)
     expect(applyHelp).toHaveAttribute('aria-expanded', 'true')
