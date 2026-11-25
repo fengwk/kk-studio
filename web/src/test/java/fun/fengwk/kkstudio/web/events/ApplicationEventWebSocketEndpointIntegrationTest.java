@@ -270,9 +270,9 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   @Test
   void oversizedThreadSnapshotBecomesSnapshotRefAndKeepsTheRealSocketHealthy() throws Exception {
     HttpClient http = HttpClient.newHttpClient();
-    String chatId = createSpace(http);
-    String oversizedThread = createThread(http, chatId, "o".repeat(20_000));
-    String healthyThread = createThread(http, chatId, "hello");
+    String spaceId = createSpace(http);
+    String oversizedThread = createThread(http, spaceId, "o".repeat(20_000));
+    String healthyThread = createThread(http, spaceId, "hello");
     JsonNode oversizedSnapshot = getThreadSnapshot(http, oversizedThread);
     JsonNode healthySnapshot = getThreadSnapshot(http, healthyThread);
 
@@ -347,22 +347,23 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
         http.send(
             adminRequest(uri("/api/chat-spaces"))
                 .timeout(Duration.ofSeconds(10))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build(),
             HttpResponse.BodyHandlers.ofString());
-    assertEquals(201, response.statusCode(), response.body());
+    assertEquals(200, response.statusCode(), response.body());
     return MAPPER.readTree(response.body()).path("id").asText();
   }
 
-  private String createThread(HttpClient http, String chatId, String userText) throws Exception {
+  private String createThread(HttpClient http, String spaceId, String userText) throws Exception {
     String createBody =
         """
         {"message":[{"type":"TEXT","text":"%s"}]}
         """.formatted(userText);
     HttpResponse<String> response =
         http.send(
-            adminRequest(uri("/api/chat-spaces/" + chatId + "/sessions"))
+            adminRequest(uri("/api/chat-spaces/" + spaceId + "/sessions"))
                 .timeout(Duration.ofSeconds(20))
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .header("Content-Type", "application/json")

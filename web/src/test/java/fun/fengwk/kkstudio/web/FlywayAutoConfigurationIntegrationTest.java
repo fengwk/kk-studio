@@ -134,9 +134,16 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name <> 'flyway_schema_history'")) {
         assertTrue(businessTables.next());
         assertEquals(
-            47L,
+            43L,
             businessTables.getLong(1),
-            "the canonical V1 baseline must expose exactly 47 business tables");
+            "the canonical V1 baseline must expose exactly 43 business tables");
+      }
+      try (ResultSet retiredTables =
+          st.executeQuery(
+              "select count(*) from information_schema.tables"
+                  + " where table_schema = 'public' and table_name in ('chat', 'chat_session')")) {
+        assertTrue(retiredTables.next());
+        assertEquals(0L, retiredTables.getLong(1));
       }
       try (ResultSet clusterNode =
           st.executeQuery(
