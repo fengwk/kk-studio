@@ -1,12 +1,11 @@
 import { useLayoutEffect, type ReactNode } from 'react'
-import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import { ThreadPane } from '@/features/thread/runtime/panes/ThreadPane'
 import {
   useThreadProjection,
   type ThreadProjection,
 } from '@/features/thread/runtime/useThreadProjection'
 import { useBoundThreadPanelViews } from '@/features/thread/runtime/controllers/useBoundThreadPanelViews'
-import { useThreadPresentation, type ThreadPresentation } from './thread-presentation'
+import { isDebugCloseEscape, useThreadPresentation, type ThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
@@ -72,9 +71,7 @@ export function ThreadView({
   }, [onPresentation, presentation])
   return (
     <div className="bound-thread-view" onKeyDown={(event) => {
-      if (onPresentation == null && presentation.mode === 'debug' && event.key === 'Escape'
-        && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing && event.keyCode !== 229
-        && !shouldDeferToBlockingModal(event.currentTarget)) {
+      if (onPresentation == null && presentation.mode === 'debug' && isDebugCloseEscape(event)) {
         event.preventDefault()
         event.stopPropagation()
         presentation.act(presentation.viewKey, 'close-debug')
