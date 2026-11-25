@@ -33,9 +33,9 @@ registerCase({
       await localizedGet(ctx, unknownSpacePath, 'zh-CN', { status: 404, code: 'not_found' }),
     )
     assert(englishDomain.code === 'not_found', JSON.stringify(englishDomain))
-    assert(englishDomain.reason === 'WORKSPACE_NOT_FOUND' && englishDomain.title === 'The resource was not found.', JSON.stringify(englishDomain))
+    assert(englishDomain.reason === 'WORKSPACE_NOT_FOUND' && englishDomain.title === 'The space was not found.', JSON.stringify(englishDomain))
     assert(chineseDomain.code === 'not_found', JSON.stringify(chineseDomain))
-    assert(chineseDomain.reason === englishDomain.reason && chineseDomain.title === '未找到 resource。', JSON.stringify(chineseDomain))
+    assert(chineseDomain.reason === englishDomain.reason && chineseDomain.title === '未找到空间。', JSON.stringify(chineseDomain))
     assert(chineseDomain.detail === 'Space not found', JSON.stringify(chineseDomain))
 
     // Catalog controller 的类型不匹配由 Domain advice 归一为 validation。

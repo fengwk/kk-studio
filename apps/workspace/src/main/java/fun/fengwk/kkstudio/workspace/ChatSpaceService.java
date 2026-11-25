@@ -239,7 +239,7 @@ public class ChatSpaceService {
         .query(Space.class)
         .optional()
         .orElseThrow(
-            () -> DomainException.notFoundReason("WORKSPACE_NOT_FOUND", "Space not found"));
+            () -> DomainException.notFound("chat_space", "WORKSPACE_NOT_FOUND", "Space not found"));
   }
 
   long advance(UUID spaceId) {
@@ -264,7 +264,7 @@ public class ChatSpaceService {
   }
 
   static DomainException resourceNotFound() {
-    return DomainException.notFoundReason("RESOURCE_NOT_FOUND", "Resource not found");
+    return DomainException.notFound("resource", "RESOURCE_NOT_FOUND", "Resource not found");
   }
 
   static String name(String value, String field) {
