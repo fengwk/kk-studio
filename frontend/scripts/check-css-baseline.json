@@ -168,9 +168,6 @@
   "src/shared/ui/markdown/markdown.css": {
     "spacing": 15
   },
-  "src/shared/ui/markdown/mermaid-block.css": {
-    "spacing": 3
-  },
   "src/shared/ui/media/media.css": {
     "spacing": 2
   },

@@ -108,21 +108,29 @@ export const sharedCatalog = {
     'en-US': 'Dismiss notification',
     'zh-CN': '关闭通知',
   },
-  'shared.mermaidDiagram': {
-    'en-US': 'Mermaid diagram',
-    'zh-CN': 'Mermaid 图表',
+  'shared.vizFigure': {
+    'en-US': 'Figure',
+    'zh-CN': '图表',
   },
-  'shared.mermaidRenderFailed': {
-    'en-US': "Can't render this diagram.",
+  'shared.vizNote': {
+    'en-US': 'Note: {{note}}',
+    'zh-CN': '注：{{note}}',
+  },
+  'shared.vizRenderFailed': {
+    'en-US': "Can't render this figure.",
     'zh-CN': '无法渲染此图。',
   },
-  'shared.mermaidRenderFailedAt': {
-    'en-US': "Can't render this diagram. Line {{line}}: {{detail}}",
+  'shared.vizRenderFailedAt': {
+    'en-US': "Can't render this figure. Line {{line}}: {{detail}}",
     'zh-CN': '无法渲染此图。第 {{line}} 行：{{detail}}',
   },
-  'shared.mermaidRenderFailedWith': {
-    'en-US': "Can't render this diagram. {{detail}}",
+  'shared.vizRenderFailedWith': {
+    'en-US': "Can't render this figure. {{detail}}",
     'zh-CN': '无法渲染此图。{{detail}}',
+  },
+  'shared.vizSource': {
+    'en-US': 'Source: {{source}}',
+    'zh-CN': '来源：{{source}}',
   },
   'shared.requestFailed': {
     'en-US': 'Request failed',

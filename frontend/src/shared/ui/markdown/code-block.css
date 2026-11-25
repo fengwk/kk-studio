@@ -5,7 +5,7 @@
 }
 
 .md-code-shell > .md-code-block,
-.md-code-shell > .md-mermaid {
+.md-code-shell > .md-viz {
   margin: 0;
 }
 

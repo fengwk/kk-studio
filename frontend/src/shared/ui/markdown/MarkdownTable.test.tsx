@@ -59,7 +59,7 @@ describe('MarkdownRenderer table copy', () => {
     expect(writeText).toHaveBeenLastCalledWith(SECOND_TABLE)
   })
 
-  it('keeps table offsets local to their own segment around a mermaid fence', async () => {
+  it('keeps table offsets local to their own segment around a viz fence', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     setClipboard({ writeText })
     const view = render(
@@ -76,7 +76,7 @@ describe('MarkdownRenderer table copy', () => {
       />,
     )
     await waitFor(() => {
-      expect(view.container.querySelector('.md-mermaid')?.innerHTML).toContain('graph TD; A-->B')
+      expect(view.container.querySelector('.md-viz')?.innerHTML).toContain('graph TD; A-->B')
     })
 
     const buttons = screen.getAllByRole('button', { name: '复制表格' })

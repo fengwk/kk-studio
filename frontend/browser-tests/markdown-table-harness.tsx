@@ -14,17 +14,27 @@ setLocale(isEnglish ? 'en-US' : 'zh-CN')
 
 /**
  * M1 表格复制的真实浏览器 harness：挂载真实 AssistantMessageBlock（含外层「复制全文」
- * 与共享 MarkdownRenderer），用窄表 + Mermaid 分段 + 宽表覆盖只能在浏览器验证的契约：
+ * 与共享 MarkdownRenderer），用窄表 + 图表分段 + 宽表覆盖只能在浏览器验证的契约：
  * 按钮与表头/单元格的几何关系、宽表横滚时按钮位置、外层 overflow 是否裁掉按钮、
  * hover/键盘显隐、剪贴板拿到的确实是表格原始 Markdown、流式追加后的分段稳定性。
  */
+
+/** 允许浏览器用例在真实 Markdown → 图表路径注入语法与源码。 */
+function vizSyntax(): string {
+  return new URLSearchParams(window.location.search).get('syntax') ?? 'mermaid'
+}
+
+function vizSource(): string {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('source') ?? params.get('mermaid') ?? 'graph TD; A-->B'
+}
 
 /** 窄表：富文本单元格（转义竖线/加粗/链接/行内代码），表头就是按钮必须避开的区域。 */
 const NARROW_HEADER = '| 名称 | 值 | 备注 |'
 const NARROW_ALIGN = '| :--- | ---: | :---: |'
 const NARROW_BODY = '| `a\\|b` | **粗体** | [链接](https://example.com/x) |'
 
-/** 追加行模拟流式增长；追加只改变第一段，Mermaid 之后的宽表段应保持已挂载。 */
+/** 追加行模拟流式增长；追加只改变第一段，图表之后的宽表段应保持已挂载。 */
 function appendedRow(index: number): string {
   return `| 追加 ${index + 1} | 值${index + 1} | 备注${index + 1} |`
 }
@@ -67,9 +77,8 @@ function buildMessage(appendedRows: number): TextDialogueMessage {
       '',
       '普通段落。',
       '',
-      '```mermaid',
-      // 允许浏览器用例在真实 Markdown → Mermaid 路径注入不同图源。
-      new URLSearchParams(window.location.search).get('mermaid') ?? 'graph TD; A-->B',
+      `\`\`\`${vizSyntax()}`,
+      vizSource(),
       '```',
       '',
       WIDE_TABLE,

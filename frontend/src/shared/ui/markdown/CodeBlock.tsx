@@ -92,7 +92,7 @@ export const CopyButton = memo(function CopyButton({
   )
 })
 
-/** 悬停右上角复制；用于代码块、mermaid 等任意源码容器 */
+/** 悬停右上角复制；用于代码块、图表等任意源码容器 */
 export const CopyableShell = memo(function CopyableShell({
   source,
   className,

@@ -492,9 +492,17 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 
 每个 VS Code 视图嵌入在对应工作区窗格（[`VsCodePaneRenderer`](../../frontend/src/features/environment/ide/VsCodePaneRenderer.tsx)），由窗格标题 `PaneHeader` 呈现名称与关闭操作；文件和目录由 VS Code 原生界面打开。托管工作台的 Open Folder、New Window 和关闭此工作区分别对应视图目录切换、打开独立视图并落入空窗格或新拆分窗格、以及该窗格的正常关闭。应用只接受来自当前嵌入 iframe、同源且匹配当前 view 与 epoch 的固定动作。
 
-### Mermaid 图
+### 图表与结构图
 
-闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；SVG 裁到图形范围并与正文左对齐。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
+闭合的 `kchart`、`mermaid`、`layers`、`blocks`、`swimlane` 代码块由
+[`VizBlock`](../../frontend/src/shared/ui/markdown/VizBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart)
+渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；
+SVG 裁到图形范围并与正文左对齐。`kchart` 是 JSON 数据图，图上方显示 `scene.heading` 与 `scene.subtitle`，
+图下方显示来源与注释。
+`mermaid`、`layers`、`blocks`、`swimlane` 作为结构图源码交给 KChart，标题由紧凑排版直接画在图中。
+配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。
+放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。
+标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
 
 应用根通过 `GET /api/auth/me` 判断登录状态。HTTP `NOT_AUTHENTICATED` 或事件连接关闭码 `4001` 触发原地重新登录；同一账号保留草稿，其它账号整页重新加载。工作区通过 `useAccount` 读取账号，使用 `AccountMenu` 展示头像、修改密码和退出入口；有未发送内容时传入 `hasUnsentContent`。
 

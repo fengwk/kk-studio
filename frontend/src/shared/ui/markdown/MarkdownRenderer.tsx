@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import { CodeBlock } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
-import { MermaidBlock } from '@/shared/ui/markdown/MermaidBlock'
+import { VizBlock } from '@/shared/ui/markdown/VizBlock'
 import { MarkdownSegmentSourceContext } from '@/shared/ui/markdown/markdown-table-source'
 import { ResourceUri } from '@/shared/ui/markdown/ResourceUri'
 import { splitMarkdownSegments } from '@/shared/ui/markdown/split-markdown-segments'
@@ -96,7 +96,7 @@ const MarkdownSegmentView = memo(
 
 /**
  * 通用 Markdown 渲染器。
- * - 闭合 mermaid fence 拆成稳定兄弟节点
+ * - 闭合图表 fence 拆成稳定兄弟节点
  * - md 段按 content memo，降低流式 token 全量 parse 成本
  * - preserveRawText：把 raw 节点渲染为安全 span.md-raw-text（保留原始换行），
  *   不解析/执行 HTML；默认 false，保持既有行为。
@@ -122,8 +122,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   return (
     <div className={['md-root', tone === 'muted' ? 'md-tone-muted' : '', className].filter(Boolean).join(' ')}>
       {segments.map((segment) => {
-        if (segment.type === 'mermaid') {
-          return <MermaidBlock key={segment.key} code={segment.content} />
+        if (segment.type === 'viz') {
+          return <VizBlock key={segment.key} syntax={segment.syntax} code={segment.content} />
         }
         if (!segment.content.trim()) {
           return null
