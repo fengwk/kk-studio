@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceUri;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -215,12 +214,11 @@ public final class UserMessageContentPreparer {
   private void requireExistingReferencedResources(UUID sessionId, String text) {
     for (UUID blobId : ResourceUri.referencedFiles(text)) {
       if (!refManager.contains(sessionId, blobId)) {
-        throw DomainException.validation(
-            "resource", "Resource is not owned by the current session");
+        throw ResourceAccess.notFound();
       }
       StorageBlob blob = blobManager.getBlob(blobId);
       if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
-        throw DomainException.validation("resource", "Resource is not available");
+        throw ResourceAccess.notFound();
       }
     }
   }
@@ -229,7 +227,7 @@ public final class UserMessageContentPreparer {
   private ResourceMessageContent requireOwnedResource(
       UUID sessionId, ResourceMessageContent resource) {
     if (!refManager.contains(sessionId, resource.blobId())) {
-      throw DomainException.validation("resource", "Resource is not owned by the current session");
+      throw ResourceAccess.notFound();
     }
     ImageInputTier imageTier = imageTierForBlob(resource.blobId(), resource.imageTier());
     if (imageTier == resource.imageTier()) {

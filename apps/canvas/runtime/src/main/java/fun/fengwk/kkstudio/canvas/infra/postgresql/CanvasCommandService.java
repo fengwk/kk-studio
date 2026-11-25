@@ -159,11 +159,15 @@ public class CanvasCommandService {
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     Objects.requireNonNull(commands, "commands");
     return applyCommandsWithHash(
-        canvasId, idempotencyKey, commands, CanvasCommandHash.of(commands));
+        canvasId, idempotencyKey, commands, CanvasCommandHash.of(commands), null);
   }
 
   private CanvasCommandResult applyCommandsWithHash(
-      UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands, String requestHash) {
+      UUID canvasId,
+      UUID idempotencyKey,
+      List<CanvasCommand> commands,
+      String requestHash,
+      CanvasUploadOwnership uploadOwner) {
     CanvasDocument document = requireLockedDocument(canvasId);
     CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (dedup != null) {
@@ -179,7 +183,7 @@ public class CanvasCommandService {
     }
     long acceptedRevision = document.revision();
     if (plan.hasChanges()) {
-      applyMutations(canvasId, plan.mutations());
+      applyMutations(canvasId, plan.mutations(), uploadOwner);
       acceptedRevision++;
       if (!canvasStore.advanceRevision(canvasId, document.revision(), acceptedRevision)) {
         throw new IllegalStateException("canvas revision CAS failed under document row lock");
@@ -216,17 +220,10 @@ public class CanvasCommandService {
     for (CanvasCommand command : commands) {
       resolved.add(resolveUploads(command, userId, uploads));
     }
+    CanvasUploadOwnership owner = uploads.isEmpty() ? null : requireUploadOwnership();
     CanvasCommandResult result =
-        applyCommandsWithHash(canvasId, idempotencyKey, resolved, requestHash);
-    if (result instanceof Accepted accepted && !accepted.patch().isEmpty() && !uploads.isEmpty()) {
-      CanvasUploadOwnership owner = requireUploadOwnership();
-      for (CanvasCommand command : resolved) {
-        for (CanvasResourceInput input : resourceInputs(command)) {
-          if (input instanceof CanvasResourceInput.Blob blob) {
-            owner.retain(blob.blobId());
-          }
-        }
-      }
+        applyCommandsWithHash(canvasId, idempotencyKey, resolved, requestHash, owner);
+    if (owner != null && result instanceof Accepted accepted && !accepted.patch().isEmpty()) {
       for (UUID uploadId : uploads.keySet()) {
         owner.delete(uploadId, userId);
       }
@@ -276,16 +273,6 @@ public class CanvasCommandService {
     return owner;
   }
 
-  private static List<CanvasResourceInput> resourceInputs(CanvasCommand command) {
-    if (command instanceof CanvasCommand.CreateNode create) {
-      return create.resources();
-    }
-    if (command instanceof CanvasCommand.SetNodeResources set) {
-      return set.resources();
-    }
-    return List.of();
-  }
-
   private CanvasDocument requireLockedDocument(UUID canvasId) {
     Objects.requireNonNull(canvasId, "canvasId");
     return canvasStore
@@ -309,7 +296,8 @@ public class CanvasCommandService {
   }
 
   /** 按规划顺序执行行级步骤；任何一步不满足都抛出，使整个事务回滚。 */
-  private void applyMutations(UUID canvasId, List<CanvasMutation> mutations) {
+  private void applyMutations(
+      UUID canvasId, List<CanvasMutation> mutations, CanvasUploadOwnership uploadOwner) {
     for (CanvasMutation mutation : mutations) {
       switch (mutation) {
         case CanvasMutation.InsertNode insert -> canvasStore.addNode(toRecord(canvasId, insert));
@@ -323,7 +311,12 @@ public class CanvasCommandService {
             throw new IllegalStateException("delete canvas node failed: " + delete.nodeId());
           }
         }
-        case CanvasMutation.InsertResource insert -> resourceRepository.add(insert.resource());
+        case CanvasMutation.InsertResource insert -> {
+          if (uploadOwner != null && insert.resource().blobId() != null) {
+            uploadOwner.retain(insert.resource().blobId());
+          }
+          resourceRepository.add(insert.resource());
+        }
         case CanvasMutation.AttachResource attach -> {
           if (!resourceRepository.attachOwner(
               canvasId, attach.resourceId(), attach.nodeId(), attach.resourceIndex())) {
