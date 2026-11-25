@@ -66,6 +66,11 @@ public class HarnessCommandAcceptanceOrchestrator {
   /** 接受一次 owner-aware 的命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
   @Transactional
   public AcceptedCommands accept(SessionOwner owner, AcceptCommandsCommand command) {
+    return accept(null, owner, command);
+  }
+
+  @Transactional
+  public AcceptedCommands accept(UUID userId, SessionOwner owner, AcceptCommandsCommand command) {
     Objects.requireNonNull(owner, "owner");
     Objects.requireNonNull(command, "command");
     requireCreationTarget(command.target());
@@ -84,13 +89,18 @@ public class HarnessCommandAcceptanceOrchestrator {
     }
     HarnessRuntime runtime = requireRuntime();
     authorize(ownership, owner, command.target());
-    AcceptancePreflight preflight = preflight(ownership, owner, command.target());
+    AcceptancePreflight preflight = preflight(ownership, owner, command.target(), userId);
     return runtime.acceptCommands(command, preflight);
   }
 
   /** The caller locks the workspace and records the new placement in this physical transaction. */
   @Transactional(propagation = Propagation.MANDATORY)
   public AcceptedCommands createSession(AcceptCommandsCommand command) {
+    return createSession(null, command);
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public AcceptedCommands createSession(UUID userId, AcceptCommandsCommand command) {
     if (!(command.target() instanceof AcceptCommandsTarget.NewRootSession)) {
       throw new IllegalArgumentException("session creation requires a new root target");
     }
@@ -98,7 +108,7 @@ public class HarnessCommandAcceptanceOrchestrator {
         .acceptCommands(
             command,
             (session, commands, copiedEntries, branchSettings) ->
-                prepareUserContents(session.id(), commands, branchSettings));
+                prepareUserContents(userId, session.id(), commands, branchSettings));
   }
 
   /**
@@ -109,6 +119,11 @@ public class HarnessCommandAcceptanceOrchestrator {
    */
   @Transactional
   public AcceptedCommands acceptOnThread(AcceptCommandsCommand command) {
+    return acceptOnThread(null, command);
+  }
+
+  @Transactional
+  public AcceptedCommands acceptOnThread(UUID userId, AcceptCommandsCommand command) {
     Objects.requireNonNull(command, "command");
     if (!(command.target() instanceof AcceptCommandsTarget.Thread)) {
       throw new IllegalArgumentException("thread command acceptance requires a THREAD target");
@@ -116,7 +131,7 @@ public class HarnessCommandAcceptanceOrchestrator {
     HarnessRuntime runtime = requireRuntime();
     AcceptancePreflight preflight =
         (session, commands, copiedEntries, branchSettings) ->
-            prepareUserContents(session.id(), commands, branchSettings);
+            prepareUserContents(userId, session.id(), commands, branchSettings);
     return runtime.acceptCommands(command, preflight);
   }
 
@@ -194,7 +209,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /** 全新 Session 的 preflight 调用产品归属钩子并物化 USER_MESSAGE 附件；精确 replay 不重复执行。 */
   private AcceptancePreflight preflight(
-      SessionOwnership ownership, SessionOwner owner, AcceptCommandsTarget target) {
+      SessionOwnership ownership, SessionOwner owner, AcceptCommandsTarget target, UUID userId) {
     return (session, commands, copiedEntries, branchSettings) -> {
       if (target instanceof AcceptCommandsTarget.NewRootSession
           || target instanceof AcceptCommandsTarget.NewForkedSession) {
@@ -203,7 +218,7 @@ public class HarnessCommandAcceptanceOrchestrator {
       if (target instanceof AcceptCommandsTarget.NewForkedSession) {
         SessionEntryResources.retain(refManager, session.id(), copiedEntries);
       }
-      return prepareUserContents(session.id(), commands, branchSettings);
+      return prepareUserContents(userId, session.id(), commands, branchSettings);
     };
   }
 
@@ -213,10 +228,10 @@ public class HarnessCommandAcceptanceOrchestrator {
    * READY upload 的取得方式不同。
    */
   private List<NewThreadCommand> prepareUserContents(
-      UUID sessionId, List<NewThreadCommand> commands, BranchSettings branchSettings) {
+      UUID userId, UUID sessionId, List<NewThreadCommand> commands, BranchSettings branchSettings) {
     if (commands.stream()
         .noneMatch(command -> command.payload() instanceof UserMessageCommandPayload)) {
-      return contentPreparer.prepare(sessionId, commands);
+      return contentPreparer.prepare(userId, sessionId, commands, null);
     }
     for (NewThreadCommand command : commands) {
       if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
@@ -224,7 +239,7 @@ public class HarnessCommandAcceptanceOrchestrator {
       }
     }
     Integer protocolMaxImages = modelImageCountLimitResolver.resolve(branchSettings);
-    return contentPreparer.prepare(sessionId, commands, protocolMaxImages);
+    return contentPreparer.prepare(userId, sessionId, commands, protocolMaxImages);
   }
 
   /**
@@ -233,10 +248,10 @@ public class HarnessCommandAcceptanceOrchestrator {
    * Maintenance 完成。
    */
   private UserMessageContentPreparer.ReadyAttachment consumeAttachment(
-      UUID sessionId, UUID uploadId) {
+      UUID userId, UUID sessionId, UUID uploadId) {
     StorageUploadService.ReadyUpload ready;
     try {
-      ready = uploadService.lockReady(uploadId);
+      ready = uploadService.lockReady(uploadId, userId);
     } catch (DomainException error) {
       if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
         throw error;

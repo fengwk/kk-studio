@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
@@ -29,13 +30,19 @@ public class HarnessCommandBatchService {
 
   /** 接受 owner-aware 创建型命令批；只允许纯执行根会话参与人工 fork。 */
   public HarnessAcceptedCommandsDTO accept(SessionOwner owner, AcceptCommandsCommand command) {
+    return accept(null, owner, command);
+  }
+
+  public HarnessAcceptedCommandsDTO accept(
+      StudioPrincipal actor, SessionOwner owner, AcceptCommandsCommand command) {
     if (command.target() instanceof AcceptCommandsTarget.NewThread fork) {
       ManualThreadControlGuard.requireForkRootSession(runtime, fork.sessionId());
     } else if (command.target() instanceof AcceptCommandsTarget.NewForkedSession forkedSession) {
       ManualThreadControlGuard.requireForkRootSourceThread(runtime, forkedSession.sourceThreadId());
     }
     try {
-      return toAcceptedDto(acceptanceService.accept(owner, command));
+      return toAcceptedDto(
+          acceptanceService.accept(actor == null ? null : actor.userId(), owner, command));
     } catch (DirectCommandsNotAllowedException error) {
       throw DomainException.conflict("DIRECT_COMMANDS_NOT_ALLOWED", error.getMessage(), error);
     }
@@ -43,10 +50,16 @@ public class HarnessCommandBatchService {
 
   /** 接受既有 Thread 的 owner-free 续写；target 必须是执行根。 */
   public HarnessAcceptedCommandsDTO acceptOnThread(AcceptCommandsCommand command) {
+    return acceptOnThread(null, command);
+  }
+
+  public HarnessAcceptedCommandsDTO acceptOnThread(
+      StudioPrincipal actor, AcceptCommandsCommand command) {
     if (command.target() instanceof AcceptCommandsTarget.Thread thread) {
       ManualThreadControlGuard.requireExecutionRoot(runtime, thread.threadId());
     }
-    return toAcceptedDto(acceptanceService.acceptOnThread(command));
+    return toAcceptedDto(
+        acceptanceService.acceptOnThread(actor == null ? null : actor.userId(), command));
   }
 
   private HarnessAcceptedCommandsDTO toAcceptedDto(AcceptedCommands accepted) {

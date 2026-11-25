@@ -107,6 +107,7 @@ public class WorkspaceSessions {
             HarnessRuntimeRequestMapper.toUserMessageContents(request.message()));
     var accepted =
         acceptance.createSession(
+            actor.userId(),
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.NewRootSession(session, thread, branch, yolo),
                 List.of(new NewThreadCommand(new UserMessageCommandPayload(message), key))));

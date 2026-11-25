@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -46,6 +47,7 @@ class PlatformResourceContentReaderTest {
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
     reader = new PlatformResourceContentReader(refs, blobManager, blobs);
+    when(refs.contains(any(), any())).thenReturn(true);
     when(blobManager.getBlob(any()))
         .thenAnswer(invocation -> activeBlob(invocation.getArgument(0)));
   }
@@ -91,18 +93,29 @@ class PlatformResourceContentReaderTest {
                 sessionId, TurnMediaCapabilities.NONE, blobId, null, null, null, "resource", null));
   }
 
-  /** 测试意图：资源读取时幂等建立当前 Session 持有。 */
+  /** 测试意图：读取只能复用当前 Session 已建立的持有关系。 */
   @Test
-  void readingResourceEstablishesSessionHold() {
+  void readingResourceRequiresExistingSessionHold() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     when(blobs.withBlobStream(eq(blobId), any(), any())).thenReturn("1|blob-content");
 
     assertTrue(read(sessionId, blobId).contains("1|blob-content"));
-    verify(refs).retainRef(sessionId, blobId);
+    verify(refs).contains(sessionId, blobId);
   }
 
-  /** 测试意图：不存在或已释放的资源不会被持有或读取。 */
+  /** 测试意图：无当前会话持有的全局 Blob ID 在 blob lookup 前拒绝。 */
+  @Test
+  void rejectsUnheldBlobBeforeLookup() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    when(refs.contains(sessionId, blobId)).thenReturn(false);
+    assertThrows(PlatformReadException.class, () -> read(sessionId, blobId));
+    verify(blobManager, never()).getBlob(blobId);
+    verifyNoInteractions(blobs);
+  }
+
+  /** 测试意图：不存在或已释放的资源不会被读取。 */
   @Test
   void rejectsMissingBlob() {
     UUID sessionId = UUID.randomUUID();

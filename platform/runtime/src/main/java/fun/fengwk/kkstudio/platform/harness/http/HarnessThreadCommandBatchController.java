@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
 
@@ -35,9 +36,11 @@ public class HarnessThreadCommandBatchController {
   @PostMapping("/{threadId}/command-batches")
   @ResponseStatus(HttpStatus.ACCEPTED)
   public HarnessAcceptedCommandsDTO accept(
-      @PathVariable UUID threadId, @RequestBody HarnessThreadCommandBatchDTO request) {
+      @PathVariable UUID threadId,
+      @RequestBody HarnessThreadCommandBatchDTO request,
+      StudioPrincipal actor) {
     AcceptCommandsCommand command =
         HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(threadId.toString(), request);
-    return commandBatchService.acceptOnThread(command);
+    return commandBatchService.acceptOnThread(actor, command);
   }
 }

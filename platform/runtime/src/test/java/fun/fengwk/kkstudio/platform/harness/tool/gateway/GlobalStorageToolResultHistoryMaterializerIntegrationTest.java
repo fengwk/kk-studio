@@ -14,14 +14,25 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.orchestration.UserMessageContentPreparer;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.ByteArrayInputStream;
@@ -46,6 +57,8 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
 
   @Autowired private GlobalStorageToolResultHistoryMaterializer materializer;
   @Autowired private StorageUploadService uploadService;
+  @Autowired private SessionBlobRefManager refManager;
+  @Autowired private StorageBlobManager blobManager;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
@@ -147,6 +160,80 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
   }
 
   @Test
+  void rejectsTextReferenceToBlobNotAlreadyHeldBySession() {
+    StorageUploadService.StagedUpload staged =
+        stage("private.txt", "text/plain", "private".getBytes(StandardCharsets.UTF_8));
+    String text = "resource://files/" + staged.blobId();
+
+    assertThrows(
+        ToolOutcomeMaterializationException.class,
+        () ->
+            inTransaction(
+                new ToolResult("call-1", List.of(new TextResultContent(text)), false, "{}")));
+
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from session_blob_ref where session_id = ? and blob_id = ?",
+            Integer.class,
+            SESSION_ID,
+            staged.blobId()));
+  }
+
+  @Test
+  void secondUsersSessionCannotClaimResourceHeldOnlyByFirstUsersSession() {
+    TwoUserSessions users = createTwoUserSessions();
+    StorageUploadService.StagedUpload staged =
+        stage("first-user.txt", "text/plain", "private".getBytes(StandardCharsets.UTF_8));
+    transaction.executeWithoutResult(status -> refManager.retainRef(SESSION_ID, staged.blobId()));
+
+    assertThrows(
+        ToolOutcomeMaterializationException.class,
+        () ->
+            inTransaction(
+                users.secondSession(),
+                new ToolResult(
+                    "call-1",
+                    List.of(new TextResultContent("resource://files/" + staged.blobId())),
+                    false,
+                    "{}")));
+
+    assertEquals(1, countSessionRef(SESSION_ID, staged.blobId()));
+    assertEquals(0, countSessionRef(users.secondSession(), staged.blobId()));
+  }
+
+  @Test
+  void secondUsersMessageCannotReferenceBlobHeldOnlyByFirstUsersSession() {
+    TwoUserSessions users = createTwoUserSessions();
+    StorageUploadService.StagedUpload staged =
+        stage("first-user.txt", "text/plain", "private".getBytes(StandardCharsets.UTF_8));
+    transaction.executeWithoutResult(status -> refManager.retainRef(SESSION_ID, staged.blobId()));
+    UserMessageContentPreparer preparer =
+        new UserMessageContentPreparer(
+            refManager,
+            blobManager,
+            (userId, sessionId, uploadId) -> {
+              throw new AssertionError("message contains no upload");
+            },
+            () -> ImageInputTier.P720,
+            () -> 2);
+    NewThreadCommand command =
+        new NewThreadCommand(
+            new UserMessageCommandPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(new TextMessageContent("resource://files/" + staged.blobId())))),
+            UUID.randomUUID());
+
+    assertThrows(
+        DomainException.class,
+        () -> preparer.prepare(users.secondUser(), users.secondSession(), List.of(command), null));
+
+    assertEquals(1, countSessionRef(SESSION_ID, staged.blobId()));
+    assertEquals(0, countSessionRef(users.secondSession(), staged.blobId()));
+  }
+
+  @Test
   void requiresCallerTransaction() {
     StorageUploadService.StagedUpload staged =
         stage("result.bin", "application/octet-stream", new byte[] {1});
@@ -176,7 +263,81 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
         staged.sha256());
   }
 
+  private TwoUserSessions createTwoUserSessions() {
+    UUID firstUser = UUID.randomUUID();
+    UUID secondUser = UUID.randomUUID();
+    UUID firstSpace = UUID.randomUUID();
+    UUID secondSpace = UUID.randomUUID();
+    UUID firstFolder = UUID.randomUUID();
+    UUID secondFolder = UUID.randomUUID();
+    UUID secondSession = UUID.randomUUID();
+    UUID firstPlacement = UUID.randomUUID();
+    UUID secondPlacement = UUID.randomUUID();
+    jdbc.update(
+        "insert into studio_user(id, username, password_hash, role) values (?, ?, 'x', 'USER'), (?, ?, 'x', 'USER')",
+        firstUser,
+        "first-" + firstUser.toString().substring(0, 8),
+        secondUser,
+        "second-" + secondUser.toString().substring(0, 8));
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        secondSession,
+        "second-user-session");
+    jdbc.update(
+        "insert into chat_space(id, owner_user_id, title, title_key, create_request_hash)"
+            + " values (?, ?, 'First', 'first', ?), (?, ?, 'Second', 'second', ?)",
+        firstSpace,
+        firstUser,
+        "a".repeat(64),
+        secondSpace,
+        secondUser,
+        "b".repeat(64));
+    jdbc.update(
+        "insert into workspace_folder(id, workspace_id, name, name_key, position)"
+            + " values (?, ?, 'Root', 'root', 0), (?, ?, 'Root', 'root', 0)",
+        firstFolder,
+        firstSpace,
+        secondFolder,
+        secondSpace);
+    jdbc.update(
+        "insert into workspace_resource(id, workspace_id, folder_id, session_id, position)"
+            + " values (?, ?, ?, ?, 0), (?, ?, ?, ?, 0)",
+        firstPlacement,
+        firstSpace,
+        firstFolder,
+        SESSION_ID,
+        secondPlacement,
+        secondSpace,
+        secondFolder,
+        secondSession);
+    assertEquals(firstUser, workspaceOwner(SESSION_ID));
+    assertEquals(secondUser, workspaceOwner(secondSession));
+    return new TwoUserSessions(firstUser, secondUser, secondSession);
+  }
+
+  private UUID workspaceOwner(UUID sessionId) {
+    return jdbc.queryForObject(
+        "select s.owner_user_id from workspace_resource r"
+            + " join chat_space s on s.id = r.workspace_id where r.session_id = ?",
+        UUID.class,
+        sessionId);
+  }
+
+  private record TwoUserSessions(UUID firstUser, UUID secondUser, UUID secondSession) {}
+
+  private int countSessionRef(UUID sessionId, UUID blobId) {
+    return jdbc.queryForObject(
+        "select count(*) from session_blob_ref where session_id = ? and blob_id = ?",
+        Integer.class,
+        sessionId,
+        blobId);
+  }
+
   private ToolResult inTransaction(ToolResult result) {
-    return transaction.execute(status -> materializer.materialize(SESSION_ID, "tool", result));
+    return inTransaction(SESSION_ID, result);
+  }
+
+  private ToolResult inTransaction(UUID sessionId, ToolResult result) {
+    return transaction.execute(status -> materializer.materialize(sessionId, "tool", result));
   }
 }

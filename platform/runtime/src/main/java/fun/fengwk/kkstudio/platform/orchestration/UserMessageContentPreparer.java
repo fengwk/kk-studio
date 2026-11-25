@@ -44,7 +44,7 @@ public final class UserMessageContentPreparer {
      * @param sessionId 目标 Session（发送侧据此 retain ref）
      * @param uploadId 客户端声明的上传 id
      */
-    ReadyAttachment acquire(UUID sessionId, UUID uploadId);
+    ReadyAttachment acquire(UUID userId, UUID sessionId, UUID uploadId);
   }
 
   /** 一条 ATTACHMENT 的不可变权威事实。 */
@@ -90,12 +90,17 @@ public final class UserMessageContentPreparer {
 
   /** 转换整个 batch 的 USER_MESSAGE 内容；非 USER_MESSAGE 命令原样保留。 */
   public List<NewThreadCommand> prepare(UUID sessionId, List<NewThreadCommand> commands) {
-    return prepare(sessionId, commands, null);
+    return prepare(null, sessionId, commands, null);
   }
 
   /** Applies the stricter of the user setting and known protocol limit to each incoming message. */
   public List<NewThreadCommand> prepare(
       UUID sessionId, List<NewThreadCommand> commands, Integer protocolMaxImages) {
+    return prepare(null, sessionId, commands, protocolMaxImages);
+  }
+
+  public List<NewThreadCommand> prepare(
+      UUID userId, UUID sessionId, List<NewThreadCommand> commands, Integer protocolMaxImages) {
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(commands, "commands");
     List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
@@ -119,11 +124,11 @@ public final class UserMessageContentPreparer {
       List<AgentMessageContent> contents = new ArrayList<>(message.contents().size());
       for (AgentMessageContent content : message.contents()) {
         if (content instanceof AttachmentMessageContent attachment) {
-          contents.add(attachmentToResource(sessionId, attachment));
+          contents.add(attachmentToResource(userId, sessionId, attachment));
         } else if (content instanceof ResourceMessageContent resource) {
           contents.add(requireOwnedResource(sessionId, resource));
         } else if (content instanceof TextMessageContent text) {
-          retainReferencedResources(sessionId, text.text());
+          requireExistingReferencedResources(sessionId, text.text());
           contents.add(content);
         } else {
           contents.add(content);
@@ -193,8 +198,8 @@ public final class UserMessageContentPreparer {
 
   /** 瞬时 ATTACHMENT 换算为 durable RESOURCE：blobId/filename 只来自权威上传事实。 */
   private ResourceMessageContent attachmentToResource(
-      UUID sessionId, AttachmentMessageContent attachment) {
-    ReadyAttachment ready = attachmentSource.acquire(sessionId, attachment.uploadId());
+      UUID userId, UUID sessionId, AttachmentMessageContent attachment) {
+    ReadyAttachment ready = attachmentSource.acquire(userId, sessionId, attachment.uploadId());
     return ResourceMessageContent.media(
         ready.blobId(),
         ready.filename(),
@@ -206,14 +211,17 @@ public final class UserMessageContentPreparer {
         ready.storedHeight());
   }
 
-  /** 自由文本中的资源 URI 也建立当前 Session 持有。 */
-  private void retainReferencedResources(UUID sessionId, String text) {
+  /** 自由文本中的资源 URI 只能引用当前 Session 已持有的 Blob。 */
+  private void requireExistingReferencedResources(UUID sessionId, String text) {
     for (UUID blobId : ResourceUri.referencedFiles(text)) {
+      if (!refManager.contains(sessionId, blobId)) {
+        throw DomainException.validation(
+            "resource", "Resource is not owned by the current session");
+      }
       StorageBlob blob = blobManager.getBlob(blobId);
       if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
         throw DomainException.validation("resource", "Resource is not available");
       }
-      refManager.retainRef(sessionId, blobId);
     }
   }
 

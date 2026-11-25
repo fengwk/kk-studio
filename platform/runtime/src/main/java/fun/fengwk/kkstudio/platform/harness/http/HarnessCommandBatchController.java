@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
@@ -33,9 +34,10 @@ public class HarnessCommandBatchController {
   /** 接受一个 owner-aware 用户命令批；202 仅表示 durable acceptance 已提交。 */
   @PostMapping
   @ResponseStatus(HttpStatus.ACCEPTED)
-  public HarnessAcceptedCommandsDTO accept(@RequestBody HarnessCommandBatchDTO request) {
+  public HarnessAcceptedCommandsDTO accept(
+      @RequestBody HarnessCommandBatchDTO request, StudioPrincipal actor) {
     SessionOwner owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
     AcceptCommandsCommand command = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
-    return commandBatchService.accept(owner, command);
+    return commandBatchService.accept(actor, owner, command);
   }
 }
