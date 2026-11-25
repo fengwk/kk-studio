@@ -14,11 +14,9 @@ describe('AI extension composition', () => {
     expect(aiExtension.toolRenderers?.map((renderer) => renderer.id)).toEqual(['task'])
     expect(aiExtension.toolRenderers?.[0]?.component).toBeTypeOf('function')
     expect(canvasExtension.pages?.map((page) => [page.id, page.path])).toEqual([
-      ['canvas.home', 'canvas'],
       ['canvas.editor', 'canvas/:canvasId'],
     ])
     expect(applicationContributions.pages.map((page) => page.id)).toEqual([
-      'canvas.home',
       'canvas.editor',
     ])
     expect(applicationContributions.dialogs.map((dialog) => dialog.id)).toEqual(
@@ -27,11 +25,8 @@ describe('AI extension composition', () => {
     expect(applicationContributions.toolRenderers.get('task')?.component).toBe(
       aiExtension.toolRenderers?.[0].component,
     )
-    expect(applicationContributions.pages.find((page) => page.id === 'canvas.home')?.component).toBe(
-      canvasExtension.pages?.[0].component,
-    )
     expect(applicationContributions.pages.find((page) => page.id === 'canvas.editor')?.component).toBe(
-      canvasExtension.pages?.[1].component,
+      canvasExtension.pages?.[0].component,
     )
   })
 })

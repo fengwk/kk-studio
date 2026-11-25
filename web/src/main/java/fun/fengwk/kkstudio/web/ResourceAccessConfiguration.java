@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
-import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 
@@ -65,11 +64,6 @@ class ResourceAccessConfiguration implements WebMvcConfigurer {
             .equals(request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE))
         && request.getParameter("rootThreadId") != null) {
       access.requireThread(principal, id(request.getParameter("rootThreadId")));
-    } else if ("/api/harness/command-batches"
-            .equals(request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE))
-        && principal.role() != StudioRole.ADMIN) {
-      // This legacy creation endpoint has no user-owned target. It remains until Phase C.
-      throw ResourceAccess.notFound();
     }
   }
 

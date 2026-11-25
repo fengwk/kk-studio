@@ -43,7 +43,6 @@ public class AgentService {
   private final AgentConfigCodec configCodec;
   private final AgentEditableSupport editableSupport;
   private final PluginAgentDependencies pluginAgentDependencies;
-  private final List<AgentReferenceCheck> productReferences;
 
   public AgentService(
       AgentRepository repository,
@@ -53,8 +52,7 @@ public class AgentService {
       AgentConfigValidator configValidator,
       AgentConfigCodec configCodec,
       AgentEditableSupport editableSupport,
-      PluginAgentDependencies pluginAgentDependencies,
-      List<AgentReferenceCheck> productReferences) {
+      PluginAgentDependencies pluginAgentDependencies) {
     this.repository = Objects.requireNonNull(repository, "repository");
     this.referenceResolver = Objects.requireNonNull(referenceResolver, "referenceResolver");
     this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
@@ -65,7 +63,6 @@ public class AgentService {
     this.editableSupport = Objects.requireNonNull(editableSupport, "editableSupport");
     this.pluginAgentDependencies =
         Objects.requireNonNull(pluginAgentDependencies, "pluginAgentDependencies");
-    this.productReferences = List.copyOf(productReferences);
   }
 
   public List<AgentDTO> listAgents() {
@@ -123,11 +120,6 @@ public class AgentService {
     Agent definition = referenceResolver.requireAgentForUpdate(name);
     ensureExpectedVersion(definition, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
-    for (AgentReferenceCheck reference : productReferences) {
-      if (reference.isReferenced(name)) {
-        throw DomainException.inUse(RESOURCE, RESOURCE + " is referenced by a product: " + name);
-      }
-    }
     // 权威 desired manifest 中任一已安装插件的普通配置声明引用该 Agent 即不可删除：删除先持自身行锁，引用方保存先持同锁，
     // 因此并发两侧最多一方成功；只读 desired 事实，不读取已应用状态、不解密秘密、不猜字段。
     if (!pluginAgentDependencies.pluginsDeclaringAgent(name).isEmpty()) {

@@ -15,7 +15,6 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
@@ -53,22 +52,6 @@ class StrictJacksonConfigurationTest {
               assertEquals(instant, mapper.readValue(Long.toString(millis), Instant.class));
             }
           }
-        });
-  }
-
-  /** Chat 默认环境是 required-nullable，不能被全局 NON_NULL 配置省略。 */
-  @Test
-  void shouldAlwaysIncludeChatDefaultEnvironment() {
-    runner.run(
-        context -> {
-          JsonMapper mapper = context.getBean(JsonMapper.class);
-          ChatDTO chat = new ChatDTO();
-          assertEquals(
-              "{\"environmentName\":null,\"yoloEnabled\":false}", mapper.writeValueAsString(chat));
-          chat.setEnvironmentName("dev");
-          assertEquals(
-              "{\"environmentName\":\"dev\",\"yoloEnabled\":false}",
-              mapper.writeValueAsString(chat));
         });
   }
 

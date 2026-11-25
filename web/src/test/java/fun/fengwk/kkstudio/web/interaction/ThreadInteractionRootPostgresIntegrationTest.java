@@ -1086,10 +1086,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   private UUID bindChat(StudioPrincipal principal, UUID sessionId) {
-    UUID chatId = UUID.randomUUID();
-    String title = "chat-" + chatId;
-    jdbc.update("insert into chat (id, title, agent_name) values (?, ?, ?)", chatId, title, AGENT);
-    jdbc.update("insert into chat_session (session_id, chat_id) values (?, ?)", sessionId, chatId);
+    String title = "space-" + UUID.randomUUID();
 
     ChatSpaceService.Space space =
         chatSpaceService.create(

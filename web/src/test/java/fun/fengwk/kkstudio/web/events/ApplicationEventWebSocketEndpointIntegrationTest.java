@@ -214,59 +214,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   void subscribeExistingThreadAcknowledgesBeforeDurableCatchUp() throws Exception {
     // 走真实 HTTP 首载和 WS 续接，验证 ACK 先于权威 snapshot，而不是 Thread version 通知。
     HttpClient http = HttpClient.newHttpClient();
-    HttpResponse<String> chatResponse =
-        http.send(
-            adminRequest(uri("/api/chat/chats"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .POST(
-                    HttpRequest.BodyPublishers.ofString(
-                        "{\"title\":\"ws-event-test\",\"agentName\":\"default-assistant\"}"))
-                .build(),
-            HttpResponse.BodyHandlers.ofString());
-    assertEquals(201, chatResponse.statusCode(), chatResponse.body());
-    String chatId = MAPPER.readTree(chatResponse.body()).path("id").asText();
-
-    String sessionId = UUID.randomUUID().toString();
-    String threadId = UUID.randomUUID().toString();
-    String idempotencyKey = UUID.randomUUID().toString();
-    String createBody =
-        """
-        {
-          "owner":{"kind":"CHAT","id":"%s"},
-          "target":{
-            "type":"NEW_SESSION",
-            "sessionId":"%s",
-            "threadId":"%s",
-            "rootSettings":{
-              "agentName":"default-assistant",
-              "execution":{
-                "driver":"builtin",
-                "settings":{"modelName":"acceptance-stub","variant":"default"}
-              },
-              "environmentName":null
-            },
-            "yoloEnabled":false
-          },
-          "commands":[{
-            "type":"USER_MESSAGE",
-            "idempotencyKey":"%s",
-            "contents":[{"type":"TEXT","text":"hello"}]
-          }]
-        }
-        """
-            .formatted(chatId, sessionId, threadId, idempotencyKey);
-    HttpResponse<String> threadResponse =
-        http.send(
-            adminRequest(uri("/api/harness/command-batches"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(createBody))
-                .build(),
-            HttpResponse.BodyHandlers.ofString());
-    assertEquals(202, threadResponse.statusCode(), threadResponse.body());
-    JsonNode created = MAPPER.readTree(threadResponse.body());
-    assertEquals(threadId, created.path("thread").path("threadId").asText());
+    String threadId = createThread(http, "hello");
     HttpResponse<String> initial =
         http.send(
             adminRequest(uri("/api/harness/threads/" + threadId)).GET().build(),

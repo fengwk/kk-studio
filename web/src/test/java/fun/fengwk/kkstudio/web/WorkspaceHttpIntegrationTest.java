@@ -367,11 +367,7 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
         new String[] {
           threadUrl,
           threadUrl + "/tree",
-          canvasUrl,
-          "/api/harness/sessions/"
-              + session.get("sessionId").asText()
-              + "/resources/"
-              + UUID.randomUUID()
+          canvasUrl
         }) {
       mvc.perform(get(url).cookie(outsider))
           .andExpect(status().isNotFound())

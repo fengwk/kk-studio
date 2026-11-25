@@ -32,12 +32,6 @@ export const canvasExtension: TrustedReactExtension = {
   id: 'builtin.canvas',
   pages: [
     {
-      id: 'canvas.home',
-      path: 'canvas',
-      component: CanvasRoutePage,
-      navGroup: 'canvas',
-    },
-    {
       id: 'canvas.editor',
       path: 'canvas/:canvasId',
       component: CanvasRoutePage,

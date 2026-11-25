@@ -53,7 +53,6 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -415,7 +414,6 @@ class EnvironmentIdeControllerTest {
             mock(IdeBrowserUseGateway.class),
             new IdeViewSnapshotStore(environmentId -> Optional.empty()),
             Duration.ofSeconds(5),
-            mock(HarnessOwnerQueryService.class),
             mock(SessionBlobRefManager.class),
             mock(StorageBlobRepository.class),
             mock(StorageBlobContentService.class));

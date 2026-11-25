@@ -35,8 +35,6 @@ import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.chat.ChatService;
-import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -52,7 +50,6 @@ import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -147,7 +144,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   @Autowired private IdeBootstrapTicketService bootstrapTickets;
 
-  @Autowired private ChatService chatService;
 
   @Autowired private HarnessCommandAcceptanceOrchestrator commandAcceptance;
 
@@ -397,14 +393,12 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Order(12)
   void opensSessionAttachmentAsReadOnlyVirtualWorkbenchContent() throws Exception {
     byte[] attachment = "Résumé — 東京 🚀 — café".getBytes(StandardCharsets.UTF_8);
-    UUID chatId = createChat("attachment-session");
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     String uploadId =
         new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc)
             .completeUpload("source.txt", attachment);
-    commandAcceptance.accept(
-        new SessionOwner("CHAT", chatId.toString()),
+    commandAcceptance.createSession(
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewRootSession(
                 sessionId,
@@ -508,13 +502,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           Files.exists(workspace.resolve(resourceId.toString())),
           "the resource identity must not be materialized in the workspace");
     }
-  }
-
-  private UUID createChat(String title) {
-    ChatCreateDTO create = new ChatCreateDTO();
-    create.setTitle(title);
-    create.setAgentName("default-assistant");
-    return UUID.fromString(chatService.createChat(create).getId());
   }
 
   /**

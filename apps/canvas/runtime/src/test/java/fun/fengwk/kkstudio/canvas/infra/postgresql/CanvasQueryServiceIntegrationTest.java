@@ -75,7 +75,7 @@ class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
     assertNull(consumerNode.run());
   }
 
-  /** 无引用的配置、未知画布与文档列表都必须保持空/缺失语义，不臆造连线或占位行。 */
+  /** 无引用配置不得臆造连线或占位行，未知画布保持缺失语义。 */
   @Test
   void snapshotWithoutReferencesAndUnknownCanvas() {
     UUID canvasId = addDocument();
@@ -86,8 +86,6 @@ class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
     assertTrue(snapshot.groups().isEmpty());
     assertEquals(1, snapshot.nodes().size());
 
-    CanvasDocument document = canvasStore.findDocument(canvasId).orElseThrow();
-    assertEquals(List.of(document), queryService.listDocuments());
     assertTrue(queryService.findSnapshot(UUID.randomUUID()).isEmpty());
   }
 

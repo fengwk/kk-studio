@@ -126,29 +126,6 @@ class FlywayAutoConfigurationIntegrationTest {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "fixture seed must be visible through the data-source");
       }
-      try (ResultSet chatSessionTable =
-          st.executeQuery(
-              "select count(*) from information_schema.tables"
-                  + " where table_schema = 'public'"
-                  + " and table_name = 'chat_session'")) {
-        assertTrue(chatSessionTable.next());
-        assertEquals(
-            1L,
-            chatSessionTable.getLong(1),
-            "the product Chat Session association must be part of V1");
-      }
-      try (ResultSet chatSessionForeignKeys =
-          st.executeQuery(
-              "select count(*) from information_schema.table_constraints"
-                  + " where table_schema = 'public'"
-                  + " and table_name = 'chat_session'"
-                  + " and constraint_type = 'FOREIGN KEY'")) {
-        assertTrue(chatSessionForeignKeys.next());
-        assertEquals(
-            2L,
-            chatSessionForeignKeys.getLong(1),
-            "the chat_session association keeps the Harness Session FK and Chat FK");
-      }
       // 业务表清单与当前 V1 的结构保持一致。
       try (ResultSet businessTables =
           st.executeQuery(

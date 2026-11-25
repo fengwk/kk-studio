@@ -23,8 +23,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
-import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
@@ -35,11 +33,8 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessImageInputTier;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopDTO;
@@ -130,52 +125,6 @@ class HarnessRuntimeRequestMapperCommandTest {
         () ->
             HarnessRuntimeRequestMapper.toToolApprovalCommand(
                 THREAD_ID, idText(31), approval, "user"));
-  }
-
-  @Test
-  void mapsRenameCommandsThroughTheSameStrictUuidAndPresenceBoundary() {
-    // Session/Thread rename 共用同一 {name} bean；id 走 canonical UUID 解析，name 经 Core 权威规范化（构造器即折叠空白）。
-    HarnessNameUpdateDTO body = new HarnessNameUpdateDTO();
-    body.setName("  my session  ");
-
-    RenameSessionCommand sessionCommand =
-        HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), body);
-    assertEquals(id(2), sessionCommand.sessionId());
-    assertEquals("my session", sessionCommand.name());
-
-    RenameThreadCommand threadCommand =
-        HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, body);
-    assertEquals(id(1), threadCommand.threadId());
-    assertEquals("my session", threadCommand.name());
-
-    assertThrows(
-        DomainException.class, () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(null, body));
-    assertThrows(
-        DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), null));
-    assertThrows(
-        DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, null));
-  }
-
-  @Test
-  void rejectsBlankNameWithoutTouchingCoreNormalization() {
-    // mapper 不能替 Core 做长度裁剪：blank 直接 400，非空白超长在命令构造器（Core 权威）中被拒绝。
-    HarnessNameUpdateDTO blank = new HarnessNameUpdateDTO();
-    blank.setName("   ");
-    assertThrows(
-        DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), blank));
-    assertThrows(
-        DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, blank));
-
-    HarnessNameUpdateDTO overlong = new HarnessNameUpdateDTO();
-    overlong.setName("n".repeat(257));
-    assertThrows(
-        DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, overlong),
-        "超长 name 必须由 Core 命令构造器拒绝，而不是在 web 层重复实现");
   }
 
   @Test
@@ -283,18 +232,10 @@ class HarnessRuntimeRequestMapperCommandTest {
 
   @Test
   void rejectsNullBatchMembersAndControlBodies() {
-    // mapper 自身必须拒绝缺失 DTO、target、command list、null command 与缺失控制请求体。
-    assertThrows(
-        DomainException.class, () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(null));
+    // mapper 自身必须拒绝缺失 command list、null command 与缺失控制请求体。
     assertThrows(
         DomainException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, null));
-
-    HarnessCommandBatchDTO missingTarget = request(newThreadTarget(), userCommand("user"));
-    missingTarget.setTarget(null);
-    assertThrows(
-        DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(missingTarget));
 
     HarnessThreadCommandBatchDTO missingCommands = threadBatch(userCommand("user"));
     missingCommands.setCommands(null);
@@ -322,9 +263,5 @@ class HarnessRuntimeRequestMapperCommandTest {
         () ->
             HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), null, "user"));
 
-    HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
-    owner.setKind("CHAT");
-    assertThrows(DomainException.class, () -> HarnessRuntimeRequestMapper.toOwner(owner));
-    assertThrows(DomainException.class, () -> HarnessRuntimeRequestMapper.toOwner(null));
   }
 }

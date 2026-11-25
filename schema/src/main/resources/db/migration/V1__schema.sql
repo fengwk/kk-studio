@@ -1527,42 +1527,6 @@ comment on column canvas_command_dedup.accepted_revision is '首次接受时的 
 alter table canvas_resource
     add constraint fk_canvas_resource_blob foreign key (blob_id)
     references storage_blob (id) on delete restrict;
-create table chat (
-    id                  uuid          primary key,
-    title               varchar(256),
-    -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
-    -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 Agent。
-    agent_name          varchar(64)   not null,
-    -- environment_name 故意不加 FK：它只按名称引用 Environment。Environment 硬删除期间该引用
-    -- 失效（发送时 planner fail closed），同名重建后既有 Chat 引用解析到当前 Environment。
-    environment_name    varchar(64),
-    yolo_enabled        boolean       not null default false,
-    created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
-    version             bigint        not null default 0,
-    constraint ck_chat_version_nonneg check (version >= 0)
-);
-
-create index idx_chat_modified on chat (updated_at, created_at);
-
-create table chat_session (
-    session_id uuid,
-    chat_id uuid not null,
-    created_at timestamptz(3) not null default current_timestamp,
-    constraint pk_chat_session primary key (session_id),
-    constraint fk_chat_session_session foreign key (session_id)
-        references harness_session (id) on delete restrict,
-    constraint fk_chat_session_chat foreign key (chat_id)
-        references chat (id) on delete restrict
-);
-
-comment on table chat_session is 'Chat 与 Harness Session 的直接关联：一个 Session 至多属于一个 Chat，删除任一侧前必须先删本行';
-comment on column chat_session.session_id is '该 Chat 持有的 Harness Session（主键，RESTRICT FK）';
-comment on column chat_session.chat_id is '所属 Chat（RESTRICT FK）';
-comment on column chat_session.created_at is '关联建立时间（毫秒精度）';
-
-create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
-
 create table chat_space (
     id                     uuid          primary key,
     owner_user_id          uuid          not null references studio_user (id) on delete restrict,

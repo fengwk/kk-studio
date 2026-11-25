@@ -97,14 +97,6 @@ public class PostgresqlCanvasStore {
     }
   }
 
-  public List<CanvasDocument> listDocuments() {
-    List<CanvasDocument> documents = new ArrayList<>();
-    for (CanvasDocumentDO document : documentStore.listAll()) {
-      documents.add(toDomain(document));
-    }
-    return List.copyOf(documents);
-  }
-
   /** 在已持有 document 行锁的事务内推进 revision；返回是否命中预期值。 */
   @Transactional
   public boolean advanceRevision(UUID canvasId, long expectedRevision, long newRevision) {

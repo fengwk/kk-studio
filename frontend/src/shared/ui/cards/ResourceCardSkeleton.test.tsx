@@ -19,8 +19,8 @@ describe('ResourceCardSkeleton', () => {
       gridTemplateColumns: '280px 280px 280px 280px',
     } as CSSStyleDeclaration)
     try {
-      const { container } = render(<ResourceCardSkeleton className="canvas-library-grid" />)
-      expect(container.querySelectorAll('.resource-grid.canvas-library-grid .resource-card-skeleton')).toHaveLength(4)
+      const { container } = render(<ResourceCardSkeleton className="custom-grid" />)
+      expect(container.querySelectorAll('.resource-grid.custom-grid .resource-card-skeleton')).toHaveLength(4)
     } finally {
       styles.mockRestore()
     }

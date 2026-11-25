@@ -2,21 +2,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Navigate, useParams } from 'react-router'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
-import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
-import { CanvasRuntimeProvider, useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { CanvasRuntimeProvider } from '@/features/canvas/CanvasRuntimeContext'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import '@/features/canvas/canvas.css'
 
 function CanvasPageBody() {
-  const { state } = useCanvasRuntime()
-
   return (
-    <div className={`canvas-feature ${state.view === 'editor' ? 'canvas-editor-active' : ''}`}>
-      {state.view === 'library' ? <CanvasLibraryView /> : <CanvasEditor />}
+    <div className="canvas-feature canvas-editor-active">
+      <CanvasEditor />
       <CanvasOverlays />
     </div>
-  )
 }
 
 export function CanvasPage() {
@@ -25,16 +21,16 @@ export function CanvasPage() {
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   }))
 
-  // 只接受 canonical UUID 深链；非规范 UUID 标识一律重定向回库。
-  if (canvasId !== undefined && !isCanonicalUuid(canvasId)) {
-    return <Navigate to="/canvas" replace />
+  // 只接受 canonical UUID 深链；Canvas 不提供独立列表页。
+  if (!canvasId || !isCanonicalUuid(canvasId)) {
+    return <Navigate to="/" replace />
   }
-  const initialCanvasId = canvasId as string | undefined
+  const initialCanvasId = canvasId
 
   return (
     <QueryClientProvider client={queryClient}>
       <CanvasRuntimeProvider
-        key={initialCanvasId ?? 'library'}
+        key={initialCanvasId}
         initialCanvasId={initialCanvasId}
       >
         <CanvasPageBody />

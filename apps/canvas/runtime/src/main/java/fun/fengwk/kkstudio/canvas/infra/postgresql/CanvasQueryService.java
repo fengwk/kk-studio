@@ -77,10 +77,6 @@ public class CanvasQueryService {
     return canvasStore.findDocuments(ids);
   }
 
-  public List<CanvasDocument> listDocuments() {
-    return canvasStore.listDocuments();
-  }
-
   private CanvasSnapshot toSnapshot(CanvasDocument document, List<CanvasFunctionRun> functionRuns) {
     UUID canvasId = document.id();
     List<CanvasResourceNode> nodes =

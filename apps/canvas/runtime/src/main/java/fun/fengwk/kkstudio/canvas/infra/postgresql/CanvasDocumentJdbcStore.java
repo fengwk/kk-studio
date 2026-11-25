@@ -85,12 +85,6 @@ public class CanvasDocumentJdbcStore {
         .optional();
   }
 
-  public List<CanvasDocumentDO> listAll() {
-    return jdbc.sql("select " + COLUMNS + " from canvas_document order by updated_at desc, id desc")
-        .query(ROW_MAPPER)
-        .list();
-  }
-
   /** CAS 推进同步位置：仅当当前 revision 等于 expected 时前进，返回受影响行数。 */
   public int advanceRevision(UUID id, long expectedRevision, long newRevision) {
     return jdbc.sql(
