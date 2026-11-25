@@ -2,8 +2,6 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { catalogEditorPreviewPlugin } from './catalog-editor-preview-plugin.mjs'
-import { extraConfigPreviewPlugin } from './extra-config-preview-plugin.mjs'
 import { composerSlashPreviewPlugin } from './composer-slash-preview-plugin.mjs'
 
 export const prototypeDir = path.dirname(fileURLToPath(import.meta.url))
@@ -60,12 +58,14 @@ export function previewConfig() {
     appType: 'custom',
     cacheDir: path.join(reportsDir, '.vite'),
     plugins: [
-      previewEntry(), catalogEditorPreviewPlugin(sourceRoot), extraConfigPreviewPlugin(sourceRoot),
+      previewEntry(),
       composerSlashPreviewPlugin(sourceRoot), react(),
     ],
     resolve: {
       dedupe: Object.keys(dependencies),
       alias: {
+        '@/features/catalog/ai-model-capabilities': path.join(prototypeDir, 'mock/local-catalog.ts'),
+        '@/shared/api/agent-service': path.join(prototypeDir, 'mock/local-catalog.ts'),
         '@/features/catalog/ai-model-pricing-preview': path.join(prototypeDir, 'catalog-editor-preview-plugin.mjs'),
         '@/features/settings/config-sync-service': path.join(prototypeDir, 'mock/local-config-sync.ts'),
         '@/features/environment/environment-runtime-query': path.join(prototypeDir, 'mock/local-environment-runtime.ts'),
