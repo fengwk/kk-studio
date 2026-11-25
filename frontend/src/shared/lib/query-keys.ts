@@ -28,6 +28,7 @@ export const queryKeys = {
   environments: {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
+    summaries: ['environments', 'summaries'] as const,
     detail: (id: string) => ['environments', 'detail', id] as const,
     events: (id: string) => ['environments', 'events', id] as const,
     runtime: (id: string) => ['environments', 'runtime', id] as const,
