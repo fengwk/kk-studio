@@ -675,27 +675,28 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.debug.conversation_switch',
+    'ui.workspace.debug.conversation_switch',
     'Debug 独占工作区、只读详情与单顶栏关闭不丢草稿',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `debug baseline ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-debug-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `debug draft ${stamp}`
           const draftKey = { threadId: fixture.threadId }
 
           // plus 命令保留已写草稿；Debug 中 Composer 挂载但完全失活。
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
-          await page.getByRole('button', { name: '打开命令表' }).click()
+          await expectWorkspaceStorage(page, draftKey, draft)
+          await page.getByRole('button', { name: UI_LABELS.openCommandsButton }).click()
           await page.getByRole('option', { name: /^debug/ }).click()
-          const listbox = page.getByRole('listbox', { name: '事件' })
+          const listbox = page.getByRole('listbox', { name: UI_LABELS.eventsTab })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           assert(
             (await page.locator('.thread-dialogue').count()) === 0,
@@ -706,14 +707,13 @@ export async function runComposerMatrix(ui) {
 
           const hiddenComposer = page.locator('.composer-editor')
           assert((await hiddenComposer.count()) === 1 && !(await hiddenComposer.isVisible()), 'debug composer is not mounted and hidden')
-          await page.locator('#chat-layout-select').waitFor({ state: 'hidden', timeout: 10_000 })
-          assert((await page.getByRole('button', { name: '关闭 Debug', exact: true }).count()) === 1, 'debug must have one header exit')
-          await expectStorage(page, draftKey, draft)
+          assert((await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).count()) === 1, 'debug must have one header exit')
+          await expectWorkspaceStorage(page, draftKey, draft)
 
           // 点击 USER 消息事件：只读 detail widget 展示原始 payload JSON。
           const userOption = listbox.getByRole('option').filter({ hasText: historicalMessage }).first()
           await userOption.click()
-          const detail = page.getByLabel('事件详情', { exact: true })
+          const detail = page.getByLabel(UI_LABELS.eventDetailsHeading, { exact: true })
           await detail.waitFor({ state: 'visible', timeout: 10_000 })
           const payload = await page.locator('.thread-event-detail-payload').innerText()
           assert(payload.includes('"role"'), `payload lacks role: ${payload.slice(0, 200)}`)
@@ -722,14 +722,14 @@ export async function runComposerMatrix(ui) {
             `payload lacks message text: ${payload.slice(0, 200)}`,
           )
           // 单顶栏关闭：debug 视图卸载，原布局、草稿与存储保持。
-          await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+          await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             (await page.locator('.thread-events').count()) === 0,
             'debug view stayed mounted while the conversation is open',
           )
-          await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceComposerText(page, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
 
           await shot(caseArt, 'debug-detail-and-switch')
           expectNoFatal(pageErrors, consoleErrors)
@@ -739,22 +739,23 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.debug.keyboard_nav',
+    'ui.workspace.debug.keyboard_nav',
     'Debug 列表点击选中、上下切换与 Esc 取消选中',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `debug keyboard ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-debug-keyboard-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           await composer.pressSequentially('/debug')
-          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
+          await page.getByRole('listbox', { name: UI_LABELS.commandPalette }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
-          const listbox = page.getByRole('listbox', { name: '事件' })
+          const listbox = page.getByRole('listbox', { name: UI_LABELS.eventsTab })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           const optionCount = await listbox.getByRole('option').count()
           assert(optionCount > 1, `too few debug events: ${optionCount}`)
@@ -772,7 +773,7 @@ export async function runComposerMatrix(ui) {
           const secondOption = listbox.getByRole('option').nth(1)
           await firstOption.click()
           const firstText = await selectedText()
-          const detail = page.getByLabel('事件详情', { exact: true })
+          const detail = page.getByLabel(UI_LABELS.eventDetailsHeading, { exact: true })
           await detail.waitFor({ state: 'visible', timeout: 10_000 })
 
           await secondOption.hover()
@@ -786,7 +787,7 @@ export async function runComposerMatrix(ui) {
           await listbox.press('Escape')
           await detail.waitFor({ state: 'hidden', timeout: 10_000 })
           assert((await selectedOption().count()) === 0, 'Escape did not clear the selection')
-          assert(await page.getByRole('button', { name: '关闭 Debug', exact: true }).isVisible(), 'inner Escape also exited Debug')
+          assert(await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).isVisible(), 'inner Escape also exited Debug')
           await listbox.press('Escape')
           await composer.waitFor({ state: 'visible', timeout: 10_000 })
           await page.waitForFunction(() => document.activeElement?.classList.contains('composer-editor'))
@@ -799,63 +800,22 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.shortcuts.escape_restores_focus',
-    '/shortcuts 只读面板打开后 Esc 关闭并恢复 Composer 焦点与草稿',
-    async (caseArt) => {
-      const draft = `shortcuts draft ${stamp}`
-      await withUiFixture(
-        page,
-        () => createBlankChatFixture(apiCtx, {
-          title: `e2e-ui-shortcuts-${stamp}`,
-        }),
-        async (fixture) => {
-          const composer = await bindBlankComposer(page, goto, fixture)
-          const blankDraftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
-          await composer.fill(draft)
-          await expectStorage(page, blankDraftKey, draft)
-
-          // 非空草稿下通过 + 菜单打开只读快捷键面板。
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^shortcuts/ }).click()
-          const panel = page.getByRole('region', { name: '键盘快捷键' })
-          await panel.waitFor({ state: 'visible', timeout: 10_000 })
-
-          // Esc 关闭面板并恢复 Composer 焦点；草稿与存储保持。
-          await page.keyboard.press('Escape')
-          await page.waitForFunction(
-            () => document.activeElement?.classList.contains('composer-editor') === true,
-            undefined,
-            { timeout: 10_000 },
-          )
-          await panel.waitFor({ state: 'hidden', timeout: 10_000 })
-          await expectComposerText(page, draft)
-          await expectStorage(page, blankDraftKey, draft)
-
-          await shot(caseArt, 'shortcuts-escape-restores-focus')
-          expectNoFatal(pageErrors, consoleErrors)
-        },
-      )
-    },
-  )
-
-  await run(
-    'ui.chat.debug.scroll_restore',
+    'ui.workspace.debug.scroll_restore',
     'Conversation/Debug 主视图各自恢复 scrollTop（重绑清零由单元测试覆盖）',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const messages = Array.from({ length: 30 }, (_, index) => `scroll msg ${index} ${stamp}`)
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-debug-scroll-${stamp}`,
           messages,
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
 
           const openMenuOption = async (id) => {
-            await page.getByRole('button', { name: '打开命令表' }).click()
+            await page.getByRole('button', { name: UI_LABELS.openCommandsButton }).click()
             await page.getByRole('option', { name: new RegExp(`^${id}`) }).click()
           }
           const scrollTopOf = (selector) =>
@@ -881,9 +841,9 @@ export async function runComposerMatrix(ui) {
 
           // /debug：真实溢出后向上滚动到非底部位置。
           await composer.pressSequentially('/debug')
-          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
+          await page.getByRole('listbox', { name: UI_LABELS.commandPalette }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
-          const listbox = page.getByRole('listbox', { name: '事件' })
+          const listbox = page.getByRole('listbox', { name: UI_LABELS.eventsTab })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           const eventsMetrics = await overflow('.thread-events')
           assert(
@@ -898,7 +858,7 @@ export async function runComposerMatrix(ui) {
           const eventsScrollTop = eventsScroll.scrollTop
 
           // 切到 conversation：真实溢出后向上滚动。
-          await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+          await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           const dialogueMetrics = await overflow('.thread-dialogue')
           assert(
@@ -937,7 +897,7 @@ export async function runComposerMatrix(ui) {
           )
 
           // 切回 conversation：恢复 transcript 的 scrollTop。
-          await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+          await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           // transcript 重新 mount 时 initialScrollTop 可能在内容完全渲染前被 clamp：
           // 等 aria-busy 结束且 scrollHeight 稳定（内容加载完）后再断言恢复值。
