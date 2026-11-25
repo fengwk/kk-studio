@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
@@ -128,7 +129,18 @@ final class InMemoryThreadStore implements ThreadStore {
   }
 
   @Override
-  public List<ExecutionRootFacts> findExecutionFacts(List<UUID> rootThreadIds) {
+  public List<UUID> listThreadIdsByRoots(List<UUID> rootThreadIds) {
+    tx.checkOpen();
+    Set<UUID> roots = Set.copyOf(rootThreadIds);
+    return state.threads.values().stream()
+        .filter(thread -> roots.contains(thread.rootThreadId()))
+        .map(ThreadState::id)
+        .toList();
+  }
+
+  @Override
+  public List<ExecutionRootFacts> findExecutionFacts(
+      List<UUID> rootThreadIds, List<DriverActiveWork> driverWork) {
     throw new UnsupportedOperationException(
         "execution facts are not supported by the in-memory fake");
   }

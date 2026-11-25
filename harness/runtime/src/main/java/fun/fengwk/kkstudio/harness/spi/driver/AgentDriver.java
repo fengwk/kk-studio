@@ -54,6 +54,11 @@ public interface AgentDriver {
     return false;
   }
 
+  /** 批量读取指定 Thread 的 Driver 私有活动 Work；只用调用方事务，不加行锁、不写入。默认无活动 Work。 */
+  default List<DriverActiveWork> readActiveWork(HarnessStore.Transaction tx, List<UUID> threadIds) {
+    return List.of();
+  }
+
   /**
    * Thread 深删第一阶段：按 Driver 锁阶梯锁定私有行，返回这些行持有的 Work target。
    *

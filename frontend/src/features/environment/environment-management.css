@@ -20,19 +20,9 @@
   gap: 8px;
 }
 
-.environment-diagnostics > summary {
-  padding: 12px 8px;
-  cursor: pointer;
-  border-radius: var(--radius-md);
-}
-
-.environment-diagnostics > summary:hover {
-  background: var(--surface-hover);
-}
-
 .environment-diagnostics-content {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .env-mgmt-section {

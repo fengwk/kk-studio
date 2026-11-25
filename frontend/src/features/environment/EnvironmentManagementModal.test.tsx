@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
@@ -74,9 +74,8 @@ function manageDialog(): HTMLElement {
   return screen.getByRole('dialog', { name: '管理环境：test-environment' })
 }
 
-/** 诊断详情默认折叠：展开后才渲染宿主、配置与事件。 */
-async function expandDiagnostics(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByText('诊断详情'))
+/** 管理面直接展示宿主、配置与事件。 */
+async function expandDiagnostics(_user: ReturnType<typeof userEvent.setup>) {
   return screen.findByText('宿主信息')
 }
 
@@ -105,7 +104,7 @@ describe('EnvironmentManagementModal', () => {
    * 测试意图：管理面是一组纯文字标签的动作入口加一段折叠的诊断详情；
    * 折叠状态不渲染宿主/配置/事件，也不读取事件端点。
    */
-  it('renders management actions with plain labels and keeps diagnostics collapsed', () => {
+  it('renders management actions with plain labels and diagnostics directly visible', () => {
     const actions: ManageAction[] = [
       { label: '编辑配置', run: vi.fn() },
       { label: '更新 Daemon', run: vi.fn() },
@@ -122,13 +121,10 @@ describe('EnvironmentManagementModal', () => {
     }
     expect(within(dialog).getByRole('button', { name: '删除环境' })).toHaveClass('danger')
 
-    const diagnostics = within(dialog).getByText('诊断详情').closest('details') as HTMLElement | null
-    expect(diagnostics).not.toBeNull()
-    expect(diagnostics).not.toHaveAttribute('open')
-    expect(within(dialog).queryByText('宿主信息')).toBeNull()
-    expect(within(dialog).queryByText('配置')).toBeNull()
-    expect(within(dialog).queryByText('事件记录')).toBeNull()
-    expect(environmentService.listEnvironmentEvents).not.toHaveBeenCalled()
+    expect(within(dialog).getByText('宿主信息')).toBeInTheDocument()
+    expect(within(dialog).getByText('配置')).toBeInTheDocument()
+    expect(within(dialog).getByText('事件记录')).toBeInTheDocument()
+    expect(environmentService.listEnvironmentEvents).toHaveBeenCalledWith('env-test-1')
   })
 
   /** 测试意图：动作先关闭管理弹窗再打开原确认流，避免两层弹窗叠加。 */
@@ -274,7 +270,7 @@ describe('EnvironmentManagementModal', () => {
         occurredAt: 1784509500000,
         level: 'WARN',
         type: 'UPDATE_FAILED',
-        message: 'Daemon update failed',
+        message: 'Daemon 更新失败。',
       },
     ]
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue(mockEvents)
@@ -282,8 +278,8 @@ describe('EnvironmentManagementModal', () => {
 
     await expandDiagnostics(user)
 
-    expect(await screen.findByText('Daemon update failed')).toBeInTheDocument()
-    expect(screen.getByText('Host connected successfully')).toBeInTheDocument()
+    expect(await screen.findByText(/Daemon 更新失败/)).toBeInTheDocument()
+    expect(screen.getByText(/环境已就绪/)).toBeInTheDocument()
     // 类型按事件语义命名，不显示 READY / UPDATE_FAILED 这类内部码。
     expect(screen.getByText('更新失败')).toHaveAttribute('title', 'UPDATE_FAILED')
     expect(screen.getByText('已就绪')).toHaveAttribute('title', 'READY')
@@ -293,10 +289,10 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.getByText('信息')).toHaveAttribute('title', 'INFO')
     expect(screen.getByText('信息')).toHaveClass('is-info')
     // 倒序：最新事件在前。
-    const messages = screen.getAllByText(/Host connected successfully|Daemon update failed/)
+    const messages = screen.getAllByText(/环境已就绪|Daemon 更新失败/)
     expect(messages.map((node) => node.textContent)).toEqual([
-      'Daemon update failed',
-      'Host connected successfully',
+      expect.stringContaining('Daemon 更新失败'),
+      expect.stringContaining('环境已就绪'),
     ])
   })
 
@@ -317,11 +313,11 @@ describe('EnvironmentManagementModal', () => {
 
     await act(async () => {
       pending.resolve([
-        { occurredAt: 1784509500000, level: 'WARN', type: 'UPDATE_FAILED', message: 'Daemon update failed' },
+        { occurredAt: 1784509500000, level: 'WARN', type: 'UPDATE_FAILED', message: 'Daemon 更新失败。' },
       ])
     })
 
-    expect(await within(eventsRegion()).findByText('Daemon update failed')).toBeInTheDocument()
+    expect(await within(eventsRegion()).findByText('Daemon 更新失败。')).toBeInTheDocument()
     expect(within(eventsRegion()).queryByText('正在读取事件记录')).toBeNull()
     expect(within(eventsRegion()).queryByText('暂无事件记录')).toBeNull()
   })
@@ -334,7 +330,7 @@ describe('EnvironmentManagementModal', () => {
     vi.mocked(environmentService.listEnvironmentEvents)
       .mockRejectedValueOnce(new ApiError('Internal Server Error', 500, 'INTERNAL_ERROR'))
       .mockResolvedValueOnce([
-        { occurredAt: 1784509500000, level: 'WARN', type: 'UPDATE_FAILED', message: 'Daemon update failed' },
+        { occurredAt: 1784509500000, level: 'WARN', type: 'UPDATE_FAILED', message: 'Daemon 更新失败。' },
       ])
     renderModal(testEnvironment())
 
@@ -345,7 +341,7 @@ describe('EnvironmentManagementModal', () => {
 
     await user.click(within(eventsRegion()).getByRole('button', { name: '重试' }))
 
-    expect(await within(eventsRegion()).findByText('Daemon update failed')).toBeInTheDocument()
+    expect(await within(eventsRegion()).findByText('Daemon 更新失败。')).toBeInTheDocument()
     expect(within(eventsRegion()).queryByText('事件记录读取失败')).toBeNull()
     expect(environmentService.listEnvironmentEvents).toHaveBeenCalledTimes(2)
   })
@@ -362,21 +358,14 @@ describe('EnvironmentManagementModal', () => {
     expect(within(eventsRegion()).queryByText('正在读取事件记录')).toBeNull()
   })
 
-  /** 测试意图：展开期间每 10 秒回读一次事件端点，折叠时完全不请求。 */
-  it('polls environment events every 10 seconds only while diagnostics is expanded', async () => {
+  /** 测试意图：管理面直接展示事件，事件端点持续按间隔回读。 */
+  it('polls environment events every 10 seconds while managed', async () => {
     vi.useFakeTimers()
     try {
       vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
       renderModal(testEnvironment())
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(0)
-      })
-      expect(environmentService.listEnvironmentEvents).not.toHaveBeenCalled()
-
-      // jsdom 把 details 的 open 变化转成异步 toggle，React 的 onToggle 再据此渲染诊断内容。
-      await act(async () => {
-        fireEvent.click(screen.getByText('诊断详情'))
         await vi.advanceTimersByTimeAsync(0)
       })
       expect(screen.getByText('宿主信息')).toBeInTheDocument()

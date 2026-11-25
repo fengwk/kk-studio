@@ -138,7 +138,7 @@ describe('PluginsTab', () => {
       // Active capabilities rendered
       expect(screen.getByText('search, draw')).toBeInTheDocument()
       // Epoch & revision coordinates rendered (desired and applied)
-      expect(screen.getAllByText('v1').length).toBe(2)
+      expect(screen.queryByText('v1')).not.toBeInTheDocument()
     })
 
     // Confirm no secret tokens exist in document

@@ -17,18 +17,13 @@
   font-size: var(--font-size-xs);
 }
 
-.capability-selection-details > summary {
-  padding-block: 10px;
-  color: var(--accent);
-  cursor: pointer;
+.capability-picker > legend {
+  margin-bottom: var(--space-2);
+  font-weight: 600;
 }
 
-.capability-selection-summary {
-  overflow-wrap: anywhere;
-}
-
-.capability-selection-details[open] + .capability-selection-summary {
-  display: none;
+.capability-picker + .capability-picker {
+  margin-top: var(--space-2);
 }
 
 .capability-filter {

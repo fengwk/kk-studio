@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
@@ -5,6 +6,8 @@ import { formatCatalogSupportIssue } from '@/features/catalog/catalog-utils'
 import { previewModelPricing } from '@/features/catalog/ai-model-pricing-preview'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import type { ModelPricingRuleDTO, ModelRateSetDTO } from '@/shared/api/generated/contracts'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
@@ -75,9 +78,16 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="form-group"><span>{label}</span>{children}</label>
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, help, children }: { title: string; help?: string; children: ReactNode }) {
+  const { t } = useI18n()
   const id = useId()
-  return <section className="pricing-plan-section" aria-labelledby={id}><h4 id={id}>{title}</h4>{children}</section>
+  return <section className="pricing-plan-section" aria-labelledby={id}>
+    <div className="pricing-section-heading">
+      <h4 id={id}>{title}</h4>
+      {help && <HelpHint label={t('shared.helpAbout', { topic: title })}>{help}</HelpHint>}
+    </div>
+    {children}
+  </section>
 }
 
 function CatalogNotice({ notice }: { notice: NonNullable<ModelDraft['pricingImportNotice']> }) {
@@ -154,20 +164,23 @@ export function ModelPricingPlanEditor({ value, onChange, pricingImportNotice }:
       {pricingImportNotice && <CatalogNotice notice={pricingImportNotice} />}
       <div className="pricing-plan-toolbar">
         <div className="form-group">
-          <span>{t('ai.catalog.form.pricingSelectPlan')}</span>
+          <FieldLabel help={(!selected || (selected.from && selected.from <= today)) && hasConfiguredPricing(value)
+            ? t('ai.catalog.form.pricingHistoryWarning') : undefined}>
+            {t('ai.catalog.form.pricingSelectPlan')}
+          </FieldLabel>
           <Select aria-label={t('ai.catalog.form.pricingSelectPlan')} value={planKey}
             options={[
               { value: BASE, label: `${t('ai.catalog.form.pricingBasePlan')}${active ? '' : ` · ${activeLabel}`}` },
               ...changes.map((change) => ({ value: change.draftKey, label: `${change.from || '—'}${change === active ? ` · ${activeLabel}` : ''}` })),
             ]} onChange={setSelection} />
         </div>
-        <Button variant="secondary" onClick={() => setNewDate(newDate === null ? '' : null)}>{t('ai.catalog.form.addPricingChange')}</Button>
+        <Button variant="secondary" onClick={() => setNewDate(newDate === null ? '' : null)}><Plus aria-hidden="true" />{t('ai.catalog.form.addPricingChange')}</Button>
       </div>
       {newDate !== null && <div className="pricing-plan-toolbar">
         <Field label={t('ai.catalog.form.pricingFromDate')}>
           <DateInput value={newDate} onChange={setNewDate} aria-label={t('ai.catalog.form.pricingFromDate')} />
         </Field>
-        <Button variant="secondary" disabled={!newDate || duplicateDate(newDate)} onClick={addChange}>{t('ai.catalog.form.pricingCreateDraft')}</Button>
+        <Button variant="secondary" disabled={!newDate || duplicateDate(newDate)} onClick={addChange}><Plus aria-hidden="true" />{t('ai.catalog.form.pricingCreateDraft')}</Button>
         {newDate && duplicateDate(newDate) && <span className="field-error" role="alert">{t('ai.catalog.form.pricingDuplicateDate')}</span>}
       </div>}
       {selected && newDate === null && <div className="pricing-plan-toolbar">
@@ -183,8 +196,6 @@ export function ModelPricingPlanEditor({ value, onChange, pricingImportNotice }:
         }}>{t('ai.catalog.form.pricingRemoveChange')}</Button>
         {selected.from && duplicateDate(selected.from, selected.draftKey) && <span className="field-error" role="alert">{t('ai.catalog.form.pricingDuplicateDate')}</span>}
       </div>}
-      {(!selected || selected.from && selected.from <= today) && hasConfiguredPricing(value)
-        ? <p className="inline-hint">{t('ai.catalog.form.pricingHistoryWarning')}</p> : null}
       <DefinitionEditor key={planKey} definition={selected?.definition ?? value.definition}
         configured={hasConfiguredPricing(value)} onChange={updateDefinition} />
       <PricingPreview value={value} />
@@ -201,10 +212,8 @@ function DefinitionEditor({ definition, configured, onChange }: {
   const { base, inputTokenRanges, serviceTiers, timePeriods } = definition
   const conflicts = findPricingConflicts(definition)
   const overrideIssues = findPricingRangeOverrideIssues(definition)
-  const [newRule, setNewRule] = useState('')
   const inherit = t('ai.catalog.form.pricingTtlInherit')
   const required = t('ai.catalog.form.pricingRateRequired')
-  const unpriced = t('ai.catalog.form.pricingUnpriced')
   const reasoningOptions = [
     { value: 'follow', label: t('ai.catalog.form.reasoningFollowOutput') },
     { value: 'separate', label: t('ai.catalog.form.reasoningSeparate') },
@@ -222,13 +231,13 @@ function DefinitionEditor({ definition, configured, onChange }: {
     const overrideRequired = group === 'inputTokenRanges' && overrideIssues.includes(key)
     return (
       <div key={key} className="pricing-plan-row" data-conflict={peerRows.length > 0 || undefined}>
-        <details className="pricing-rule-details" open={newRule === key || undefined}>
-          <summary>{index + 1}. {summary}</summary>
+        <section className="pricing-rule-details">
+          <h5 className="pricing-rule-heading">{index + 1}. {summary}</h5>
           <div className="pricing-rule-fields">
             {children}
             <Button type="button" variant="secondary" onClick={remove}>{t('ai.catalog.form.removePricingRule')}</Button>
           </div>
-        </details>
+        </section>
         {!!peerRows.length && <span className="field-error" role="alert">{t(`ai.catalog.form.${reason}`, { rows: peerRows.join(', ') })}</span>}
         {overrideRequired && <span className="field-error" role="alert">{t('ai.catalog.form.pricingRangeOverrideRequired')}</span>}
       </div>
@@ -237,12 +246,11 @@ function DefinitionEditor({ definition, configured, onChange }: {
 
   return <>
     <Section title={t('ai.catalog.form.pricingBase')}>
-      {!configured && <p className="inline-hint">{t('ai.catalog.form.pricingNotConfigured')}</p>}
       <div className="form-grid-2">
         {RATE_FIELDS.slice(0, 4).map(([field, label]) => (
           <Field key={field} label={t(label)}>
             <TextInput inputMode="decimal" value={base[field] ?? ''}
-              placeholder={field === 'cacheWrite' ? t('ai.catalog.form.pricingNotSet') : configured ? required : unpriced}
+              placeholder={field === 'cacheWrite' || !configured ? t('ai.catalog.form.pricingNotSet') : required}
               invalid={configured && field !== 'cacheWrite' && !base[field]}
               onChange={(event) => onChange({ ...definition, base: { ...base, [field]: sanitizeDecimalInput(event.target.value) } })} />
           </Field>
@@ -311,11 +319,10 @@ function DefinitionEditor({ definition, configured, onChange }: {
       })}
       <Button type="button" variant="secondary" onClick={() => {
         const draftKey = createPricingDraftKey()
-        setNewRule(draftKey)
         updateRows('inputTokenRanges', [...inputTokenRanges, {
           draftKey, minInputTokens: '', maxInputTokensExclusive: '', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
         }])
-      }}>{t('ai.catalog.form.addPricingRange')}</Button>
+      }}><Plus aria-hidden="true" />{t('ai.catalog.form.addPricingRange')}</Button>
     </Section>
     <Section title={t('ai.catalog.form.pricingTiers')}>
       {serviceTiers.map((tier, index) => {
@@ -328,9 +335,8 @@ function DefinitionEditor({ definition, configured, onChange }: {
       })}
       <Button type="button" variant="secondary" onClick={() => {
         const draftKey = createPricingDraftKey()
-        setNewRule(draftKey)
         updateRows('serviceTiers', [...serviceTiers, { draftKey, serviceTier: '', factors: blankFactors() }])
-      }}>{t('ai.catalog.form.addPricingTier')}</Button>
+      }}><Plus aria-hidden="true" />{t('ai.catalog.form.addPricingTier')}</Button>
     </Section>
     <Section title={t('ai.catalog.form.pricingTimes')}>
       {!!timePeriods.length && <Field label={t('ai.catalog.form.pricingTimezone')}>
@@ -362,11 +368,10 @@ function DefinitionEditor({ definition, configured, onChange }: {
       })}
       <Button type="button" variant="secondary" onClick={() => {
         const draftKey = createPricingDraftKey()
-        setNewRule(draftKey)
         updateRows('timePeriods', [...timePeriods, {
           draftKey, weekdays: [], start: '00:00', end: '24:00', timezone: timePeriods[0]?.timezone ?? 'UTC', factors: blankFactors(),
         }])
-      }}>{t('ai.catalog.form.addPricingTime')}</Button>
+      }}><Plus aria-hidden="true" />{t('ai.catalog.form.addPricingTime')}</Button>
     </Section>
   </>
 }
@@ -387,15 +392,15 @@ function FactorInputs({ factors, onChange }: { factors: PricingFactorsDraft; onC
   return <>
     <Field label={t('ai.catalog.form.pricingFactor')}><TextInput inputMode="decimal" value={factors.factor}
       onChange={(event) => onChange({ ...factors, factor: sanitizeDecimalInput(event.target.value) })} /></Field>
-    <details className="pricing-factor-details">
-      <summary>{t('ai.catalog.form.pricingFactorOverrides')}</summary>
+    <section className="pricing-factor-details">
+      <h6 className="pricing-rule-heading">{t('ai.catalog.form.pricingFactorOverrides')}</h6>
       <div className="form-grid-2 pricing-rule-fields">
         {FACTOR_FIELDS.map((field, index) => <Field key={field} label={t(RATE_FIELDS[index]![1])}>
-          <TextInput inputMode="decimal" placeholder={factors.factor} value={factors[field]}
+          <TextInput inputMode="decimal" placeholder={`${t('ai.catalog.form.pricingTtlInherit')} ×${factors.factor || '1'}`} value={factors[field]}
             onChange={(event) => onChange({ ...factors, [field]: sanitizeDecimalInput(event.target.value) })} />
         </Field>)}
       </div>
-    </details>
+    </section>
   </>
 }
 
@@ -453,8 +458,7 @@ function PricingPreview({ value }: { value: ModelPricingDraft }) {
     }
   }
 
-  return <Section title={t('ai.catalog.form.pricingPreview')}>
-    <p className="inline-hint">{t('ai.catalog.form.pricingPreviewScope')}</p>
+  return <Section title={t('ai.catalog.form.pricingPreview')} help={t('ai.catalog.form.pricingPreviewScope')}>
     <div className="form-grid-2">
       <Field label={t('ai.catalog.form.pricingInputTokens')}><TextInput inputMode="numeric" value={inputTokens}
         onChange={(event) => setInputTokens(event.target.value.replace(/\D/g, ''))} /></Field>

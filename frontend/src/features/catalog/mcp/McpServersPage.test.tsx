@@ -27,10 +27,6 @@ vi.mock('@/features/catalog/mcp-server-service', () => ({
   },
 }))
 
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => null,
-}))
-
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -62,7 +58,7 @@ function summary(overrides: Partial<McpServerSummaryDTO> = {}): McpServerSummary
 function detail(overrides: Partial<McpServerDTO> = {}): McpServerDTO {
   return {
     name: 'filesystem',
-    url: 'https://example.com/mcp',
+    url: 'https://mcp.example.invalid/mcp',
     enabled: true,
     timeoutMillis: '30000',
     discoveryStatus: 'AVAILABLE',
@@ -172,8 +168,8 @@ describe('McpServersPage', () => {
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
 
     await user.type(screen.getByPlaceholderText('例如 filesystem'), 'new_srv')
-    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
-    fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
+    await user.type(screen.getByPlaceholderText('https://mcp.example.invalid/mcp'), 'https://mcp.example.invalid/mcp')
+    fireEvent.change(screen.getByRole('textbox', { name: /JSON 请求头/ }), {
       target: { value: '{"Authorization": "Bearer secret"}' },
     })
     await user.click(within(modal).getByRole('button', { name: '创建' }))
@@ -181,7 +177,7 @@ describe('McpServersPage', () => {
     await waitFor(() => {
       expect(mcpServerService.createServer).toHaveBeenCalledWith({
         name: 'new_srv',
-        url: 'https://example.com/mcp',
+        url: 'https://mcp.example.invalid/mcp',
         headers: { operation: 'SET', value: '{"Authorization":"Bearer secret"}' },
         enabled: true,
         timeoutMillis: '60000',
@@ -199,13 +195,13 @@ describe('McpServersPage', () => {
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
 
     await user.type(screen.getByPlaceholderText('例如 filesystem'), 'no_headers')
-    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
+    await user.type(screen.getByPlaceholderText('https://mcp.example.invalid/mcp'), 'https://mcp.example.invalid/mcp')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     await waitFor(() => {
       expect(mcpServerService.createServer).toHaveBeenCalledWith({
         name: 'no_headers',
-        url: 'https://example.com/mcp',
+        url: 'https://mcp.example.invalid/mcp',
         enabled: true,
         timeoutMillis: '60000',
       })
@@ -220,7 +216,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
     await user.type(screen.getByPlaceholderText('例如 filesystem'), 'Bad_Name')
-    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
+    await user.type(screen.getByPlaceholderText('https://mcp.example.invalid/mcp'), 'https://mcp.example.invalid/mcp')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     // 校验错误是用户可见文案：必须随界面语言走，而不是固定英文。
@@ -228,9 +224,7 @@ describe('McpServersPage', () => {
     expect(mcpServerService.createServer).not.toHaveBeenCalled()
   })
 
-  it('labels the create timeout with its unit and keeps the name pattern as one code token', async () => {
-    // 意图：表单时长直接提交毫秒，字段名必须带单位；名字正则是不可拆分的代码片段，
-    // 不能与说明文字混成同一段可随意断行的纯文本。
+  it('labels the create timeout with its unit and shows no validation message initially', async () => {
     const user = userEvent.setup()
 
     renderPage()
@@ -241,12 +235,7 @@ describe('McpServersPage', () => {
     const timeoutField = within(modal).getByLabelText('超时（毫秒）')
     expect(timeoutField).toHaveValue('60000')
 
-    const hint = within(modal).getByText(/小写字母、数字或下划线/)
-    const pattern = within(hint).getByText('^[a-z][a-z0-9_]*$')
-    expect(pattern.tagName).toBe('CODE')
-    expect(pattern).toHaveClass('ui-mono', 'mcp-name-pattern')
-    // 说明文案里不再内联正则：否则那段文本又会被浏览器在 token 中间断开。
-    expect(hint.textContent).not.toContain('格式：^')
+    expect(within(modal).queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('shows a conflict presenter when create conflicts', async () => {
@@ -263,7 +252,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByRole('button', { name: '新建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '新建 MCP 服务' })
     await user.type(screen.getByPlaceholderText('例如 filesystem'), 'conflict_srv')
-    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
+    await user.type(screen.getByPlaceholderText('https://mcp.example.invalid/mcp'), 'https://mcp.example.invalid/mcp')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 
     expect(await screen.findByText('数据已发生变化')).toBeInTheDocument()
@@ -292,9 +281,10 @@ describe('McpServersPage', () => {
 
     const urlInput = screen.getByDisplayValue('https://example.com/api')
     // headers 已保存，但从不回读：输入框为空，提示留空保持
-    const headersArea = screen.getByLabelText(/JSON 请求头/)
+    const headersArea = screen.getByRole('textbox', { name: /JSON 请求头/ })
     expect(headersArea).toHaveValue('')
-    expect(within(modal).getByText('留空保持已保存的请求头。')).toBeInTheDocument()
+    fireEvent.focus(within(modal).getByRole('button', { name: /帮助：.*请求头/ }))
+    expect(screen.getByText('留空保持已保存的请求头。')).toBeInTheDocument()
 
     await user.clear(urlInput)
     await user.type(urlInput, 'https://example.com/api-v2')
@@ -324,7 +314,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_hdr'))
     const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_hdr' })
 
-    fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
+    fireEvent.change(screen.getByRole('textbox', { name: /JSON 请求头/ }), {
       target: { value: '{"X-Api-Key": "key_123"}' },
     })
     await user.click(within(modal).getByRole('button', { name: '保存修改' }))
@@ -332,7 +322,7 @@ describe('McpServersPage', () => {
     await waitFor(() => {
       expect(mcpServerService.updateServer).toHaveBeenCalledWith('srv_hdr', {
         expectedVersion: '1',
-        url: 'https://example.com/mcp',
+        url: 'https://mcp.example.invalid/mcp',
         headers: { operation: 'SET', value: '{"X-Api-Key":"key_123"}' },
         enabled: true,
         timeoutMillis: '30000',
@@ -347,7 +337,7 @@ describe('McpServersPage', () => {
     await waitFor(() => {
       expect(mcpServerService.updateServer).toHaveBeenLastCalledWith('srv_hdr', {
         expectedVersion: '1',
-        url: 'https://example.com/mcp',
+        url: 'https://mcp.example.invalid/mcp',
         headers: { operation: 'CLEAR' },
         enabled: true,
         timeoutMillis: '30000',
@@ -359,7 +349,7 @@ describe('McpServersPage', () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_disc', version: '2' })])
     vi.mocked(mcpServerService.getServer).mockResolvedValue(
-      detail({ name: 'srv_disc', url: 'https://example.com/mcp', version: '2' }),
+      detail({ name: 'srv_disc', url: 'https://mcp.example.invalid/mcp', version: '2' }),
     )
     vi.mocked(mcpServerService.discoverServer).mockResolvedValue(
       detail({ name: 'srv_disc', version: '2', discoveryStatus: 'AVAILABLE', toolCount: 4 }),
@@ -369,7 +359,7 @@ describe('McpServersPage', () => {
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_disc'))
     const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_disc' })
-    const urlInput = screen.getByDisplayValue('https://example.com/mcp')
+    const urlInput = screen.getByDisplayValue('https://mcp.example.invalid/mcp')
     const discoverBtn = within(modal).getByRole('button', { name: '发现工具' })
 
     await user.type(urlInput, '-modified')
@@ -379,7 +369,7 @@ describe('McpServersPage', () => {
     expect(mcpServerService.discoverServer).not.toHaveBeenCalled()
 
     await user.clear(urlInput)
-    await user.type(urlInput, 'https://example.com/mcp')
+    await user.type(urlInput, 'https://mcp.example.invalid/mcp')
     await user.click(discoverBtn)
 
     await waitFor(() => {

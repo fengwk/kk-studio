@@ -4,15 +4,11 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
-import { Mono } from '@/shared/ui/data/Mono'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useUnsavedChangesConfirmation } from '@/shared/ui/overlays/useUnsavedChangesConfirmation'
 import { useI18n } from '@/shared/i18n'
 import type { FormEvent } from 'react'
-import { MCP_NAME_PATTERN_SOURCE } from './mcp-utils'
 import { hasUnsavedCreateChanges, type CreateMcpServerFormState } from './mcp-server-forms'
-
-const HEADERS_PLACEHOLDER = '{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'
 
 /** 新建 MCP Server 弹窗：只呈现表单，校验与提交由页面编排。 */
 export function CreateMcpServerDialog({
@@ -61,10 +57,6 @@ export function CreateMcpServerDialog({
                 required
                 autoFocus
               />
-              <span className="inline-hint">
-                {t('ai.mcp.nameHint')}{' '}
-                <Mono className="mcp-name-pattern">{MCP_NAME_PATTERN_SOURCE}</Mono>
-              </span>
             </label>
 
             <label className="form-group">
@@ -72,26 +64,25 @@ export function CreateMcpServerDialog({
               <TextInput
                 value={form.url}
                 onChange={(event) => edit({ url: event.target.value })}
-                placeholder="https://example.com/mcp"
+                placeholder="https://mcp.example.invalid/mcp"
                 maxLength={2048}
                 disabled={pending}
                 required
               />
-              <span className="inline-hint">{t('ai.mcp.urlHint')}</span>
             </label>
 
-            <label className="form-group">
-              <FieldLabel>{t('ai.mcp.headers')}</FieldLabel>
+            <div className="form-group">
+              <FieldLabel htmlFor="create-mcp-headers" help={t('ai.mcp.headersHint')}>{t('ai.mcp.headers')}</FieldLabel>
               <TextArea
+                id="create-mcp-headers"
                 className="mcp-headers-textarea"
                 value={form.headersText}
                 onChange={(event) => edit({ headersText: event.target.value })}
-                placeholder={HEADERS_PLACEHOLDER}
+                placeholder={'{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'}
                 disabled={pending}
                 rows={4}
               />
-              <span className="inline-hint">{t('ai.mcp.headersHint')}</span>
-            </label>
+            </div>
 
             <label className="form-group">
               <FieldLabel>{t('ai.mcp.timeout')}</FieldLabel>

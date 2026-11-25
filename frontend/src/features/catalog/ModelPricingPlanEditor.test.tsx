@@ -94,7 +94,7 @@ describe('ModelPricingPlanEditor', () => {
     render(<Harness />)
     const input = screen.getByLabelText('Input')
     expect(input).toHaveValue('')
-    expect(input).toHaveAttribute('placeholder', 'Unpriced')
+    expect(input).toHaveAttribute('placeholder', 'Not set')
     expect(screen.getByText('USD / million tokens')).toBeInTheDocument()
     for (const heading of ['Base prices', 'Input length prices', 'Service tiers', 'Time periods', 'Rate preview']) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
@@ -372,8 +372,8 @@ describe('ModelPricingPlanEditor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview prices' }))
     await waitFor(() => expect(transport).toHaveBeenCalledOnce())
-    // 基础价格区与试算区都报告“未配置价格”，不存在 0 价或免费兜底。
-    await waitFor(() => expect(screen.getAllByText('No pricing configured')).toHaveLength(2))
+    // 试算结果明确报告“未配置价格”，不存在 0 价或免费兜底。
+    expect(await screen.findByText('No pricing configured')).toBeInTheDocument()
     expect(screen.queryByText('Effective prices')).not.toBeInTheDocument()
     expect(JSON.parse(String(transport.mock.calls[0]![1]!.body)).pricing).toBeNull()
   })

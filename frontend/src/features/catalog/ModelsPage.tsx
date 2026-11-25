@@ -1,7 +1,7 @@
 import { ModelsPanel } from '@/features/catalog/AiConsolePanels'
 import { CatalogRuntime } from '@/features/catalog/CatalogRuntime'
 import { useCatalogRuntime } from '@/features/catalog/CatalogRuntimeContext'
-import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
+import { ResourcePageLayout } from '@/shared/ui/cards/ResourcePageLayout'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 
 export function ModelsPage({ children }: ExtensionComponentProps) {
@@ -20,7 +20,7 @@ function ModelsResourcePanel() {
 function ModelsFrame({ children }: ExtensionComponentProps) {
   const controller = useCatalogRuntime()
   return (
-    <AiConsoleFrame
+    <ResourcePageLayout
       search={controller.search}
       onSearchChange={controller.setSearch}
       busy={controller.busy}
@@ -30,6 +30,6 @@ function ModelsFrame({ children }: ExtensionComponentProps) {
       content={<ModelsResourcePanel />}
     >
       {children}
-    </AiConsoleFrame>
+    </ResourcePageLayout>
   )
 }

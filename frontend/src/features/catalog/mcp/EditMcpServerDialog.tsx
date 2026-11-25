@@ -13,8 +13,6 @@ import { useUnsavedChangesConfirmation } from '@/shared/ui/overlays/useUnsavedCh
 import { useI18n } from '@/shared/i18n'
 import { hasUnsavedEditChanges, type EditMcpServerFormState } from './mcp-server-forms'
 
-const HEADERS_PLACEHOLDER = '{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'
-
 /** 编辑 MCP Server 弹窗：详情加载、表单与“发现工具”动作由页面编排后传入。 */
 export function EditMcpServerDialog({
   form,
@@ -80,7 +78,7 @@ export function EditMcpServerDialog({
                 <TextInput
                   value={form.url}
                   onChange={(event) => edit({ url: event.target.value })}
-                  placeholder="https://example.com/mcp"
+                  placeholder="https://mcp.example.invalid/mcp"
                   maxLength={2048}
                   disabled={busy}
                   required
@@ -88,23 +86,19 @@ export function EditMcpServerDialog({
                 />
               </label>
 
-              <label className="form-group">
-                <FieldLabel>{t('ai.mcp.headers')}</FieldLabel>
+              <div className="form-group">
+                <FieldLabel htmlFor="edit-mcp-headers" help={t(form.loaded?.headersConfigured ? 'ai.mcp.headersKeepHint' : 'ai.mcp.headersHint')}>{t('ai.mcp.headers')}</FieldLabel>
                 <TextArea
+                  id="edit-mcp-headers"
                   className="mcp-headers-textarea"
                   value={form.headersText}
                   onChange={(event) =>
                     edit({ headersText: event.target.value, clearHeaders: false })
                   }
-                  placeholder={HEADERS_PLACEHOLDER}
+                  placeholder={'{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'}
                   disabled={busy || form.clearHeaders}
                   rows={4}
                 />
-                <span className="inline-hint">
-                  {form.loaded?.headersConfigured
-                    ? t('ai.mcp.headersKeepHint')
-                    : t('ai.mcp.headersHint')}
-                </span>
                 {form.loaded?.headersConfigured && (
                   <Checkbox
                     checked={form.clearHeaders}
@@ -118,7 +112,7 @@ export function EditMcpServerDialog({
                     label={t('ai.mcp.clearHeaders')}
                   />
                 )}
-              </label>
+              </div>
 
               <label className="form-group">
                 <FieldLabel>{t('ai.mcp.timeout')}</FieldLabel>

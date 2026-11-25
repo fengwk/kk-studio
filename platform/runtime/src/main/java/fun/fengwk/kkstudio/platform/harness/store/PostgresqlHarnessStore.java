@@ -33,6 +33,7 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
+  private final TransactionTemplate snapshots;
   private final Supplier<UUID> idGenerator;
   private final Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage>
       driverWorkFactory;
@@ -57,6 +58,10 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
     this.transactions.setName("harness-store");
     this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    this.snapshots = new TransactionTemplate(transactionManager);
+    this.snapshots.setName("harness-store-snapshot");
+    this.snapshots.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    this.snapshots.setReadOnly(true);
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.driverWorkFactory = Objects.requireNonNull(driverWorkFactory, "driverWorkFactory");
   }
@@ -82,6 +87,23 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
    */
   @Override
   public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
+    return execute(transactions, callback);
+  }
+
+  @Override
+  public <T> T readSnapshot(Function<HarnessStore.Transaction, T> callback) {
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+      if (!Objects.equals(isolation, TransactionDefinition.ISOLATION_REPEATABLE_READ)
+          && !Objects.equals(isolation, TransactionDefinition.ISOLATION_SERIALIZABLE)) {
+        throw new IllegalStateException("execution facts require a repeatable read transaction");
+      }
+    }
+    return execute(snapshots, callback);
+  }
+
+  private <T> T execute(
+      TransactionTemplate template, Function<HarnessStore.Transaction, T> callback) {
     Objects.requireNonNull(callback, "callback");
     if (Boolean.TRUE.equals(active.get())) {
       throw new IllegalStateException("nested transactions are not supported");
@@ -93,7 +115,7 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
     T result;
     try {
       result =
-          transactions.execute(
+          template.execute(
               status -> {
                 PostgresqlHarnessLocks lockLedger = null;
                 if (TransactionSynchronizationManager.isSynchronizationActive()) {

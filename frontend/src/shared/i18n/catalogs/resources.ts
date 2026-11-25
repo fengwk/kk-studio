@@ -456,6 +456,10 @@ export const resourcesCatalog = {
     'en-US': 'Optional cap on prompt tokens per request; leave empty to use the context window.',
     'zh-CN': '可选的每次请求输入 token 上限；留空表示仅受上下文窗口约束。',
   },
+  'ai.catalog.form.inputLimitPlaceholder': {
+    'en-US': 'Uses the context window',
+    'zh-CN': '跟随上下文窗口',
+  },
   'ai.catalog.form.limit': {
     'en-US': 'Limit',
     'zh-CN': '请求限制',
@@ -549,8 +553,16 @@ export const resourcesCatalog = {
     'zh-CN': '思考强度',
   },
   'ai.catalog.form.reasoningEffortPlaceholder': {
-    'en-US': 'e.g. high, max, off',
-    'zh-CN': '例如 high、max、off',
+    'en-US': 'Use model default',
+    'zh-CN': '使用模型默认',
+  },
+  'ai.catalog.form.inputLimitHelp': {
+    'en-US': 'Caps input per request without changing the context window.',
+    'zh-CN': '只限制单次请求的输入，不改变模型上下文窗口。',
+  },
+  'ai.catalog.form.reasoningEffortHelp': {
+    'en-US': 'Enter off to disable reasoning.',
+    'zh-CN': '填 off 关闭思考。',
   },
   'ai.catalog.form.protocolOptions': {
     'en-US': 'Protocol Options',
@@ -1049,10 +1061,6 @@ export const resourcesCatalog = {
     'en-US': 'Skills Count',
     'zh-CN': '包含技能数量',
   },
-  'ai.skillPackages.loading': {
-    'en-US': 'Loading Skill Packages...',
-    'zh-CN': '正在加载技能包...',
-  },
   'ai.skillPackages.source': {
     'en-US': 'Source',
     'zh-CN': '来源',
@@ -1062,8 +1070,8 @@ export const resourcesCatalog = {
     'zh-CN': 'Git 仓库',
   },
   'ai.skillPackages.source.UPLOAD': {
-    'en-US': 'Uploaded archive',
-    'zh-CN': '上传压缩包',
+    'en-US': 'Local archive',
+    'zh-CN': '本地压缩包',
   },
   'ai.skillPackages.sourceLabel': {
     'en-US': 'Source',

@@ -1,3 +1,4 @@
+import { notifySessionExpired } from './session-expiry'
 import { API_RESPONSE_TYPES, type ApiRoutes } from './generated/contracts'
 import { getLocale, translate } from '@/shared/i18n'
 
@@ -241,7 +242,9 @@ export async function executeFetch<T = unknown>(
       signal: controller.signal,
     })
     if (!response.ok) {
-      throw await problemError(response)
+      const error = await problemError(response)
+      if (error.status === 401 && error.reason === 'NOT_AUTHENTICATED') notifySessionExpired()
+      throw error
     }
     if (config.readResponse) {
       return await config.readResponse(response) as T

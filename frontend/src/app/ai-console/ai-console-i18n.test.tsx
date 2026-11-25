@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { AgentSelectionPanel } from '@/features/thread/SelectionPanel'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
@@ -81,15 +80,6 @@ describe('AI i18n live-switch contracts', () => {
       .toBe('The model or variant for Agent broken-agent cannot be resolved; pick another agent.')
   })
 
-  it('switches the Environment navigation label without remounting', () => {
-    act(() => setLocale('en-US'))
-    renderWithWorkbench(<AiNavigation />, 'environments')
-
-    expect(screen.getByRole('link', { name: 'Environment' })).toBeInTheDocument()
-
-    act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('link', { name: '环境' })).toBeInTheDocument()
-  })
 
   it('switches the Chat creation flow labels live', () => {
     act(() => setLocale('en-US'))

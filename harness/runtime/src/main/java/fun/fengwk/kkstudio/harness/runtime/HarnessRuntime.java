@@ -290,7 +290,12 @@ public final class HarnessRuntime {
     List<UUID> ids = List.copyOf(rootThreadIds);
     return ids.isEmpty()
         ? List.of()
-        : store.transaction(tx -> tx.threads().findExecutionFacts(ids));
+        : store.readSnapshot(
+            tx -> {
+              List<UUID> threadIds = tx.threads().listThreadIdsByRoots(ids);
+              return tx.threads()
+                  .findExecutionFacts(ids, driverRegistry.readActiveWork(tx, threadIds));
+            });
   }
 
   /** 读取目标 Thread 所属执行树的窄摘要：按不可变 {@code rootThreadId} 取同根全部 Thread。 */

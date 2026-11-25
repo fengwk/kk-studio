@@ -9,6 +9,78 @@ export const settingsCatalog = {
     'en-US': 'Settings',
     'zh-CN': '设置',
   },
+  'settings.groups.interface': {
+    'en-US': 'Interface',
+    'zh-CN': '界面',
+  },
+  'settings.groups.system': {
+    'en-US': 'System',
+    'zh-CN': '系统',
+  },
+  'settings.groups.harness': {
+    'en-US': 'Harness',
+    'zh-CN': 'Harness',
+  },
+  'settings.sections.preferences': {
+    'en-US': 'Preferences',
+    'zh-CN': '偏好',
+  },
+  'settings.sections.agents': {
+    'en-US': 'Agent',
+    'zh-CN': 'Agent',
+  },
+  'settings.sections.models': {
+    'en-US': 'Models',
+    'zh-CN': '模型',
+  },
+  'settings.sections.providers': {
+    'en-US': 'Providers',
+    'zh-CN': '提供商',
+  },
+  'settings.sections.skillPackages': {
+    'en-US': 'Skill packages',
+    'zh-CN': '技能包',
+  },
+  'settings.sections.environments': {
+    'en-US': 'Environments',
+    'zh-CN': '环境',
+  },
+  'settings.sections.mcpServers': {
+    'en-US': 'MCP servers',
+    'zh-CN': 'MCP 服务',
+  },
+  'settings.sections.users': {
+    'en-US': 'Users',
+    'zh-CN': '用户',
+  },
+  'settings.sections.environmentDefaults': {
+    'en-US': 'Environment defaults',
+    'zh-CN': '环境默认值',
+  },
+  'settings.back': {
+    'en-US': 'Back',
+    'zh-CN': '返回',
+  },
+  'settings.categories': {
+    'en-US': 'Settings categories',
+    'zh-CN': '设置分类',
+  },
+  'settings.content': {
+    'en-US': 'Settings content',
+    'zh-CN': '设置内容',
+  },
+  'settings.about.title': {
+    'en-US': 'About KK Studio',
+    'zh-CN': '关于 KK Studio',
+  },
+  'settings.about.version': {
+    'en-US': 'Studio version',
+    'zh-CN': 'Studio 版本',
+  },
+  'settings.about.deploymentAddress': {
+    'en-US': 'Deployment address',
+    'zh-CN': '部署地址',
+  },
   'settings.subtitle': {
     'en-US': 'Changes take effect as soon as you save. Calls already in progress keep the values they started with.',
     'zh-CN': '设置保存后立即生效，进行中的调用沿用开始时的值。',
@@ -527,9 +599,10 @@ export const settingsCatalog = {
     'zh-CN': '代理地址',
   },
   'settings.field.backendNetwork.proxyUrl.hint': {
-    'en-US': 'HTTP proxy used by backend outbound requests. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected.',
-    'zh-CN': '后端发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后后端新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
+    'en-US': 'Use an unauthenticated http://host:port proxy. Only new HTTP requests use the saved proxy.',
+    'zh-CN': '使用无认证的 http://host:port 代理。保存后只影响新发起的 HTTP 请求。',
   },
+  'settings.field.backendNetwork.proxyUrl.direct': { 'en-US': 'Direct connection', 'zh-CN': '直连' },
   'settings.field.backendNetwork.noProxyHosts': {
     'en-US': 'Proxy bypass rules',
     'zh-CN': '代理绕过规则',

@@ -1,4 +1,3 @@
-import { useId } from 'react'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
@@ -32,7 +31,7 @@ export function VariantListEditor({
   label: string
   variants: VariantDraft[]
   defaultVariant: string
-  reasoning: boolean
+  reasoning?: boolean
   capabilities?: ModelCapabilitiesDTO | null
   capabilitiesLoading?: boolean
   capabilitiesError?: string
@@ -40,7 +39,6 @@ export function VariantListEditor({
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
   const { t } = useI18n()
-  const reasoningHintId = useId()
 
   const resolvedCapabilities = capabilitiesLoading || capabilitiesError ? null : capabilities
   const cacheState = resolvedCapabilities?.promptCacheState
@@ -120,12 +118,6 @@ export function VariantListEditor({
           ) : null}
         </div>
       ) : null}
-      <p className="inline-hint" id={reasoningHintId}>
-        {t('ai.catalog.form.variantHint')}
-        {reasoning
-          ? t('ai.catalog.form.reasoningHint')
-          : t('ai.catalog.form.reasoningDisabledHint')}
-      </p>
       <div className="variant-stack">
         {variants.map((variant, index) => {
           const currentRetention = variant.promptCacheRetention
@@ -181,12 +173,11 @@ export function VariantListEditor({
                     ) : null}
                   </div>
                 )}
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
+                {reasoning && <div className="form-group">
+                  <FieldLabel htmlFor={`reasoning-effort-${variant.draftId}`} help={t('ai.catalog.form.reasoningEffortHelp')}>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
                   <TextInput
+                    id={`reasoning-effort-${variant.draftId}`}
                     aria-label={`${t('ai.catalog.form.reasoningEffort')} ${index + 1}`}
-                    aria-describedby={!reasoning ? reasoningHintId : undefined}
-                    disabled={!reasoning}
                     value={variant.reasoningEffort}
                     maxLength={64}
                     onChange={(event) =>
@@ -194,27 +185,24 @@ export function VariantListEditor({
                     }
                     placeholder={t('ai.catalog.form.reasoningEffortPlaceholder')}
                   />
-                </label>
+                </div>}
               </div>
 
-              <details className="advanced-options">
-                <summary>{t('ai.catalog.form.advancedOptions')}</summary>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
-                  <TextArea
-                    className="code-textarea"
-                    aria-label={`${t('ai.catalog.form.protocolOptions')} ${index + 1}`}
-                    value={variant.protocolOptionsJson}
-                    onChange={(event) =>
-                      updateVariant(index, { protocolOptionsJson: event.target.value })
-                    }
-                    placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
-                    rows={3}
-                    spellCheck={false}
-                  />
-                  <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
-                </label>
-              </details>
+              <div className="form-group">
+                <FieldLabel htmlFor={`protocol-options-${variant.draftId}`} help={t('ai.catalog.form.protocolOptionsHint')}>
+                  {t('ai.catalog.form.protocolOptions')}
+                </FieldLabel>
+                <TextArea
+                  id={`protocol-options-${variant.draftId}`}
+                  className="code-textarea"
+                  aria-label={`${t('ai.catalog.form.protocolOptions')} ${index + 1}`}
+                  value={variant.protocolOptionsJson}
+                  onChange={(event) => updateVariant(index, { protocolOptionsJson: event.target.value })}
+                  placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
+                  rows={3}
+                  spellCheck={false}
+                />
+              </div>
 
               <div>
                 <Button

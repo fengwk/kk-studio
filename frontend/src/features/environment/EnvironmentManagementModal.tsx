@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { Button } from '@/shared/ui/controls/Button'
@@ -29,11 +28,9 @@ export function EnvironmentManagementModal({
   actions = [],
 }: EnvironmentManagementModalProps) {
   const { t } = useI18n()
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const eventsQuery = useQuery({
     queryKey: queryKeys.environments.events(environment.id),
     queryFn: () => environmentService.listEnvironmentEvents(environment.id),
-    enabled: diagnosticsOpen,
     refetchInterval: 10_000,
   })
   const orderedEvents = [...(eventsQuery.data ?? [])].reverse()
@@ -63,10 +60,7 @@ export function EnvironmentManagementModal({
             ))}
           </div>
         )}
-        <details className="environment-diagnostics" onToggle={(event) => setDiagnosticsOpen(event.currentTarget.open)}>
-          <summary>{t('ai.environment.diagnostics')}</summary>
-          {diagnosticsOpen && (
-            <div className="environment-diagnostics-content">
+        <div className="environment-diagnostics-content">
               <EnvironmentHostSection environment={environment} />
               <EnvironmentConfigurationSection environment={environment} />
               <section className="env-mgmt-section" aria-label={t('ai.environment.events.title')}>
@@ -113,16 +107,18 @@ export function EnvironmentManagementModal({
                             </span>
                             {timeStr ? <span className="env-event-time">{timeStr}</span> : null}
                           </div>
-                          {evt.message ? <div className="env-event-message">{evt.message}</div> : null}
+                          {evt.message && <div className="env-event-message">{t(
+                            evt.type === 'DISCONNECTED' && evt.level === 'INFO'
+                              ? 'ai.environment.events.message.released'
+                              : `ai.environment.events.message.${evt.type}`,
+                          )}</div>}
                         </div>
                       )
                     })}
                   </div>
                 )}
               </section>
-            </div>
-          )}
-        </details>
+        </div>
       </div>
       <div className="modal-footer">
         <Button variant="secondary" onClick={onClose}>{t('shared.close')}</Button>

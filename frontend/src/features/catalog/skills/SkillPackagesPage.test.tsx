@@ -27,10 +27,6 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => <div data-testid="navigation-slot" />,
-}))
-
 const PACKAGE_VERSION = '1111111111111111111111111111111111111111'
 const HEAD_COMMIT = '2222222222222222222222222222222222222222'
 
@@ -158,7 +154,7 @@ describe('SkillPackagesPage', () => {
     expect(within(coreCard).getByText('Git 仓库')).toBeInTheDocument()
     expect(within(coreCard).getByText('2')).toBeInTheDocument()
 
-    await waitFor(() => expect(within(card('browser-tools')).getByText('上传压缩包')).toBeInTheDocument())
+    await waitFor(() => expect(within(card('browser-tools')).getByText('本地压缩包')).toBeInTheDocument())
 
     await user.type(screen.getByPlaceholderText(/搜索/), 'browser')
     expect(screen.queryByText('core-tools')).not.toBeInTheDocument()

@@ -14,9 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"unicode"
 
+	"github.com/fengwk/kk-studio/daemon/internal/coding/keylock"
 	"github.com/fengwk/kk-studio/daemon/internal/uuid"
 )
 
@@ -34,7 +34,7 @@ type installArgs struct {
 	Skill      string `json:"skill"`
 }
 
-var packageLocks sync.Map
+var packageLocks keylock.Locks
 
 // Installer installs ticket-verified skill archives into the daemon's versioned skills tree.
 type Installer struct {
@@ -90,8 +90,8 @@ func (i *Installer) Install(ctx context.Context, input json.RawMessage) (json.Ra
 		return nil, "", err
 	}
 	packageVersionDir := filepath.Join(i.DataDir, "skills", a.Package, a.Version)
-	lock := lockPackage(packageVersionDir)
-	defer lock.Unlock()
+	unlock := packageLocks.Lock(packageVersionDir)
+	defer unlock()
 	target := filepath.Join(packageVersionDir, ticket.SHA256[:12])
 	if err := requireInstalledSkill(target, a.Skill, ticket.SHA256); err == nil {
 		return installedResult(target, a.Skill, "Skill package is already installed.")
@@ -123,14 +123,6 @@ func decodeInstallArgs(input json.RawMessage) (installArgs, error) {
 		return a, errors.New("skill.install: invalid arguments")
 	}
 	return a, nil
-}
-
-// lockPackage returns the mutex that serialises installations into one package version directory.
-func lockPackage(packageVersionDir string) *sync.Mutex {
-	lockAny, _ := packageLocks.LoadOrStore(packageVersionDir, &sync.Mutex{})
-	lock := lockAny.(*sync.Mutex)
-	lock.Lock()
-	return lock
 }
 
 // ticket requests the resource ticket and checks the metadata the archive is verified against.

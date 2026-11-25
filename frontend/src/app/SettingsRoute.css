@@ -1,0 +1,56 @@
+.settings-route {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  min-height: 100dvh;
+  background: var(--stage-bg);
+}
+
+.settings-route-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+}
+
+.settings-route-nav h2 {
+  margin: var(--space-1) var(--space-2);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.settings-route-nav a {
+  display: flex;
+  align-items: center;
+  min-height: var(--row-h);
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.settings-route-nav a:hover { background: var(--hover); }
+.settings-route-nav a[aria-current] { background: var(--accent-soft); }
+.settings-route-nav a[aria-current]:hover { background: var(--accent-soft-hover); }
+.settings-route-content { min-width: 0; padding: var(--space-8); }
+.settings-route-mobile { display: none; }
+.settings-deployment { max-width: 760px; }
+.settings-deployment dl { display: grid; gap: var(--space-2); margin: 0; }
+.settings-deployment dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); }
+.settings-deployment dt { color: var(--fg-muted); }
+.settings-deployment dd { margin: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .settings-route { display: block; }
+  .settings-route-nav { display: none; }
+  .settings-route-content { padding: var(--space-4) var(--space-3); }
+  .settings-route-mobile {
+    display: grid;
+    grid-template-columns: var(--touch-target) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-route-mobile > .settings-back { width: var(--touch-target); height: var(--touch-target); }
+}

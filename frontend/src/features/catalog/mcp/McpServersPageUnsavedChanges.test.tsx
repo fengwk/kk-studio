@@ -24,14 +24,10 @@ vi.mock('@/features/catalog/mcp-server-service', () => ({
   },
 }))
 
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => null,
-}))
-
 const SEEDED_AT = 1784505600000
 const EDIT_NAME = 'srv_edit'
 const EDIT_TITLE = `编辑 MCP 服务：${EDIT_NAME}`
-const SAVED_URL = 'https://example.com/mcp'
+const SAVED_URL = 'https://mcp.example.invalid/mcp'
 
 type Kind = 'create' | 'edit'
 const KINDS: Kind[] = ['create', 'edit']
@@ -113,7 +109,7 @@ async function editDraft(
   }
   await user.clear(within(dialog).getByDisplayValue(SAVED_URL))
   await user.type(
-    within(dialog).getByPlaceholderText('https://example.com/mcp'),
+    within(dialog).getByPlaceholderText('https://mcp.example.invalid/mcp'),
     `${SAVED_URL}-draft`,
   )
 }
@@ -292,10 +288,10 @@ describe('McpServersPage unsaved changes', () => {
     const enabled = within(create).getByLabelText('已启用')
     await user.click(enabled)
     await user.click(enabled)
-    fireEvent.change(within(create).getByLabelText(/JSON 请求头/), {
+    fireEvent.change(within(create).getByRole('textbox', { name: /JSON 请求头/ }), {
       target: { value: '{"X-Temp": "1"}' },
     })
-    fireEvent.change(within(create).getByLabelText(/JSON 请求头/), { target: { value: '' } })
+    fireEvent.change(within(create).getByRole('textbox', { name: /JSON 请求头/ }), { target: { value: '' } })
     const timeout = within(create).getByLabelText('超时（毫秒）')
     await user.clear(timeout)
     await user.type(timeout, '45000')
@@ -318,11 +314,11 @@ describe('McpServersPage unsaved changes', () => {
     const urlInput = within(edit).getByDisplayValue(SAVED_URL)
     await user.clear(urlInput)
     await user.type(
-      within(edit).getByPlaceholderText('https://example.com/mcp'),
+      within(edit).getByPlaceholderText('https://mcp.example.invalid/mcp'),
       `${SAVED_URL}-draft`,
     )
-    await user.clear(within(edit).getByPlaceholderText('https://example.com/mcp'))
-    await user.type(within(edit).getByPlaceholderText('https://example.com/mcp'), SAVED_URL)
+    await user.clear(within(edit).getByPlaceholderText('https://mcp.example.invalid/mcp'))
+    await user.type(within(edit).getByPlaceholderText('https://mcp.example.invalid/mcp'), SAVED_URL)
     await closeDialog(user, edit, 'escape')
     await expectDialogClosed()
   })
@@ -334,7 +330,7 @@ describe('McpServersPage unsaved changes', () => {
 
     const create = await openDialog(user, 'create')
     await user.type(within(create).getByPlaceholderText('例如 filesystem'), 'created_srv')
-    await user.type(within(create).getByPlaceholderText('https://example.com/mcp'), SAVED_URL)
+    await user.type(within(create).getByPlaceholderText('https://mcp.example.invalid/mcp'), SAVED_URL)
     await user.click(within(create).getByRole('button', { name: '创建' }))
     await expectDialogClosed()
     expect(mcpServerService.createServer).toHaveBeenCalledTimes(1)
@@ -343,7 +339,7 @@ describe('McpServersPage unsaved changes', () => {
     const urlInput = within(edit).getByDisplayValue(SAVED_URL)
     await user.clear(urlInput)
     await user.type(
-      within(edit).getByPlaceholderText('https://example.com/mcp'),
+      within(edit).getByPlaceholderText('https://mcp.example.invalid/mcp'),
       `${SAVED_URL}-saved`,
     )
     await user.click(within(edit).getByRole('button', { name: '保存修改' }))
@@ -368,7 +364,7 @@ describe('McpServersPage unsaved changes', () => {
     const urlInput = within(conflicted).getByDisplayValue(SAVED_URL)
     await user.clear(urlInput)
     await user.type(
-      within(conflicted).getByPlaceholderText('https://example.com/mcp'),
+      within(conflicted).getByPlaceholderText('https://mcp.example.invalid/mcp'),
       `${SAVED_URL}-conflict`,
     )
     await user.click(within(conflicted).getByRole('button', { name: '保存修改' }))
@@ -397,7 +393,7 @@ describe('McpServersPage unsaved changes', () => {
 
     const create = await openDialog(user, 'create')
     await user.type(within(create).getByPlaceholderText('例如 filesystem'), 'pending_srv')
-    await user.type(within(create).getByPlaceholderText('https://example.com/mcp'), SAVED_URL)
+    await user.type(within(create).getByPlaceholderText('https://mcp.example.invalid/mcp'), SAVED_URL)
     await user.click(within(create).getByRole('button', { name: '创建' }))
 
     await user.keyboard('{Escape}')

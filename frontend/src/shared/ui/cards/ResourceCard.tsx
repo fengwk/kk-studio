@@ -17,10 +17,12 @@ export type ResourceCardMetaRow =
 export interface ResourceCardProps {
   /** 资源类型图标元素（通常为 20px 的 lucide 图标）；共享卡不绑定任何业务图标枚举。 */
   icon: ReactNode
+  iconStyle?: 'plain'
   title: string
   subtitle?: string
   /** 标题行右侧的状态标记槽（状态 pill、版本等）；共享卡不解释其语义。 */
   badge?: ReactNode
+  wrapBadges?: boolean
   meta?: ResourceCardMetaRow[]
   /** 元信息之上的业务内容槽（正文、进度、附件等）。 */
   children?: ReactNode
@@ -100,16 +102,18 @@ export function ResourceCard({
   icon,
   title,
   subtitle,
+  iconStyle,
   badge,
+  wrapBadges = false,
   meta,
   children,
   actions,
   className,
 }: ResourceCardProps) {
   return (
-    <article className={['resource-card', className].filter(Boolean).join(' ')}>
+    <article className={['resource-card', className].filter(Boolean).join(' ')} data-wrap-badges={wrapBadges || undefined}>
       <div className="resource-card-head">
-        <div className="resource-card-icon" aria-hidden="true">
+        <div className="resource-card-icon" data-style={iconStyle} aria-hidden="true">
           {icon}
         </div>
         <div className="resource-card-head-text">

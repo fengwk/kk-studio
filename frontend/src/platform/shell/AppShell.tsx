@@ -245,6 +245,7 @@ export function AppShell({
                     key={item.id}
                     className={active ? 'active' : undefined}
                     to={item.to}
+                    state={item.rememberOrigin ? { from: location.pathname + location.search + location.hash } : undefined}
                     aria-label={t(item.ariaKey)}
                     onClick={() => setNavOpen(false)}
                   >

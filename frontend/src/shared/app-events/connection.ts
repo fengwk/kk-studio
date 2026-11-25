@@ -4,6 +4,7 @@ import {
   type ApplicationEventClientMessage,
   type ApplicationEventServerMessage,
 } from '@/shared/app-events/protocol'
+import { notifySessionExpired } from '@/shared/api/session-expiry'
 
 /**
  * 连接状态：
@@ -202,6 +203,11 @@ export class ApplicationEventConnection {
       this.socket = null
       this.socketOpen = false
       this.notifyClosed()
+      if (event.code === 4001) {
+        this.disconnect()
+        notifySessionExpired()
+        return
+      }
       const stopCause = CLOSE_CODE_STOP_CAUSE.get(event.code)
       if (stopCause != null) {
         // 协议错误/策略违规：terminal，不无限重试。

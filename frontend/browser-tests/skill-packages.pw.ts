@@ -34,7 +34,7 @@ test.describe('Skill Packages real browser verification', () => {
     expect(await tabIconTextGaps(dialog.getByRole('tablist'))).toEqual([4, 4])
 
     await dialog.getByPlaceholder('my-skills').fill('new-git-pack')
-    await dialog.getByPlaceholder('https://github.com/org/repo.git').fill('https://github.com/example/new-git-pack.git')
+    await dialog.getByPlaceholder('https://git.example.invalid/team/example-skills.git').fill('https://github.com/example/new-git-pack.git')
     await dialog.getByPlaceholder('main').fill('main')
     await dialog.getByRole('button', { name: '创建' }).click()
 
@@ -57,7 +57,7 @@ test.describe('Skill Packages real browser verification', () => {
 
     await page.getByRole('button', { name: '新建技能包' }).click()
     const dialog = page.getByRole('dialog', { name: '新建技能包' })
-    await dialog.getByRole('tab', { name: '上传压缩包' }).click()
+    await dialog.getByRole('tab', { name: '本地压缩包' }).click()
     await dialog.getByPlaceholder('my-skills').fill('upload-pack')
     await dialog.getByPlaceholder('1.0.0').fill('2026.09.1')
     await dialog.getByLabel('技能包压缩包').setInputFiles(archive)
@@ -92,7 +92,7 @@ test.describe('Skill Packages real browser verification', () => {
     await preview.getByRole('button', { name: '发布', exact: true }).click()
 
     await expect(page.getByRole('dialog', { name: '预览并发布' })).toHaveCount(0)
-    await expect(card(page, 'upload-pack')).toContainText('上传压缩包')
+    await expect(card(page, 'upload-pack')).toContainText('本地压缩包')
     await expect(card(page, 'upload-pack')).toContainText('2026.09.1')
     await page.screenshot({ path: `${SHOTS}/skill-packages-published-desktop-1280.png`, fullPage: true })
   })
@@ -155,7 +155,7 @@ test.describe('Skill Packages real browser verification', () => {
     await page.getByRole('button', { name: '新建技能包' }).click()
     const dialog = page.getByRole('dialog', { name: '新建技能包' })
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('tab', { name: '上传压缩包' }).click()
+    await dialog.getByRole('tab', { name: '本地压缩包' }).click()
     await dialog.getByPlaceholder('my-skills').fill('mobile-pack')
     await expect(dialog.getByPlaceholder('1.0.0')).toBeVisible()
 

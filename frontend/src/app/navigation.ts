@@ -33,7 +33,8 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
   {
     id: 'settings',
     groupId: 'settings',
-    to: '/settings',
+    to: '/settings/preferences',
+    rememberOrigin: true,
     labelKey: 'platform.nav.settings',
     ariaKey: 'platform.nav.settingsAria',
     icon: Settings,

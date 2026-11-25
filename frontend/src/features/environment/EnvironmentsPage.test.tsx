@@ -33,10 +33,6 @@ vi.mock('@/features/environment/environment-service', () => ({
   },
 }))
 
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => null,
-}))
-
 type TestUser = ReturnType<typeof userEvent.setup>
 
 function renderPage() {

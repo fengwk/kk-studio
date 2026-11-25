@@ -7,8 +7,8 @@ test('retry backoff strategy options save and clear dirty state', async ({ page 
   // 只读目录端点（如 /api/platform/models）直接返回数组；模型选择字段按数组消费。
   await page.route('**/api/**', (route) => route.fulfill({ json: [] }))
   await page.goto('/browser-tests/settings-catalog-harness.html')
-  await page.getByRole('tab', { name: 'AI 运行时' }).click()
-  const select = page.getByLabel('退避策略')
+  await page.getByRole('link', { name: 'AI 运行时' }).click()
+  const select = page.getByRole('button', { name: '退避策略', exact: true })
   await expect(select).toContainText('指数')
   await select.click()
   await expect(page.getByRole('option', { name: '指数', exact: true })).toBeVisible()
@@ -24,11 +24,12 @@ test('retry backoff strategy options save and clear dirty state', async ({ page 
 
 /** en-US 页签文案最长，作为页签栏宽度的回归基准。 */
 const EN_TAB_LABELS = [
-  'General',
+  'Preferences', 'Agent', 'Models', 'Providers', 'Skill packages', 'Environments', 'MCP servers',
+  'General', 'Users',
   'Plugins',
   'AI Runtime',
   'Tools & Permissions',
-  'Environment',
+  'Environment defaults',
   'Backend Network',
   'Storage & Media',
   'Advanced',
@@ -45,14 +46,14 @@ async function openEnSettingsTabs(page: Page, viewport: { width: number; height:
   await page.route('**/api/**', (route) => route.fulfill({ json: [] }))
   await page.goto(EN_SETTINGS_URL)
   // server 页签来自 settings schema，等全部页签渲染后再量宽度。
-  await expect(page.getByRole('tab')).toHaveCount(EN_TAB_LABELS.length)
-  return page.getByRole('tablist')
+  await expect(page.getByRole('link')).toHaveCount(EN_TAB_LABELS.length)
+  return page.getByRole('navigation')
 }
 
 /** 页签自身的横向内容不溢出，即文案既没被省略号截断也没被折行裁切。 */
 async function expectTabLabelsIntact(page: Page) {
   const clipped = await page
-    .getByRole('tab')
+    .getByRole('link')
     .evaluateAll((tabs) =>
       tabs.filter((tab) => tab.scrollWidth > tab.clientWidth + 1).map((tab) => tab.textContent),
     )
@@ -64,33 +65,23 @@ test('en-US settings tabs show without horizontal scrolling at 1440', async ({ p
 
   // 宽屏下每个页签都完整落在视口内，页签栏本身不产生横向溢出。
   for (const label of EN_TAB_LABELS) {
-    await expect(page.getByRole('tab', { name: label, exact: true })).toBeInViewport({ ratio: 1 })
+    await expect(page.getByRole('link', { name: label, exact: true })).toBeInViewport({ ratio: 1 })
   }
   expect(await tablist.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   await expectTabLabelsIntact(page)
   await page.screenshot({ path: '../reports/layout/settings-tabs-1440-en.png' })
 })
 
-test('en-US settings tabs scroll horizontally with intact labels at 390', async ({ page }) => {
-  const tablist = await openEnSettingsTabs(page, NARROW)
-
-  // 窄屏靠页签栏自身横向滚动：内容溢出，容器仍停在视口内。
-  expect(await tablist.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
-  const box = await tablist.boundingBox()
-  expect(box).not.toBeNull()
-  expect(box!.x + box!.width).toBeLessThanOrEqual(NARROW.width + 1)
-  await expectTabLabelsIntact(page)
-
-  // 滚到末尾能看到最后一个页签的完整文案。scrollIntoView 只能停在整像素，滚动量末位会有
-  // 亚像素残差（实测 tab 右缘 374.44、容器右缘 374），因此按 1px 容差校验可见范围，
-  // 文字本身是否被裁由 expectTabLabelsIntact 断言。
-  const lastTab = page.getByRole('tab', { name: 'Sync', exact: true })
-  await lastTab.scrollIntoViewIfNeeded()
-  const lastTabBox = await lastTab.boundingBox()
-  expect(lastTabBox).not.toBeNull()
-  expect(lastTabBox!.x).toBeGreaterThanOrEqual(0)
-  expect(lastTabBox!.x + lastTabBox!.width).toBeLessThanOrEqual(NARROW.width + 1)
-  await page.screenshot({ path: '../reports/layout/settings-tabs-390-en.png' })
+test('en-US settings categories can be selected without horizontal scrolling at 390', async ({ page }) => {
+  await page.setViewportSize(NARROW)
+  await page.route('**/api/**', (route) => route.fulfill({ json: [] }))
+  await page.goto(EN_SETTINGS_URL)
+  const categories = page.getByRole('button', { name: 'Settings categories' })
+  await categories.click()
+  await expect(page.getByRole('listbox')).toBeVisible()
+  await page.getByRole('option', { name: 'Sync', exact: true }).click()
+  await expect(categories).toHaveText('Sync')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(NARROW.width)
 })
 
 /**
@@ -143,7 +134,12 @@ async function openPluginsTab(
   await page.goto(
     `/browser-tests/settings-catalog-harness.html${locale === 'en-US' ? '?locale=en-US' : ''}`,
   )
-  await page.getByRole('tab', { name: PLUGINS_TAB_LABEL[locale], exact: true }).click()
+  if (viewport.width === NARROW.width) {
+    await page.getByRole('button', { name: locale === 'en-US' ? 'Settings categories' : '设置分类' }).click()
+    await page.getByRole('option', { name: PLUGINS_TAB_LABEL[locale], exact: true }).click()
+  } else {
+    await page.getByRole('link', { name: PLUGINS_TAB_LABEL[locale], exact: true }).click()
+  }
   await expect(page.locator('.plugin-card')).toHaveCount(plugins.length, { timeout: 15000 })
   return page.locator('.plugin-card').first()
 }

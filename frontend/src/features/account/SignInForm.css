@@ -1,0 +1,14 @@
+.sign-in-form {
+  display: grid;
+  gap: var(--space-4);
+  width: min(100%, 360px);
+}
+
+.sign-in-form > img {
+  justify-self: center;
+  margin-bottom: var(--space-2);
+}
+
+.sign-in-form :is(input, button) {
+  min-height: var(--touch-target);
+}

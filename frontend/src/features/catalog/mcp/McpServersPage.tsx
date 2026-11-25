@@ -9,7 +9,7 @@ import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
-import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
+import { ResourcePageLayout } from '@/shared/ui/cards/ResourcePageLayout'
 import { mcpServerService } from '@/features/catalog/mcp-server-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
@@ -34,7 +34,7 @@ import type { McpServerSummaryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * MCP Server 管理页：编排列表查询与搜索、两个编辑弹窗、删除确认与冲突呈现。
- * 页面外壳（导航、搜索、加载/失败状态）复用 `AiConsoleFrame`，与其他 AI 目录页一致；
+ * 页面外壳（导航、搜索、加载/失败状态）复用 `ResourcePageLayout`，与其他 AI 目录页一致；
  * 表单状态、表单规则与写入副作用分别在 `mcp-server-forms`、`mcp-server-form-validation`
  * 与 `useMcpServerEditor` / `useMcpServerMutations` 中，本组件只负责把它们接起来。
  */
@@ -173,7 +173,7 @@ export function McpServersPage() {
   }
 
   return (
-    <AiConsoleFrame
+    <ResourcePageLayout
       search={search}
       onSearchChange={setSearch}
       busy={serversQuery.isLoading}
@@ -250,6 +250,6 @@ export function McpServersPage() {
         onRefresh={refreshAfterConflict}
         onClose={() => setConflict(null)}
       />
-    </AiConsoleFrame>
+    </ResourcePageLayout>
   )
 }

@@ -9,7 +9,7 @@ import {
 
 const HARNESS_URL = '/browser-tests/model-browser-harness.html'
 const VIEWPORTS = [
-  { width: 1280, height: 900 },
+  { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ]
 
@@ -410,16 +410,12 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await dialog.getByLabel('名称', { exact: true }).fill('new-model')
     await dialog.getByLabel('模型 ID', { exact: true }).fill('acme-new-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
-    const advancedOptions = dialog.locator('.advanced-options').first()
-    await expect(advancedOptions).not.toHaveAttribute('open', '')
-    await expect(advancedOptions.getByLabel('原生协议选项 1', { exact: true })).not.toBeVisible()
-    await advancedOptions.locator('summary').click()
-    await expect(advancedOptions.getByLabel('原生协议选项 1', { exact: true })).toBeVisible()
+    await expect(dialog.getByRole('textbox', { name: '原生协议选项 1', exact: true })).toBeVisible()
 
     const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
     const inputPrice = baseRateInput(pricing, 'input')
     await expect(inputPrice).toHaveValue('')
-    await expect(inputPrice).toHaveAttribute('placeholder', '未定价')
+    await expect(inputPrice).toHaveAttribute('placeholder', '未设置')
     // 统一单位提示固定在定价标题旁；空费率表示未知，不代表免费。
     await expect(pricing).toContainText('USD /')
     await dialog.getByRole('button', { name: '创建', exact: true }).click()
@@ -537,25 +533,30 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await expect(reasoningRateInput(pricing)).toHaveValue('9')
       await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
 
-      // 既有规则默认折叠：摘要保留范围/档位/时段与倍率，点摘要才展开字段。
+      // 既有规则的边界、档位和时段无需展开即可编辑。
       const rangeGroup = pricing.locator('.pricing-plan-section').nth(1)
       await expect(rangeGroup.locator('.pricing-plan-row')).toHaveCount(1)
-      await expect(rangeGroup.locator('.pricing-rule-details')).not.toHaveAttribute('open', '')
-      await expect(rangeGroup.locator('.pricing-rule-details > summary')).toContainText('200001')
-      await rangeGroup.locator('.pricing-rule-details > summary').click()
-      await expect(rangeGroup.locator('.pricing-rule-details')).toHaveAttribute('open', '')
+      await expect(rangeGroup.getByRole('heading', { level: 5 })).toContainText('200001')
       // Start (inclusive) / End (exclusive) 是区间行的两个边界字段，上限留空即为无上限。
       const rangeBounds = rangeGroup.locator('.pricing-rule-details')
       await expect(rangeBounds.getByLabel('起点（含）', { exact: true })).toHaveValue('200001')
       await expect(rangeBounds.getByLabel('终点（不含）', { exact: true })).toHaveValue('')
       const tierGroup = pricing.locator('.pricing-plan-section').nth(2)
-      await tierGroup.locator('.pricing-rule-details > summary').click()
       await expect(tierGroup.getByLabel('服务档名称')).toHaveValue('priority')
       const timeGroup = pricing.locator('.pricing-plan-section').nth(3)
       await expect(timeGroup.getByLabel('时区')).toHaveValue('UTC')
-      await timeGroup.locator('.pricing-rule-details > summary').click()
-      await expect(timeGroup.getByLabel('开始时间')).toHaveValue('00:00')
-      await expect(timeGroup.getByLabel('结束时间')).toHaveValue('24:00')
+      const startTime = timeGroup.getByRole('button', { name: '开始时间' })
+      const endTime = timeGroup.getByRole('button', { name: '结束时间' })
+      await expect(startTime).toHaveText('00:00')
+      await expect(endTime).toHaveText('24:00')
+      await endTime.click()
+      const clock = page.locator('.ui-time-panel')
+      const hours = clock.getByRole('listbox').first()
+      const minutes = clock.getByRole('listbox').last()
+      await expect(hours.getByRole('option', { name: '24', exact: true })).toHaveAttribute('aria-selected', 'true')
+      await expect(minutes.getByRole('option', { name: '01', exact: true })).toHaveAttribute('aria-disabled', 'true')
+      await page.screenshot({ path: `../reports/r130-editors/product-pricing-time-${viewport.width}.png` })
+      await page.keyboard.press('Escape')
       await timeGroup.getByLabel('时区').fill('Europe/Paris')
       await expect(timeGroup.getByLabel('时区')).toHaveValue('Europe/Paris')
       await timeGroup.getByLabel('时区').fill('UTC')
@@ -569,7 +570,13 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       // 试算使用后端返回的价格与命中规则，而不是浏览器按浮点数本地计算。
       await expect(pricing.getByRole('heading', { name: '费率试算' })).toBeVisible()
       await pricing.getByLabel('输入 tokens', { exact: true }).fill('250000')
-      await pricing.getByLabel('请求开始时间（UTC）', { exact: true }).fill('2027-01-05T02:00')
+      await page.clock.setFixedTime(new Date('2027-01-05T12:00:00Z'))
+      const previewTime = pricing.getByRole('button', { name: '请求开始时间（UTC）', exact: true })
+      await previewTime.first().click()
+      await page.getByRole('gridcell').filter({ hasText: /^5$/ }).and(page.locator('[id$="-2027-01-05"]')).click()
+      await previewTime.last().click()
+      await clock.getByRole('listbox').first().getByRole('option', { name: '02', exact: true }).click()
+      await clock.getByRole('listbox').last().getByRole('option', { name: '00', exact: true }).click()
       await pricing.getByLabel('实际返回服务档', { exact: true }).fill('priority')
       const beforePreview = calls.length
       await pricing.getByRole('button', { name: '试算价格', exact: true }).click()
@@ -607,9 +614,11 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     const planSelect = pricing.getByRole('button', { name: '价格方案', exact: true })
 
     // 调价草稿从当前方案派生，基础方案本身保持不变。
-    const futureDate = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10)
+    await page.clock.setFixedTime(new Date('2026-07-03T12:00:00Z'))
+    const futureDate = '2026-07-05'
     await pricing.getByRole('button', { name: '添加调价', exact: true }).click()
-    await pricing.getByLabel('生效日期（UTC）', { exact: true }).fill(futureDate)
+    await pricing.getByRole('button', { name: '生效日期（UTC）', exact: true }).click()
+    await page.getByRole('gridcell').and(page.locator(`[id$="-${futureDate}"]`)).click()
     await pricing.getByRole('button', { name: '创建调价草稿', exact: true }).click()
     await expect(planSelect).toHaveText(futureDate)
 
@@ -618,7 +627,6 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     for (const [min, max, input] of [['0', '1000', '1.5'], ['500', '2000', '2']]) {
       await rangeGroup.getByRole('button', { name: '添加输入档位', exact: true }).click()
       const row = rangeGroup.locator('.pricing-rule-details').last()
-      await expect(row).toHaveAttribute('open', '')
       await row.getByLabel('起点（含）', { exact: true }).fill(min)
       await row.getByLabel('终点（不含）', { exact: true }).fill(max)
       await row.getByLabel(RATE_LABELS.input, { exact: true }).fill(input)
@@ -701,6 +709,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
 
         await page.locator('.create-card').click()
         const dialog = page.getByRole('dialog')
+        await dialog.locator('label.ui-checkbox').filter({ hasText: new RegExp(`^${copy.fields.reasoning.name}$`) }).click()
         for (const field of Object.values(copy.fields)) {
           await expect(dialog.getByRole(field.role, { name: field.name, exact: true })).toHaveCount(1)
         }
@@ -709,8 +718,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
             dialog.getByRole(stale.role, { name: stale.name, exact: true }),
           ).toHaveCount(0)
         }
-        // 折叠在 <details> 内的字段不在可访问性树里，按 aria-label 精确断言。
-        await expect(dialog.locator(`[aria-label="${copy.protocolOptions}"]`)).toHaveCount(1)
+        await expect(dialog.getByRole('textbox', { name: copy.protocolOptions, exact: true })).toBeVisible()
         await expect(dialog.locator(`[aria-label="${staleCopy.protocolOptions}"]`))
           .toHaveCount(0)
         const presetsSection = page.locator('.structured-section')
@@ -718,7 +726,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         await expect(
           presetsSection.getByRole('heading', { name: copy.presetsHeading, exact: true }),
         ).toHaveCount(1)
-        await expect(presetsSection).toContainText(copy.variantHint)
+        await expect(presetsSection).not.toContainText(copy.variantHint)
 
         await dialog.getByRole('tab', { name: item.groupTab, exact: true }).click()
         await expect(dialog).toHaveAccessibleName(item.title)

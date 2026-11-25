@@ -1,7 +1,7 @@
 import { expect, test } from './fixture'
 
 test.describe('Catalog & Skill Packages i18n Real React Browser Verification', () => {
-  test('Model Form: Reasoning effort visible-disabled, responsive 2-col/stacked, preserved draft & aria hint', async ({
+  test('Model Form: Reasoning effort is conditional, responsive and preserves the draft', async ({
     page,
   }) => {
     // 1. 桌面端 1280x800
@@ -11,7 +11,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     const modelTabBtn = page.locator('#tab-model-btn')
     await expect(modelTabBtn).toBeVisible()
 
-    // 新建时默认 reasoning 为 false，思考强度 1 输入框始终渲染且为 disabled
+    // 新建时推理默认关闭，思考强度不显示。
     const reasoningCheckbox = page.getByRole('checkbox', { name: '推理', exact: true })
     // 共享 Checkbox 的原生 input 只承载可访问性与键盘语义（视觉隐藏），
     // 指针点击必须落在可见的 label 上，与真实用户操作一致。hasText 用锚定正则,
@@ -21,15 +21,10 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await expect(reasoningCheckbox).not.toBeChecked()
 
     const effortInput = page.getByLabel('思考强度 1', { exact: true })
-    await expect(effortInput).toBeVisible()
-    await expect(effortInput).toBeDisabled()
-
-    // 验证 aria-describedby 指向包含关闭原因的 hint
-    const hintId = await effortInput.getAttribute('aria-describedby')
-    expect(hintId).toBeTruthy()
-    const hintEl = page.locator(`#${hintId}`)
-    await expect(hintEl).toContainText('推理当前已关闭')
-    await expect(hintEl).toContainText('请勾选上方的「推理」')
+    await expect(effortInput).toHaveCount(0)
+    await reasoningToggle.click()
+    await expect(effortInput).toHaveAttribute('placeholder', '使用模型默认')
+    await expect(page.getByRole('button', { name: '帮助：思考强度' })).toBeVisible()
 
     // 桌面端 editor-grid 2 列布局：预设 ID 与思考强度处于同一水平行
     const variantIdInput = page.getByLabel('预设 ID 1', { exact: true })
@@ -47,48 +42,20 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     // 恢复桌面端视口继续验证草稿保留
     await page.setViewportSize({ width: 1280, height: 800 })
 
-    // 勾选开启 Reasoning（点击可见 label）
-    await reasoningToggle.click()
-    await expect(reasoningCheckbox).toBeChecked()
-    await expect(effortInput).toBeEnabled()
-    await expect(effortInput).not.toHaveAttribute('aria-describedby')
-
     // 填写思考强度
     await effortInput.fill('high')
     await expect(effortInput).toHaveValue('high')
 
-    // 再次关闭 Reasoning：输入框置灰但保留已填写内容
+    // 关闭推理时隐藏字段，再开启时恢复草稿。
     await reasoningToggle.click()
     await expect(reasoningCheckbox).not.toBeChecked()
-    await expect(effortInput).toBeDisabled()
-    await expect(effortInput).toHaveValue('high')
+    await expect(effortInput).toHaveCount(0)
 
     // 再次开启 Reasoning：输入框恢复可用，草稿值 'high' 完整恢复
     await reasoningToggle.click()
     await expect(reasoningCheckbox).toBeChecked()
     await expect(effortInput).toBeEnabled()
     await expect(effortInput).toHaveValue('high')
-  })
-
-  test('Ai Navigation: Skill Package tab localized to 技能包 in zh-CN and Skill Package in en-US', async ({
-    page,
-  }) => {
-    await page.goto('/browser-tests/catalog-i18n-harness.html')
-    await page.click('#tab-nav-btn')
-
-    // 默认 zh-CN：二级导航中必须是“技能包”
-    const skillPkgLink = page.getByRole('link', { name: '技能包' })
-    await expect(skillPkgLink).toBeVisible()
-
-    // 切换至 en-US
-    await page.click('#toggle-locale-btn')
-    const skillPkgEnLink = page.getByRole('link', { name: 'Skill Package' })
-    await expect(skillPkgEnLink).toBeVisible()
-    await expect(page.getByRole('link', { name: '技能包' })).toHaveCount(0)
-
-    // 切回 zh-CN
-    await page.click('#toggle-locale-btn')
-    await expect(page.getByRole('link', { name: '技能包' })).toBeVisible()
   })
 
   test('Skill Packages Page: zh-CN & en-US cards, status pills, labels, modal fields and cancel/delete interpolation', async ({

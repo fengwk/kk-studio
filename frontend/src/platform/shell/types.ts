@@ -6,6 +6,7 @@ export interface PrimaryNavItem {
   id: string
   groupId: string
   to: string
+  rememberOrigin?: boolean
   labelKey: TranslationKey
   ariaKey: TranslationKey
   icon: ComponentType<{ 'aria-hidden'?: boolean | 'true' | 'false' }>

@@ -614,6 +614,12 @@ export const environmentCatalog = {
     'en-US': 'Warning',
     'zh-CN': '警告',
   },
+  'ai.environment.events.message.CONNECTING': { 'en-US': 'Daemon connection accepted.', 'zh-CN': '已接受 Daemon 连接。' },
+  'ai.environment.events.message.READY': { 'en-US': 'Environment is ready.', 'zh-CN': '环境已就绪。' },
+  'ai.environment.events.message.DISCONNECTED': { 'en-US': 'Daemon connection lost.', 'zh-CN': 'Daemon 连接已断开。' },
+  'ai.environment.events.message.released': { 'en-US': 'Daemon connection released.', 'zh-CN': '已释放 Daemon 连接。' },
+  'ai.environment.events.message.UPDATE_FAILED': { 'en-US': 'Daemon update failed.', 'zh-CN': 'Daemon 更新失败。' },
+  'ai.environment.installOverwrite': { 'en-US': 'Install / Overwrite', 'zh-CN': '安装 / 覆盖' },
   'ai.environment.events.type.connecting': {
     'en-US': 'Connecting',
     'zh-CN': '连接中',

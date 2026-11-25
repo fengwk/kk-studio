@@ -25,8 +25,8 @@ export function ProviderForm({
 }) {
   const { t } = useI18n()
   const isCustomRetry = draft.modelHttpRetryStatusCodes !== null && draft.modelHttpRetryStatusCodes !== undefined
-  // 只有编辑已配置密钥的 Provider 才需要 CLEAR：创建表单只接受 SET（可留空）。
   const canClearCredential = mode === 'edit' && draft.credentialConfigured
+  const credentialId = useId()
   const nameId = useId()
   const nameErrorId = useFieldErrorId(fieldErrors.name)
   const baseUrlId = useId()
@@ -47,9 +47,12 @@ export function ProviderForm({
         />
         {fieldErrors.name ? <FieldError id={nameErrorId}>{fieldErrors.name}</FieldError> : null}
       </div>
-      <label className="form-group">
-        <FieldLabel>{t('ai.catalog.form.apiKeyOptional')}</FieldLabel>
+      <div className="form-group">
+        <FieldLabel htmlFor={credentialId} help={t(mode === 'edit' ? 'ai.catalog.form.credentialEditHint' : 'ai.catalog.form.credentialCreateHint')}>
+          {t('ai.catalog.form.apiKeyOptional')}
+        </FieldLabel>
         <TextInput
+          id={credentialId}
           type="password"
           autoComplete="off"
           value={draft.credential}
@@ -63,12 +66,7 @@ export function ProviderForm({
                 : t('ai.catalog.form.optionalCredential')
           }
         />
-        <small>
-          {mode === 'edit'
-            ? t('ai.catalog.form.credentialEditHint')
-            : t('ai.catalog.form.credentialCreateHint')}
-        </small>
-      </label>
+      </div>
       {canClearCredential ? (
         <div className="form-group">
           <Checkbox
@@ -120,7 +118,7 @@ export function ProviderForm({
           aria-describedby={baseUrlErrorId}
           value={draft.baseUrl}
           onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })}
-          placeholder="https://api.example.com/v1"
+          placeholder="https://api.example.invalid/v1"
         />
         {fieldErrors.baseUrl ? <FieldError id={baseUrlErrorId}>{fieldErrors.baseUrl}</FieldError> : null}
       </div>
@@ -171,11 +169,7 @@ export function ProviderForm({
             placeholder={t('ai.catalog.form.httpRetryPlaceholder')}
             ariaLabel={t('ai.catalog.form.httpRetryCustom')}
           />
-        ) : (
-          <small className="form-group-hint">
-            {t('ai.catalog.form.httpRetryInheritHint')}
-          </small>
-        )}
+        ) : null}
       </div>
     </>
   )
