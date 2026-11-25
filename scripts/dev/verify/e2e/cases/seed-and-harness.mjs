@@ -244,7 +244,7 @@ registerCase({
   id: 'thread.workspace_session_branch_fork',
   level: 'L1',
   title: 'Chat Space Session、分支与分叉使用当前 API',
-  docs: '经 Chat Space 创建 Session；Harness Thread 查询继续使用 /api/harness/threads/{id}；从 ROOT 切点经 Workspace branches/forks 创建分支与新 Session，不调用模型',
+  docs: '经 Chat Space 创建 Session；通过 /api/harness/threads/{id} 读取 Thread 的 TURN_END 切点，再经 Workspace branches/forks 创建分支与新 Session，不调用真实模型',
   async run(ctx) {
     const spaceId = await ctx.createSpace(`e2e-session-${cid().slice(0, 8)}`)
     const created = await createWorkspaceSession(ctx, spaceId, {
