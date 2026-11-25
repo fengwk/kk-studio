@@ -47,7 +47,7 @@ function approvalItem(props: HarnessApproval): InteractionApproval {
     threadId: props.threadId,
     sessionId: 'sess-mutation-harness',
     rootThreadId: props.threadId,
-    owner: { kind: 'CHAT', id: 'chat-mutation-harness', title: 'Mutation review harness' },
+    owner: { kind: 'CHAT_SPACE', id: 'space-mutation-harness', title: 'Mutation review harness' },
     toolCallId: props.invocationId,
     toolName: props.toolName,
     argumentsJson: props.argumentsJson ?? '',

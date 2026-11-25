@@ -13,7 +13,7 @@
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
 | 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
 | 理解 Harness 的架构、库表、模型字段、执行与接口 | [Harness](workspace-harness.md) |
-| 评审产品设计、领域映射和离线原型 | [产品设计与模型映射](workspace-design.md) |
+| 评审产品设计与模型映射 | [产品设计与模型映射](workspace-design.md) |
 | 实现新工作区时核对每个动作的接口、事务和事件 | [交互与底层链路](workspace-interactions.md) |
 | 统一新工作区的颜色、间距、焦点和组件样式 | [视觉语言与组件体系](workspace-ui.md) |
 | 规划新工作区的代码去留、实施顺序和验收 | [保留、重构、删除与交付](workspace-delivery.md) |
@@ -78,9 +78,7 @@ HTML 和截图留在 `reports/`，不入库。构建后对两份 HTML 分别运�
 | 文档 | 回答的问题 |
 | --- | --- |
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
-| [Workspace](modules/workspace.md) | Chat Space、目录和资源归属如何保持一致，并通过工作区入口创建与管理执行资源？ |
-| [工作区持久化](modules/workspace.md) | 空间、目录和资源归属如何保持一致？ |
-
+| [Workspace](modules/workspace.md) | Chat Space、目录、资源归属和定时任务如何保持一致，并通过工作区入口创建与管理执行资源？ |
 | [IDE](modules/ide.md) | Chat 内同源 code-server 视图如何经 Daemon 命令通道、权威快照与复用数据连接打开、恢复和转发？ |
 
 ### 组合根与前端

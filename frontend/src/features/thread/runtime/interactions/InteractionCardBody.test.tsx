@@ -26,7 +26,7 @@ it('renders environment waits read-only without approval or questionnaire action
   const item: InteractionDTO = {
     type: 'ENVIRONMENT_WAIT', rootThreadId: 'root', environmentId: 'env',
     environmentName: 'archlinux', waitingCount: 2, createdAt: 1780000000000,
-    owner: { kind: 'CHAT', id: 'chat', title: 'Chat', link: '/chats/chat' },
+    owner: { kind: 'CHAT_SPACE', id: 'space-1', title: 'Workspace', link: '/chat-spaces/space-1' },
   }
   render(<InteractionCardBody item={item} />)
   // 环境等待只有聚合身份：展示等待的环境与调用数，不出现任何可操作入口。
@@ -47,7 +47,7 @@ it('renders and submits a long questionnaire without truncating questions, optio
     toolCallId: 'call-1', toolName: 'ask_user',
     argumentsJson: LONG_QUESTIONNAIRE_JSON,
     createdAt: 1780000000000,
-    owner: { kind: 'CHAT', id: 'chat', title: 'Chat', link: '/chats/chat' },
+    owner: { kind: 'CHAT_SPACE', id: 'space-1', title: 'Workspace', link: '/chat-spaces/space-1' },
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(

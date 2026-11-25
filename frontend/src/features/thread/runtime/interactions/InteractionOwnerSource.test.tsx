@@ -12,7 +12,7 @@ const childInvocation: InteractionDTO = {
   threadId: '0f3c9a2e-1111-4000-8000-000000000001',
   rootThreadId: '9a2e0f3c-2222-4000-8000-000000000002',
   sessionId: 'session-1',
-  owner: { kind: 'CHAT', id: 'chat-1', title: '产品对话', link: '/chats/chat-1' },
+  owner: { kind: 'CHAT_SPACE', id: 'space-1', title: '产品工作区', link: '/chat-spaces/space-1' },
   toolCallId: 'call-1',
   toolName: 'bash',
   argumentsJson: '{"command":"ls"}',
@@ -33,8 +33,8 @@ function renderSource(item: InteractionDTO, openThread?: (threadId: string) => v
 }
 
 describe('interaction owner source', () => {
-  it('adds a subagent entry after the owner without exposing the child thread id', () => {
-    // 测试意图：子线程调用在归属后补“子 Agent”入口，链接目标是子线程地址而非执行根。
+  it('adds a subagent entry without exposing the child thread id', () => {
+    // 测试意图：子线程调用只展示“子 Agent”入口，链接目标是子线程地址且不暴露 UUID 或旧归属按钮。
     setLocale('zh-CN')
     renderSource(childInvocation)
 
@@ -43,7 +43,7 @@ describe('interaction owner source', () => {
     expect(link).toHaveAttribute('href', '/threads/0f3c9a2e-1111-4000-8000-000000000001')
     expect(link).toHaveTextContent('子 Agent')
     expect(link).not.toHaveTextContent('0f3c9a2e')
-    expect(screen.getByRole('button', { name: '对话 · 产品对话' })).toHaveAttribute('title', '查看来源')
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('opens the subagent in the current pane when the pane owns thread navigation', () => {
@@ -60,7 +60,7 @@ describe('interaction owner source', () => {
     setLocale('zh-CN')
     renderSource({ ...childInvocation, threadId: childInvocation.rootThreadId })
     expect(screen.queryByRole('link')).toBeNull()
-    expect(screen.getByRole('button', { name: '对话 · 产品对话' })).toBeInTheDocument()
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('shows no subagent entry for aggregated environment waits', () => {
@@ -78,13 +78,13 @@ describe('interaction owner source', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it('keeps a headless owner as text and still offers the subagent entry', () => {
+  it('still offers the subagent entry when owner is AGENT_TASK', () => {
     setLocale('zh-CN')
     renderSource({
       ...childInvocation,
       owner: { kind: 'AGENT_TASK', id: 'task-1', title: 'reporter', link: null },
     })
-    expect(screen.getByText('Agent 任务 · reporter').closest('button')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
     expect(screen.getByRole('link', { name: '打开子 Agent' }))
       .toHaveAttribute('href', '/threads/0f3c9a2e-1111-4000-8000-000000000001')
   })

@@ -10,6 +10,7 @@ import {
   useI18n,
 } from '@/shared/i18n'
 import { messageCatalog } from '@/shared/i18n/catalogs'
+import { chatCatalog } from '@/shared/i18n/catalogs/chat'
 import { resourcesCatalog } from '@/shared/i18n/catalogs/resources'
 
 describe('i18n runtime', () => {
@@ -117,6 +118,38 @@ const DYNAMIC_KEY_PREFIXES = [
   'ai.catalog.form.pricing',
 ]
 
+const CHAT_DYNAMIC_KEY_PREFIXES = [
+  // SubagentTreePanel.tsx / ThreadTreeRows.tsx: `ai.runtime.agentTree.outcome.${outcome}`
+  'ai.runtime.agentTree.outcome.',
+  // ToolMessageBlock.tsx: `ai.runtime.tool.task.${taskReceipt.status}` / `ai.runtime.tool.${view.executionState}`
+  'ai.runtime.tool.',
+  // ToolCallPreviewSections.tsx: `ai.runtime.mutation.lossyDecode.${tool}.${plural}`
+  'ai.runtime.mutation.lossyDecode.',
+  // ResourceUri.tsx: `ai.resource.openInIde.${openError}`
+  'ai.resource.openInIde.',
+]
+
+/** thread-commands.ts: `ai.runtime.command.${id}` / `ai.runtime.command.${id}Label` */
+const ACTIVE_THREAD_COMMAND_IDS = [
+  'yolo',
+  'models',
+  'stop',
+  'new',
+  'upload',
+  'debug',
+  'subagent',
+  'shortcuts',
+  'compact',
+  'files',
+] as const
+
+const THREAD_COMMAND_KEYS = new Set(
+  ACTIVE_THREAD_COMMAND_IDS.flatMap((id) => [
+    `ai.runtime.command.${id}`,
+    `ai.runtime.command.${id}Label`,
+  ]),
+)
+
 const sourceRoot = resolve(process.cwd(), 'src')
 const catalogDefinitionRoot = resolve(sourceRoot, 'shared/i18n/catalogs')
 
@@ -152,5 +185,20 @@ describe('i18n catalog key usage', () => {
     )
 
     expect(unreferenced, 'catalog keys without a source reference').toEqual([])
+  })
+
+  it('references every chat catalog key from source', () => {
+    const source = collectSourceText(sourceRoot)
+    const references = new Set(
+      Array.from(source.matchAll(/(['"`])([\w.-]+)\1/gu), ([, , key]) => key),
+    )
+    const unreferenced = Object.keys(chatCatalog).filter(
+      (key) =>
+        !THREAD_COMMAND_KEYS.has(key) &&
+        !CHAT_DYNAMIC_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) &&
+        !references.has(key),
+    )
+
+    expect(unreferenced, 'chat catalog keys without a source reference').toEqual([])
   })
 })

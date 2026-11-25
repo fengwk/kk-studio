@@ -71,9 +71,6 @@
     "box-shadow": 1,
     "outline": 1
   },
-  "src/features/thread/runtime/interactions/interactions-page.css": {
-    "spacing": 13
-  },
   "src/features/thread/runtime/panes/child-thread-view.css": {
     "spacing": 3
   },
