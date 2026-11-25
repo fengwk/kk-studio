@@ -158,12 +158,13 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(40)
+    expect(allTestFiles.length).toBe(41)
     expect(allTestFiles).toContain('shared-ui-visual.pw.ts')
     expect(allTestFiles).toContain('canvas-editor.pw.ts')
     expect(allTestFiles).toContain('resource-attachment-ide.pw.ts')
     expect(allTestFiles).toContain('custom-message-queue.pw.ts')
     expect(allTestFiles).toContain('mermaid.pw.ts')
+    expect(allTestFiles).toContain('workspace-schedules.pw.ts')
 
     const projects = playwrightConfig.projects ?? []
     expect(
@@ -174,6 +175,11 @@ describe('test file matching coverage and exclusivity', () => {
     expect(
       projects
         .filter((project) => matchesProject('mermaid.pw.ts', project))
+        .map((project) => project.name),
+    ).toEqual(['layout'])
+    expect(
+      projects
+        .filter((project) => matchesProject('workspace-schedules.pw.ts', project))
         .map((project) => project.name),
     ).toEqual(['layout'])
     for (const testFile of allTestFiles) {
