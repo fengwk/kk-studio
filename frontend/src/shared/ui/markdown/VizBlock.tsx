@@ -342,7 +342,12 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
       ) : null}
       {chartFigure?.table && chartFigure.table.rows.length > 0 ? (
         <details className="md-viz-data">
-          <summary>{t('shared.vizChartData', { count: chartFigure.table.rows.length })}</summary>
+          <summary>
+            {t(
+              chartFigure.table.rows.length === 1 ? 'shared.vizChartData.one' : 'shared.vizChartData.other',
+              { count: chartFigure.table.rows.length },
+            )}
+          </summary>
           <table>
             <thead>
               <tr>

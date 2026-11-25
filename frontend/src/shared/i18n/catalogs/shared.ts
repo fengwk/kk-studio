@@ -97,7 +97,11 @@ export const sharedCatalog = {
     'en-US': 'Dismiss notification',
     'zh-CN': '关闭通知',
   },
-  'shared.vizChartData': {
+  'shared.vizChartData.one': {
+    'en-US': 'Chart data · {{count}} row',
+    'zh-CN': '图表数据 · {{count}} 行',
+  },
+  'shared.vizChartData.other': {
     'en-US': 'Chart data · {{count}} rows',
     'zh-CN': '图表数据 · {{count}} 行',
   },
