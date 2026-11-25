@@ -66,9 +66,9 @@ export function AgentResourceCard({
         [t(agent.execution && agent.execution.driver !== 'builtin'
           ? 'ai.catalog.form.executionDriver'
           : 'ai.catalog.card.effectiveModel'), effectiveModel],
-        { label: t('ai.catalog.form.agentTools'), tags: tools, limit: 2 },
-        { label: t('ai.catalog.form.agentSkills'), tags: skillTags, limit: 2 },
-        { label: t('ai.catalog.form.agentSubagents'), tags: subagents, limit: 2 },
+        ...(tools.length ? [{ label: t('ai.catalog.form.agentTools'), tags: tools, limit: 2 }] : []),
+        ...(skillTags.length ? [{ label: t('ai.catalog.form.agentSkills'), tags: skillTags, limit: 2 }] : []),
+        ...(subagents.length ? [{ label: t('ai.catalog.form.agentSubagents'), tags: subagents, limit: 2 }] : []),
       ]}
       onEdit={onEdit}
       onDelete={onDelete}

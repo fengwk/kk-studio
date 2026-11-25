@@ -33,7 +33,7 @@ export function ModelGroupForm({
   return (
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
+        <FieldLabel required help={t('ai.catalog.form.groupNameHint')}>{t('ai.catalog.form.name')}</FieldLabel>
         <TextInput
           invalid={Boolean(fieldErrors.name)}
           aria-label={t('ai.catalog.form.name')}
@@ -42,7 +42,6 @@ export function ModelGroupForm({
           placeholder="coding"
           required
         />
-        <span className="inline-hint">{t('ai.catalog.form.groupNameHint')}</span>
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
 
@@ -62,7 +61,7 @@ export function ModelGroupForm({
       </section>
 
       <label className={`form-group${fieldErrors.fallbackStatusCodes ? ' is-error' : ''}`}>
-        <FieldLabel>{t('ai.catalog.form.fallbackStatusCodes')}</FieldLabel>
+        <FieldLabel help={t('ai.catalog.form.fallbackStatusCodesHint')}>{t('ai.catalog.form.fallbackStatusCodes')}</FieldLabel>
         <TagInput
           value={draft.fallbackStatusCodes}
           min={400}
@@ -71,21 +70,19 @@ export function ModelGroupForm({
           placeholder={t('ai.catalog.form.fallbackStatusCodesPlaceholder')}
           onChange={(fallbackStatusCodes) => onChange({ ...draft, fallbackStatusCodes })}
         />
-        <span className="inline-hint">{t('ai.catalog.form.fallbackStatusCodesHint')}</span>
         {fieldErrors.fallbackStatusCodes ? (
           <span className="field-error">{fieldErrors.fallbackStatusCodes}</span>
         ) : null}
       </label>
 
       <label className={`form-group${fieldErrors.cooldownSeconds ? ' is-error' : ''}`}>
-        <FieldLabel>{t('ai.catalog.form.cooldownSeconds')}</FieldLabel>
+        <FieldLabel help={t('ai.catalog.form.cooldownHint')}>{t('ai.catalog.form.cooldownSeconds')}</FieldLabel>
         <NumberInput
           value={draft.cooldownSeconds}
           min={0}
           aria-label={t('ai.catalog.form.cooldownSeconds')}
           onChange={(cooldownSeconds) => onChange({ ...draft, cooldownSeconds })}
         />
-        <span className="inline-hint">{t('ai.catalog.form.cooldownHint')}</span>
         {fieldErrors.cooldownSeconds ? (
           <span className="field-error">{fieldErrors.cooldownSeconds}</span>
         ) : null}

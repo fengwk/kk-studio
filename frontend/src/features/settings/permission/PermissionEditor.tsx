@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react'
 import { buildPermissionToolCandidates } from '@/features/catalog/agent-capability-candidates'
 import {
   addRule,
@@ -189,14 +189,14 @@ export function PermissionEditor({
               variant="secondary"
               onClick={() => onChange(addRule(groups, groupIndex))}
             >
-              {t('settings.permission.addRule')}
+              <Plus aria-hidden="true" />{t('settings.permission.addRule')}
             </Button>
           </section>
         )
       })}
 
       <Button variant="secondary" onClick={() => onChange(addTool(groups))}>
-        {t('settings.permission.addTool')}
+        <Plus aria-hidden="true" />{t('settings.permission.addTool')}
       </Button>
     </div>
   )

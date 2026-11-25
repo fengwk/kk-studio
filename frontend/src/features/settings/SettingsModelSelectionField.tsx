@@ -3,6 +3,7 @@ import type { ModelSelectionDraft } from '@/features/settings/system-settings-dr
 import { agentService } from '@/shared/api/agent-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { ModelSelectionPicker } from '@/shared/ui/controls/ModelSelectionPicker'
 
 export function SettingsModelSelectionField({
@@ -37,8 +38,7 @@ export function SettingsModelSelectionField({
       data-settings-field-path={fieldPath}
       data-settings-nullable={nullable}
     >
-      <span className="settings-field-label">{label}</span>
-      {hint ? <span className="settings-field-description">{hint}</span> : null}
+      <FieldLabel help={hint}>{label}</FieldLabel>
       <ModelSelectionPicker
         models={models}
         modelName={value.modelName}

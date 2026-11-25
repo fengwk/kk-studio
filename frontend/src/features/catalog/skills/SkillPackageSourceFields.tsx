@@ -90,7 +90,7 @@ export function SkillPackageSourceFields({
             <FieldLabel required>{t('ai.skillPackages.repositoryUrl')}</FieldLabel>
             <TextInput
               value={form.repositoryUrl}
-              placeholder="https://github.com/org/repo.git"
+              placeholder="https://git.example.invalid/team/example-skills.git"
               disabled={busy}
               required
               onChange={(event) => edit({ repositoryUrl: event.target.value })}
@@ -118,7 +118,6 @@ export function SkillPackageSourceFields({
               disabled={busy}
               onChange={(event) => edit({ token: event.target.value })}
             />
-            <small>{t('ai.skillPackages.tokenCreateHint')}</small>
           </label>
         </>
       ) : (
@@ -147,7 +146,6 @@ export function SkillPackageSourceFields({
                 }}
               />
             </div>
-            <small>{t('ai.skillPackages.archiveFileHint')}</small>
           </div>
 
           <label className="form-group">

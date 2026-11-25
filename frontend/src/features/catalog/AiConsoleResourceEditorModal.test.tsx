@@ -83,7 +83,7 @@ describe('model create kind tabs', () => {
     expect(modelTab).toHaveAttribute('aria-controls', panel.id)
     expect(panel).toHaveAttribute('aria-labelledby', modelTab.id)
     // 表单正文在面板内，切换后的内容才属于当前页签。
-    expect(within(panel).getByRole('navigation', { name: '区块导航' })).toBeInTheDocument()
+    expect(within(panel).getByRole('region', { name: '基本信息' })).toBeInTheDocument()
   })
 
   // 测试意图：点击与方向键/Home 都切换资源类型（选中态与焦点一起移动），不再需要逐个 Tab。

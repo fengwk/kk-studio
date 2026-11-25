@@ -226,7 +226,7 @@ describe('catalog resource editor unsaved changes', () => {
     const user = userEvent.setup()
     renderHarness()
     const dialog = await openEditor(user, 'edit-provider')
-    const baseUrl = within(dialog).getByPlaceholderText('https://api.example.com/v1')
+    const baseUrl = within(dialog).getByPlaceholderText('https://api.example.invalid/v1')
     expect(baseUrl).toHaveValue('http://stub.local/v1')
 
     await user.type(baseUrl, '-edited')

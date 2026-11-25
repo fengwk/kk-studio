@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import { Mono } from '@/shared/ui/data/Mono'
 import { useI18n } from '@/shared/i18n'
 import { environmentRuntimeQueryOptions } from '@/features/environment/environment-runtime-query'
@@ -28,7 +29,12 @@ export function EnvironmentConfigurationSection({
     <section className="env-mgmt-section" aria-label={t('ai.environment.config.title')}>
       <div className="env-mgmt-section-header">
         <div>
-          <h3 className="env-mgmt-section-title">{t('ai.environment.config.title')}</h3>
+          <div className="field-label-row">
+            <h3 className="env-mgmt-section-title">{t('ai.environment.config.title')}</h3>
+            <HelpHint label={t('shared.helpAbout', { topic: t('ai.environment.config.title') })}>
+              {t('ai.environment.config.hotUpdateHelp')}
+            </HelpHint>
+          </div>
           <EnvironmentConfigStatusBadge view={view} />
         </div>
       </div>
@@ -62,7 +68,6 @@ export function EnvironmentConfigurationSection({
           {t('ai.environment.runtime.loadFailed')}
         </p>
       ) : null}
-      <p className="field-help">{t('ai.environment.config.hotUpdateHelp')}</p>
     </section>
   )
 }

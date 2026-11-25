@@ -75,14 +75,10 @@ export function PluginCard({
   ]
 
   const rows: ResourceCardMetaRow[] = [
-    [
-      t('plugins.configurationVersion'),
-      `v${plugin.configuration.version}`,
-    ],
-    [
-      t('plugins.appliedVersion'),
-      `v${plugin.appliedVersion ?? '—'}`,
-    ],
+    ...(isPendingApplication ? [
+      [t('plugins.configurationVersion'), `v${plugin.configuration.version}`] as ResourceCardMetaRow,
+      [t('plugins.appliedVersion'), plugin.appliedVersion == null ? '—' : `v${plugin.appliedVersion}`] as ResourceCardMetaRow,
+    ] : []),
     [
       t('plugins.capabilities'),
       activeCapabilities.length > 0 ? activeCapabilities.join(', ') : t('plugins.capabilities.none'),

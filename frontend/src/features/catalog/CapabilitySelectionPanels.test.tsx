@@ -28,7 +28,6 @@ function renderPanel(initial: PanelProps = {}) {
   const tree = (props: PanelProps) => (
     <CapabilitySelectionPanel
       label="Tools"
-      manageLabel="管理工具"
       searchLabel="搜索工具"
       options={props.options ?? options}
       selected={props.selected ?? []}
@@ -42,24 +41,10 @@ function renderPanel(initial: PanelProps = {}) {
   return { onToggle, rerender: (props: PanelProps) => view.rerender(tree(props)) }
 }
 
-async function openPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByText('管理工具'))
-}
-
 describe('CapabilitySelectionPanel', () => {
-  // 能力区默认收起：只暴露一句本地化的「管理…」摘要和已选数量。
-  it('starts collapsed with a localized summary and opens on demand', async () => {
-    const user = userEvent.setup()
+  it('shows the selected count and searchable choices without an extra action', () => {
     renderPanel({ selected: ['read'] })
-
-    const details = document.querySelector('details')
-    expect(details).not.toBeNull()
-    expect(details).not.toHaveAttribute('open')
-    expect(screen.getByText('管理工具')).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: /^Tools/ })).toBeInTheDocument()
-
-    await openPanel(user)
-    expect(details).toHaveAttribute('open')
+    expect(screen.getByRole('group', { name: /^Tools.*1/ })).toBeInTheDocument()
     expect(screen.getByRole('searchbox', { name: '搜索工具' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'BUILTIN' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'MCP' })).toBeInTheDocument()
@@ -70,7 +55,6 @@ describe('CapabilitySelectionPanel', () => {
   it('narrows candidates by search while keeping group identity and selection', async () => {
     const user = userEvent.setup()
     const { onToggle } = renderPanel({ selected: ['read'] })
-    await openPanel(user)
 
     await user.type(screen.getByRole('searchbox', { name: '搜索工具' }), 'web')
     expect(screen.getByRole('checkbox', { name: /mcp_search/ })).toBeInTheDocument()
@@ -89,7 +73,6 @@ describe('CapabilitySelectionPanel', () => {
   it('keeps search text and selection while switching the selected-only filter', async () => {
     const user = userEvent.setup()
     const { onToggle } = renderPanel({ selected: ['read'] })
-    await openPanel(user)
 
     const search = screen.getByRole('searchbox', { name: '搜索工具' })
     await user.type(search, 'read')
@@ -117,7 +100,6 @@ describe('CapabilitySelectionPanel', () => {
       selected: ['lost:old'],
       directory: { status: 'loading', retry: () => undefined },
     })
-    await openPanel(user)
 
     const orphan = screen.getByRole('checkbox', { name: /lost \/ old/ })
     expect(orphan).toBeChecked()
@@ -135,7 +117,6 @@ describe('CapabilitySelectionPanel', () => {
     const user = userEvent.setup()
     const retry = vi.fn()
     renderPanel({ selected: ['lost:old'], directory: { status: 'error', retry } })
-    await openPanel(user)
 
     expect(screen.getByRole('alert')).toHaveTextContent('资源加载失败')
     expect(screen.queryByText('不可用')).not.toBeInTheDocument()
@@ -147,7 +128,6 @@ describe('CapabilitySelectionPanel', () => {
   it('distinguishes an empty catalog from a search without matches', async () => {
     const user = userEvent.setup()
     const { rerender } = renderPanel({ options: [] })
-    await openPanel(user)
 
     expect(screen.getByText('目录还没有工具')).toBeInTheDocument()
     expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
@@ -160,12 +140,10 @@ describe('CapabilitySelectionPanel', () => {
   })
 
   // 校验错误与面板同处一个分组，并带错误语义。
-  it('renders the field error inside the panel', async () => {
-    const user = userEvent.setup()
+  it('renders the field error inside the panel', () => {
     renderPanel({ error: '请至少选择一个 Tools' })
 
     expect(screen.getByRole('group', { name: /^Tools/ })).toHaveClass('is-error')
-    await openPanel(user)
     expect(screen.getByText('请至少选择一个 Tools')).toBeInTheDocument()
   })
 })

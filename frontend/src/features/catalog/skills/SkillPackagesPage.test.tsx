@@ -154,7 +154,7 @@ describe('SkillPackagesPage', () => {
     expect(within(coreCard).getByText('Git 仓库')).toBeInTheDocument()
     expect(within(coreCard).getByText('2')).toBeInTheDocument()
 
-    await waitFor(() => expect(within(card('browser-tools')).getByText('上传压缩包')).toBeInTheDocument())
+    await waitFor(() => expect(within(card('browser-tools')).getByText('本地压缩包')).toBeInTheDocument())
 
     await user.type(screen.getByPlaceholderText(/搜索/), 'browser')
     expect(screen.queryByText('core-tools')).not.toBeInTheDocument()

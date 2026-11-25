@@ -226,9 +226,9 @@ export function EnvironmentConfigModal({
           </label>
 
           <div className="form-group">
-            <label className="field-label" htmlFor={`${id}-studio-url`}>
-              <FieldLabel required>{t('ai.environment.form.studioUrl')}</FieldLabel>
-            </label>
+            <FieldLabel required htmlFor={`${id}-studio-url`} help={t('ai.environment.form.studioUrlHelp')}>
+              {t('ai.environment.form.studioUrl')}
+            </FieldLabel>
             <TextInput
               id={`${id}-studio-url`}
               value={studioUrl}
@@ -237,13 +237,12 @@ export function EnvironmentConfigModal({
               required
               invalid={errorField === 'daemonConfig.studioUrl'}
             />
-            <p className="field-help">{t('ai.environment.form.studioUrlHelp')}</p>
           </div>
 
           <div className="form-group">
-            <label className="field-label" htmlFor={`${id}-bash`}>
-              <FieldLabel>{t('ai.environment.form.bashExecutable')}</FieldLabel>
-            </label>
+            <FieldLabel htmlFor={`${id}-bash`} help={t('ai.environment.form.bashHelp')}>
+              {t('ai.environment.form.bashExecutable')}
+            </FieldLabel>
             <TextInput
               id={`${id}-bash`}
               value={bashExecutable}
@@ -251,7 +250,6 @@ export function EnvironmentConfigModal({
               placeholder="/bin/bash"
               invalid={errorField === 'daemonConfig.bashExecutable'}
             />
-            <p className="field-help">{t('ai.environment.form.bashHelp')}</p>
           </div>
 
           <div className="form-group">
@@ -303,7 +301,6 @@ export function EnvironmentConfigModal({
               placeholder={t('ai.environment.form.proxyPlaceholder')}
               invalid={errorField === 'daemonConfig.proxyUrl'}
             />
-            <p className="field-help">{t('ai.environment.form.proxyHelp')}</p>
           </div>
 
           {error ? (

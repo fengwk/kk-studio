@@ -132,7 +132,7 @@ describe('SkillPackageCreateModal', () => {
 
     const modal = screen.getByRole('dialog', { name: /新建技能包/ })
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'custom-pkg')
-    await user.type(within(modal).getByPlaceholderText('https://github.com/org/repo.git'), 'https://github.com/myorg/skills.git')
+    await user.type(within(modal).getByPlaceholderText('https://git.example.invalid/team/example-skills.git'), 'https://github.com/myorg/skills.git')
     await user.type(within(modal).getByLabelText(/访问令牌/), 'ghp_secret')
     await user.click(within(modal).getByRole('button', { name: '创建' }))
 
@@ -169,7 +169,7 @@ describe('SkillPackageCreateModal', () => {
     const { onCreated } = renderModal()
 
     const modal = screen.getByRole('dialog', { name: /新建技能包/ })
-    await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
+    await user.click(within(modal).getByRole('tab', { name: /本地压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
     await user.upload(within(modal).getByLabelText('技能包压缩包'), archiveFile())
@@ -240,7 +240,7 @@ describe('SkillPackageCreateModal', () => {
     renderModal()
 
     const modal = screen.getByRole('dialog', { name: /新建技能包/ })
-    await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
+    await user.click(within(modal).getByRole('tab', { name: /本地压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
     await user.upload(within(modal).getByLabelText('技能包压缩包'), archiveFile())
@@ -268,7 +268,7 @@ describe('SkillPackageCreateModal', () => {
     const { onClose } = renderModal()
 
     const modal = screen.getByRole('dialog', { name: /新建技能包/ })
-    await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
+    await user.click(within(modal).getByRole('tab', { name: /本地压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
     await user.upload(within(modal).getByLabelText('技能包压缩包'), archiveFile())
@@ -297,7 +297,7 @@ describe('SkillPackageCreateModal', () => {
     renderModal()
 
     const modal = screen.getByRole('dialog', { name: /新建技能包/ })
-    await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
+    await user.click(within(modal).getByRole('tab', { name: /本地压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.type(within(modal).getByPlaceholderText('1.0.0'), '2026.09.1')
     await user.upload(within(modal).getByLabelText('技能包压缩包'), archiveFile())
@@ -314,7 +314,7 @@ describe('SkillPackageCreateModal', () => {
     renderModal()
 
     const modal = screen.getByRole('dialog', { name: /新建技能包/ })
-    await user.click(within(modal).getByRole('tab', { name: /上传压缩包/ }))
+    await user.click(within(modal).getByRole('tab', { name: /本地压缩包/ }))
     await user.type(within(modal).getByPlaceholderText('my-skills'), 'core-tools')
     await user.click(within(modal).getByRole('button', { name: /解析预览/ }))
 

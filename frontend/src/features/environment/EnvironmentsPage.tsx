@@ -296,16 +296,14 @@ export function EnvironmentsPage() {
                   meta={rows}
                   actions={
                     <>
-                      {status === 'OFFLINE' && !lastVersion && (
-                        <Button
-                          size="compact"
-                          aria-label={`${t('ai.environment.install')} ${environment.name}`}
-                          onClick={() => setInstallTarget(environment)}
-                        >
-                          <Download aria-hidden="true" />
-                          {t('ai.environment.install')}
-                        </Button>
-                      )}
+                      <Button
+                        size="compact"
+                        aria-label={`${t('ai.environment.installOverwrite')} ${environment.name}`}
+                        onClick={() => setInstallTarget(environment)}
+                      >
+                        <Download aria-hidden="true" />
+                        {t('ai.environment.installOverwrite')}
+                      </Button>
                       <Button
                         variant="secondary"
                         size="compact"
@@ -317,6 +315,14 @@ export function EnvironmentsPage() {
                       >
                         <SlidersHorizontal aria-hidden="true" />
                         {t('ai.environment.manage')}
+                      </Button>
+                      <Button variant="secondary" size="compact" aria-label={`${t('ai.environment.form.edit')} ${environment.name}`}
+                        onClick={() => setEditor({ mode: 'edit', environment })}>
+                        {t('ai.environment.form.edit')}
+                      </Button>
+                      <Button variant="secondary" size="compact" danger aria-label={`${t('ai.environment.delete')} ${environment.name}`}
+                        onClick={() => { setDeleteError(null); setDeleteTarget(environment) }}>
+                        {t('ai.environment.delete')}
                       </Button>
                     </>
                   }
@@ -423,8 +429,6 @@ export function EnvironmentsPage() {
           environment={managedEnvironment}
           onClose={() => setManageId(null)}
           actions={[
-            { label: t('ai.environment.form.edit'), run: () => setEditor({ mode: 'edit', environment: managedEnvironment }) },
-            { label: t('ai.environment.install'), run: () => setInstallTarget(managedEnvironment) },
             { label: t('ai.environment.update'), run: () => {
               setUpdateError(null)
               setUpdateTarget(managedEnvironment)
@@ -433,10 +437,6 @@ export function EnvironmentsPage() {
             { label: t('ai.environment.rotateToken'), run: () => {
               setRotateError(null)
               setRotateTarget(managedEnvironment)
-            } },
-            { label: t('ai.environment.delete'), danger: true, run: () => {
-              setDeleteError(null)
-              setDeleteTarget(managedEnvironment)
             } },
           ]}
         />
