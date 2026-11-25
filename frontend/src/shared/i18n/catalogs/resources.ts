@@ -1049,10 +1049,6 @@ export const resourcesCatalog = {
     'en-US': 'Skills Count',
     'zh-CN': '包含技能数量',
   },
-  'ai.skillPackages.loading': {
-    'en-US': 'Loading Skill Packages...',
-    'zh-CN': '正在加载技能包...',
-  },
   'ai.skillPackages.source': {
     'en-US': 'Source',
     'zh-CN': '来源',

@@ -22,16 +22,17 @@ import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { useUnsavedChangesConfirmation } from '@/shared/ui/overlays/useUnsavedChangesConfirmation'
 import '@/features/settings/settings.css'
 import './SettingsRoute.css'
 
 const harness = [
-  ['agents', 'Agent', 'Agent', AgentsPage],
-  ['models', '模型', 'Models', ModelsPage],
-  ['providers', '提供商', 'Providers', ProvidersPage],
-  ['skill-packages', '技能包', 'Skill packages', SkillPackagesPage],
-  ['environments', '环境', 'Environments', EnvironmentsPage],
-  ['mcp-servers', 'MCP 服务', 'MCP servers', McpServersPage],
+  ['agents', 'settings.sections.agents', AgentsPage],
+  ['models', 'settings.sections.models', ModelsPage],
+  ['providers', 'settings.sections.providers', ProvidersPage],
+  ['skill-packages', 'settings.sections.skillPackages', SkillPackagesPage],
+  ['environments', 'settings.sections.environments', EnvironmentsPage],
+  ['mcp-servers', 'settings.sections.mcpServers', McpServersPage],
 ] as const
 
 export function SettingsRoute({ reloadPage = () => window.location.reload() }: { reloadPage?: () => void } = {}) {
@@ -39,20 +40,23 @@ export function SettingsRoute({ reloadPage = () => window.location.reload() }: {
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAccount()
-  const { t, locale } = useI18n()
-  const zh = locale === 'zh-CN'
+  const { t } = useI18n()
   const admin = user?.role === 'ADMIN'
   const editor = useSystemSettingsEditor(admin)
   const serverSections = editor.schema?.sections ?? []
+  const from = (location.state as { from?: string } | null)?.from
+  const backTo = from?.startsWith('/') && !from.startsWith('//') && !from.startsWith('/settings/') ? from : '/'
+  const leave = () => navigate(backTo, { replace: true })
+  const { requestClose, confirmation } = useUnsavedChangesConfirmation(editor.dirty, editor.saving, leave)
   const groups = [
-    { title: zh ? '界面' : 'Interface', options: [{ value: 'preferences', label: zh ? '偏好' : 'Preferences' }] },
+    { title: t('settings.groups.interface'), options: [{ value: 'preferences', label: t('settings.sections.preferences') }] },
     ...(admin ? [
-      { title: 'Harness', options: harness.map(([value, cn, en]) => ({ value, label: zh ? cn : en })) },
-      { title: zh ? '系统' : 'System', options: [
+      { title: t('settings.groups.harness'), options: harness.map(([value, key]) => ({ value, label: t(key) })) },
+      { title: t('settings.groups.system'), options: [
         { value: 'general', label: t('settings.tabs.general') },
-        { value: 'users', label: zh ? '用户' : 'Users' },
+        { value: 'users', label: t('settings.sections.users') },
         { value: 'plugins', label: t('settings.tabs.plugins') },
-        ...serverSections.map((item) => ({ value: item.key, label: item.key === 'environment' ? (zh ? '环境默认值' : 'Environment defaults') : t(requireTranslationKey(item.labelKey)) })),
+        ...serverSections.map((item) => ({ value: item.key, label: item.key === 'environment' ? t('settings.sections.environmentDefaults') : t(requireTranslationKey(item.labelKey)) })),
         { value: 'sync', label: t('settings.tabs.sync') },
       ] },
     ] : []),
@@ -63,14 +67,10 @@ export function SettingsRoute({ reloadPage = () => window.location.reload() }: {
   if (!valid && (!admin || (!editor.loading && !error))) {
     return <Navigate to="/settings/preferences" state={location.state} replace />
   }
-  const from = (location.state as { from?: string } | null)?.from
-  const backTo = from?.startsWith('/') && !from.startsWith('//') && !from.startsWith('/settings/') ? from : '/'
-  const back = <IconButton className="settings-back" label={zh ? '返回' : 'Back'} onClick={() => {
-    if (!editor.dirty || window.confirm(zh ? '放弃未保存的更改？' : 'Discard unsaved changes?')) navigate(backTo, { replace: true })
-  }}><ArrowLeft aria-hidden="true" /></IconButton>
-  const category = zh ? '设置分类' : 'Settings categories'
+  const back = <IconButton className="settings-back" label={t('settings.back')} onClick={requestClose}><ArrowLeft aria-hidden="true" /></IconButton>
+  const category = t('settings.categories')
   const selected = serverSections.find((item) => item.key === section)
-  const CatalogPage = harness.find(([value]) => value === section)?.[3]
+  const CatalogPage = harness.find(([value]) => value === section)?.[2]
   let content
   if (section === 'preferences') content = <GeneralTab />
   else if (CatalogPage) content = <CatalogPage><OverlayHost /></CatalogPage>
@@ -79,9 +79,9 @@ export function SettingsRoute({ reloadPage = () => window.location.reload() }: {
   else if (section === 'sync') content = <SyncTab reloadSettings={editor.reload} settingsDirty={editor.dirty} />
   else if (error) content = <div className="settings-error-state"><StateBlock title={error} tone="danger" /><Button onClick={editor.retryLoad}>{t('settings.retry')}</Button></div>
   else if (section === 'general') content = <section className="settings-card settings-deployment">
-    <header className="settings-card-header"><h2>{zh ? '关于 KK Studio' : 'About KK Studio'}</h2></header>
-    <dl><div><dt>{zh ? 'Studio 版本' : 'Studio version'}</dt><dd>{version}</dd></div>
-      <div><dt>{zh ? '部署地址' : 'Deployment address'}</dt><dd>{window.location.origin}</dd></div></dl>
+    <header className="settings-card-header"><h2>{t('settings.about.title')}</h2></header>
+    <dl><div><dt>{t('settings.about.version')}</dt><dd>{version}</dd></div>
+      <div><dt>{t('settings.about.deploymentAddress')}</dt><dd>{window.location.origin}</dd></div></dl>
   </section>
   else if (!editor.draft || !selected) content = <StateBlock title={t('settings.loading')} />
   else content = <div className="settings-section-stack">
@@ -101,10 +101,11 @@ export function SettingsRoute({ reloadPage = () => window.location.reload() }: {
       {back}
       <Select touch aria-label={category} value={section} options={options} onChange={(value) => navigate(`/settings/${value}`, { state: location.state, replace: true })} />
     </div>
-    <section className="settings-route-content" aria-label={zh ? '设置内容' : 'Settings content'}>
+    <section className="settings-route-content" aria-label={t('settings.content')}>
       {section === 'preferences' && admin && error && <div className="settings-error-state"><StateBlock title={error} tone="danger" /><Button onClick={editor.retryLoad}>{t('settings.retry')}</Button></div>}
       {content}
     </section>
+    {confirmation}
     <ConflictPresenter className="modal-touch-target" conflict={editor.conflict} onRefresh={reloadPage} onClose={editor.dismissConflict} />
   </main>
 }

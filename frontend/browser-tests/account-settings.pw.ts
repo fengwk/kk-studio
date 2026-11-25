@@ -152,6 +152,23 @@ test('renaming the current account updates the avatar; disabling it returns to l
   await expect(page.getByRole('navigation', { name: '设置分类' })).toHaveCount(0)
 })
 
+test('settings back uses the shared confirmation and can return to the original address', async ({ page }) => {
+  await mockServer(page)
+  await page.goto(`${harness}#/?draft=1`)
+  await page.getByRole('link', { name: '设置', exact: true }).click()
+  await page.getByRole('link', { name: 'AI 运行时' }).click()
+  const retries = page.getByLabel('最大重试次数')
+  await retries.fill('4')
+  const back = page.getByRole('button', { name: '返回' })
+  await back.click()
+  const confirmation = page.getByRole('alertdialog', { name: '放弃未保存的修改？' })
+  await confirmation.getByRole('button', { name: '继续编辑' }).click()
+  await expect(retries).toHaveValue('4')
+  await back.click()
+  await confirmation.getByRole('button', { name: '放弃修改' }).click()
+  await expect(page).toHaveURL(/#\/\?draft=1$/)
+})
+
 test('capture login and user settings at acceptance widths', async ({ page }) => {
   await mockServer(page, null)
   for (const width of [1440, 390, 320]) {

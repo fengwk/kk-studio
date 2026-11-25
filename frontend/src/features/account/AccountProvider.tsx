@@ -4,7 +4,7 @@ import { ApiError, request } from '@/shared/api/client'
 import { sessionExpiry } from '@/shared/api/session-expiry'
 import type { StudioAccountDTO } from '@/shared/api/generated/contracts'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { getLocale } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { AccountContext } from './account-context'
@@ -25,7 +25,7 @@ export function AccountProvider({ children }: PropsWithChildren) {
   const cache = useQueryClient()
   const [session, setSession] = useState<Session>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
-  const zh = getLocale() === 'zh-CN'
+  const { t } = useI18n()
   const user = 'user' in session ? session.user : null
   const expired = session.kind === 'expired'
 
@@ -87,17 +87,17 @@ export function AccountProvider({ children }: PropsWithChildren) {
 
   if (!user) return <main className="account-gate">
     {session.kind === 'signed-out' && <SignInForm signIn={signIn} />}
-    {session.kind === 'loading' && <span role="status">{zh ? '加载中…' : 'Loading…'}</span>}
+    {session.kind === 'loading' && <span role="status">{t('account.loading')}</span>}
     {session.kind === 'error' && <div role="alert">
       <p>{session.message}</p>
-      <Button onClick={() => { setSession({ kind: 'loading' }); setAttempt(attempt + 1) }}>{zh ? '重试' : 'Retry'}</Button>
+      <Button onClick={() => { setSession({ kind: 'loading' }); setAttempt(attempt + 1) }}>{t('shared.retry')}</Button>
     </div>}
   </main>
 
   return <AccountContext.Provider value={{ user, refresh, signOut }}>
     <ApplicationEventProvider enabled={!expired}>
       <div className="account-content" inert={expired}>{children}</div>
-      {expired && <Dialog pending onClose={() => undefined} ariaLabel={zh ? '登录已失效' : 'Session expired'} initialFocusSelector="[name=password]" className="account-relogin">
+      {expired && <Dialog pending onClose={() => undefined} ariaLabel={t('account.sessionExpired')} initialFocusSelector="[name=password]" className="account-relogin">
         <SignInForm username={user.username} signIn={signIn} />
       </Dialog>}
     </ApplicationEventProvider>

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { ApiError, request } from '@/shared/api/client'
-import { getLocale } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { FieldError } from '@/shared/ui/controls/FieldError'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
@@ -17,9 +17,9 @@ export function AccountMenu({ hasUnsentContent = false }: { hasUnsentContent?: b
   const [dialog, setDialog] = useState<'password' | 'logout' | null>(null)
   const [logoutError, setLogoutError] = useState('')
   const [pending, setPending] = useState(false)
-  const zh = getLocale() === 'zh-CN'
-  const passwordLabel = zh ? '修改密码' : 'Change password'
-  const logoutLabel = zh ? '退出登录' : 'Sign out'
+  const { t } = useI18n()
+  const passwordLabel = t('account.changePassword')
+  const logoutLabel = t('account.signOut')
   if (!user) return null
 
   async function logout() {
@@ -43,9 +43,9 @@ export function AccountMenu({ hasUnsentContent = false }: { hasUnsentContent?: b
     {dialog === 'password' && <PasswordDialog title={passwordLabel} onClose={() => setDialog(null)} />}
     {dialog === 'logout' && <Dialog title={logoutLabel} pending={pending} onClose={() => setDialog(null)} className="account-dialog">
       <div className="account-dialog-form">
-        <p>{zh ? '尚有未发送的内容。退出后将丢失，确定退出？' : 'Unsent content will be lost. Sign out?'}</p>
+        <p>{t('account.signOutWarning')}</p>
         {logoutError && <FieldError role="alert">{logoutError}</FieldError>}
-        <div className="account-dialog-actions"><Button onClick={() => setDialog(null)} disabled={pending}>{zh ? '取消' : 'Cancel'}</Button><Button variant="primary" loading={pending} onClick={() => void logout()}>{logoutLabel}</Button></div>
+        <div className="account-dialog-actions"><Button onClick={() => setDialog(null)} disabled={pending}>{t('shared.cancel')}</Button><Button variant="primary" loading={pending} onClick={() => void logout()}>{logoutLabel}</Button></div>
       </div>
     </Dialog>}
     {dialog !== 'logout' && logoutError && <FieldError role="alert">{logoutError}</FieldError>}
@@ -53,7 +53,7 @@ export function AccountMenu({ hasUnsentContent = false }: { hasUnsentContent?: b
 }
 
 function PasswordDialog({ title, onClose }: { title: string; onClose: () => void }) {
-  const zh = getLocale() === 'zh-CN'
+  const { t } = useI18n()
   const [pending, setPending] = useState(false)
   const [errors, setErrors] = useState<{ current?: string; next?: string; confirm?: string; overall?: string }>({})
 
@@ -65,11 +65,11 @@ function PasswordDialog({ title, onClose }: { title: string; onClose: () => void
     const currentPassword = String(data.get('current'))
     const newPassword = String(data.get('next'))
     if (newPassword.length < 8 || newPassword.length > 128) {
-      setErrors({ next: zh ? '密码长度须为 8–128 个字符。' : 'Use 8–128 characters.' })
+      setErrors({ next: t('account.passwordLength') })
       return
     }
     if (data.get('confirm') !== newPassword) {
-      setErrors({ confirm: zh ? '两次输入的密码不一致。' : 'The passwords do not match.' })
+      setErrors({ confirm: t('account.passwordMismatch') })
       return
     }
     setErrors({})
@@ -79,7 +79,7 @@ function PasswordDialog({ title, onClose }: { title: string; onClose: () => void
       onClose()
     } catch (error) {
       if (error instanceof ApiError && error.reason === 'WRONG_PASSWORD') {
-        setErrors({ current: zh ? '当前密码错误。' : 'Incorrect current password.' })
+        setErrors({ current: t('account.wrongPassword') })
         ;(form.elements.namedItem('current') as HTMLInputElement).focus()
       } else setErrors({ overall: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -89,11 +89,11 @@ function PasswordDialog({ title, onClose }: { title: string; onClose: () => void
 
   return <Dialog title={title} pending={pending} onClose={onClose} className="account-dialog" initialFocusSelector="[name=current]">
     <form className="account-dialog-form" onSubmit={submit}>
-      <AccountInput name="current" label={zh ? '当前密码' : 'Current password'} type="password" autoComplete="current-password" required error={errors.current} />
-      <AccountInput name="next" label={zh ? '新密码' : 'New password'} type="password" autoComplete="new-password" required error={errors.next} />
-      <AccountInput name="confirm" label={zh ? '确认新密码' : 'Confirm new password'} type="password" autoComplete="new-password" required error={errors.confirm} />
+      <AccountInput name="current" label={t('account.currentPassword')} type="password" autoComplete="current-password" required error={errors.current} />
+      <AccountInput name="next" label={t('account.newPassword')} type="password" autoComplete="new-password" required error={errors.next} />
+      <AccountInput name="confirm" label={t('account.confirmNewPassword')} type="password" autoComplete="new-password" required error={errors.confirm} />
       {errors.overall && <FieldError role="alert">{errors.overall}</FieldError>}
-      <div className="account-dialog-actions"><Button onClick={onClose} disabled={pending}>{zh ? '取消' : 'Cancel'}</Button><Button type="submit" variant="primary" loading={pending}>{zh ? '保存' : 'Save'}</Button></div>
+      <div className="account-dialog-actions"><Button onClick={onClose} disabled={pending}>{t('shared.cancel')}</Button><Button type="submit" variant="primary" loading={pending}>{t('settings.save')}</Button></div>
     </form>
   </Dialog>
 }
