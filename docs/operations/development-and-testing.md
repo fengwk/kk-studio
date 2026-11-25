@@ -351,6 +351,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 ./scripts/dev/verify/e2e/run.sh
 ./scripts/dev/verify/e2e/run.sh --rebuild
 ./scripts/dev/verify/e2e/run.sh --real
+./scripts/dev/verify/e2e/run.sh --real-model openai_responses
 ./scripts/dev/verify/e2e/run.sh --with-tools
 ./scripts/dev/verify/e2e/run.sh --real --with-branch
 ./scripts/dev/verify/e2e/run.sh --with-canvas-storage
@@ -367,16 +368,17 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | Flag | 语义 |
 | --- | --- |
 | `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也用 Go 1.27.4 构建并重启 Daemon |
-| `--real` | 启用真实 Provider case，要求四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
+| `--real` | 启用真实 Provider case；默认同步并检查全部四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
+| `--real-model <idSuffix>` | 隐含 `--real`，只同步并检查所选模型对应的一组 credential pair，并将所选模型用于真实模型 case，包括 UI、stop、branch 与 Tool；可用值见「真实 Provider 与付费边界」。该选择不绕过 Tool、UI、存储等 capability 前置条件 |
 | `--with-tools` | 启用 Daemon/Tool case；`daemon.ready` 校验能力目录，包括 `find` 对应的 `fs.find-files` |
-| `--with-branch` | 启用 branch case，并自动打开 `--real` |
+| `--with-branch` | 启用 branch case，并自动打开 `--real`；与 `--real-model` 并用时 branch 使用所选模型 |
 | `--with-canvas-storage` | 允许依赖附件存储的真实模型、工具用例；默认 L1 的 Session/Canvas Blob 契约用例不需要此开关 |
 | `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用工作区 Canvas fake 链路 UI 用例，该用例只绑定 `fake-image`，不会提交付费 Function |
 | `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-*` 组合 |
 | `--ui` | 在 API 矩阵后执行 Playwright Workspace UI 矩阵，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 API 或 UI case，可重复；UI case 需同时传 `--ui`，可混选 API 与 UI |
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不受此过滤器影响 |
-| `--list` / `--docs` | 列出已注册的 API case、level 和 `requires`；`--docs` 另打印逐项契约。不启动栈或运行 case，也不列出 UI case |
+| `--list` / `--docs` | 列出完整已注册的 API case、level 和 `requires`；`--docs` 另打印逐项契约。不启动栈或运行 case，也不列出 UI case。与 `--real-model` 并用时仍展示完整 inventory，不因模型选择裁剪清单 |
 
 矩阵分成 L1 免费 API 契约、L2 真实 Provider 文本/推理/图片输入、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题、输入、期望 wire 与覆盖边界
@@ -435,14 +437,17 @@ mock 模型 Provider，不隐式分配环境），发送首条消息创建会话
 
 ### 真实 Provider 与付费边界
 
-E2E 矩阵只有 `--real` 会读取并同步宿主凭据，且必须提供四组完整 pair，缺一或只给一半都会在同步前失败：
+E2E 矩阵只有真实模式会读取并同步宿主凭据。单独使用 `--real` 时默认要求并同步全部四组完整 pair；`--real-model <idSuffix>` 则只要求、同步并检查所选模型对应的 pair，缺失或只给一半都会在启动前失败。四组变量为：
 
 - `TEST_GOOGLE_BASE_URL` + `TEST_GOOGLE_API_KEY`
 - `TEST_OPENAI_RESPONSES_BASE_URL` + `TEST_OPENAI_RESPONSES_API_KEY`
 - `TEST_ANTHROPIC_BASE_URL` + `TEST_ANTHROPIC_API_KEY`
 - `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
 
-运行时变量名以 `node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env` 的输出为准。
+`--real-model` 取值为 [real-models](../../scripts/dev/verify/e2e/lib/real-models.mjs) 声明的 `idSuffix`：
+`google_gemini`、`openai_responses`、`minimax_anthropic`、`deepseek_chat`。
+运行时变量名以 `node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env` 的输出为准；
+追加 `--real-model ID` 可只列出所选模型需要的变量名。
 
 变量按协议区分：`TEST_OPENAI_RESPONSES_*` 写入 `openai` Responses Provider，
 `TEST_OPENAI_*` 写入 `deepseek` Chat Completions Provider；Provider 名称与模型身份不变。
@@ -470,7 +475,7 @@ Runner 只读取导出的 `TEST_*`，不直接读取 `CPA_*`。
 
 同步通过 backend API 写入 E2E database 中对应的 seed Provider row，credential 不进入 seed
 SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment 或报告。不要把
-`docker inspect`、完整 endpoint 或数据库凭据内容放进报告。未带 `--real` 时，runner 会在首个 case
+`docker inspect`、完整 endpoint 或数据库凭据内容放进报告。未开启真实模式时，runner 会在首个 case
 前对整个 Provider catalog 做 fail-closed 检查：任何 configured row 或非空 `baseUrl` 都会阻止免费
 矩阵运行，因此复用曾执行真实 E2E 的 database 会失败，需要改用全新未配置的 E2E database。
 
@@ -485,12 +490,12 @@ database 中的 `minimax` Responses Provider。该 pair 与 E2E 四组凭据同�
 具体用例 ID 和契约以 `--list` / `--docs` 为准。
 
 四种协议的文本缓存验收已注册为 `real.text_cache.*`，可由矩阵自动执行，不需要另加手工探针。
-取得付费授权、提供上述四组凭据后，必须使用隔离的新 DB、S3 与后端，不复用开发或生产环境。
-两个指定模型可分别执行：
+取得付费授权并提供目标凭据后，必须使用隔离的新 DB、S3 与后端，不复用开发或生产环境。
+只跑一个模型的缓存用例，可同时指定模型和用例：
 
 ```bash
-./scripts/dev/verify/e2e/run.sh --real --only real.text_cache.deepseek_chat
-./scripts/dev/verify/e2e/run.sh --real --only real.text_cache.google_gemini
+./scripts/dev/verify/e2e/run.sh --real-model deepseek_chat --only real.text_cache.deepseek_chat
+./scripts/dev/verify/e2e/run.sh --real-model google_gemini --only real.text_cache.google_gemini
 ```
 
 Google 固定首轮加 1 个 follow-up（最多 2 次），其他协议首轮加最多 3 个 follow-up（最多 4 次，
@@ -524,13 +529,12 @@ system 很短，两组都保留其固定的 ephemeral 标记。
 输出只包含标记位置、状态和数值 usage。上游可能自动缓存或不报告缓存写入，因此成功完成测量不等于证明断点带来提升；
 应比较两组读缓存 token，并明确该结果只适用于凭据指向的线路，不等同于 Anthropic 官方服务行为。
 
-两个内建工具 case `real.task_delegation` 与 `tool.read_turn` 默认使用
-`minimax-anthropic/MiniMax-M3`，可用 `E2E_BUILTIN_MODEL` 显式换用另一个**已声明**模型；取值是
-[real-models](../../scripts/dev/verify/e2e/lib/real-models.mjs) 的 `idSuffix`：
-`google_gemini`、`openai_responses`、`minimax_anthropic`（默认）、`deepseek_chat`。非法取值在 case
-开始前直接失败，不自动 fallback、不改 provider identity，实际选择写入 case artifact。该选项只让这两个
-内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*` 与
-`real.reasoning_levels.*` 仍按各自 provider 运行）。
+`--real-model` 收窄文本、推理和图片专项，并让 stop、branch、真实 UI 与两个内建工具用例使用同一个模型。
+用例的能力门槛不变。未知或重复的 `--real-model`，以及与 `E2E_BUILTIN_MODEL` 冲突的选择，都会在启动前失败。
+
+不指定 `--real-model` 时，真实模式仍覆盖四个 Provider 的专项，stop、branch 和真实 UI 默认使用 MiniMax。
+`E2E_BUILTIN_MODEL` 仍可独立指定 `real.task_delegation` 与 `tool.read_turn` 的模型（默认 `minimax_anthropic`）；
+不影响其他用例，非法值在工具用例选模时失败。工具用例将实际模型写入 case artifact。
 
 隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
 不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、
@@ -1058,7 +1062,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml ps`；同参数执行 `logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
-| 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
+| 真实 Provider 不可用 | 检查 `--list-env` 列出的变量是否非空；单模型时加上相同的 `--real-model ID` | 只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
 | 敏感数据门禁失败 | `node scripts/dev/verify/repository/check-sensitive-data.mjs` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |

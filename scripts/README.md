@@ -43,7 +43,7 @@ systemd/launchd 服务，测试入口见
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
 | 默认免费 L1 API 矩阵 | [dev/verify/e2e/run.sh](dev/verify/e2e/run.sh) | JDK 21、Maven、Node、curl，Backend/Vite 可复用或由入口启动；报告在 `reports/e2e` |
-| 真模型、Tool、Branch、UI、Canvas 扩展 | 同一 E2E 入口：`--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-storage`、`--with-canvas-function` | real 需 4 个 Provider 的 8 个 `TEST_*` URL/key，branch 隐含 real；tools 启动/复用 Daemon；UI 需 Playwright；Canvas storage 需 S3，function 使用免费 fake 并隐含 storage + rebuild |
+| 真模型、Tool、Branch、UI、Canvas 扩展 | 同一 E2E 入口：`--real`、`--real-model <idSuffix>`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-storage`、`--with-canvas-function` | `--real` 默认需 4 个 Provider 的 8 个 `TEST_*` URL/key；`--real-model` 隐含 real，只需并同步所选模型的 pair，且选择用于真实模型、UI、stop、branch、Tool case；不绕过各 case 的 capability 前置条件。branch 隐含 real；tools 启动/复用 Daemon；UI 需 Playwright；Canvas storage 需 S3，function 使用免费 fake 并隐含 storage + rebuild |
 | 免费双节点矩阵 | 同一 E2E 入口：`--distributed` | 需 Docker；不能与 real/tools/branch/UI/storage/function 组合，结束清理隔离栈与数据卷 |
 | 双节点栈生命周期 | [dev/verify/e2e/distributed.sh](dev/verify/e2e/distributed.sh) | Docker Engine 与 Compose v2；创建/删除容器、网络和数据卷 |
 | 本机免费性能基线 | [dev/verify/performance/run.sh](dev/verify/performance/run.sh) | Docker、Node；构建隔离测试镜像、短时压测，报告在 `reports/performance`，不是无 Docker 的纯离线构建 |

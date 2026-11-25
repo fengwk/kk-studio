@@ -133,9 +133,9 @@ export async function resolveRealModel(ctx, modelDef) {
   }
 }
 
-/** 共享安全解析 minimax-anthropic/MiniMax-M3。 */
-export async function requireRealMiniMaxM3(ctx) {
-  return await resolveRealModel(ctx, MINIMAX_ANTHROPIC_M3)
+/** Stop 与 branch 缺省使用 MiniMax，不受仅面向工具的环境变量影响。 */
+export async function requireSharedRealModel(ctx) {
+  return await resolveRealModel(ctx, ctx.realModel ?? MINIMAX_ANTHROPIC_M3)
 }
 
 /** 两个内建工具 real case 默认使用的已声明模型 id。 */
@@ -160,9 +160,9 @@ export function resolveBuiltinModelDef(value = process.env.E2E_BUILTIN_MODEL) {
   return def
 }
 
-/** 两个内建工具 real case 的模型解析：实时读取 E2E_BUILTIN_MODEL，非法值直接失败。 */
+/** 两个内建工具 real case 优先使用本次选择，否则读取 E2E_BUILTIN_MODEL。 */
 export async function requireBuiltinModel(ctx) {
-  const def = resolveBuiltinModelDef()
+  const def = ctx.realModel ?? resolveBuiltinModelDef()
   const resolved = await resolveRealModel(ctx, def)
   return { ...resolved, idSuffix: def.idSuffix, title: def.title }
 }
@@ -564,6 +564,7 @@ function assertTextCacheRoundCompleted(snapshot, entries, assistant) {
 for (const def of REAL_MODEL_DEFINITIONS) {
   registerCase({
     id: `real.text_cache.${def.idSuffix}`,
+    modelIdSuffix: def.idSuffix,
     level: 'L2',
     title: `${def.title} 真实文本与缓存轮次`,
     requires: ['real'],
@@ -572,7 +573,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
         ? `验证 ${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1 个短 follow-up，断言非空/marker 回复与 usage 并观测 cache hit（Google Gemini implicit cache 为服务端机会性能力，只观测 cache hit，确定性 cachedContentTokenCount 映射由 provider 单测覆盖），写脱敏 artifact`
         : `验证 ${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1~3 个短 follow-up，逐轮断言非空/marker 回复与 usage，最终要求至少一个 follow-up cacheReadTokens > 0，写脱敏 artifact`
     ) + '；每轮校验 IDLE、无 active activeAssistantOutput/queuedCommands、对应 TURN_END COMPLETED 且 continueModel false，逐轮写统一 rounds artifact；'
-      + `须显式 --real，最多 ${def.providerType === 'google' ? 2 : 4} 次请求，不自动加重试，cachePolicy=${def.providerType === 'google' ? 'observed' : 'required'}。`,
+      + `须开启真模型（如 --real 或 --real-model），最多 ${def.providerType === 'google' ? 2 : 4} 次请求，不自动加重试，cachePolicy=${def.providerType === 'google' ? 'observed' : 'required'}。`,
     // 所有协议使用相同的逐轮证据结构；case PASS 与缓存观测结果分别表达。
     async run(ctx) {
       const resolved = await resolveRealModel(ctx, def)
@@ -858,6 +859,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
 for (const def of REAL_MODEL_DEFINITIONS) {
   registerCase({
     id: `real.reasoning_levels.${def.idSuffix}`,
+    modelIdSuffix: def.idSuffix,
     level: 'L2',
     title: `${def.title} 多推理级别烟雾测试`,
     requires: ['real'],
@@ -880,6 +882,7 @@ const RED_PNG = Buffer.from(
 for (const def of REAL_MODEL_DEFINITIONS.filter((model) => model.imageInput)) {
   registerCase({
     id: `real.image_input.${def.idSuffix}`,
+    modelIdSuffix: def.idSuffix,
     level: 'L2',
     title: `${def.title} 真实图片输入`,
     requires: ['real', 'canvas-storage'],
@@ -935,7 +938,7 @@ for (const def of REAL_MODEL_DEFINITIONS.filter((model) => model.imageInput)) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. 现有其他真实 case（迁移至 minimax-anthropic/MiniMax-M3）
+// 4. 共享真实模型 case
 // ---------------------------------------------------------------------------
 
 registerCase({
@@ -943,7 +946,7 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；task 是同步委派：tool_result 在子 Thread 收敛后才返回，wire 为 MESSAGE + role=TOOL 的 tool_result{toolName:"task", rendererKey:"task", detailsJson}，detailsJson 精确为 kind=task.result/thread_id/session_id/status/subagent_type/replayed，正文为子 Thread 的最终 report；父 Thread 在 tool result 后继续同一回合并只产生一个 TURN_END；子 Thread 由 details.thread_id 定位，其不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；正常完成不产生 SUBAGENT_RESULT 通知（旧的异步接受回执与完成通知已移除）；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；task 是同步委派：tool_result 在子 Thread 收敛后才返回，wire 为 MESSAGE + role=TOOL 的 tool_result{toolName:"task", rendererKey:"task", detailsJson}，detailsJson 精确为 kind=task.result/thread_id/session_id/status/subagent_type/replayed，正文为子 Thread 的最终 report；父 Thread 在 tool result 后继续同一回合并只产生一个 TURN_END；子 Thread 由 details.thread_id 定位，其不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；正常完成不产生 SUBAGENT_RESULT 通知（旧的异步接受回执与完成通知已移除）；模型由 --real-model 显式选择；未指定时来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
@@ -1096,9 +1099,9 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 使用正确 Agent 与不可用执行配置确定性创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/harness/threads/{threadId}/command-batches 提交 SET_EXECUTION + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；用例等待异步退出确认及两次稳定 IDLE 快照，以 IDLE + STOPPED 建立退出基线（确认可独立推进 version，不改变 barrier head）；再以同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、相对退出基线 head/version 不变；API 本身允许收敛前重放，但新 USER 续写须等收敛；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于收敛基线后并仅产生一个新 assistant MESSAGE',
+  docs: '使用 --real-model 选中的模型（未指定时使用 minimax-anthropic/MiniMax-M3）：bootstrap 使用正确 Agent 与不可用执行配置确定性创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/harness/threads/{threadId}/command-batches 提交 SET_EXECUTION + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；用例等待异步退出确认及两次稳定 IDLE 快照，以 IDLE + STOPPED 建立退出基线（确认可独立推进 version，不改变 barrier head）；再以同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、相对退出基线 head/version 不变；API 本身允许收敛前重放，但新 USER 续写须等收敛；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于收敛基线后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
-    const minimaxModel = await requireRealMiniMaxM3(ctx)
+    const selectedModel = await requireSharedRealModel(ctx)
 
     const initialMarker = `STOP-PARTIAL-${cid()}`
     const followUpMarker = `FOLLOW-UP-${cid()}`
@@ -1118,7 +1121,7 @@ registerCase({
         name: `e2e-stop-agent-${suffix}`,
         description: 'Temporary agent for stop partial test.',
         systemPrompt: 'Follow instructions strictly.',
-        execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
+        execution: { driver: 'builtin', settings: { modelName: selectedModel.modelName, variant: selectedModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
       tempAgent = agentJson
@@ -1336,9 +1339,9 @@ registerCase({
   level: 'L3',
   title: '工作区同会话分支与续写（真实模型）',
   requires: ['real', 'branch'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：通过工作区 sessions/{id}/branches 在 TURN_END 切点创建同会话的空闲分支，标题取请求的 title。使用 Thread 命令批续写后，路径仍包含切点及此前的 assistant，且产生独立回复；源 Thread 的 head/version/nextCommandSequence 不变；以相同 Idempotency-Key 重放创建请求返回原分支。',
+  docs: '使用 --real-model 选中的模型（未指定时使用 minimax-anthropic/MiniMax-M3）：通过工作区 sessions/{id}/branches 在 TURN_END 切点创建同会话的空闲分支，标题取请求的 title。使用 Thread 命令批续写后，路径仍包含切点及此前的 assistant，且产生独立回复；源 Thread 的 head/version/nextCommandSequence 不变；以相同 Idempotency-Key 重放创建请求返回原分支。',
   async run(ctx) {
-    const minimaxModel = await requireRealMiniMaxM3(ctx)
+    const selectedModel = await requireSharedRealModel(ctx)
     const suffix = cid().slice(0, 8)
     let agent = null
     let space = null
@@ -1348,7 +1351,7 @@ registerCase({
         name: `e2e-branch-agent-${suffix}`,
         description: 'Temporary agent for branch entry thread testing.',
         systemPrompt: 'Follow user instructions strictly.',
-        execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
+        execution: { driver: 'builtin', settings: { modelName: selectedModel.modelName, variant: selectedModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
       agent = agentJson
@@ -1546,7 +1549,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 read 内联结果',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '默认使用 minimax-anthropic/MiniMax-M3（可由 E2E_BUILTIN_MODEL 覆盖为其它已声明模型）+ backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），会话创建请求通过 environmentId 绑定 Daemon 所属环境；yolo=false 时 read ToolInvocation 进入 WAITING_APPROVAL（Thread status 为 RUNNING，审批等待不是 Thread 活动状态；ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '要求 backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），会话创建请求通过 environmentId 绑定 Daemon 所属环境；yolo=false 时 read ToolInvocation 进入 WAITING_APPROVAL（Thread status 为 RUNNING，审批等待不是 Thread 活动状态；ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型由 --real-model 显式选择；未指定时来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     const model = await requireBuiltinModel(ctx)

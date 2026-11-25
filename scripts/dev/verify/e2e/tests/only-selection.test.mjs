@@ -22,6 +22,10 @@ step() { :; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 ensure_stack() { :; }
 cleanup_owned_stack() { :; }
+load_e2e_credential_names() { REAL_CREDENTIAL_VARS=(FIXTURE_CREDENTIAL); }
+sync_e2e_provider_credentials() { printf '%s\\n' "$@" > "$STUB_ROOT/sync-args"; }
+e2e_studio_get() { printf '[]'; }
+E2E_STUDIO_COOKIE=fixture
 node() {
   local script="$1"
   shift
@@ -32,6 +36,10 @@ node() {
       printf 'API report\\n' > "$STUB_ROOT/reports/e2e/latest/report.md"
       return "$STUB_MATRIX_EXIT"
       ;;
+    */lib/json-probe.mjs)
+      printf '%s\\n' "$@" > "$STUB_ROOT/probe-args"
+      printf 'ok\\n'
+      ;;
     */ui-smoke.mjs)
       printf '%s\\n' "$@" > "$STUB_ROOT/ui-args"
       ;;
@@ -40,7 +48,7 @@ node() {
 }
 `)
     const result = spawnSync('bash', [entry, ...args], {
-      env: { ...process.env, STUB_ROOT: root, STUB_MATRIX_EXIT: String(matrixExit) },
+      env: { PATH: process.env.PATH, STUB_ROOT: root, STUB_MATRIX_EXIT: String(matrixExit), FIXTURE_CREDENTIAL: 'synthetic' },
       encoding: 'utf8',
     })
     const readArgs = (name) => {
@@ -51,7 +59,7 @@ node() {
         throw error
       }
     }
-    return { ...result, api: readArgs('api-args'), ui: readArgs('ui-args') }
+    return { ...result, api: readArgs('api-args'), ui: readArgs('ui-args'), sync: readArgs('sync-args'), probe: readArgs('probe-args') }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -78,6 +86,26 @@ test('only forwards UI ids to UI and supports mixed, UI-only, and API-only selec
   const all = runEntry(['--ui'])
   assert.equal(all.status, 0, all.stderr)
   assert.ok(!all.ui.includes('--only'))
+})
+
+test('real model is forwarded to both runners, sync and readiness, while free mode never syncs', () => {
+  // 本地替身记录生产入口的实际实参，不启动栈。
+  const selection = ['--real-model', 'openai_responses']
+  const run = runEntry([...selection, '--ui'])
+  assert.equal(run.status, 0, run.stderr)
+  assert.deepEqual(run.api.slice(-3), ['--real', ...selection])
+  assert.deepEqual(run.ui.slice(-3), ['--real', ...selection])
+  assert.deepEqual(run.sync, selection)
+  assert.deepEqual(run.probe, ['providers-ready', selection[1]])
+  const all = runEntry(['--real', '--ui'])
+  assert.equal(all.status, 0, all.stderr)
+  assert.deepEqual(all.probe, ['providers-ready'])
+  assert.ok(all.api.includes('--real') && all.ui.includes('--real'))
+  assert.ok(!all.api.includes('--real-model') && !all.ui.includes('--real-model'))
+  const free = runEntry(['--ui'])
+  assert.equal(free.sync, null)
+  assert.equal(free.probe, null)
+  assert.ok(!free.api.includes('--real') && !free.ui.includes('--real'))
 })
 
 test('UI selection without --ui fails before startup', () => {

@@ -50,3 +50,15 @@ export const REAL_MODEL_DEFINITIONS = [
 export const MINIMAX_ANTHROPIC_M3 = REAL_MODEL_DEFINITIONS.find(
   (def) => def.idSuffix === 'minimax_anthropic',
 )
+
+export function resolveRealModelSelection(idSuffix) {
+  const model = REAL_MODEL_DEFINITIONS.find((def) => def.idSuffix === idSuffix)
+  if (!model) {
+    throw new Error(`--real-model requires one of: ${REAL_MODEL_DEFINITIONS.map((def) => def.idSuffix).join(', ')}`)
+  }
+  const builtin = process.env.E2E_BUILTIN_MODEL
+  if (builtin && builtin !== model.idSuffix) {
+    throw new Error('--real-model conflicts with E2E_BUILTIN_MODEL')
+  }
+  return model
+}

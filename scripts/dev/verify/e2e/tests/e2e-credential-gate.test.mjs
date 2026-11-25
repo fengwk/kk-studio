@@ -6,6 +6,8 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { REPOSITORY_ROOT, functionBody, runBash } from '../../../tests/support/shell.mjs'
+import { REAL_MODEL_DEFINITIONS } from '../lib/real-models.mjs'
+import { PROVIDER_SPECS } from '../sync-provider-credentials.mjs'
 
 const E2E_ROOT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e')
 const E2E_LIB = path.join(E2E_ROOT, 'lib.sh')
@@ -23,7 +25,7 @@ const CREDENTIAL_NAMES = [
   'TEST_OPENAI_API_KEY',
 ]
 
-test('test intent: a missing or blank protocol input fails before startup without leaking values', () => {
+test('test intent: all-provider real modes require every credential input before startup without leaking values', () => {
   const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('TEST_')))
   // A gate regression must fail JDK resolution rather than launch the real stack.
   cleanEnv.JAVA_HOME_21 = E2E_ENTRY
@@ -53,6 +55,45 @@ test('test intent: a missing or blank protocol input fails before startup withou
         assert.ok(!result.stderr.includes('https://cpa.example'), context)
       }
     }
+  }
+})
+
+test('test intent: selected real-model credentials gate startup and reject invalid selections', () => {
+  // If validation is bypassed, this deliberately invalid JDK path prevents service startup.
+  const cleanEnv = { PATH: process.env.PATH, JAVA_HOME_21: E2E_ENTRY }
+  for (const { idSuffix: id, providerName } of REAL_MODEL_DEFINITIONS) {
+    const { baseUrlEnv: baseName, apiKeyEnv: keyName } = PROVIDER_SPECS.find((spec) => spec.name === providerName)
+    const validPair = { [baseName]: 'https://selected.example', [keyName]: 'selected-fixture-key' }
+    for (const missing of [baseName, keyName]) {
+      const env = { ...cleanEnv, ...validPair }
+      delete env[missing]
+      const result = spawnSync('bash', [E2E_ENTRY, '--real-model', id], { cwd: REPOSITORY_ROOT, env, encoding: 'utf8', timeout: 10_000 })
+      assert.notEqual(result.status, 0, `${id} missing ${missing}`)
+      assert.ok(result.stderr.includes(`missing: ${missing}`), `${id} missing ${missing}: ${result.stderr}`)
+      assert.ok(!result.stderr.includes('selected-fixture-key'))
+      assert.ok(!result.stderr.includes('https://selected.example'))
+    }
+
+    const unselectedName = CREDENTIAL_NAMES.find((name) => name !== baseName && name !== keyName)
+    const unselectedEnv = { ...cleanEnv, ...validPair, [unselectedName]: 'malformed-unselected-fixture' }
+    const result = spawnSync('bash', [E2E_ENTRY, '--real-model', id], { cwd: REPOSITORY_ROOT, env: unselectedEnv, encoding: 'utf8', timeout: 10_000 })
+    // The fixture JDK stops execution after the credential gate without launching services.
+    assert.notEqual(result.status, 0, `${id} must not reach service startup`)
+    assert.ok(!result.stderr.includes('missing:'), `${id} rejected an unselected credential: ${result.stderr}`)
+    assert.ok(!result.stderr.includes('malformed-unselected-fixture'))
+  }
+
+  const invalidSelections = [
+    { args: ['--real-model'], env: cleanEnv, diagnostic: '--real-model requires a model idSuffix' },
+    { args: ['--real-model', 'unknown_model'], env: cleanEnv, diagnostic: '--real-model requires one of:' },
+    { args: ['--real-model', 'google_gemini', '--real-model', 'deepseek_chat'], env: cleanEnv, diagnostic: '--real-model may only be specified once' },
+    { args: ['--real-model', 'google_gemini'], env: { ...cleanEnv, E2E_BUILTIN_MODEL: 'deepseek_chat' }, diagnostic: '--real-model conflicts with E2E_BUILTIN_MODEL' },
+  ]
+  for (const { args, env, diagnostic } of invalidSelections) {
+    const result = spawnSync('bash', [E2E_ENTRY, ...args], { cwd: REPOSITORY_ROOT, env, encoding: 'utf8', timeout: 10_000 })
+    assert.notEqual(result.status, 0, args.join(' '))
+    assert.ok(result.stderr.includes(diagnostic), `${args.join(' ')}: ${result.stderr}`)
+    assert.equal(result.stdout, '')
   }
 })
 

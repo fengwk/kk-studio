@@ -22,7 +22,7 @@ import {
   subagentResults,
   summarizeThreadHistory,
   resolveRealModel,
-  requireRealMiniMaxM3,
+  requireSharedRealModel,
 } from '../cases/real.mjs'
 
 test('八个指定 real case 正确注册到 case registry', () => {
@@ -108,6 +108,7 @@ test('真实文本缓存 case 文案契约：Google 明确只观测 cache hit �
   for (const def of REAL_MODEL_DEFINITIONS) {
     const docs = ALL_CASES.find((c) => c.id === `real.text_cache.${def.idSuffix}`).docs
     const google = def.providerType === 'google'
+    assert.match(docs, /--real 或 --real-model/)
     assert.ok(docs.includes(`最多 ${google ? 2 : 4} 次请求，不自动加重试`))
     assert.ok(docs.includes(`cachePolicy=${google ? 'observed' : 'required'}`))
   }
@@ -426,7 +427,7 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
 
   // 3. MiniMax 未在 mock catalog 中出现应被拦截
   await assert.rejects(
-    () => requireRealMiniMaxM3(fakeCtx),
+    () => requireSharedRealModel(fakeCtx),
     (err) => {
       assert.ok(err.message.includes('provider minimax-anthropic not found in catalog'))
       return true

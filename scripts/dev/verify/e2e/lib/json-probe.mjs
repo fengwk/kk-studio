@@ -6,13 +6,13 @@
  *   json-probe.mjs model-config-check          exit 0 when the first model carries a structured config
  *   json-probe.mjs environment-status NAME     print the status of the named environment ("" if absent)
  *   json-probe.mjs environment-ready NAME      exit 0 only when the named environment is READY
- *   json-probe.mjs providers-ready             print "ok" or "missing:<names>" for the four real providers
+ *   json-probe.mjs providers-ready [MODEL]     print "ok" or "missing:<names>" for the target real providers
  */
 
 import { readFileSync } from 'node:fs'
 
 import { render, runProbe } from '../../../lib/json-probe.mjs'
-import { PROVIDER_SPECS } from '../sync-provider-credentials.mjs'
+import { selectProviderSpecs } from '../sync-provider-credentials.mjs'
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -40,9 +40,9 @@ const commands = {
     const match = (document ?? []).find((row) => row?.name === name)
     console.log(match ? render(match.status) : '')
   },
-  'providers-ready'() {
+  'providers-ready'(idSuffix) {
     const configured = new Set(rows.filter((row) => row.credential?.configured && row.baseUrl).map((row) => row.name))
-    const missing = PROVIDER_SPECS.map((spec) => spec.name).filter((name) => !configured.has(name)).sort()
+    const missing = selectProviderSpecs(idSuffix).map((spec) => spec.name).filter((name) => !configured.has(name)).sort()
     console.log(missing.length > 0 ? `missing:${missing.join(',')}` : 'ok')
   },
 }
