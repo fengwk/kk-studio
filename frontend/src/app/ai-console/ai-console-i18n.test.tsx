@@ -4,7 +4,6 @@ import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSelectionPanel } from '@/features/thread/SelectionPanel'
-import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
 import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorModal'
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
@@ -80,38 +79,6 @@ describe('AI i18n live-switch contracts', () => {
       .toBe('The model or variant for Agent broken-agent cannot be resolved; pick another agent.')
   })
 
-
-  it('switches the Chat creation flow labels live', () => {
-    act(() => setLocale('en-US'))
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <CreateChatModal
-          open
-          agents={[agent]}
-          selectedAgentName=""
-          title=""
-          yoloEnabled={false}
-          selectedEnvironmentName={null}
-          pending={false}
-          onClose={() => undefined}
-          onSelectAgent={() => undefined}
-          onTitleChange={() => undefined}
-          onYoloChange={() => undefined}
-          onSelectEnvironment={() => undefined}
-          onSubmit={(event) => event.preventDefault()}
-        />
-      </QueryClientProvider>,
-    )
-
-    expect(screen.getByRole('form', { name: 'New Chat' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat name')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
-
-    act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('form', { name: '新建对话' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('对话名称')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '创建' })).toBeInTheDocument()
-  })
 
   it('switches Catalog resource modal labels live', () => {
     act(() => setLocale('en-US'))

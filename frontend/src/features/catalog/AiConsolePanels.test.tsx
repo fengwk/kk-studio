@@ -1,10 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
-import { ChatCardsPanel } from '@/features/chat/ChatCardsPanel'
-import type { ModelConfigDTO, ChatDTO, ModelDTO } from '@/shared/api/generated/contracts'
+import type { ModelConfigDTO, ModelDTO } from '@/shared/api/generated/contracts'
 
 const baseConfig: ModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -33,30 +31,14 @@ function modelWithProvider(): ModelDTO {
 }
 
 describe('AiConsolePanels', () => {
-  it('renders chat/agent/model/provider cards and action hooks', async () => {
+  it('renders agent/model/provider cards and action hooks', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn()
     const onEdit = vi.fn()
     const onDelete = vi.fn()
     const model = modelWithProvider()
     render(
-      <MemoryRouter>
-        <ChatCardsPanel
-          chats={[
-            {
-              id: 'c1',
-              title: 'One',
-              agentName: 'missing',
-              environmentName: null,
-              yoloEnabled: false,
-              version: '1',
-              createdAt: 0,
-              updatedAt: 0,
-            } satisfies ChatDTO,
-          ]}
-          agents={[]}
-          onCreate={onCreate}
-        />
+      <>
         <AgentsPanel
           agents={[
             {
@@ -109,14 +91,13 @@ describe('AiConsolePanels', () => {
           onEdit={onEdit}
           onDelete={onDelete}
         />
-      </MemoryRouter>,
+      </>,
     )
-    expect(screen.getByText('One')).toBeInTheDocument()
     expect(screen.getByText('assistant')).toBeInTheDocument()
     // Model 卡片使用全局唯一逻辑名。
     expect(screen.getAllByText('MiniMax').length).toBeGreaterThan(0)
     expect(screen.getByText('上下文 128000 · 输出 8192')).toBeInTheDocument()
-    await user.click(screen.getAllByRole('button', { name: '新建对话' })[0]!)
-    expect(onCreate).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
+    expect(onEdit).toHaveBeenCalled()
   })
 })
