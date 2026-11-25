@@ -237,9 +237,9 @@ const isMessage = (entry, role) =>
   entry.entryType.toUpperCase() === 'MESSAGE' && entryPayload(entry).message.role === role
 
 /** Offline Chat Space smoke: create a session with its first user message, then wait for quiescence. */
-async function offlineChat(client, spaceId) {
+async function offlineWorkspaceSession(client, spaceId) {
   const { jsonCall, sleep: wait } = client
-  const marker = `offline-chat-smoke-${randomUUID().replaceAll('-', '').slice(0, 8)}`
+  const marker = `offline-workspace-smoke-${randomUUID().replaceAll('-', '').slice(0, 8)}`
   const accepted = await jsonCall(
     'POST',
     `/api/chat-spaces/${spaceId}/sessions`,
@@ -262,7 +262,7 @@ async function offlineChat(client, spaceId) {
       await wait(250)
     }
   }
-  assert.ok(quiescent, `offline Chat thread did not become quiescent: ${JSON.stringify(current)}`)
+  assert.ok(quiescent, `offline workspace thread did not become quiescent: ${JSON.stringify(current)}`)
   assert.equal(current.thread.status, 'IDLE', JSON.stringify(current))
   assert.ok(
     !current.entries.some((entry) => entry.entryType.toUpperCase() === 'ASSISTANT_ERROR'),
@@ -398,7 +398,7 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.equal(seedanceNode.resources.length, 1)
   assert.equal(seedanceNode.resources[0].kind, 'VIDEO')
 
-  await offlineChat(client, space.id)
+  await offlineWorkspaceSession(client, space.id)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
