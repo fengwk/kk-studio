@@ -6,6 +6,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import { environmentService } from '@/features/environment/environment-service'
 import { environmentDisplayStatus } from '@/features/environment/environment-utils'
+import { useEnvironmentStatusRecheck } from '@/features/environment/useEnvironmentStatusRecheck'
 import { IdeWorkspaceContext, type VsCodeTarget } from './ide-workspace-context'
 import { initializeIdeSession, type IdeSessionStorage } from './ide-session-state'
 import { useIdeBrowserSession } from './ide-browser-session'
@@ -21,12 +22,16 @@ export function IdeWorkspaceProvider({ children, storage }: PropsWithChildren<{ 
   const lifecycle = useRef<{
     clone: () => void; restore: () => void; suspend: () => void; reconcileEnvironments: (available: Set<string>) => void
   } | null>(null)
-  const query = useQuery({ queryKey: queryKeys.environments.list, queryFn: () => environmentService.listEnvironments() })
+  const query = useQuery({
+    queryKey: queryKeys.environments.summaries,
+    queryFn: environmentService.listEnvironmentSummaries,
+  })
   const invalidate = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.environments.summaries })
   }, [queryClient])
   useResourceSync({ kind: 'environments' }, { sync: invalidate, syncOn: (name) => name === 'changed' })
   const environments = useMemo(() => [...(query.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [query.data])
+  useEnvironmentStatusRecheck(environments, invalidate)
   const environmentMap = useMemo(() => new Map(environments.map((environment) => [environment.id, environment])), [environments])
   const currentEnvironments = useRef(environmentMap)
   useEffect(() => { currentEnvironments.current = environmentMap }, [environmentMap])

@@ -5,6 +5,7 @@ import type {
   EnvironmentEventDTO,
   EnvironmentInstallCodeDTO,
   EnvironmentRuntimeStatusDTO,
+  EnvironmentSummaryDTO,
   EnvironmentUpdateDTO,
   EnvironmentUpdateStartDTO,
 } from '@/shared/api/generated/contracts'
@@ -12,6 +13,9 @@ import type {
 export const environmentService = {
   listEnvironments: (): Promise<EnvironmentDTO[]> =>
     request('GET /api/platform/environments', {}),
+
+  listEnvironmentSummaries: (): Promise<EnvironmentSummaryDTO[]> =>
+    request('GET /api/platform/environment-summaries', {}),
 
   listEnvironmentEvents: (id: string): Promise<EnvironmentEventDTO[]> =>
     request('GET /api/platform/environments/{environmentId}/events', {
