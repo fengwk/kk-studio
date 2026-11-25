@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
@@ -73,6 +74,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -116,6 +119,7 @@ class ApplicationEventWebSocketHandlerTest {
   private SentRecorder recorder;
   private AtomicLong nowNanos;
   private StudioAccountService accounts;
+  private ResourceAccess access;
   private ScheduledExecutorService heartbeatScheduler;
   private ScheduledExecutorService snapshotScheduler;
 
@@ -179,11 +183,15 @@ class ApplicationEventWebSocketHandlerTest {
     if (heartbeatScheduler != null) {
       heartbeatScheduler.shutdownNow();
     }
-    heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
+    heartbeatScheduler = spy(new ScheduledThreadPoolExecutor(1));
+    // 心跳和 ping 由测试主动驱动，发送超时仍使用实际调度器。
+    doReturn(mock(ScheduledFuture.class))
+        .when(heartbeatScheduler)
+        .scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class));
     accounts = mock(StudioAccountService.class);
     var principal = new StudioPrincipal(EVENT_NODE, "event-admin", StudioRole.ADMIN);
     when(accounts.authenticate("test-session")).thenReturn(Optional.of(principal));
-    var access = mock(ResourceAccess.class);
+    access = mock(ResourceAccess.class);
     when(access.allowsThread(any(), any())).thenReturn(true);
     when(access.allows(any(), any(), any())).thenReturn(true);
     handler =
@@ -601,6 +609,76 @@ class ApplicationEventWebSocketHandlerTest {
     assertTrue(recorder.sent.get(1).contains("\"code\":\"RESOURCE_NOT_SUBSCRIBED\""));
     assertTrue(recorder.sent.get(1).contains("\"kind\":\"thread-tree\""));
     verify(springSession, never()).close(any());
+  }
+
+  @Test
+  void refreshWithRevokedSessionClosesWithoutRequestingSnapshot() throws Exception {
+    AutoCloseable release = mock(AutoCloseable.class);
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, release));
+    hub = spy(hub);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
+    handler.afterConnectionEstablished(springSession);
+    String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
+    handler.handleTextMessage(
+        springSession, textMessage("{\"type\":\"subscribe\",\"resource\":" + resource + "}"));
+    recorder.completeFirst();
+
+    // 不推进时钟：下一次正常 refresh 自身必须发现登录已撤销。
+    when(accounts.authenticate("test-session")).thenReturn(Optional.empty());
+    handler.handleTextMessage(
+        springSession, textMessage("{\"type\":\"refresh\",\"resource\":" + resource + "}"));
+
+    verify(hub, never()).requestThreadSnapshot(any());
+    verify(release).close();
+    assertEquals(
+        "{\"type\":\"error\",\"code\":\"NOT_AUTHENTICATED\",\"message\":\"Login required\"}",
+        recorder.sent.getLast());
+    recorder.complete(1);
+    verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
+        .close(eq(4001), eq("NOT_AUTHENTICATED"), any(Callback.class));
+  }
+
+  @Test
+  void refreshChecksOnlyItsTargetWithoutPostponingPeriodicRevalidation() throws Exception {
+    HarnessInvalidationChanges executionTree = mock(HarnessInvalidationChanges.class);
+    AutoCloseable releaseTree = mock(AutoCloseable.class);
+    AutoCloseable releaseCanvas = mock(AutoCloseable.class);
+    when(harnessChanges.executionTree()).thenReturn(executionTree);
+    when(executionTree.subscribe(any(), any())).thenReturn(subscribed(0L, releaseTree));
+    when(canvasVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(3L, releaseCanvas));
+    hub = spy(hub);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
+    handler.afterConnectionEstablished(springSession);
+    String tree = "{\"kind\":\"thread-tree\",\"id\":\"" + THREAD + "\"}";
+    String canvas = "{\"kind\":\"canvas\",\"id\":\"" + CANVAS_KEY.id() + "\"}";
+    handler.handleTextMessage(
+        springSession, textMessage("{\"type\":\"subscribe\",\"resource\":" + tree + "}"));
+    recorder.completeFirst();
+    handler.handleTextMessage(
+        springSession, textMessage("{\"type\":\"subscribe\",\"resource\":" + canvas + "}"));
+    recorder.complete(1);
+
+    // 两项资源都失权，但主动动作只裁决其目标，空闲订阅仍由原周期回收。
+    when(access.allowsThread(any(), eq(THREAD))).thenReturn(false);
+    when(access.allows(any(), any(), eq(CANVAS_KEY.id()))).thenReturn(false);
+    nowNanos.addAndGet(TimeUnit.SECONDS.toNanos(58));
+    handler.handleTextMessage(
+        springSession, textMessage("{\"type\":\"refresh\",\"resource\":" + tree + "}"));
+
+    verify(hub, never()).requestThreadTreeSnapshot(THREAD_TREE_KEY);
+    verify(releaseTree).close();
+    verify(releaseCanvas, never()).close();
+    assertEquals(
+        "{\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":"
+            + tree
+            + "}",
+        recorder.sent.getLast());
+    recorder.complete(2);
+    nowNanos.addAndGet(TimeUnit.SECONDS.toNanos(2));
+    handler.heartbeatTick();
+    verify(releaseCanvas).close();
+    assertTrue(recorder.sent.getLast().contains("\"type\":\"heartbeat\""));
   }
 
   @Test
