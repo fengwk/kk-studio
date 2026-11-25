@@ -376,12 +376,12 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--ui` | 在 API 矩阵后执行 Playwright Workspace UI 矩阵，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 API 或 UI case，可重复；UI case 需同时传 `--ui`，可混选 API 与 UI |
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不受此过滤器影响 |
-| `--list` / `--docs` | 只列出 API case，或只打印 case 标题、requires 与契约文档 |
+| `--list` / `--docs` | 列出已注册的 API case、level 和 `requires`；`--docs` 另打印逐项契约。不启动栈或运行 case，也不列出 UI case |
 
 矩阵分成 L1 免费 API 契约、L2 真实 Provider 文本/推理/图片输入、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题、输入、期望 wire 与覆盖边界
 以 `--list` / `--docs` 当前输出为准，不要复制 case 清单；默认执行哪些 case 由 flag 组合和 case 的
-`requires` 共同决定。默认 L1 覆盖定时任务立即运行与记录分页、Session/Canvas 附件持有者取址、同源附件流及双用户隔离。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
+`requires` 共同决定。默认 L1 覆盖工作区会话创建、同会话分支与跨会话分叉（`thread.workspace_session_branch_fork`），以及定时任务立即运行与记录分页、Session/Canvas 附件持有者取址、同源附件流及双用户隔离。L3 真实分支先在工作区创建空闲分支，再通过 Thread 命令批续写。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
 精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
 阅读 case 结果时还需保留两个边界：
@@ -391,7 +391,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `node --test scripts/dev/verify/e2e/tests/*.test.mjs` 只验证 case 与 HTTP mock 的脚本契约，
   不能替代对真实服务执行对应 case。
 
-更改 API 契约、首发顺序或 usage 语义时，同步 case、fixture、生成的前端契约与本节的分类说明。L1 `thread.queued_command_batch` 以本地受控 Provider mock 验证 Thread GET 基线、WebSocket `subscribed` ACK cursor `0`、后续初始 `snapshot`、`realtime` 提示与不依赖 HTTP 追更的连续快照；完成后用 `afterEntryId` 增量核对持久化 Entry 链；不调用真实 Provider。该 case 需要宿主 mock，双节点 `--distributed` 不运行它。`thread_tree.query_contract` 还验证同 root 第二个 WebSocket 订阅者的首快照、已订阅资源的 refresh 控制帧，以及 refresh 不创建新订阅。
+更改 API 契约、首发顺序或 usage 语义时，同步 case、fixture、生成的前端契约与本节的分类说明。L1 `thread.queued_command_batch` 以本地受控 Provider mock 验证 Thread GET 基线、WebSocket `subscribed` ACK cursor `0`、后续初始 `snapshot`、`realtime` 提示与不依赖 HTTP 追更的连续快照；完成后用 `afterEntryId` 增量核对持久化 Entry 链；不调用真实 Provider。该 case 需要宿主 mock，双节点 `--distributed` 不运行它。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。单实例 runner
 每次启动自己管理的 Backend、Vite 和独立 Compose 依赖栈；不会复用已有 Backend/Frontend，也不会杀占用端口的进程。

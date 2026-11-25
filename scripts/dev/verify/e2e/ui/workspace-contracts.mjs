@@ -1138,7 +1138,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
   const state = {
     agent: null,
     apiCtx,
-    chat: null,
     markers,
     mock,
     model: null,

@@ -11,7 +11,6 @@ import {
 import {
   acceptCommandBatch,
   approveToolInvocation,
-  branchSettingsOf,
   canonicalUuid,
   createWorkspaceSpace,
   createWorkspaceSession,
@@ -1003,7 +1002,7 @@ registerCase({
         intervalMs: 500,
       })
       assert(finalThread.status === 'IDLE', safeDiagnosticJson(finalThread))
-      // 第一段（即时回执）快照先落盘：后续任何断言失败都必须留下持久证据，cleanup 会删除 Chat。
+      // 第一段（即时回执）快照先落盘：后续任何断言失败都必须留下持久证据，cleanup 会删除测试会话。
       let parentSnapshot = await getThreadSnapshot(ctx, parentThreadId)
       ctx.writeArtifact(
         'task-delegation-acceptance.json',
@@ -1081,7 +1080,7 @@ registerCase({
         JSON.stringify(sanitizeArtifact({ modelChoice, parentSnapshot, childSnapshot, taskResult }), null, 2),
       )
     } catch (error) {
-      // cleanup 会删除 Chat/Agent，诊断必须先落盘；best-effort，绝不覆盖原始失败。
+      // cleanup 会删除测试会话和 Agent，诊断必须先落盘；best-effort，绝不覆盖原始失败。
       await captureThreadFailureDiagnostics(ctx, parentThreadId, 'task-delegation', { modelChoice })
       throw error
     } finally {
@@ -1335,9 +1334,9 @@ registerCase({
 registerCase({
   id: 'branch.same_session_new_thread',
   level: 'L3',
-  title: 'NEW_THREAD 同 Session 分支创建（真实分支 turn）',
+  title: '工作区同会话分支与续写（真实模型）',
   requires: ['real', 'branch'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：在已闭合 TURN_END 边界用 NEW_THREAD 开新 Thread（不复制 Entry，不允许从 turn 中途的 assistant 消息开分支）：sessionId 不变、分支名等于显式给出的 threadName、root-to-head 路径包含 startEntry（TURN_END）与其前的 assistant、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变；同一 batch 精确重放返回原 branch Thread 且不产生第二个 branch',
+  docs: '使用 minimax-anthropic/MiniMax-M3：通过工作区 sessions/{id}/branches 在 TURN_END 切点创建同会话的空闲分支，标题取请求的 title。使用 Thread 命令批续写后，路径仍包含切点及此前的 assistant，且产生独立回复；源 Thread 的 head/version/nextCommandSequence 不变；以相同 Idempotency-Key 重放创建请求返回原分支。',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
     const suffix = cid().slice(0, 8)
@@ -1379,7 +1378,7 @@ registerCase({
 
       const current = await getThread(ctx, mainTid)
       assert(String(current.sessionId) === String(sessionId), safeDiagnosticJson(current))
-      // fork 边界只能是 ROOT 或已闭合 TURN_END：quiescent head 必须是 TURN_END，assistant 消息本身不是边界。
+      // 工作区分支从 TURN_END 切开，不能直接使用 assistant 消息作为切点。
       const startEntryId = String(current.headEntryId)
       const startEntry = (mainSnapshot.entries || []).find(
         (entry) => String(entry.entryId) === startEntryId,
@@ -1405,6 +1404,9 @@ registerCase({
       assert(String(branched.sessionId) === String(sessionId), safeDiagnosticJson(branched))
       assert(branched.threadId, safeDiagnosticJson(branched))
       const branchThreadId = branched.threadId
+      const idleBranch = await getThread(ctx, branchThreadId)
+      assert(idleBranch.status === 'IDLE' && idleBranch.headEntryId === startEntryId
+        && idleBranch.name === branchInput.title, safeDiagnosticJson(idleBranch))
       // Branch creation starts an idle root; continue it via the owner-free Thread command API.
       const branchStart = await acceptCommandBatch(ctx, {
         target: threadTarget({ threadId: branchThreadId }),
@@ -1428,8 +1430,9 @@ registerCase({
       assert(finalThread.status === 'IDLE', safeDiagnosticJson(finalThread))
       const entries = await snapshotEntries(ctx, branchThreadId)
       assert(
-        entries.some((entry) => String(entry.entryId) === String(assistantEntryId)),
-        `branch path must include the startEntry: ${safeDiagnosticJson(entries)}`,
+        entries.some((entry) => entry.entryId === startEntryId)
+          && entries.some((entry) => entry.entryId === assistantEntryId),
+        `branch path must retain the turn cut and its assistant output: ${safeDiagnosticJson(entries)}`,
       )
       const branchUserIndex = findUserEntryIndex(entries, branchUserText)
       const assistantIndex = entries.findIndex(
@@ -1543,7 +1546,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 read 内联结果',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '默认使用 minimax-anthropic/MiniMax-M3（可由 E2E_BUILTIN_MODEL 覆盖为其它已声明模型）+ backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），Environment 只由 NEW_SESSION 的 branchSettings.environmentName 绑定 canonical daemon name 并在每轮解析为内部路由身份；yolo=false 时 read ToolInvocation 进入 WAITING_APPROVAL（Thread status 为 RUNNING，审批等待不是 Thread 活动状态；ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '默认使用 minimax-anthropic/MiniMax-M3（可由 E2E_BUILTIN_MODEL 覆盖为其它已声明模型）+ backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），会话创建请求通过 environmentId 绑定 Daemon 所属环境；yolo=false 时 read ToolInvocation 进入 WAITING_APPROVAL（Thread status 为 RUNNING，审批等待不是 Thread 活动状态；ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     const model = await requireBuiltinModel(ctx)
@@ -1825,7 +1828,7 @@ registerCase({
         JSON.stringify(sanitizeArtifact({ modelChoice, finalThread, finalSnapshot }), null, 2),
       )
     } catch (error) {
-      // cleanup 会删除 Chat/Agent，诊断必须先落盘；best-effort，绝不覆盖原始失败。
+      // cleanup 会删除测试会话和 Agent，诊断必须先落盘；best-effort，绝不覆盖原始失败。
       await captureThreadFailureDiagnostics(ctx, tid, 'tool-read-turn', { modelChoice })
       throw error
     } finally {
@@ -1977,7 +1980,7 @@ export function delegatedChildFacts(parentThreadId, childSnapshot) {
 /**
  * 把 Thread Entry 压成可读诊断摘要（类型 / role / tool 名 / assistant 错误码 / 文本前缀）。
  *
- * <p>real case 的 cleanup 会删除 Chat 与会话，失败时只剩 artifacts；没有这份摘要就只能看到空数组，
+ * <p>real case 的 cleanup 会删除测试会话，失败时只剩 artifacts；没有这份摘要就只能看到空数组，
  * 无法区分「模型没调用工具」与「产品没有记录回执」。
  */
 export function summarizeThreadHistory(entries) {
