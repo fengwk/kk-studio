@@ -106,8 +106,6 @@ vi.mock('@/shared/api/storage-service', () => ({
     uploadFile: vi.fn(),
     completeUpload: vi.fn(),
     deleteUpload: vi.fn(),
-    getBlobDownloadUrl: vi.fn(),
-    getBlobPreviewUrl: vi.fn(),
   },
 }))
 
@@ -340,8 +338,8 @@ function materializeResource(
   return {
     ...base,
     type: 'BLOB',
-    id: input.blobId,
-    blobId: input.blobId,
+    id: input.uploadId,
+    blobId: input.uploadId,
     kind: 'IMAGE',
     mediaType: 'image/png',
     sizeBytes: '100',
@@ -687,7 +685,7 @@ describe('useCanvasController real snapshot runtime', () => {
       resources: [{
         type: 'BLOB',
         name: 'upload.png',
-        blobId: 'blob-upload',
+        uploadId: UPLOAD_ID,
       }],
       nodeId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
     })

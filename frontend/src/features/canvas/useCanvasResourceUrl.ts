@@ -11,7 +11,7 @@ const LAZY_VIEWPORT_MARGIN = 160
 
 interface ResourceUrlOptions {
   canvasId: string
-  resourceId: string
+  blobId: string | null
   kind: ResourceUrlKind
   enabled?: boolean
   lazy?: boolean
@@ -35,12 +35,12 @@ function isNearViewport(element: HTMLElement) {
 /** 媒体 URL 查询只在可见或用户明确请求后启用，observer 在换节点和卸载时断开。 */
 export function useCanvasResourceUrl({
   canvasId,
-  resourceId,
+  blobId,
   kind,
   enabled = true,
   lazy = false,
 }: ResourceUrlOptions) {
-  const visibilityKey = `${canvasId}:${resourceId}:${kind}:${lazy}`
+  const visibilityKey = `${canvasId}:${blobId ?? ''}:${kind}:${lazy}`
   const observerRef = useRef<IntersectionObserver | null>(null)
   const [visibility, setVisibility] = useState({
     key: visibilityKey,
@@ -84,14 +84,14 @@ export function useCanvasResourceUrl({
 
   const query = useQuery({
     queryKey: kind === 'preview'
-      ? queryKeys.studio.canvasResourcePreview(canvasId, resourceId)
-      : queryKeys.studio.canvasResourceOriginal(canvasId, resourceId),
+      ? queryKeys.studio.canvasResourcePreview(canvasId, blobId ?? '')
+      : queryKeys.studio.canvasResourceOriginal(canvasId, blobId ?? ''),
     queryFn: ({ signal }) => (
       kind === 'preview'
-        ? getCanvasResourcePreviewUrl(canvasId, resourceId, { signal })
-        : getCanvasResourceOriginalUrl(canvasId, resourceId, { signal })
+        ? getCanvasResourcePreviewUrl(canvasId, blobId!, { signal })
+        : getCanvasResourceOriginalUrl(canvasId, blobId!, { signal })
     ),
-    enabled: enabled && visible,
+    enabled: enabled && visible && Boolean(blobId),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
     retry: 1,

@@ -304,12 +304,16 @@ describe('canvas api transport adapter', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 1786320000000 }),
     )
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ method: 'GET', url: 'https://preview', headers: {}, expiresAt: 1786320000000 }),
+    )
 
     const rawCanvasId = 'canvas/id with spaces&symbols'
-    const rawResourceId = 'res/123#special'
+    const rawBlobId = 'blob/123#special'
 
     await getCanvas(rawCanvasId)
-    await getCanvasResourceOriginalUrl(rawCanvasId, rawResourceId)
+    await getCanvasResourceOriginalUrl(rawCanvasId, rawBlobId)
+    await getCanvasResourcePreviewUrl(rawCanvasId, rawBlobId)
 
     const calls = fetchMock.mock.calls.map(([rawUrl]) =>
       typeof rawUrl === 'string'
@@ -321,7 +325,10 @@ describe('canvas api transport adapter', () => {
 
     expect(calls[0]).toBe(`/api/canvas/canvases/${encodeURIComponent(rawCanvasId)}`)
     expect(calls[1]).toBe(
-      `/api/canvas/canvases/${encodeURIComponent(rawCanvasId)}/resources/${encodeURIComponent(rawResourceId)}/download-url`,
+      `/api/canvas/canvases/${encodeURIComponent(rawCanvasId)}/blobs/${encodeURIComponent(rawBlobId)}/download-url`,
+    )
+    expect(calls[2]).toBe(
+      `/api/canvas/canvases/${encodeURIComponent(rawCanvasId)}/blobs/${encodeURIComponent(rawBlobId)}/preview-url`,
     )
   })
 

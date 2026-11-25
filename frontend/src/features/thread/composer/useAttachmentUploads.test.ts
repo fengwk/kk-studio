@@ -71,8 +71,6 @@ function createFakeStorageService(overrides?: Partial<StorageService>): StorageS
     })),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
     uploadFile: vi.fn().mockResolvedValue(undefined),
-    getBlobDownloadUrl: vi.fn(),
-    getBlobPreviewUrl: vi.fn(),
     ...overrides,
   }
 }

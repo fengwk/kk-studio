@@ -29,7 +29,7 @@ function CanvasAudioPlayer({ resource }: { resource: Resource }) {
     refresh: refreshOriginal,
   } = useCanvasResourceUrl({
     canvasId: resource.canvasId,
-    resourceId: resource.id,
+    blobId: resource.blobId,
     kind: 'original',
     enabled: originalRequested,
   })

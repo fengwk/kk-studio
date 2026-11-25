@@ -479,8 +479,6 @@ describe('ThreadComposer and commands', () => {
         }),
         deleteUpload: vi.fn().mockResolvedValue(undefined),
         uploadFile: vi.fn().mockResolvedValue(undefined),
-        getBlobDownloadUrl: vi.fn(),
-        getBlobPreviewUrl: vi.fn(),
       }
 
       const user = userEvent.setup()
@@ -534,8 +532,6 @@ describe('ThreadComposer and commands', () => {
         completeUpload: vi.fn(),
         deleteUpload: vi.fn().mockResolvedValue(undefined),
         uploadFile: vi.fn().mockResolvedValue(undefined),
-        getBlobDownloadUrl: vi.fn(),
-        getBlobPreviewUrl: vi.fn(),
       }
 
       render(

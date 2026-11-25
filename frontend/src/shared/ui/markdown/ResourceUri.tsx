@@ -1,6 +1,11 @@
 import { useContext, useEffect, useState } from 'react'
-import { fetchSessionResource } from '@/shared/api/resource-service'
 import { ApiError } from '@/shared/api/client'
+import type { StoragePresignedUrlDTO } from '@/shared/api/generated/contracts'
+import {
+  getSessionBlobDownloadUrl,
+  getSessionBlobPreviewUrl,
+} from '@/shared/api/resource-service'
+import { FORBIDDEN_UPLOAD_HEADERS } from '@/shared/api/storage-service'
 import { useI18n } from '@/shared/i18n'
 import {
   ResourceOpenInIdeContext,
@@ -8,6 +13,40 @@ import {
 } from '@/shared/ui/markdown/ResourceUriContext'
 
 const FILE_RESOURCE_URI = /^resource:\/\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+
+type ResourcePreviewState =
+  | { kind: 'image'; previewUrl: string | null; originalUrl: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'unsupported' }
+
+function isImageMediaType(mediaType: string): boolean {
+  return mediaType.startsWith('image/')
+}
+
+function isTextMediaType(mediaType: string): boolean {
+  return mediaType.startsWith('text/') || mediaType.includes('json') || mediaType.includes('xml')
+}
+
+async function fetchSignedText(
+  signed: StoragePresignedUrlDTO,
+  signal?: AbortSignal,
+): Promise<string> {
+  const headers: Record<string, string> = {}
+  for (const [name, value] of Object.entries(signed.headers ?? {})) {
+    if (!FORBIDDEN_UPLOAD_HEADERS.has(name.toLowerCase())) {
+      headers[name] = value
+    }
+  }
+  const response = await fetch(signed.url, {
+    method: signed.method,
+    headers,
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(`Resource fetch failed with HTTP ${response.status}`)
+  }
+  return response.text()
+}
 
 /** A private resource URI is never handed to the browser as a navigable URL. */
 export function ResourceUri({ uri, label, image = false }: {
@@ -24,7 +63,7 @@ export function ResourceUri({ uri, label, image = false }: {
   if (uri.startsWith('resource://skills/')) {
     return <span className="md-resource-unavailable">{label ?? uri} — {t('ai.resource.unsupported')}</span>
   }
-  if (resourceId == null || sessionId == null) {
+  if (resourceId == null || !sessionId) {
     return <span className="md-resource-unavailable">{label ?? uri} — {t('ai.resource.unavailable')}</span>
   }
   return image
@@ -40,30 +79,54 @@ export function ResourceUri({ uri, label, image = false }: {
 
 function ResourceImage({ sessionId, resourceId, label }: { sessionId: string; resourceId: string; label: string }) {
   const { t } = useI18n()
-  const [src, setSrc] = useState<string | null>(null)
+  const [urls, setUrls] = useState<{ original: string; preview: string | null } | null>(null)
+  const [useOriginal, setUseOriginal] = useState(false)
   const [failed, setFailed] = useState(false)
+
   useEffect(() => {
     let active = true
-    let objectUrl: string | null = null
     const controller = new AbortController()
-    void fetchSessionResource(sessionId, resourceId, false, controller.signal).then((blob) => {
-      if (active) {
-        objectUrl = URL.createObjectURL(blob)
-        setSrc(objectUrl)
+    setUrls(null)
+    setUseOriginal(false)
+    setFailed(false)
+    void Promise.all([
+      getSessionBlobDownloadUrl(sessionId, resourceId, { signal: controller.signal }),
+      getSessionBlobPreviewUrl(sessionId, resourceId, { signal: controller.signal }).catch(() => null),
+    ]).then(([original, preview]) => {
+      if (!active) return
+      if (!original.url.trim()) {
+        setFailed(true)
+        return
       }
+      setUrls({
+        original: original.url,
+        preview: preview?.url?.trim() || null,
+      })
     }).catch(() => {
       if (active) setFailed(true)
     })
     return () => {
       active = false
       controller.abort()
-      if (objectUrl != null) URL.revokeObjectURL(objectUrl)
     }
   }, [sessionId, resourceId])
+
   if (failed) return <span role="status">{t('ai.resource.previewFailed')}</span>
-  return src == null
-    ? <span role="status">{t('ai.resource.loading')}</span>
-    : <img src={src} alt={label} />
+  if (urls == null) return <span role="status">{t('ai.resource.loading')}</span>
+  const src = useOriginal ? urls.original : (urls.preview ?? urls.original)
+  return (
+    <img
+      src={src}
+      alt={label}
+      onError={() => {
+        if (!useOriginal && urls.preview && src !== urls.original) {
+          setUseOriginal(true)
+        } else {
+          setFailed(true)
+        }
+      }}
+    />
+  )
 }
 
 function ResourceLink({ sessionId, resourceId, label, openInIde }: {
@@ -73,7 +136,7 @@ function ResourceLink({ sessionId, resourceId, label, openInIde }: {
   openInIde?: (sessionId: string, resourceId: string) => Promise<void>
 }) {
   const { t } = useI18n()
-  const [preview, setPreview] = useState<Blob | null>(null)
+  const [preview, setPreview] = useState<ResourcePreviewState | null>(null)
   const [error, setError] = useState(false)
   const [busy, setBusy] = useState(false)
   const [openingInIde, setOpeningInIde] = useState(false)
@@ -84,13 +147,32 @@ function ResourceLink({ sessionId, resourceId, label, openInIde }: {
     setBusy(true)
     setError(false)
     try {
-      setPreview(await fetchSessionResource(sessionId, resourceId, false))
+      const original = await getSessionBlobDownloadUrl(sessionId, resourceId)
+      if (!original.url.trim()) {
+        setError(true)
+        return
+      }
+      const mediaType = original.mediaType?.trim() ?? ''
+      if (isImageMediaType(mediaType)) {
+        const previewSigned = await getSessionBlobPreviewUrl(sessionId, resourceId).catch(() => null)
+        setPreview({
+          kind: 'image',
+          previewUrl: previewSigned?.url?.trim() || null,
+          originalUrl: original.url,
+        })
+      } else if (isTextMediaType(mediaType)) {
+        const text = await fetchSignedText(original)
+        setPreview({ kind: 'text', text })
+      } else {
+        setPreview({ kind: 'unsupported' })
+      }
     } catch {
       setError(true)
     } finally {
       setBusy(false)
     }
   }
+
   async function openAttachmentInIde() {
     if (openInIde == null) return
     setOpeningInIde(true)
@@ -112,13 +194,18 @@ function ResourceLink({ sessionId, resourceId, label, openInIde }: {
     setBusy(true)
     setError(false)
     try {
-      const blob = await fetchSessionResource(sessionId, resourceId, true)
-      const url = URL.createObjectURL(blob)
+      const original = await getSessionBlobDownloadUrl(sessionId, resourceId)
+      if (!original.url.trim()) {
+        setError(true)
+        return
+      }
       const anchor = document.createElement('a')
-      anchor.href = url
+      anchor.href = original.url
+      anchor.rel = 'noreferrer'
       anchor.download = filename
+      document.body.appendChild(anchor)
       anchor.click()
-      URL.revokeObjectURL(url)
+      anchor.remove()
     } catch {
       setError(true)
     } finally {
@@ -147,40 +234,38 @@ function ResourceLink({ sessionId, resourceId, label, openInIde }: {
       {openError != null ? (
         <span role="alert">{t(`ai.resource.openInIde.${openError}`)}</span>
       ) : null}
-      {preview != null ? <ResourcePreview blob={preview} label={label} /> : null}
+      {preview != null ? <ResourcePreview preview={preview} label={label} /> : null}
     </span>
   )
 }
 
-function ResourcePreview({ blob, label }: { blob: Blob; label: string }) {
+function ResourcePreview({ preview, label }: { preview: ResourcePreviewState; label: string }) {
   const { t } = useI18n()
-  const [text, setText] = useState<string | null>(null)
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
-  const isImage = blob.type.startsWith('image/')
-  const isText = blob.type.startsWith('text/') || blob.type.includes('json') || blob.type.includes('xml')
+  const [useOriginal, setUseOriginal] = useState(false)
+  const [failed, setFailed] = useState(false)
+
   useEffect(() => {
-    let active = true
-    let objectUrl: string | null = null
-    setText(null)
-    setImageUrl(null)
-    if (isImage) {
-      objectUrl = URL.createObjectURL(blob)
-      setImageUrl(objectUrl)
-    } else if (isText) {
-      void blob.text().then((value) => {
-        if (active) setText(value)
-      })
-    }
-    return () => {
-      active = false
-      if (objectUrl != null) URL.revokeObjectURL(objectUrl)
-    }
-  }, [blob, isImage, isText])
-  if (isImage) {
-    return imageUrl == null
-      ? <span role="status">{t('ai.resource.loading')}</span>
-      : <img src={imageUrl} alt={label} />
+    setUseOriginal(false)
+    setFailed(false)
+  }, [preview])
+
+  if (preview.kind === 'image') {
+    if (failed) return <span role="status">{t('ai.resource.previewFailed')}</span>
+    const src = useOriginal ? preview.originalUrl : (preview.previewUrl ?? preview.originalUrl)
+    return (
+      <img
+        src={src}
+        alt={label}
+        onError={() => {
+          if (!useOriginal && preview.previewUrl && src !== preview.originalUrl) {
+            setUseOriginal(true)
+          } else {
+            setFailed(true)
+          }
+        }}
+      />
+    )
   }
-  if (text != null) return <span className="md-resource-text-preview">{text}</span>
+  if (preview.kind === 'text') return <span className="md-resource-text-preview">{preview.text}</span>
   return <span role="status">{t('ai.resource.previewUnsupported')}</span>
 }

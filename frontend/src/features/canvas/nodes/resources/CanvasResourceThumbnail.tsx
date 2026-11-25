@@ -8,10 +8,10 @@ export function CanvasResourceThumbnail({ resource }: { resource: Resource }) {
     url,
   } = useCanvasResourceUrl({
     canvasId: resource.canvasId,
-    resourceId: resource.id,
+    blobId: resource.blobId,
     kind: 'preview',
     lazy: true,
-    enabled: resource.kind === 'IMAGE' || resource.kind === 'VIDEO',
+    enabled: (resource.kind === 'IMAGE' || resource.kind === 'VIDEO') && Boolean(resource.blobId),
   })
   return (
     <span className="canvas-resource-thumbnail" ref={targetRef} data-kind={resource.kind}>
