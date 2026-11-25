@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 
-import { assert } from '../lib/http.mjs'
+import { assert, expectHttpError } from '../lib/http.mjs'
 import { createWorkspaceSession } from '../lib/harness.mjs'
+import { uploadPng } from '../lib/image-attachment.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -159,7 +160,7 @@ registerCase({
   id: 'workspace.two_user_resource_isolation',
   level: 'L1',
   title: '双用户工作区资源、交互与实时订阅隔离',
-  docs: '两个独立普通用户各自可访问自己的会话和画布；另一用户对会话、画布和交互根收到精确 RESOURCE_NOT_FOUND，对 chat-space 订阅收到对应错误帧',
+  docs: '两个普通用户各自可访问自己的会话、画布及附件；跨用户访问资源、交互根或为附件签名返回 404，chat-space 订阅被拒绝。',
   async run(ctx) {
     const first = await ctx.createUser()
     const second = await ctx.createUser()
@@ -167,7 +168,12 @@ registerCase({
     const secondSpace = await second.createSpace(`e2e-owner-b-${key().slice(0, 8)}`)
     const firstTree = await json(first, 'GET', `/api/chat-spaces/${firstSpace}/tree`)
     const secondTree = await json(second, 'GET', `/api/chat-spaces/${secondSpace}/tree`)
-    const firstSession = await createSession(first, firstSpace, firstTree.folders[0].id, `owner-a-${key()}`)
+    const upload = await uploadPng(first)
+    const firstSession = await createWorkspaceSession(first, firstSpace, {
+      idempotencyKey: key(),
+      folderId: firstTree.folders[0].id,
+      message: [{ type: 'TEXT', text: 'Owner A attachment.' }, { type: 'ATTACHMENT', uploadId: upload.id }],
+    })
     const secondSession = await createSession(second, secondSpace, secondTree.folders[0].id, `owner-b-${key()}`)
     const firstCanvas = await createCanvas(first, firstSpace, 'owner-a canvas')
     const secondCanvas = await createCanvas(second, secondSpace, 'owner-b canvas')
@@ -200,6 +206,29 @@ registerCase({
         const reason = label === 'chat-space tree' ? 'WORKSPACE_NOT_FOUND' : 'RESOURCE_NOT_FOUND'
         assert(denied.status === 404 && denied.json?.reason === reason,
           `cross-user ${label} must return 404 ${reason}, got ${denied.status}: ${denied.text}`)
+      }
+    }
+
+    const canvasUpload = await uploadPng(first)
+    await json(first, 'POST', `/api/canvas/canvases/${firstCanvas}/commands`, {
+      idempotencyKey: key(),
+      commands: [{
+        type: 'CREATE_NODE', nodeId: key(), name: 'Owner A attachment',
+        transform: { x: 0, y: 0, width: 100, height: 100 },
+        resources: [{ type: 'BLOB', name: 'tiny.png', uploadId: canvasUpload.id }],
+      }],
+    })
+    for (const [holder, blobId] of [
+      [`/api/harness/sessions/${firstSession.sessionId}`, upload.blobId],
+      [`/api/canvas/canvases/${firstCanvas}`, canvasUpload.blobId],
+    ]) {
+      for (const operation of ['download-url', 'preview-url']) {
+        const path = `${holder}/blobs/${blobId}/${operation}`
+        const signed = await json(first, 'POST', path)
+        assert(signed.method === 'GET' && signed.url, `owner could not sign ${operation}`)
+        await expectHttpError(() => second.call('POST', path), {
+          status: 404, code: 'not_found', reason: 'RESOURCE_NOT_FOUND',
+        })
       }
     }
 

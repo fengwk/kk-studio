@@ -30,6 +30,12 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 const sleep = (millis) => new Promise((resolve) => setTimeout(resolve, millis))
 
+/** Canvas signing is authorized by the canvas holding edge and must address the Blob, not a resource. */
+export function canvasBlobUrlPath(canvasId, blobId, action) {
+  assert.ok(['download-url', 'preview-url'].includes(action), `unsupported Blob URL action: ${action}`)
+  return `/api/canvas/canvases/${canvasId}/blobs/${blobId}/${action}`
+}
+
 /** HTTP client for the application API: resolves to the 2xx resource body, or null for 204. */
 export function createClient(baseUrl) {
   const http = createHttpClient({ baseUrl, origin: new URL(baseUrl).origin })
@@ -183,8 +189,8 @@ export async function uploadBlob(client, image, fetchImpl = rawFetch) {
   return completed
 }
 
-async function assertWebpPreview(url) {
-  const response = await rawFetch(url)
+async function assertWebpPreview({ url, headers }) {
+  const response = await rawFetch(url, { headers })
   const body = Buffer.from(await response.arrayBuffer())
   assert.equal(response.status, 200)
   assert.ok(body.subarray(0, 4).toString('latin1') === 'RIFF' && body.subarray(0, 16).includes('WEBP'))
@@ -318,14 +324,14 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   const snapshotResourceNode = resourceSnapshot.nodes.find((node) => node.id === resourceNodeId)
   assert.equal(snapshotResourceNode.resources[0].id, resource.id)
 
-  const original = await jsonCall('POST', `/api/canvas/canvases/${canvas.document.id}/blobs/${resource.blobId}/download-url`)
-  const originalResponse = await rawFetch(original.url)
+  const original = await jsonCall('POST', canvasBlobUrlPath(canvas.document.id, resource.blobId, 'download-url'))
+  const originalResponse = await rawFetch(original.url, { headers: original.headers })
   assert.equal(originalResponse.status, 200)
   assert.ok(Buffer.from(await originalResponse.arrayBuffer()).equals(image))
 
-  const preview = await jsonCall('POST', `/api/canvas/canvases/${canvas.document.id}/blobs/${resource.blobId}/preview-url`)
+  const preview = await jsonCall('POST', canvasBlobUrlPath(canvas.document.id, resource.blobId, 'preview-url'))
   assert.ok(!('bucket' in preview) && !('key' in preview))
-  await assertWebpPreview(preview.url)
+  await assertWebpPreview(preview)
 
   const functionNodeId = newId()
   const functionPatch = await jsonCall(
@@ -369,9 +375,9 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.equal(generatedResource.name, 'generated.png')
   const generatedPreview = await jsonCall(
     'POST',
-    `/api/canvas/canvases/${canvas.document.id}/blobs/${generatedResource.blobId}/preview-url`,
+    canvasBlobUrlPath(canvas.document.id, generatedResource.blobId, 'preview-url'),
   )
-  await assertWebpPreview(generatedPreview.url)
+  await assertWebpPreview(generatedPreview)
 
   await initializeOpencliPlugin(client)
   assertFunctionDefinitions(await jsonCall('GET', '/api/canvas/functions'))

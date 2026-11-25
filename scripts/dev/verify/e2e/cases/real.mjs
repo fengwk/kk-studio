@@ -13,15 +13,12 @@ import {
   approveToolInvocation,
   branchSettingsOf,
   canonicalUuid,
-  chatOwner,
-  createChat,
   createWorkspaceSpace,
   createWorkspaceSession,
   createWorkspaceBranch,
   getThread,
   getThreadSnapshot,
   listEnvironments,
-  createNewSession,
   setExecutionCommand,
   snapshotEntries,
   stopThread,
@@ -31,7 +28,7 @@ import {
   waitForModelContentDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { uploadPngAttachment } from '../lib/image-attachment.mjs'
+import { uploadPng } from '../lib/image-attachment.mjs'
 import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
@@ -535,18 +532,6 @@ async function createRealWorkspaceSession(ctx, title, agent, message, { modelSel
   return { space, session }
 }
 
-async function cleanupChat(ctx, chat) {
-  if (!chat?.id) return
-  try {
-    await ctx.call(
-      'DELETE',
-      `/api/chat/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version ?? '0')}`,
-    )
-  } catch {
-    // Best-effort cleanup for attachment cases awaiting their API slice.
-  }
-}
-
 async function cleanupAgent(ctx, agent) {
   if (!agent?.name) return
   try {
@@ -905,7 +890,8 @@ for (const def of REAL_MODEL_DEFINITIONS.filter((model) => model.imageInput)) {
       assert(model.config?.abilities?.inputModalities?.includes('IMAGE'), `${modelName} must declare IMAGE input`)
       const name = `e2e-image-${def.idSuffix}-${cid().slice(0, 8)}`
       let agent = null
-      let chat = null
+      let space = null
+      let sessionId = null
       try {
         agent = (await ctx.call('POST', '/api/platform/agents', {
           name,
@@ -914,19 +900,18 @@ for (const def of REAL_MODEL_DEFINITIONS.filter((model) => model.imageInput)) {
           execution: { driver: 'builtin', settings: { modelName, variant } },
           config: { tools: [], skills: [], subagents: [] },
         })).json
-        chat = await createChat(ctx, { title: name, agentName: agent.name, yoloEnabled: false })
-        const command = userMessageCommand('What color is the image? Reply with exactly one English word.', cid())
-        command.contents.push(await uploadPngAttachment(ctx, RED_PNG))
-        const threadId = cid()
-        const accepted = await createNewSession(ctx, {
-          owner: chatOwner(chat.id),
-          sessionId: cid(),
-          threadId,
-          rootSettings: branchSettingsOf(agent, agent.execution.settings),
+        space = await createWorkspaceSpace(ctx, { title: name, defaultAgentName: agent.name })
+        const message = [{ type: 'TEXT', text: 'What color is the image? Reply with exactly one English word.' }]
+        const upload = await uploadPng(ctx, RED_PNG, 'red.png')
+        message.push({ type: 'ATTACHMENT', uploadId: upload.id })
+        const created = await createWorkspaceSession(ctx, space.id, {
+          idempotencyKey: cid(),
+          message,
+          modelSelection: agent.execution.settings,
           yoloEnabled: false,
-          commands: [command],
         })
-        assert(accepted.acceptedCommands[0]?.type === 'USER_MESSAGE', 'expected accepted image USER_MESSAGE')
+        sessionId = created.sessionId
+        const threadId = String(created.threadId)
         const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 180_000, intervalMs: 500 })
         assert(thread.status === 'IDLE', `image input thread not IDLE: ${thread.status}`)
         const { entries } = await getThreadSnapshot(ctx, threadId)
@@ -943,7 +928,7 @@ for (const def of REAL_MODEL_DEFINITIONS.filter((model) => model.imageInput)) {
           usage: { inputTokens, outputTokens, reasoningTokens, cacheReadTokens, cacheWriteTokens, cacheWriteByTtl, providerTotalTokens },
         }, 2))
       } finally {
-        await cleanupChat(ctx, chat)
+        await cleanupWorkspaceSession(ctx, space?.id, sessionId)
         await cleanupAgent(ctx, agent)
       }
     },

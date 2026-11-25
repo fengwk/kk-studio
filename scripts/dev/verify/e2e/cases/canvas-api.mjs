@@ -52,7 +52,7 @@ function transform(x, y, width = 100, height = 80) {
 }
 
 /** 创建空画布并断言 workspace ResourceRef 契约（HTTP 200）。 */
-async function createCanvas(ctx, title) {
+export async function createCanvas(ctx, title) {
   const spaceId = await ctx.createSpace(`e2e-space-${cid().slice(0, 8)}`)
   const tree = (await apiRequest(ctx, 'GET', `/api/chat-spaces/${spaceId}/tree`)).json
   const folderId = tree.folders[0]?.id

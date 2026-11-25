@@ -13,7 +13,14 @@ import test from 'node:test'
 
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import { functionBatch } from '../offline-canvas-contract.mjs'
-import { createAndRun, createClient, createStubCatalog, initializeOpencliPlugin, uploadBlob } from '../offline-smoke.mjs'
+import {
+  canvasBlobUrlPath,
+  createAndRun,
+  createClient,
+  createStubCatalog,
+  initializeOpencliPlugin,
+  uploadBlob,
+} from '../offline-smoke.mjs'
 import { CANVAS_ID, documentDto, functionDefinitions, functionVersion, patchDto, runDto } from './support/canvas-dto.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
@@ -217,6 +224,12 @@ test('test intent: the stub catalog uses the unified SecretUpdate credential and
     settings: { modelName: 'acceptance-stub', variant: 'default' },
   })
   assert.deepEqual(agent.config, { tools: [], skills: [], subagents: [] })
+})
+
+test('test intent: Canvas Blob signing uses holder-scoped Blob routes, never resource IDs', () => {
+  assert.equal(canvasBlobUrlPath('canvas-1', 'blob-1', 'download-url'), '/api/canvas/canvases/canvas-1/blobs/blob-1/download-url')
+  assert.equal(canvasBlobUrlPath('canvas-2', 'blob-2', 'preview-url'), '/api/canvas/canvases/canvas-2/blobs/blob-2/preview-url')
+  assert.throws(() => canvasBlobUrlPath('canvas-1', 'blob-1', 'resource-preview-url'), assert.AssertionError)
 })
 
 test('test intent: blob upload reads the current PENDING/READY union and enforces create-only PUT', async () => {
