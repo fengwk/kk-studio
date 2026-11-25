@@ -1,5 +1,13 @@
 import { request } from '@/shared/api/client'
-import type { ChatSpaceCreateDTO, ChatSpacePatchDTO, FolderCreateDTO, CanvasCreateDTO } from '@/shared/api/generated/contracts'
+import type {
+  CanvasCreateDTO,
+  ChatSpaceCreateDTO,
+  ChatSpacePatchDTO,
+  FolderCreateDTO,
+  ScheduleDraftDTO,
+  SchedulePatchDTO,
+  SchedulePreviewRequestDTO,
+} from '@/shared/api/generated/contracts'
 import type { TreeDrop, TreeRow } from './resource-tree'
 
 export const listSpaces = (signal?: AbortSignal) => request('GET /api/chat-spaces', {}, { signal })
@@ -76,3 +84,33 @@ export function deleteTreeRow(spaceId: string, deletion: TreeDeletion) {
     })
   }
 }
+
+export const listSchedules = (spaceId: string, signal?: AbortSignal) =>
+  request('GET /api/chat-spaces/{spaceId}/schedules', { path: { spaceId } }, { signal })
+
+export const previewSchedule = (spaceId: string, body: SchedulePreviewRequestDTO, signal?: AbortSignal) =>
+  request('POST /api/chat-spaces/{spaceId}/schedules/preview', { path: { spaceId }, body }, { signal })
+
+export const createSchedule = (spaceId: string, body: ScheduleDraftDTO, idempotencyKey: string) =>
+  request('POST /api/chat-spaces/{spaceId}/schedules', { path: { spaceId }, body }, { idempotencyKey })
+
+export const patchSchedule = (spaceId: string, id: string, body: SchedulePatchDTO) =>
+  request('PATCH /api/chat-spaces/{spaceId}/schedules/{id}', { path: { spaceId, id }, body })
+
+export const deleteSchedule = (spaceId: string, id: string, expectedVersion: string) =>
+  request('DELETE /api/chat-spaces/{spaceId}/schedules/{id}', { path: { spaceId, id }, query: { expectedVersion } })
+
+export const runScheduleNow = (spaceId: string, id: string, idempotencyKey: string) =>
+  request('POST /api/chat-spaces/{spaceId}/schedules/{id}/runs', { path: { spaceId, id } }, { idempotencyKey })
+
+export const listScheduleRuns = (spaceId: string, id: string, before: string | null, signal?: AbortSignal) =>
+  request('GET /api/chat-spaces/{spaceId}/schedules/{id}/runs', {
+    path: { spaceId, id },
+    query: before ? { before } : undefined,
+  }, { signal })
+
+export const listAgentSummaries = (signal?: AbortSignal) =>
+  request('GET /api/platform/agent-summaries', {}, { signal })
+
+export const getThreadEntriesSnapshot = (threadId: string, signal?: AbortSignal) =>
+  request('GET /api/harness/threads/{threadId}', { path: { threadId } }, { signal })

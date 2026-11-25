@@ -25,7 +25,7 @@
  *   - thread-tree changed：仅旧版内部提示，不用于浏览器数据流。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
- *   - chat-space tree {treeVersion} / threads {} / space {version}：仅提示回读，不带 cursor。
+ *   - chat-space tree {treeVersion} / threads {} / space {version} / schedules {scheduleId?}：仅提示回读，不带 cursor。
  * - {"type":"snapshot-ref","resource":{...}[,"version":"<canonical>"]}：该资源快照本身超出单帧预算，
  *   服务端不发送它，客户端必须回读 HTTP 权威事实。Thread 必带顶层真实权威 version（canonical
  *   非负十进制，取自 DTO 而不是合成游标），thread-tree 不带 version。它只是该资源的恢复提示，
@@ -91,7 +91,7 @@ export type ApplicationEventResource =
   | { kind: 'environments' }
   | { kind: 'chat-space'; id: string }
 
-export type ApplicationEventName = 'realtime' | 'changed' | 'revision' | 'snapshot' | 'tree' | 'threads' | 'space'
+export type ApplicationEventName = 'realtime' | 'changed' | 'revision' | 'snapshot' | 'tree' | 'threads' | 'space' | 'schedules'
 
 /**
  * 资源快照超出单帧预算的提示；{@link ApplicationEventServerMessage} 中的 snapshot-ref 帧。
@@ -232,7 +232,8 @@ type ApplicationEventChatSpaceEvent = {
   resource: Extract<ApplicationEventResource, { kind: 'chat-space' }>
 } & ({ name: 'tree'; data: { treeVersion: string } }
   | { name: 'threads'; data: Record<string, never> }
-  | { name: 'space'; data: { version: string } })
+  | { name: 'space'; data: { version: string } }
+  | { name: 'schedules'; data: { scheduleId?: string } })
 
 export type ApplicationEventServerMessage =
   | { type: 'connected'; eventNodeId: string; connectionId: string; heartbeatIntervalMillis: string }
@@ -473,6 +474,12 @@ function decodeEventData(
         const version = parseCursor(data.version)
         if (version !== null) return { type: 'event', resource, name, data: { version } }
       }
+      if (name === 'schedules') {
+        if (hasExactFields(data, [])) return { type: 'event', resource, name, data: {} }
+        if (hasExactFields(data, ['scheduleId']) && isCanonicalUuid(data.scheduleId)) {
+          return { type: 'event', resource, name, data: { scheduleId: data.scheduleId } }
+        }
+      }
       return null
     }
   }
@@ -518,7 +525,7 @@ function isEventNameFor(
     case 'thread-tree':
       return name === 'snapshot' || name === 'changed'
     case 'chat-space':
-      return name === 'tree' || name === 'threads' || name === 'space'
+      return name === 'tree' || name === 'threads' || name === 'space' || name === 'schedules'
     default:
       return name === 'changed'
   }
@@ -872,6 +879,7 @@ function isEventName(value: unknown): value is ApplicationEventName {
     || value === 'tree'
     || value === 'threads'
     || value === 'space'
+    || value === 'schedules'
 }
 
 function parseCursor(value: unknown): ApplicationEventCursor | null {
