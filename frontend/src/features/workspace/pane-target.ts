@@ -50,6 +50,8 @@ export type PaneRendererProps<T extends PaneTarget> = {
   replace: (next: PaneTarget) => void
   /** Open another target through the workspace open flow (directly, or after the pane picker). */
   open: (next: PaneTarget, anchor?: HTMLElement | null) => void
+  /** Open another target without replacing this pane: in an empty pane, otherwise in a new pane split from this one. */
+  openBeside: (next: PaneTarget) => void
   /** Report whether the pane holds unsent input; the workspace confirms before replacing or closing it. */
   onUnsentChange: (unsent: boolean) => void
   /** Open the space's default configuration (default Agent, environment and permission). */
