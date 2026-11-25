@@ -45,7 +45,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -122,7 +122,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             new AllowGateway(),
             new IdeViewSnapshotStore(transportB),
             Duration.ofSeconds(1),
-            mock(HarnessOwnerQueryService.class),
+            mock(ResourceAccess.class),
             mock(SessionBlobRefManager.class),
             mock(StorageBlobRepository.class),
             mock(StorageBlobContentService.class));
@@ -463,7 +463,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         new AllowGateway(),
         new IdeViewSnapshotStore(localTransportA),
         Duration.ofSeconds(1),
-        mock(HarnessOwnerQueryService.class),
+        mock(ResourceAccess.class),
         mock(SessionBlobRefManager.class),
         mock(StorageBlobRepository.class),
         mock(StorageBlobContentService.class));
@@ -741,13 +741,14 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       return true;
     }
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
       return Optional.empty();
     }
   }

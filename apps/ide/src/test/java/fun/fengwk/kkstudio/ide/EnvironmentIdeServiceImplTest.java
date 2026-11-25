@@ -30,6 +30,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -38,7 +40,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -74,6 +77,9 @@ class EnvironmentIdeServiceImplTest {
   private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
   private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
   private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(USER_ID, "test", StudioRole.USER);
   private static final UUID ATTACHMENT_ID = UUID.fromString("abcdefab-cdef-4abc-8def-abcdefabcdef");
   private static final UUID ATTACHMENT_SESSION_ID =
       UUID.fromString("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
@@ -86,7 +92,7 @@ class EnvironmentIdeServiceImplTest {
   private FakeBrowserUse browserUse;
   private IdeBootstrapTicketService tickets;
   private IdeViewSnapshotStore snapshots;
-  private HarnessOwnerQueryService ownerQueryService;
+  private ResourceAccess resourceAccess;
   private SessionBlobRefManager sessionBlobRefManager;
   private StorageBlobRepository blobRepository;
   private StorageBlobContentService blobContentService;
@@ -98,7 +104,7 @@ class EnvironmentIdeServiceImplTest {
     browserUse = new FakeBrowserUse();
     tickets = new IdeBootstrapTicketService();
     snapshots = new IdeViewSnapshotStore(transport);
-    ownerQueryService = mock(HarnessOwnerQueryService.class);
+    resourceAccess = mock(ResourceAccess.class);
     sessionBlobRefManager = mock(SessionBlobRefManager.class);
     blobRepository = mock(StorageBlobRepository.class);
     blobContentService = mock(StorageBlobContentService.class);
@@ -109,17 +115,32 @@ class EnvironmentIdeServiceImplTest {
             browserUse,
             snapshots,
             Duration.ofMillis(150),
-            ownerQueryService,
+            resourceAccess,
             sessionBlobRefManager,
             blobRepository,
             blobContentService);
   }
 
   @Test
+  void createListsViewsBeforeOpeningAndRejectsAnotherUserForTheSameView() {
+    transport.replies.add(openSnapshot(5L, 7L));
+
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
+
+    assertEquals(List.of(IdeAction.LIST_VIEWS, IdeAction.OPEN_VIEW), allActions());
+    StudioPrincipal otherPrincipal =
+        new StudioPrincipal(UUID.randomUUID(), "other", StudioRole.USER);
+    assertThrows(
+        DomainException.class,
+        () -> service.openView(ENV, openRequest("create", 0L, null), otherPrincipal));
+    assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
+  }
+
+  @Test
   void openViewUsesExplicitInstanceAndCompleteSnapshot() {
     transport.replies.add(openSnapshot(5L, 7L));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, "/client/dir"));
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, "/client/dir"), PRINCIPAL);
 
     assertEquals(VIEW.toString(), dto.getViewId());
     assertEquals(BROWSER_SESSION.toString(), dto.getBrowserSessionId());
@@ -135,7 +156,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(0L, command.getExpectedBindingEpoch());
     assertEquals(DAEMON_INSTANCE, command.getExpectedDaemonInstanceId());
     assertEquals(
-        List.of(new IntentQuery(EVENT_NODE, CONNECTION, BROWSER_SESSION, VIEW, CLAIM)),
+        List.of(new IntentQuery(EVENT_NODE, CONNECTION, BROWSER_SESSION, VIEW, CLAIM, USER_ID)),
         browserUse.queries);
   }
 
@@ -143,7 +164,7 @@ class EnvironmentIdeServiceImplTest {
   void zeroRootOpenOmitsDirectoryAndKeepsWorkspaceBinding() {
     transport.replies.add(snapshot(5L, zeroRootSummary(7L, CLAIM)));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null));
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
 
     assertNull(dto.getDirectory(), "a zero-root view must not report a directory");
     assertEquals("/daemon/ws", dto.getWorkspacePath());
@@ -160,7 +181,7 @@ class EnvironmentIdeServiceImplTest {
     transport.failNext.set(IdeAction.OPEN_VIEW);
     transport.replies.add(snapshot(5L, zeroRootSummary(7L, CLAIM)));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null));
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
 
     assertNull(dto.getDirectory());
     assertEquals("/daemon/ws", dto.getWorkspacePath());
@@ -176,7 +197,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("IDE_PROTOCOL_ERROR", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -185,7 +206,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void changeDirectoryStillRequiresADirectory() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
     change.setBrowserSessionId(BROWSER_SESSION.toString());
     change.setBindingEpoch(7L);
@@ -193,7 +214,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("validation", error.code().code());
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -205,7 +226,7 @@ class EnvironmentIdeServiceImplTest {
     request.setExpectedDaemonInstanceId(null);
 
     DomainException error =
-        assertThrows(DomainException.class, () -> service.openView(ENV, request));
+        assertThrows(DomainException.class, () -> service.openView(ENV, request, PRINCIPAL));
 
     assertEquals("validation", error.code().code());
     assertTrue(transport.commands.isEmpty());
@@ -217,7 +238,7 @@ class EnvironmentIdeServiceImplTest {
     request.setExpectedDaemonInstanceId(REPLACEMENT_INSTANCE);
 
     DomainException error =
-        assertThrows(DomainException.class, () -> service.openView(ENV, request));
+        assertThrows(DomainException.class, () -> service.openView(ENV, request, PRINCIPAL));
 
     assertEquals("VIEW_GONE", error.reason());
     assertTrue(transport.commands.isEmpty());
@@ -229,12 +250,12 @@ class EnvironmentIdeServiceImplTest {
     EnvironmentIdeOpenViewDTO open = openRequest("create", 0L, null);
     open.setExpectedDaemonInstanceId(invalid);
     DomainException openError =
-        assertThrows(DomainException.class, () -> service.openView(ENV, open));
+        assertThrows(DomainException.class, () -> service.openView(ENV, open, PRINCIPAL));
     assertEquals("validation", openError.code().code());
     assertTrue(transport.commands.isEmpty());
 
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     int before = transport.commands.size();
 
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
@@ -245,7 +266,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(
         "validation",
         assertThrows(
-                DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change))
+                DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL))
             .code()
             .code());
 
@@ -253,7 +274,7 @@ class EnvironmentIdeServiceImplTest {
     close.setExpectedDaemonInstanceId(invalid);
     assertEquals(
         "validation",
-        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close))
+        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close, PRINCIPAL))
             .code()
             .code());
 
@@ -262,7 +283,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(
         "validation",
         assertThrows(
-                DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), focus))
+                DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), focus, PRINCIPAL))
             .code()
             .code());
 
@@ -271,7 +292,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(
         "validation",
         assertThrows(
-                DomainException.class, () -> service.collapseMobile(ENV, VIEW.toString(), apply))
+                DomainException.class, () -> service.collapseMobile(ENV, VIEW.toString(), apply, PRINCIPAL))
             .code()
             .code());
 
@@ -284,7 +305,7 @@ class EnvironmentIdeServiceImplTest {
     transport.failNext.set(IdeAction.OPEN_VIEW);
     transport.replies.add(openSnapshot(5L, 7L));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null));
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
 
     assertEquals(7L, dto.getBindingEpoch());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
@@ -299,7 +320,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
@@ -313,7 +334,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -322,11 +343,11 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void readViewReturnsAuthoritativeSnapshotWithoutEntryUrl() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     transport.replies.add(snapshot(6L, summary(7L, CLAIM)));
 
     EnvironmentIdeViewSnapshotDTO snapshot =
-        service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION));
+        service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION), PRINCIPAL);
 
     assertEquals(6L, snapshot.getRevision());
     assertEquals(DAEMON_INSTANCE, snapshot.getDaemonInstanceId());
@@ -340,7 +361,7 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(snapshot(4L));
 
     EnvironmentIdeViewSnapshotDTO snapshot =
-        service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION));
+        service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION), PRINCIPAL);
 
     assertEquals(4L, snapshot.getRevision());
     assertNull(snapshot.getView());
@@ -353,7 +374,7 @@ class EnvironmentIdeServiceImplTest {
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION)));
+            () -> service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertTrue(transport.commands.isEmpty());
@@ -367,7 +388,7 @@ class EnvironmentIdeServiceImplTest {
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.readView(ENV, VIEW.toString(), readRequest(otherBrowserSession)));
+            () -> service.readView(ENV, VIEW.toString(), readRequest(otherBrowserSession), PRINCIPAL));
 
     assertEquals("VIEW_OWNED_BY_OTHER_SESSION", error.reason());
   }
@@ -375,12 +396,12 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void staleEpochAndAbsentViewKeepDistinctReasons() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
 
     EnvironmentIdeViewBindingDTO wrongEpoch = binding(8L);
     DomainException stale =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), wrongEpoch));
+            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), wrongEpoch, PRINCIPAL));
     assertEquals("STALE_BINDING", stale.reason());
 
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
@@ -391,14 +412,14 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(snapshot(7L));
     DomainException gone =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
     assertEquals("VIEW_GONE", gone.reason());
   }
 
   @Test
   void lowerRevisionReceiptCannotRemoveNewBinding() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
 
     // Daemon 迟到的低 revision 快照仍然没有该 view：接受结果必须保持当前高 revision 绑定。
     transport.replies.add(snapshot(4L));
@@ -412,7 +433,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void changeDirectoryUsesReplySnapshotAndDeleteDoesNotReadBack() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
     change.setBrowserSessionId(BROWSER_SESSION.toString());
     change.setBindingEpoch(7L);
@@ -420,7 +441,7 @@ class EnvironmentIdeServiceImplTest {
     change.setDirectory("/next");
     transport.replies.add(snapshot(6L, summary(7L, CLAIM, "/daemon/next")));
 
-    EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), change);
+    EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL);
 
     assertEquals("/daemon/next", changed.getDirectory());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY), actions());
@@ -435,6 +456,7 @@ class EnvironmentIdeServiceImplTest {
         VIEW.toString(),
         ATTACHMENT_SESSION_ID.toString(),
         ATTACHMENT_ID.toString(),
+        PRINCIPAL,
         binding(7L));
 
     IdeCommand command = transport.commands.get(1);
@@ -443,7 +465,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals("hello attachment", command.getAttachmentText());
     assertFalse(command.hasDirectory());
     assertFalse(command.hasDiscard());
-    verify(ownerQueryService).requireOwnedSession(ATTACHMENT_SESSION_ID);
+    verify(resourceAccess).require(PRINCIPAL, Kind.SESSION, ATTACHMENT_SESSION_ID);
   }
 
   @Test
@@ -458,6 +480,7 @@ class EnvironmentIdeServiceImplTest {
                 VIEW.toString(),
                 ATTACHMENT_SESSION_ID.toString(),
                 ATTACHMENT_ID.toString(),
+                PRINCIPAL,
                 binding(7L)));
 
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -466,10 +489,10 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void openAttachmentRequiresOwnedSessionAndSessionResourceReference() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     doThrow(DomainException.notFound("session"))
-        .when(ownerQueryService)
-        .requireOwnedSession(ATTACHMENT_SESSION_ID);
+        .when(resourceAccess)
+        .require(PRINCIPAL, Kind.SESSION, ATTACHMENT_SESSION_ID);
 
     assertThrows(
         DomainException.class,
@@ -479,6 +502,7 @@ class EnvironmentIdeServiceImplTest {
                 VIEW.toString(),
                 ATTACHMENT_SESSION_ID.toString(),
                 ATTACHMENT_ID.toString(),
+                PRINCIPAL,
                 binding(7L)));
 
     verify(sessionBlobRefManager, never()).contains(ATTACHMENT_SESSION_ID, ATTACHMENT_ID);
@@ -497,6 +521,7 @@ class EnvironmentIdeServiceImplTest {
                 VIEW.toString(),
                 ATTACHMENT_SESSION_ID.toString(),
                 ATTACHMENT_ID.toString(),
+                PRINCIPAL,
                 binding(7L)));
 
     verifyNoInteractions(blobContentService);
@@ -515,6 +540,7 @@ class EnvironmentIdeServiceImplTest {
                 VIEW.toString(),
                 ATTACHMENT_SESSION_ID.toString(),
                 ATTACHMENT_ID.toString(),
+                PRINCIPAL,
                 binding(7L)));
 
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -530,6 +556,7 @@ class EnvironmentIdeServiceImplTest {
                 VIEW.toString(),
                 ATTACHMENT_SESSION_ID.toString(),
                 ATTACHMENT_ID.toString().toUpperCase(),
+                PRINCIPAL,
                 binding(7L)));
 
     assertTrue(transport.commands.isEmpty());
@@ -538,10 +565,10 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void boundCommandsCarryBrowserSessionAndEpochAndCloseRevokesTicket() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeViewBindingDTO binding = binding(7L);
     transport.replies.add(snapshot(6L, summary(7L, CLAIM)));
-    service.focusTerminal(ENV, VIEW.toString(), binding);
+    service.focusTerminal(ENV, VIEW.toString(), binding, PRINCIPAL);
 
     IdeCommand focus = transport.commands.get(1);
     assertEquals(IdeAction.FOCUS_TERMINAL, focus.getAction());
@@ -551,7 +578,7 @@ class EnvironmentIdeServiceImplTest {
 
     EnvironmentIdeCloseViewDTO close = closeRequest(true);
     transport.replies.add(snapshot(7L));
-    service.closeView(ENV, VIEW.toString(), close);
+    service.closeView(ENV, VIEW.toString(), close, PRINCIPAL);
 
     IdeCommand closed = transport.commands.get(2);
     assertEquals(IdeAction.CLOSE_VIEW, closed.getAction());
@@ -564,7 +591,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void listViewsRevokesReplacedEpochTicket() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     assertEquals(1, tickets.pendingCount());
     transport.replies.add(snapshot(6L, summary(8L, CLAIM)));
 
@@ -577,14 +604,14 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void changeDirectoryRejectsOldEpochAfterResume() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     transport.replies.add(snapshot(6L, summary(8L, CLAIM)));
 
     service.listViews(ENV);
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
@@ -592,12 +619,12 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void daemonGenerationReplacementInvalidatesCachedBindings() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     transport.replaceCurrent(new DaemonConnectionIdentity(ENV, REPLACEMENT_INSTANCE));
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
 
     assertEquals("VIEW_GONE", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -606,7 +633,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void lateSnapshotFromReplacedInstanceIsRejectedWithoutReplacingCurrentCache() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, REPLACEMENT_INSTANCE);
     transport.replaceCurrent(replacement);
     transport.replyAs(new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE));
@@ -621,7 +648,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void changeDirectoryRejectsReplyWhenBindingEpochChangedBeforeCacheWrite() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
     change.setBrowserSessionId(BROWSER_SESSION.toString());
     change.setBindingEpoch(7L);
@@ -631,7 +658,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     IdeViewSnapshotStore.Snapshot current = snapshot();
@@ -646,7 +673,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
@@ -657,12 +684,12 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void terminalOutcomeUnknownIsNotReplayed() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     transport.failNext.set(IdeAction.FOCUS_TERMINAL);
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.FOCUS_TERMINAL), actions());
@@ -672,21 +699,21 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void normalCloseWaitsForReplyWhileOtherCommandsRemainBounded() throws Exception {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
 
     transport.failNext.set(IdeAction.FOCUS_TERMINAL);
     assertThrows(
-        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
 
     transport.failNext.set(IdeAction.CLOSE_VIEW);
     assertThrows(
-        DomainException.class, () -> service.closeView(ENV, VIEW.toString(), closeRequest(true)));
+        DomainException.class, () -> service.closeView(ENV, VIEW.toString(), closeRequest(true), PRINCIPAL));
 
     CountDownLatch started = new CountDownLatch(1);
     CompletableFuture<IdeResult> pendingReply = transport.pending(started);
     CompletableFuture<Void> waiting =
         CompletableFuture.runAsync(
-            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false)));
+            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false), PRINCIPAL));
     try {
       assertTrue(started.await(2, TimeUnit.SECONDS));
       assertThrows(TimeoutException.class, () -> waiting.get(500, TimeUnit.MILLISECONDS));
@@ -703,7 +730,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void interruptingNormalCloseAbandonsPendingCommandWithOutcomeUnknown() throws Exception {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     CountDownLatch started = new CountDownLatch(1);
     CompletableFuture<IdeResult> pendingReply = transport.pending(started);
     AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -712,7 +739,7 @@ class EnvironmentIdeServiceImplTest {
         new Thread(
             () -> {
               try {
-                service.closeView(ENV, VIEW.toString(), closeRequest(false));
+                service.closeView(ENV, VIEW.toString(), closeRequest(false), PRINCIPAL);
               } catch (RuntimeException error) {
                 failure.set(error);
                 interrupted.set(Thread.currentThread().isInterrupted());
@@ -738,13 +765,13 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void cancelledCloseKeepsBindingAndReason() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeCloseViewDTO close = closeRequest(false);
     transport.replies.add(
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
 
     DomainException error =
-        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close));
+        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close, PRINCIPAL));
 
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
     assertEquals("validation", error.code().code());
@@ -756,7 +783,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void cancelledChangeDirectoryKeepsBindingTicketsAndLeaseSnapshot() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
     change.setBrowserSessionId(BROWSER_SESSION.toString());
     change.setBindingEpoch(7L);
@@ -771,7 +798,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
     assertEquals("validation", error.code().code());
@@ -786,7 +813,7 @@ class EnvironmentIdeServiceImplTest {
 
     // 同 epoch 的重试仍被授权，而不是退化为 STALE_BINDING/VIEW_GONE。
     transport.replies.add(snapshot(6L, summary(7L, CLAIM, "/daemon/next")));
-    EnvironmentIdeViewDTO retried = service.changeDirectory(ENV, VIEW.toString(), change);
+    EnvironmentIdeViewDTO retried = service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL);
     assertEquals("/daemon/next", retried.getDirectory());
   }
 
@@ -796,7 +823,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("DAEMON_NOT_READY", error.reason());
     assertTrue(transport.commands.isEmpty());
@@ -808,7 +835,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertTrue(transport.commands.isEmpty());
@@ -818,7 +845,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void missingIntentDoesNotDeleteExistingViewOrDispatchWriteCommand() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     int before = transport.commands.size();
     assertTrue(snapshot().find(VIEW).isPresent());
     assertEquals(1, tickets.pendingCount());
@@ -827,7 +854,7 @@ class EnvironmentIdeServiceImplTest {
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false)));
+            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(before, transport.commands.size());
@@ -842,7 +869,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -857,7 +884,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
+            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("VIEW_GONE", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -867,14 +894,14 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void closeViewGoneRevokesExactBindingTicket() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     transport.replies.add(
         IdeResult.newBuilder().setOk(false).setCode("VIEW_GONE").setMessage("gone").build());
 
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false)));
+            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false), PRINCIPAL));
 
     assertEquals("VIEW_GONE", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -883,7 +910,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void changeDirectoryUnknownOutcomeIsNotReplayedOrAccepted() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
     change.setBrowserSessionId(BROWSER_SESSION.toString());
     change.setBindingEpoch(7L);
@@ -893,7 +920,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY), actions());
@@ -903,7 +930,7 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void changeDirectoryRejectsDifferentBindingBeforeCacheWrite() {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
     change.setBrowserSessionId(BROWSER_SESSION.toString());
     change.setBindingEpoch(7L);
@@ -914,7 +941,7 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     IdeViewSnapshotStore.Snapshot current = snapshot();
@@ -933,7 +960,7 @@ class EnvironmentIdeServiceImplTest {
             browserUse,
             snapshots,
             Duration.ofMillis(150),
-            ownerQueryService,
+            resourceAccess,
             sessionBlobRefManager,
             blobRepository,
             blobContentService);
@@ -951,7 +978,7 @@ class EnvironmentIdeServiceImplTest {
 
     transport.replies.add(snapshot(3L, summary(3L, CLAIM)));
     service.listViews(ENV);
-    String newTicket = blockingTickets.issue(identity, VIEW.toString(), 3L, "/daemon/ws");
+    String newTicket = blockingTickets.issue(identity, VIEW.toString(), 3L, "/daemon/ws", USER_ID);
 
     blockingTickets.release.countDown();
     lateRev2.join(2000);
@@ -963,7 +990,7 @@ class EnvironmentIdeServiceImplTest {
 
   private void prepareAttachment(byte[] bytes, String mediaType) {
     transport.replies.add(openSnapshot(5L, 7L));
-    service.openView(ENV, openRequest("create", 0L, null));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
     when(sessionBlobRefManager.contains(ATTACHMENT_SESSION_ID, ATTACHMENT_ID)).thenReturn(true);
     StorageBlob blob = new StorageBlob();
     blob.setId(ATTACHMENT_ID);
@@ -982,6 +1009,10 @@ class EnvironmentIdeServiceImplTest {
 
   private List<IdeAction> actions() {
     return transport.commands.stream().map(IdeCommand::getAction).toList();
+  }
+
+  private List<IdeAction> allActions() {
+    return transport.allActions;
   }
 
   private static EnvironmentIdeOpenViewDTO openRequest(
@@ -1072,15 +1103,22 @@ class EnvironmentIdeServiceImplTest {
   }
 
   private record IntentQuery(
-      UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID viewId, UUID claimId) {}
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID browserSessionId,
+      UUID viewId,
+      UUID claimId,
+      UUID userId) {}
 
-  private static final class FakeTransport extends IdeCommandTransport {
+  private final class FakeTransport extends IdeCommandTransport {
 
     private FakeTransport() {
       super(mock(EnvironmentDaemonServer.class));
     }
 
     private final List<IdeCommand> commands = new CopyOnWriteArrayList<>();
+    private final List<IdeAction> allActions = new CopyOnWriteArrayList<>();
+    private int preflightIntentCount;
     private final Deque<IdeResult> replies = new ArrayDeque<>();
     private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
     private final AtomicInteger abandoned = new AtomicInteger();
@@ -1094,7 +1132,15 @@ class EnvironmentIdeServiceImplTest {
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
-      commands.add(command);
+      allActions.add(command.getAction());
+      boolean createPreflight =
+          command.getAction() == IdeAction.LIST_VIEWS
+              && browserUse.queries.size() > preflightIntentCount;
+      if (createPreflight) {
+        preflightIntentCount = browserUse.queries.size();
+      } else {
+        commands.add(command);
+      }
       CompletableFuture<IdeResult> future;
       CompletableFuture<IdeResult> pending = pendingReply;
       if (pending != null) {
@@ -1106,6 +1152,9 @@ class EnvironmentIdeServiceImplTest {
         }
       } else {
         future = new CompletableFuture<>();
+        if (createPreflight) {
+          future.complete(snapshot(1L));
+        }
         IdeAction failAction = failNext.get();
         if (failAction == command.getAction() && failNext.compareAndSet(failAction, null)) {
           // 让该命令超时，模拟结果未知。
@@ -1113,7 +1162,7 @@ class EnvironmentIdeServiceImplTest {
           if (hook != null) {
             hook.run();
           }
-        } else {
+        } else if (!createPreflight) {
           synchronized (replies) {
             future.complete(replies.removeFirst());
           }
@@ -1173,14 +1222,16 @@ class EnvironmentIdeServiceImplTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
-      queries.add(new IntentQuery(eventNodeId, connectionId, browserSessionId, viewId, claimId));
+        UUID claimId,
+        UUID userId) {
+      queries.add(
+          new IntentQuery(eventNodeId, connectionId, browserSessionId, viewId, claimId, userId));
       return matched;
     }
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
       return Optional.empty();
     }
   }

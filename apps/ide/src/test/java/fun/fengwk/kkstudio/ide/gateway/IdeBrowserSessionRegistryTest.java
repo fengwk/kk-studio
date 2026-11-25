@@ -30,6 +30,7 @@ class IdeBrowserSessionRegistryTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final DaemonConnectionIdentity IDENTITY =
       new DaemonConnectionIdentity(ENV, "daemon-1");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
 
   private IdeBrowserSessionRegistry registry() {
     return registry(new MutableClock(Instant.parse("2026-01-01T00:00:00Z")), Duration.ofHours(1));
@@ -45,7 +46,7 @@ class IdeBrowserSessionRegistryTest {
         IllegalArgumentException.class,
         () ->
             new IdeBrowserSessionRegistry.Session(
-                IDENTITY, UUID.randomUUID().toString(), 0L, "/workspace"),
+                IDENTITY, UUID.randomUUID().toString(), 0L, "/workspace", USER_ID),
         "cookie 会话不得接受非正 bindingEpoch");
   }
 
@@ -55,7 +56,7 @@ class IdeBrowserSessionRegistryTest {
     IdeBrowserSessionRegistry registry = registry(clock, Duration.ofHours(1));
     String viewId = UUID.randomUUID().toString();
 
-    String token = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    String token = registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
     assertNotNull(token);
     Optional<IdeBrowserSessionRegistry.Session> session = registry.lookup(token, ENV, viewId);
     assertTrue(session.isPresent());
@@ -71,9 +72,9 @@ class IdeBrowserSessionRegistryTest {
     IdeBrowserSessionRegistry registry = registry();
     String viewId = UUID.randomUUID().toString();
 
-    String first = registry.open(IDENTITY, viewId, 1L, "/workspace");
-    String same = registry.open(IDENTITY, viewId, 1L, "/workspace");
-    String nextEpoch = registry.open(IDENTITY, viewId, 2L, "/workspace");
+    String first = registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
+    String same = registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
+    String nextEpoch = registry.open(IDENTITY, viewId, 2L, "/workspace", USER_ID);
 
     assertEquals(first, same);
     assertNotEquals(first, nextEpoch);
@@ -87,7 +88,7 @@ class IdeBrowserSessionRegistryTest {
   void lookupIsScopedByEnvironmentViewAndKnownToken() {
     IdeBrowserSessionRegistry registry = registry();
     String viewId = UUID.randomUUID().toString();
-    String token = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    String token = registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
     EnvironmentId otherEnv = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
 
     assertFalse(registry.lookup("unknown", ENV, viewId).isPresent());
@@ -100,10 +101,10 @@ class IdeBrowserSessionRegistryTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry registry = registry(clock, Duration.ofHours(1));
     String viewId = UUID.randomUUID().toString();
-    String first = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    String first = registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
 
     clock.advance(Duration.ofHours(2));
-    String renewed = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    String renewed = registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
 
     assertNotEquals(first, renewed, "过期会话不复用旧 cookie 值");
     assertFalse(registry.lookup(first, ENV, viewId).isPresent());
@@ -117,7 +118,7 @@ class IdeBrowserSessionRegistryTest {
     String previous = null;
 
     for (long epoch = 1L; epoch <= 20L; epoch++) {
-      String token = registry.open(IDENTITY, viewId, epoch, "/workspace");
+      String token = registry.open(IDENTITY, viewId, epoch, "/workspace", USER_ID);
       if (previous != null) {
         assertFalse(
             registry.lookup(previous, ENV, viewId).isPresent(),
@@ -135,12 +136,12 @@ class IdeBrowserSessionRegistryTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry registry = registry(clock, Duration.ofHours(1));
     String abandonedView = UUID.randomUUID().toString();
-    String abandoned = registry.open(IDENTITY, abandonedView, 1L, "/workspace");
+    String abandoned = registry.open(IDENTITY, abandonedView, 1L, "/workspace", USER_ID);
     assertTrue(registry.lookup(abandoned, ENV, abandonedView).isPresent());
 
     clock.advance(Duration.ofHours(2));
     String currentView = UUID.randomUUID().toString();
-    String current = registry.open(IDENTITY, currentView, 1L, "/workspace");
+    String current = registry.open(IDENTITY, currentView, 1L, "/workspace", USER_ID);
 
     assertEquals(1, sessionCount(registry), "过期条目不参与任何后续授权，应在下一次 open 时回收");
     assertEquals(tokenBySessionKeyCount(registry), sessionCount(registry), "两个索引必须同步清理");
@@ -152,8 +153,8 @@ class IdeBrowserSessionRegistryTest {
     IdeBrowserSessionRegistry registry = registry();
     String viewId = UUID.randomUUID().toString();
 
-    String current = registry.open(IDENTITY, viewId, 2L, "/workspace");
-    registry.open(IDENTITY, viewId, 1L, "/workspace");
+    String current = registry.open(IDENTITY, viewId, 2L, "/workspace", USER_ID);
+    registry.open(IDENTITY, viewId, 1L, "/workspace", USER_ID);
 
     assertTrue(
         registry.lookup(current, ENV, viewId).isPresent(), "迟到的旧 epoch 不能再撤销新 epoch 已签发的 cookie");

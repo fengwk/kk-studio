@@ -244,7 +244,8 @@ class IdeBindingsTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       queries++;
       if (runtimeFailure != null) {
         throw runtimeFailure;

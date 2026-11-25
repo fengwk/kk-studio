@@ -19,6 +19,9 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
@@ -40,6 +43,9 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   private static final UUID EVENT_NODE = UUID.fromString("44444444-4444-4444-8444-444444444444");
   private static final UUID CONNECTION = UUID.fromString("55555555-5555-4555-8555-555555555555");
   private static final UUID CLAIM = UUID.fromString("66666666-6666-4666-8666-666666666666");
+  private static final UUID USER_ID = UUID.fromString("77777777-7777-4777-8777-777777777777");
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(USER_ID, "test", StudioRole.USER);
   private static final DaemonConnectionIdentity IDENTITY =
       new DaemonConnectionIdentity(ENV, "daemon-1");
 
@@ -84,14 +90,19 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     SessionIdeDataViewAuthorizer authorizer =
         new SessionIdeDataViewAuthorizer(sessions, snapshots, transport);
 
-    String zeroRootToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/workspace");
+    String zeroRootToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/workspace", USER_ID);
     Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
         authorizer.authorize(ENV, VIEW, "kk_ide_session=" + zeroRootToken);
 
     assertTrue(access.isPresent(), "a zero-root view authorizes on its registered workspace file");
     assertEquals(Set.of("/workspace"), access.get().authorizedWorkspaces());
+    assertTrue(
+        authorizer.belongsToUser(ENV, VIEW, "kk_ide_session=" + zeroRootToken, USER_ID));
+    assertFalse(
+        authorizer.belongsToUser(
+            ENV, VIEW, "kk_ide_session=" + zeroRootToken, UUID.randomUUID()));
 
-    String foreignWorkspaceToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/elsewhere");
+    String foreignWorkspaceToken = sessions.open(IDENTITY, VIEW.toString(), 1L, "/elsewhere", USER_ID);
     assertFalse(
         authorizer.authorize(ENV, VIEW, "kk_ide_session=" + foreignWorkspaceToken).isPresent(),
         "the workspace file, not a directory, is the data-plane authority");
@@ -145,6 +156,7 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     Fixture fixture = fixture();
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getParameter("token")).thenReturn("valid-ticket");
+    when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
     when(request.getContextPath()).thenReturn("");
     when(request.isSecure()).thenReturn(true);
     HttpServletResponse response = mock(HttpServletResponse.class);
@@ -162,6 +174,20 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   }
 
   @Test
+  void bootstrapRejectsTicketForAnotherAccount() throws IOException {
+    Fixture fixture = fixture();
+    HttpServletRequest request = mock(HttpServletRequest.class);
+    when(request.getParameter("token")).thenReturn("valid-ticket");
+    when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE))
+        .thenReturn(new StudioPrincipal(UUID.randomUUID(), "other", StudioRole.USER));
+    HttpServletResponse response = mock(HttpServletResponse.class);
+
+    fixture.handler.handleBootstrap(ENV, VIEW, request, response);
+
+    verify(response).sendError(HttpServletResponse.SC_GONE);
+  }
+
+  @Test
   void bootstrapWithoutCurrentSnapshotIsGone() throws IOException {
     IdeBootstrapTicketService tickets = mock(IdeBootstrapTicketService.class);
     IdeBrowserSessionRegistry sessions = new IdeBrowserSessionRegistry();
@@ -172,11 +198,13 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     when(tickets.consume("ticket"))
         .thenReturn(
             Optional.of(
-                new IdeBootstrapTicketService.Ticket(IDENTITY, VIEW.toString(), 1L, "/workspace")));
+                new IdeBootstrapTicketService.Ticket(
+                    IDENTITY, VIEW.toString(), 1L, "/workspace", USER_ID)));
     IdeBrowserSessionHandler handler =
         new IdeBrowserSessionHandler(tickets, sessions, snapshots, transport);
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getParameter("token")).thenReturn("ticket");
+    when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
     HttpServletResponse response = mock(HttpServletResponse.class);
 
     handler.handleBootstrap(ENV, VIEW, request, response);
@@ -189,6 +217,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     Fixture otherEnvironment = fixture();
     HttpServletRequest otherEnvironmentRequest = mock(HttpServletRequest.class);
     when(otherEnvironmentRequest.getParameter("token")).thenReturn("valid-ticket");
+    when(otherEnvironmentRequest.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE))
+        .thenReturn(PRINCIPAL);
     HttpServletResponse otherEnvironmentResponse = mock(HttpServletResponse.class);
     otherEnvironment.handler.handleBootstrap(
         EnvironmentId.parse("99999999-9999-4999-8999-999999999999"),
@@ -200,6 +230,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     Fixture otherView = fixture();
     HttpServletRequest otherViewRequest = mock(HttpServletRequest.class);
     when(otherViewRequest.getParameter("token")).thenReturn("valid-ticket");
+    when(otherViewRequest.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE))
+        .thenReturn(PRINCIPAL);
     HttpServletResponse otherViewResponse = mock(HttpServletResponse.class);
     otherView.handler.handleBootstrap(ENV, UUID.randomUUID(), otherViewRequest, otherViewResponse);
     verify(otherViewResponse).sendError(HttpServletResponse.SC_GONE);
@@ -209,6 +241,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
         .thenReturn(Optional.of(new DaemonConnectionIdentity(ENV, "daemon-2")));
     HttpServletRequest replacedRequest = mock(HttpServletRequest.class);
     when(replacedRequest.getParameter("token")).thenReturn("valid-ticket");
+    when(replacedRequest.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE))
+        .thenReturn(PRINCIPAL);
     HttpServletResponse replacedResponse = mock(HttpServletResponse.class);
     replaced.handler.handleBootstrap(ENV, VIEW, replacedRequest, replacedResponse);
     verify(replacedResponse).sendError(HttpServletResponse.SC_GONE);
@@ -240,11 +274,13 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     when(tickets.consume("ticket"))
         .thenReturn(
             Optional.of(
-                new IdeBootstrapTicketService.Ticket(IDENTITY, VIEW.toString(), 1L, workspace)));
+                new IdeBootstrapTicketService.Ticket(
+                    IDENTITY, VIEW.toString(), 1L, workspace, USER_ID)));
     IdeBrowserSessionHandler handler =
         new IdeBrowserSessionHandler(tickets, sessions, snapshots, transport);
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getParameter("token")).thenReturn("ticket");
+    when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
     when(request.getContextPath()).thenReturn("");
     HttpServletResponse response = mock(HttpServletResponse.class);
 
@@ -363,11 +399,12 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
                 "/dir",
                 "/workspace",
                 IdeViewState.OPEN)));
-    String token = sessions.open(IDENTITY, VIEW.toString(), 1L, "/workspace");
+    String token = sessions.open(IDENTITY, VIEW.toString(), 1L, "/workspace", USER_ID);
     when(tickets.consume("valid-ticket"))
         .thenReturn(
             Optional.of(
-                new IdeBootstrapTicketService.Ticket(IDENTITY, VIEW.toString(), 1L, "/workspace")));
+                new IdeBootstrapTicketService.Ticket(
+                    IDENTITY, VIEW.toString(), 1L, "/workspace", USER_ID)));
     IdeBrowserSessionHandler handler =
         new IdeBrowserSessionHandler(tickets, sessions, snapshots, transport);
     SessionIdeDataViewAuthorizer authorizer =

@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterPresenceConfiguration;
 import fun.fengwk.kkstudio.platform.cluster.ClusterProperties;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -114,7 +114,7 @@ class ClusterEnvironmentIdeConfigurationTest {
                 JdbcTemplate.class, () -> new JdbcTemplate(mock(DataSource.class)));
             context.registerBean(IdeCommandTransport.class, () -> mock(IdeCommandTransport.class));
             context.registerBean(
-                HarnessOwnerQueryService.class, () -> mock(HarnessOwnerQueryService.class));
+                ResourceAccess.class, () -> mock(ResourceAccess.class));
             context.registerBean(
                 SessionBlobRefManager.class, () -> mock(SessionBlobRefManager.class));
             context.registerBean(

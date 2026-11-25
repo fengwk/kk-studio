@@ -42,7 +42,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -89,7 +89,7 @@ class ClusterEnvironmentIdeServiceTest {
             new AllowGateway(),
             new IdeViewSnapshotStore(localTransport),
             Duration.ofSeconds(1),
-            mock(HarnessOwnerQueryService.class),
+            mock(ResourceAccess.class),
             mock(SessionBlobRefManager.class),
             mock(StorageBlobRepository.class),
             mock(StorageBlobContentService.class));
@@ -103,7 +103,8 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeViewDTO dto = service.openView(ENV, openViewRequest(), PRINCIPAL);
 
     assertEquals(VIEW, dto.getViewId());
-    assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(0).getAction());
+    assertEquals(IdeAction.LIST_VIEWS, localTransport.commands.get(0).getAction());
+    assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(1).getAction());
     assertTrue(client.calls.isEmpty());
   }
 
@@ -411,6 +412,11 @@ class ClusterEnvironmentIdeServiceTest {
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
       CompletableFuture<IdeResult> reply = new CompletableFuture<>();
+      if (command.getAction() == IdeAction.LIST_VIEWS) {
+        reply.complete(IdeResult.newBuilder().setOk(true).setRevision(1L).build());
+        return new IdeRequest(
+            new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE), UUID.randomUUID(), reply);
+      }
       IdeResult.Builder builder =
           IdeResult.newBuilder()
               .setOk(true)
@@ -461,13 +467,14 @@ class ClusterEnvironmentIdeServiceTest {
         UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
-        UUID claimId) {
+        UUID claimId,
+        UUID userId) {
       return true;
     }
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId, UUID userId) {
       return Optional.empty();
     }
   }
