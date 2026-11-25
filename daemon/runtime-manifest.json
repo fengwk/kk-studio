@@ -1,25 +1,25 @@
 {
-  "codeServerVersion": "4.145.2-kk.4",
+  "codeServerVersion": "4.146.0-kk.1",
   "codeServer": {
     "linux-amd64": {
-      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.2-kk.4/code-server-4.145.2-kk.4-linux-amd64.tar.gz",
-      "sha256": "9e737cdbb3024fa2dd1845a52b838b9744b9000ce610dd324c56123615edd005"
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.146.0-kk.1/code-server-4.146.0-kk.1-linux-amd64.tar.gz",
+      "sha256": "0856a958485ca36c5832d31dffaf460ac9cd67aa215192a0523ede497e884a67"
     },
     "linux-arm64": {
-      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.2-kk.4/code-server-4.145.2-kk.4-linux-arm64.tar.gz",
-      "sha256": "f08f032f3c4545e44f39df268050ffa5933f7a46830338e1dc1febbbe3391c0d"
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.146.0-kk.1/code-server-4.146.0-kk.1-linux-arm64.tar.gz",
+      "sha256": "c0139473451f6dee45c312c02f0ab58ace9074a398ebec45c8bfbe3c29ae2969"
     },
     "macos-amd64": {
-      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.2-kk.4/code-server-4.145.2-kk.4-macos-amd64.tar.gz",
-      "sha256": "90eb73b0acf7e63b63f0017fc10ea4ae0b4cfa130be2e34f2e6ebc467067848b"
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.146.0-kk.1/code-server-4.146.0-kk.1-macos-amd64.tar.gz",
+      "sha256": "5b1114af5545f5a7a024b488fda43ef755db1df45a36f0c81dd17c8e1570a912"
     },
     "macos-arm64": {
-      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.2-kk.4/code-server-4.145.2-kk.4-macos-arm64.tar.gz",
-      "sha256": "53d7243c3094e6afc164ab4e555090dc22eccffb3ef2c55138b87fe6694b01dc"
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.146.0-kk.1/code-server-4.146.0-kk.1-macos-arm64.tar.gz",
+      "sha256": "c4b823ffa2189dc2b3a78b9c48fbdfcd1d33b46de1faa5a457e3c30668521f3f"
     },
     "windows-amd64": {
-      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.2-kk.4/code-server-4.145.2-kk.4-windows-amd64.tar.gz",
-      "sha256": "96ebf8c731230ca1846952a40a7b71390ba5a43f9d3df44763b06255305b771c"
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.146.0-kk.1/code-server-4.146.0-kk.1-windows-amd64.tar.gz",
+      "sha256": "89bce6164ad144c513743c1f522310d3b944bc0d67b8bfc064c1d25a355e3c4f"
     }
   }
 }
