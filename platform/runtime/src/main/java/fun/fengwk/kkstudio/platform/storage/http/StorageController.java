@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
@@ -40,7 +41,7 @@ public class StorageController {
   @ResponseStatus(HttpStatus.CREATED)
   public StorageUploadDTO reserve(
       @RequestBody StorageUploadReserveRequestDTO request,
-      @RequestAttribute("studioPrincipal") StudioPrincipal principal) {
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal) {
     return uploadService.reserve(request, principal.userId());
   }
 
@@ -48,7 +49,7 @@ public class StorageController {
   @PostMapping("/uploads/{uploadId}/complete")
   public StorageUploadDTO complete(
       @PathVariable("uploadId") UUID uploadId,
-      @RequestAttribute("studioPrincipal") StudioPrincipal principal) {
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal) {
     return uploadService.complete(uploadId, principal.userId());
   }
 
@@ -57,7 +58,7 @@ public class StorageController {
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void delete(
       @PathVariable("uploadId") UUID uploadId,
-      @RequestAttribute("studioPrincipal") StudioPrincipal principal) {
+      @RequestAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE) StudioPrincipal principal) {
     uploadService.delete(uploadId, principal.userId());
   }
 }

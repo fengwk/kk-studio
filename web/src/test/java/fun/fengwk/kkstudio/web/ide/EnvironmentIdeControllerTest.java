@@ -47,13 +47,15 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.http.EnvironmentIdeController;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -79,6 +81,8 @@ class EnvironmentIdeControllerTest {
   private static final String DOCUMENT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   private static final String DIRTY_REJECTION =
       "save or discard unsaved changes before switching directory";
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(UUID.randomUUID(), "ide-test", StudioRole.USER);
   private static final ObjectMapper OBJECT_MAPPER = StrictHttpJsonMapperTestSupport.strictHttp();
 
   private EnvironmentIdeService environmentIdeService;
@@ -91,6 +95,7 @@ class EnvironmentIdeControllerTest {
     JsonMapper mapper = StrictHttpJsonMapperTestSupport.strictHttp();
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
+            .defaultRequest(post("/").requestAttr("studioPrincipal", PRINCIPAL))
             .setControllerAdvice(
                 new RequestBodyRequiredValidationAdvice(mapper),
                 new ProblemAdvice(new MessageService()))
@@ -116,7 +121,7 @@ class EnvironmentIdeControllerTest {
     ArgumentCaptor<EnvironmentIdeViewBindingDTO> body =
         ArgumentCaptor.forClass(EnvironmentIdeViewBindingDTO.class);
     verify(environmentIdeService)
-        .collapseMobile(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), body.capture());
+        .collapseMobile(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), body.capture(), eq(PRINCIPAL));
     assertEquals(DOCUMENT_ID, body.getValue().getBrowserSessionId());
     assertEquals(7L, body.getValue().getBindingEpoch());
   }
@@ -129,7 +134,8 @@ class EnvironmentIdeControllerTest {
     snapshot.setDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     snapshot.setRevision(9L);
     snapshot.setView(view);
-    when(environmentIdeService.readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
+    when(environmentIdeService.readView(
+            eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any(), eq(PRINCIPAL)))
         .thenReturn(snapshot);
 
     mockMvc
@@ -149,7 +155,7 @@ class EnvironmentIdeControllerTest {
     ArgumentCaptor<EnvironmentIdeReadViewDTO> request =
         ArgumentCaptor.forClass(EnvironmentIdeReadViewDTO.class);
     verify(environmentIdeService)
-        .readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
+        .readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture(), eq(PRINCIPAL));
     assertEquals(DOCUMENT_ID, request.getValue().getBrowserSessionId());
     assertEquals(
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", request.getValue().getExpectedDaemonInstanceId());
@@ -160,7 +166,8 @@ class EnvironmentIdeControllerTest {
   void openViewForwardsRequestAndReturnsEntryUrl() throws Exception {
     EnvironmentIdeViewDTO view = view("/workspace");
     view.setEntryUrl("http://" + ENV_ID + ".ide.browser.localhost:8080/ide/bootstrap?ticket=t");
-    when(environmentIdeService.openView(eq(EnvironmentId.of(ENV_ID)), any())).thenReturn(view);
+    when(environmentIdeService.openView(eq(EnvironmentId.of(ENV_ID)), any(), eq(PRINCIPAL)))
+        .thenReturn(view);
 
     mockMvc
         .perform(
@@ -178,7 +185,8 @@ class EnvironmentIdeControllerTest {
 
     ArgumentCaptor<EnvironmentIdeOpenViewDTO> request =
         ArgumentCaptor.forClass(EnvironmentIdeOpenViewDTO.class);
-    verify(environmentIdeService).openView(eq(EnvironmentId.of(ENV_ID)), request.capture());
+    verify(environmentIdeService)
+        .openView(eq(EnvironmentId.of(ENV_ID)), request.capture(), eq(PRINCIPAL));
     assertEquals(VIEW_ID, request.getValue().getViewId());
     assertEquals("/workspace", request.getValue().getDirectory());
   }
@@ -188,7 +196,8 @@ class EnvironmentIdeControllerTest {
   void openViewReturnsNullDirectoryForAZeroRootWorkspace() throws Exception {
     EnvironmentIdeViewDTO view = view(null);
     view.setWorkspacePath("/managed/zero.code-workspace");
-    when(environmentIdeService.openView(eq(EnvironmentId.of(ENV_ID)), any())).thenReturn(view);
+    when(environmentIdeService.openView(eq(EnvironmentId.of(ENV_ID)), any(), eq(PRINCIPAL)))
+        .thenReturn(view);
 
     mockMvc
         .perform(
@@ -201,7 +210,8 @@ class EnvironmentIdeControllerTest {
 
     ArgumentCaptor<EnvironmentIdeOpenViewDTO> request =
         ArgumentCaptor.forClass(EnvironmentIdeOpenViewDTO.class);
-    verify(environmentIdeService).openView(eq(EnvironmentId.of(ENV_ID)), request.capture());
+    verify(environmentIdeService)
+        .openView(eq(EnvironmentId.of(ENV_ID)), request.capture(), eq(PRINCIPAL));
     assertNull(request.getValue().getDirectory(), "the wire contract keeps directory optional");
   }
 
@@ -211,7 +221,8 @@ class EnvironmentIdeControllerTest {
    */
   @Test
   void changeDirectoryKeepsDirtyRejectionAsBadRequestValidation() throws Exception {
-    when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
+    when(environmentIdeService.changeDirectory(
+            eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any(), eq(PRINCIPAL)))
         .thenThrow(DomainException.validation("environment", DIRTY_REJECTION));
 
     mockMvc
@@ -233,7 +244,8 @@ class EnvironmentIdeControllerTest {
   /** 意图：CHANGE_DIRECTORY 成功时返回 200 与更新后的目录，不伪造新的 bootstrap 入口。 */
   @Test
   void changeDirectoryReturnsUpdatedDirectoryAndForwardsDocumentEpoch() throws Exception {
-    when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
+    when(environmentIdeService.changeDirectory(
+            eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any(), eq(PRINCIPAL)))
         .thenReturn(view("/workspace/subdir"));
 
     mockMvc
@@ -253,7 +265,8 @@ class EnvironmentIdeControllerTest {
     ArgumentCaptor<EnvironmentIdeChangeDirectoryDTO> request =
         ArgumentCaptor.forClass(EnvironmentIdeChangeDirectoryDTO.class);
     verify(environmentIdeService)
-        .changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
+        .changeDirectory(
+            eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture(), eq(PRINCIPAL));
     assertEquals(DOCUMENT_ID, request.getValue().getBrowserSessionId());
     assertEquals(7L, request.getValue().getBindingEpoch());
     assertEquals("/workspace/subdir", request.getValue().getDirectory());
@@ -267,7 +280,8 @@ class EnvironmentIdeControllerTest {
   })
   void ideChannelFailuresReturnTypedConflictInRequestLocale(
       String languageTag, String expectedMessage) throws Exception {
-    when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
+    when(environmentIdeService.changeDirectory(
+            eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any(), eq(PRINCIPAL)))
         .thenThrow(
             DomainException.unavailable("IDE_UNAVAILABLE", "environment IDE command timed out"));
 
@@ -351,9 +365,9 @@ class EnvironmentIdeControllerTest {
     ArgumentCaptor<EnvironmentIdeCloseViewDTO> close =
         ArgumentCaptor.forClass(EnvironmentIdeCloseViewDTO.class);
     verify(environmentIdeService)
-        .focusTerminal(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), focus.capture());
+        .focusTerminal(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), focus.capture(), eq(PRINCIPAL));
     verify(environmentIdeService)
-        .closeView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), close.capture());
+        .closeView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), close.capture(), eq(PRINCIPAL));
     assertEquals(DOCUMENT_ID, focus.getValue().getBrowserSessionId());
     assertEquals(7L, focus.getValue().getBindingEpoch());
     assertEquals(DOCUMENT_ID, close.getValue().getBrowserSessionId());
@@ -415,12 +429,13 @@ class EnvironmentIdeControllerTest {
             mock(IdeBrowserUseGateway.class),
             new IdeViewSnapshotStore(environmentId -> Optional.empty()),
             Duration.ofSeconds(5),
-            mock(HarnessOwnerQueryService.class),
+            mock(ResourceAccess.class),
             mock(SessionBlobRefManager.class),
             mock(StorageBlobRepository.class),
             mock(StorageBlobContentService.class));
     MockMvc realChain =
         MockMvcBuilders.standaloneSetup(new EnvironmentIdeController(service))
+            .defaultRequest(post("/").requestAttr("studioPrincipal", PRINCIPAL))
             .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
 
