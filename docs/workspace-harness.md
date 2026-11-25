@@ -590,7 +590,7 @@ HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstu
 | `GET /threads/{threadId}/tree` | 按目标定位执行根 → 轻量执行树节点数组。 |
 | `GET /sessions/{sessionId}/threads` | 同 Session 的 `USER` Thread 摘要，按创建时间和 ID 排序。 |
 | `GET /sessions/{sessionId}/entries` | 可选 `cursor`（同 Session 的 Entry ID）和 `limit`（默认 100，最多 200）→ `{items, nextCursor}`。 |
-| `PUT /sessions/{sessionId}/name`、`PUT /threads/{threadId}/name` | `{name}` → 当前 Session 或 Thread；同名直接返回当前值。 |
+| `PUT /sessions/{sessionId}/name` | `{name}` → 当前 Session；同名直接返回当前值。 |
 | `PUT /threads/{threadId}/yolo` | `{yoloEnabled}` → 当前 Thread；按锁内当前行应用，同值直接返回。 |
 | `POST /threads/{threadId}/stop` | `{stopRequestId, expectedVersion}` → `202`，Thread 和此次停止的集合/回执。 |
 | `GET /threads/{threadId}/compaction-availability` | 返回查询时的 `{available, disabledReason}`，提交时重新校验。 |

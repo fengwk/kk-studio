@@ -3523,11 +3523,6 @@ export interface ApiRoutes {
     body: HarnessNameUpdateDTO
     response: HarnessSessionDTO
   }
-  'PUT /api/harness/threads/{threadId}/name': {
-    path: { threadId: string }
-    body: HarnessNameUpdateDTO
-    response: HarnessThreadDTO
-  }
   'PUT /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/approval': {
     path: { threadId: string; toolInvocationId: string }
     body: HarnessToolApprovalDTO
