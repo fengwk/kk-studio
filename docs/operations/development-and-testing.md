@@ -366,9 +366,9 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--with-tools` | 启用 Daemon/Tool case；`daemon.ready` 校验能力目录，包括 `find` 对应的 `fs.find-files` |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob 契约用例（Backend 无论何种模式均要求 S3/MinIO 基础设施就绪） |
-| `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用 Canvas 真实链路 UI 用例（编辑保存、重开读回、fake 运行产出资源、跨节点引用后再运行），该用例只绑定 `fake-image`，不会提交付费 Function |
+| `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用工作区 Canvas fake 链路 UI 用例，该用例只绑定 `fake-image`，不会提交付费 Function |
 | `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-*` 组合 |
-| `--ui` | 在 API 矩阵后执行 Playwright UI 矩阵，截图并入同一 run |
+| `--ui` | 在 API 矩阵后执行可选 Playwright Workspace UI smoke，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 API 或 UI case，可重复；UI case 需同时传 `--ui`，可混选 API 与 UI |
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不受此过滤器影响 |
 | `--list` / `--docs` | 只列出 API case，或只打印 case 标题、requires 与契约文档 |
@@ -423,10 +423,11 @@ Backend 只连接本次 Compose 项目创建的数据库 `kk_studio_e2e_matrix` 
 
 执行 `--ui` 前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
 [frontend/package.json](../../frontend/package.json) 加载。
-生成期间重载的 Thread 恢复回归可用 `./scripts/dev/verify/e2e/run.sh --ui --only ui.chat.thread_snapshot_reload` 单独执行。
-该用例仅替换模型 Provider：真实 Chromium 通过 Chat 绑定 Thread、发送消息并在生成期间重载，检查新 WebSocket
-订阅的快照使用十进制字符串游标、回复完成不依赖再次导航或 Thread GET，并从浏览器外确认 `IDLE` 与持久化 `TURN_END`。
-不需要 `--real` 或 Daemon。
+可用 `./scripts/dev/verify/e2e/run.sh --ui --only ui.workspace.smoke` 单独执行工作区 UI smoke：真实 Chromium
+通过登录表单以 E2E 管理员账号登录（不打印密码），进入工作区并在默认新会话窗格配置临时默认 Agent（绑定本地离线
+mock 模型 Provider，不隐式分配环境），发送首条消息创建会话，校验目录树出现该 Session 且窗格标题切换为对应会话线程名，
+然后打开 `/settings/preferences` 并返回工作区，截图写入 `reports/e2e/`。`--ui` 还会运行
+`ui.environments.page_loads` 校验 `/settings/environments` 卡片与管理弹窗暴露完整 7 项环境动作；均不需要 `--real` 或 Daemon。
 
 ### 真实 Provider 与付费边界
 

@@ -82,8 +82,8 @@ async function box(locator: Locator): Promise<Box> {
   return value!
 }
 
-function headerText(page: Page): Promise<string> {
-  return page.locator('.editor-header').innerText().then((text) => text.replace(/\s+/g, ' ').trim())
+function saveStateText(page: Page): Promise<string> {
+  return page.locator('.editor-view [aria-live="polite"]').innerText().then((text) => text.replace(/\s+/g, ' ').trim())
 }
 
 const VIEWPORTS = [
@@ -243,15 +243,15 @@ test.describe('Canvas editor canvas-only surface regressions', () => {
 })
 
 test.describe('Canvas editor empty canvas', () => {
-  test('the header shows only the title and save state, and the guidance never blocks the stage', async ({ page }) => {
+  test('announces save state without a library header or version pill, and the guidance never blocks the stage', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto(`${HARNESS_URL}?locale=zh-CN`)
 
-    const header = page.locator('.editor-header')
-    await expect(header).toContainText('Board')
-    // 版本号留在同步协议与诊断信息：头部只有标题与保存状态，没有 `v0` 胶囊。
-    await expect.poll(() => headerText(page)).toBe(`Board ${COPY['zh-CN'].saved}`)
+    await expect(page.locator('.editor-view')).toBeVisible()
+    // 1.3.0 画布嵌入通用窗格，不再渲染独立的 .editor-header 与 .version-pill，保存状态通过实时区域宣告。
+    await expect(page.locator('.editor-header')).toHaveCount(0)
     await expect(page.locator('.version-pill')).toHaveCount(0)
+    await expect.poll(() => saveStateText(page)).toBe(COPY['zh-CN'].saved)
 
     const guidance = page.locator('.canvas-empty-guidance')
     await expect(guidance).toBeVisible()
@@ -308,8 +308,10 @@ test.describe('Canvas editor empty canvas', () => {
     await expect(guidance).toHaveCount(0)
     // 有节点后恢复缩略图。
     await expect(page.locator('.react-flow__minimap')).toBeVisible()
-    // 头部仍不出现版本号，即使 revision 已经前进。
-    await expect.poll(() => headerText(page)).toBe(`Board ${COPY['zh-CN'].saved}`)
+    // 不出现独立画布库头部与版本号，即使 revision 已经前进。
+    await expect(page.locator('.editor-header')).toHaveCount(0)
+    await expect(page.locator('.version-pill')).toHaveCount(0)
+    await expect.poll(() => saveStateText(page)).toBe(COPY['zh-CN'].saved)
   })
 
   for (const viewport of [
