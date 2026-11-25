@@ -38,7 +38,11 @@ test('test intent: the e2e entry keeps the single-instance path by default', () 
     ),
   )
   // Distributed mode must not boot the host single-instance stack.
-  assert.ok(E2E_ENTRY.includes('if [ "$DISTRIBUTED" != "true" ]; then\n  ensure_stack'))
+  assert.ok(
+    E2E_ENTRY.includes(
+      'if [ "$DISTRIBUTED" != "true" ]; then\n  trap cleanup_owned_stack EXIT\n  ensure_stack',
+    ),
+  )
 })
 
 test('test intent: the matrix runner keeps single-node defaults without --distributed', () => {

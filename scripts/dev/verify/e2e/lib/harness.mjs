@@ -3,7 +3,6 @@ import {
   cid,
   HttpError,
   sleep,
-  studioAuthHeaders,
 } from './http.mjs'
 
 /**
@@ -452,6 +451,108 @@ export async function createNewSession(
     target: newSessionTarget({ sessionId, threadId, rootSettings, yoloEnabled }),
     commands,
   })
+}
+
+/** Create a Chat Space with an explicit default agent when a case needs isolated model behavior. */
+export async function createWorkspaceSpace(ctx, { title, defaultAgentName }) {
+  assert(typeof title === 'string' && title.trim(), 'space title must be non-blank')
+  assert(typeof defaultAgentName === 'string' && defaultAgentName.trim(), 'defaultAgentName must be non-blank')
+  const response = await ctx.request('/api/chat-spaces', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': cid() },
+    body: { title, rootFolderName: 'E2E', defaultAgentName, defaultYoloEnabled: false },
+  })
+  const space = response.json ?? response
+  canonicalUuid(space.id, 'space.id')
+  return space
+}
+
+/** Create a workspace Session through its public idempotent creation API. */
+export async function createWorkspaceSession(
+  ctx,
+  spaceId,
+  { idempotencyKey, folderId = null, message, modelSelection = null, environmentId = null, yoloEnabled = null },
+) {
+  canonicalUuid(spaceId, 'spaceId')
+  canonicalUuid(idempotencyKey, 'idempotencyKey')
+  if (folderId !== null) canonicalUuid(folderId, 'folderId')
+  assert(Array.isArray(message) && message.length > 0, 'session message must be a non-empty content array')
+  const response = await ctx.request(`/api/chat-spaces/${encodeURIComponent(spaceId)}/sessions`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: { folderId, message, modelSelection, environmentId, yoloEnabled },
+  })
+  const created = response.json ?? response
+  canonicalUuid(created.sessionId, 'created.sessionId')
+  canonicalUuid(created.threadId, 'created.threadId')
+  canonicalUuid(created.commandId, 'created.commandId')
+  nonNegativeDecimal(created.treeVersion, 'created.treeVersion')
+  return created
+}
+
+/** Delete a Session and release its temporary Agent from the owning Chat Space defaults. */
+export async function deleteWorkspaceSession(ctx, spaceId, sessionId) {
+  canonicalUuid(spaceId, 'spaceId')
+  canonicalUuid(sessionId, 'sessionId')
+  const tree = (await ctx.call('GET', `/api/chat-spaces/${encodeURIComponent(spaceId)}/tree`)).json
+  await ctx.call(
+    'DELETE',
+    `/api/chat-spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}?expectedTreeVersion=${encodeURIComponent(tree.treeVersion)}`,
+  )
+  const spaces = (await ctx.call('GET', '/api/chat-spaces')).json
+  assert(Array.isArray(spaces), `expected Chat Space list: ${JSON.stringify(spaces)}`)
+  const space = spaces.find((item) => item.id === spaceId)
+  assert(space, `Chat Space ${spaceId} missing from collection`)
+  if (space.defaultAgentName != null) {
+    await ctx.call('PATCH', `/api/chat-spaces/${encodeURIComponent(spaceId)}`, {
+      expectedVersion: space.version,
+      defaultAgentName: null,
+    })
+  }
+}
+
+/** Create a same-Session branch at a completed turn boundary. */
+export async function createWorkspaceBranch(ctx, spaceId, sessionId, {
+  idempotencyKey,
+  sourceThreadId,
+  turnEndEntryId,
+  title,
+}) {
+  return createWorkspaceTurnCut(ctx, spaceId, sessionId, 'branches', {
+    idempotencyKey, sourceThreadId, turnEndEntryId, title,
+  })
+}
+
+/** Fork a completed turn into a new Session in the same Chat Space. */
+export async function createWorkspaceFork(ctx, spaceId, sessionId, {
+  idempotencyKey,
+  sourceThreadId,
+  turnEndEntryId,
+  title,
+}) {
+  return createWorkspaceTurnCut(ctx, spaceId, sessionId, 'forks', {
+    idempotencyKey, sourceThreadId, turnEndEntryId, title,
+  })
+}
+
+async function createWorkspaceTurnCut(ctx, spaceId, sessionId, operation, {
+  idempotencyKey, sourceThreadId, turnEndEntryId, title,
+}) {
+  canonicalUuid(spaceId, 'spaceId')
+  canonicalUuid(sessionId, 'sessionId')
+  canonicalUuid(idempotencyKey, 'idempotencyKey')
+  canonicalUuid(sourceThreadId, 'sourceThreadId')
+  canonicalUuid(turnEndEntryId, 'turnEndEntryId')
+  assert(typeof title === 'string' && title.trim(), 'title must be non-blank')
+  const response = await ctx.request(
+    `/api/chat-spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}/${operation}`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: { sourceThreadId, turnEndEntryId, title },
+    },
+  )
+  return response.json ?? response
 }
 
 /** NEW_THREAD 原子创建：在既有 Session 的合法 fork 边界下开新 Thread（不复制 Entry）。 */
@@ -1157,18 +1258,12 @@ async function waitForModelDeltaAfterEventSubscribed(
   assert(typeof startWork === 'function', 'startWork must be a function')
   assert(typeof parseDelta === 'function', 'parseDelta must be a function')
   assert(typeof description === 'string' && description, 'description must be non-blank')
-  assert(
-    typeof ctx?.baseUrl === 'string' && ctx.baseUrl.trim(),
-    'E2E context must expose a non-blank baseUrl',
-  )
+  assert(typeof ctx?.openWebSocket === 'function', 'E2E context must expose openWebSocket(path)')
   assert(Number.isFinite(timeoutMs) && timeoutMs > 0, `invalid event timeout: ${timeoutMs}`)
-  assert(typeof WebSocket === 'function', 'Node runtime must provide WebSocket')
 
   const deadline = Date.now() + timeoutMs
   const controller = new AbortController()
-  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl), {
-    headers: studioAuthHeaders(ctx.baseUrl),
-  })
+  const socket = ctx.openWebSocket('/ws/events')
   try {
     await waitForSocketOpen(socket, deadline, controller.signal)
     socket.send(JSON.stringify({
@@ -1232,15 +1327,6 @@ async function waitForModelDeltaAfterEventSubscribed(
 }
 
 // ---------- 应用事件 WebSocket 辅助 ----------
-
-function applicationEventUrl(baseUrl) {
-  const url = new URL(baseUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/ws/events'
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
 
 function waitForSocketOpen(socket, deadline, signal) {
   return new Promise((resolve, reject) => {

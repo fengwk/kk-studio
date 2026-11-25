@@ -2,7 +2,7 @@
 # scripts/dev/verify/e2e/run.sh — kk-studio 矩阵化 E2E 入口
 #
 # 快速开始：
-#   scripts/dev/verify/e2e/run.sh                  # 复用已启动服务，跑 L1（免费）
+#   scripts/dev/verify/e2e/run.sh                  # 启动并清理隔离栈，跑 L1（免费）
 #   scripts/dev/verify/e2e/run.sh --rebuild        # 强制 Java 21 clean package 并重启 backend/frontend
 #   scripts/dev/verify/e2e/run.sh --real           # + 真实四 Provider 轮次（需 8 个 TEST_* 变量）
 #   scripts/dev/verify/e2e/run.sh --real --with-branch
@@ -54,7 +54,7 @@ Usage: scripts/dev/verify/e2e/run.sh [options]
 Options:
   --rebuild         Force clean package backend + restart backend/frontend (and the daemon with --with-tools)
   --real            Enable real provider cases (requires every TEST_*_BASE_URL/API_KEY credential)
-  --with-tools      Enable daemon/tool cases (starts/reuses daemon)
+  --with-tools      Enable daemon/tool cases (starts and cleans up an owned daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable Canvas Resource/Blob contract cases (backend S3 readiness is required in all modes; also a precondition of real tool.read_turn)
   --with-canvas-function Enable free fake Canvas Function E2E (implies storage + rebuild)
@@ -196,6 +196,7 @@ fi
 
 # 1) ensure stack（--distributed 时栈即 deploy/distributed，跳过宿主单实例栈）
 if [ "$DISTRIBUTED" != "true" ]; then
+  trap cleanup_owned_stack EXIT
   ensure_stack "$REBUILD" "$WITH_TOOLS"
 fi
 

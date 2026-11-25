@@ -373,10 +373,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不受此过滤器影响 |
 | `--list` / `--docs` | 只列出 API case，或只打印 case 标题、requires 与契约文档 |
 
-矩阵分成 L1 免费 API 契约、L2 真实文本与推理、L3 真实分支、L4 Environment/Tool/approval、L5
+矩阵分成 L1 免费 API 契约、L2 真实 Provider 文本/推理/图片输入、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题、输入、期望 wire 与覆盖边界
-只由 `--list` / `--docs` 输出，不要复制到文档；默认执行哪些 case 由 flag 组合和 case 的
-`requires` 共同决定。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
+以 `--list` / `--docs` 当前输出为准，不要复制 case 清单；默认执行哪些 case 由 flag 组合和 case 的
+`requires` 共同决定。当前 L1 Workspace case 覆盖定时任务立即运行记录分页及双用户资源隔离；不要据此推断 Workspace 附件测试已迁入矩阵。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
 精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
 阅读 case 结果时还需保留两个边界：
@@ -388,18 +388,22 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 更改 API 契约、首发顺序或 usage 语义时，同步 case、fixture、生成的前端契约与本节的分类说明。L1 `thread.queued_command_batch` 以本地受控 Provider mock 验证 Thread GET 基线、WebSocket `subscribed` ACK cursor `0`、后续初始 `snapshot`、`realtime` 提示与不依赖 HTTP 追更的连续快照；完成后用 `afterEntryId` 增量核对持久化 Entry 链；不调用真实 Provider。该 case 需要宿主 mock，双节点 `--distributed` 不运行它。`thread_tree.query_contract` 还验证同 root 第二个 WebSocket 订阅者的首快照、已订阅资源的 refresh 控制帧，以及 refresh 不创建新订阅。
 
-默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
-runner 会复用已有服务，或杀掉上述端口监听后启动服务；执行前须确认端口为独立可丢弃环境。
-E2E runner 拥有专用的独立数据库（默认 `127.0.0.1:5432/kk_studio_e2e_matrix`）与专用存储桶；
-连接本地 MinIO（127.0.0.1/localhost:9000）时存储桶固定为专用名 `kk-studio-e2e-matrix`（忽略外部环境变量覆盖），
-runner 启动后端时会自动重建该专用空库（由 Flyway 初始化当前 Schema 与种子）并清空该专用存储桶，
-严格与开发应用隔离。本地桶初始化复用
-[`deploy/dependencies/minio-client/init-bucket.sh`](../../deploy/dependencies/minio-client/init-bucket.sh)：
-桶已存在时清空对象，再确保桶存在且关闭匿名访问。
-连接外部 S3 endpoint 时允许覆盖 bucket 名但绝不清理。重置工具优先使用宿主 `psql`，
-其次使用本地 compose 的 postgres 容器；环境缺少工具或重置失败时明确报错停止。
-Backend 启动要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 bucket；即使只跑免费 L1 API
-矩阵，也需要独立的 S3/MinIO 环境。不能用共享或生产存储桶充当测试基础设施。
+默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。单实例 runner
+每次启动自己管理的 Backend、Vite 和独立 Compose 依赖栈；不会复用已有 Backend/Frontend，也不会杀占用端口的进程。
+首次运行前在当前工作树执行 `npm --prefix frontend ci`。
+端口被占用时 runner 会报错退出。需要避开冲突时可手动指定宿主端口，例如：
+
+```bash
+BACKEND_PORT=28081 FRONTEND_PORT=25173 ./scripts/dev/verify/e2e/run.sh
+```
+
+Compose 为 PostgreSQL 与 MinIO 动态分配 loopback 宿主端口；runner 查询映射后将实际端口用于连接，
+不需要预留固定的数据库或 MinIO 宿主端口。退出时自动停止本次启动的 Backend/Frontend，并对本次唯一
+Compose project 执行 `down --volumes --remove-orphans`，其数据库与 MinIO 卷也会删除；不要将该临时栈用于保存数据。
+
+Backend 只连接本次 Compose 项目创建的数据库 `kk_studio_e2e_matrix` 与私有存储桶 `kk-studio-e2e-matrix`，
+不使用外部数据库或 S3 endpoint。Flyway 从空数据库初始化当前 Schema 与种子；MinIO 容器通过
+[`deploy/dependencies/minio-client/init-bucket.sh`](../../deploy/dependencies/minio-client/init-bucket.sh) 创建桶。即使只跑免费 L1 也会启动这两项依赖。
 `--rebuild` 默认允许 Maven 在线解析依赖，只有 `E2E_MAVEN_OFFLINE=true` 时才加 `-o`。
 `E2E_WORK_DIR` 默认 `runtime/e2e`；工具 case 的任务工作目录默认是其下的 `environment`（fixture
 路径与 Tool 调用的 `workdir` 都由它派生，不是 Daemon 配置），可由 `DAEMON_ENV_ROOT` 覆盖。

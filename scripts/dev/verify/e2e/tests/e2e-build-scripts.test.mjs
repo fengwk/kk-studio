@@ -1,7 +1,6 @@
 /** Permanent guards for E2E clean package, runtime work directory, and daemon contracts. */
 
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -113,49 +112,9 @@ test('test intent: the daemon distribution has no JVM or classpath machinery', (
   assert.ok(startDaemon.includes('DAEMON_BINARY="$DAEMON_BINARY"'))
   assert.ok(!startDaemon.includes('JAVA_HOME'))
 
-  const killDaemon = functionBody(E2E_LIB, 'kill_daemon')
-  assert.ok(killDaemon.includes('pgrep -f --'))
-  assert.ok(killDaemon.includes('$DAEMON_BINARY'))
-})
-
-/** Stand-in for the daemon: any process whose argv carries the given path. */
-const standIn = (marker) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)', marker], { stdio: 'ignore' })
-
-const exited = (child, timeoutMillis) =>
-  new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve(true)
-      return
-    }
-    const timer = setTimeout(() => resolve(false), timeoutMillis)
-    child.once('exit', () => {
-      clearTimeout(timer)
-      resolve(true)
-    })
-  })
-
-test('test intent: kill_daemon terminates the configured entry process only', async () => {
-  const temporary = mkdtempSync(path.join(tmpdir(), 'kk-kill-daemon-'))
-  const dist = path.join(temporary, 'dist')
-  mkdirSync(dist)
-  const daemonBinary = path.join(dist, 'kk-studio-daemon')
-  writeFileSync(daemonBinary, '#!/bin/bash\n')
-  const daemon = standIn(daemonBinary)
-  const bystander = standIn(path.join(temporary, 'other-daemon'))
-  try {
-    // Give both children time to start so their argv is visible to pgrep.
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    const result = runBash(`source ${E2E_LIB}\nkill_daemon\n`, { env: { ...process.env, DAEMON_BINARY: daemonBinary } })
-    assert.equal(result.status, 0, output(result))
-    assert.ok(await exited(daemon, 30_000), 'the process holding the configured entry path must be terminated')
-    assert.equal(bystander.exitCode, null, 'a process that does not carry the configured entry path must survive')
-    assert.equal(bystander.signalCode, null)
-  } finally {
-    for (const child of [daemon, bystander]) {
-      child.kill('SIGKILL')
-    }
-    rmSync(temporary, { recursive: true, force: true })
-  }
+  assert.ok(!startDaemon.includes('kill_daemon'))
+  assert.ok(!readText(E2E_LIB).includes('pgrep -f -- "$DAEMON_BINARY"'))
+  assert.ok(startDaemon.includes('OWNED_DAEMON_PID=$!'))
 })
 
 test('test intent: ambiguous E2E_MAVEN_OFFLINE values fail before a Maven child can run', () => {
@@ -207,166 +166,67 @@ test('test intent: provider credentials are synchronized only for real mode', ()
   assert.ok(!ensureStack.includes('sync_e2e_provider_credentials'))
 })
 
-test('test intent: an overridden database endpoint can never reset the shared local compose postgres', () => {
-  // 隔离规则：只有未被覆盖的默认端点才能回退到 deploy/local；其它端点缺 psql 时必须先失败。
-  const overrideProbe = `source ${E2E_LIB}
-command() {
-  if [ "$1" = -v ] && [ "$2" = psql ]; then
-    return 1
-  fi
-  builtin command "$@"
-}
-reset_e2e_database`
-  const override = runBash(overrideProbe, {
+test('test intent: database endpoint overrides cannot redirect E2E outside its Compose stack', () => {
+  const result = runBash(`source ${E2E_LIB}\nprintf '%s' "$DB_HOST:$DB_PORT"`, {
     env: {
       ...cleanEnvironment(),
-      KK_STUDIO_DB_URL: 'jdbc:postgresql://127.0.0.1:55432/postgres',
+      KK_STUDIO_DB_URL: 'jdbc:postgresql://user-database:55432/postgres',
+      KK_STUDIO_DB_HOST: 'user-database',
+      KK_STUDIO_DB_PORT: '55432',
     },
   })
-  assert.notEqual(override.status, 0)
-  assert.match(output(override), /host psql is required unless the endpoint is the local compose postgres/)
-  assert.ok(!output(override).includes('DROP DATABASE'))
+  assert.equal(result.status, 0, output(result))
+  assert.equal(result.stdout, '127.0.0.1:')
+  assert.ok(!readText(E2E_LIB).includes('ensure_dedicated_s3_bucket'))
+  assert.ok(!readText(E2E_LIB).includes('is_local_minio_endpoint'))
+})
 
-  // 默认端点保留原有 docker compose 回退路径。
-  const dockerProbe = `source ${E2E_LIB}
-command() {
-  if [ "$1" = -v ] && [ "$2" = psql ]; then
-    return 1
-  fi
-  builtin command "$@"
-}
-docker() {
-  printf 'docker %s\\n' "$*"
-  [ "$FAKE_COMPOSE_STATE" = running ] && printf 'postgres-container\\n'
-  return 0
-}
-reset_e2e_database`
-  const fallback = runBash(dockerProbe, {
+test('test intent: startup owns fixed bucket credentials and does not honor user S3 overrides', () => {
+  const result = runBash(`source ${E2E_LIB}\nprintf '%s\\n' "$STORAGE_S3_BUCKET" "$STORAGE_S3_ENDPOINT" "$STORAGE_S3_ACCESS_KEY"`, {
     env: {
       ...cleanEnvironment(),
-      KK_STUDIO_DB_URL: 'jdbc:postgresql://127.0.0.1:5432/postgres',
-      FAKE_COMPOSE_STATE: 'running',
+      KK_STUDIO_STORAGE_S3_ENDPOINT: 'https://user-s3.invalid',
+      KK_STUDIO_STORAGE_S3_BUCKET: 'user-bucket',
+      KK_STUDIO_STORAGE_S3_ACCESS_KEY: 'user-key',
     },
   })
-  assert.equal(fallback.status, 0, output(fallback))
-  assert.match(output(fallback), /compose -f .*deploy\/local\/compose\.yaml exec -T .* postgres psql/)
-  assert.match(output(fallback), /DROP DATABASE IF EXISTS kk_studio_e2e_matrix/)
+  assert.equal(result.status, 0, output(result))
+  assert.deepEqual(result.stdout.trim().split('\n'), ['kk-studio-e2e-matrix', '', 'kk-studio'])
 })
 
-test('test intent: S3 bucket isolation rules for local MinIO vs external S3 endpoint', () => {
-  // 本地 MinIO (127.0.0.1:9000) 固定专用名 kk-studio-e2e-matrix，忽略外部环境变量覆盖
-  const localProbe = `source ${E2E_LIB}
-echo "$STORAGE_S3_BUCKET"
-`
-  const localResult = runBash(localProbe, {
-    env: {
-      ...process.env,
-      KK_STUDIO_STORAGE_S3_ENDPOINT: 'http://127.0.0.1:9000',
-      KK_STUDIO_STORAGE_S3_BUCKET: 'dev-user-bucket',
-    },
-  })
-  assert.equal(localResult.status, 0, output(localResult))
-  assert.equal(localResult.stdout.trim(), 'kk-studio-e2e-matrix')
-
-  // 外部 S3 endpoint 允许覆盖 bucket，但跳过清理
-  const externalProbe = `source ${E2E_LIB}
-echo "$STORAGE_S3_BUCKET"
-ensure_dedicated_s3_bucket
-`
-  const externalResult = runBash(externalProbe, {
-    env: {
-      ...process.env,
-      KK_STUDIO_STORAGE_S3_ENDPOINT: 'https://s3.us-west-2.amazonaws.com',
-      KK_STUDIO_STORAGE_S3_BUCKET: 'custom-external-bucket',
-    },
-  })
-  assert.equal(externalResult.status, 0, output(externalResult))
-  assert.match(externalResult.stdout, /custom-external-bucket/)
-  assert.match(externalResult.stdout, /External S3 endpoint configured.*skipping bucket cleanup/)
+test('test intent: legacy MinIO bucket cleanup helper is absent', () => {
+  assert.ok(!readText(E2E_LIB).includes('ensure_s3_storage'))
+  assert.ok(!readText(E2E_LIB).includes('ensure_dedicated_s3_bucket'))
 })
 
-test('test intent: host mc and Docker fallback preserve dedicated bucket behavior', () => {
-  // Record both entry paths without Docker or a real bucket; an old image must use the checkout script.
-  withTempDir((root) => {
-    const mcDir = path.join(root, 'mc-bin')
-    const dockerDir = path.join(root, 'docker-bin')
-    mkdirSync(mcDir)
-    mkdirSync(dockerDir)
-    const mcLog = path.join(root, 'mc.log')
-    const dockerLog = path.join(root, 'docker.log')
-    writeFileSync(path.join(mcDir, 'mc'), [
-      '#!/bin/sh',
-      'printf "%s\\n" "$*" >> "$MC_LOG"',
-      'if [ "${MC_VERIFY_EOF-}" = yes ] && IFS= read -r unexpected; then exit 25; fi',
-      'if [ "${MC_FAIL_ON-}" = "$1" ]; then exit 1; fi',
-      'if [ "$1" = ls ] && [ "$MC_BUCKET_STATE" = absent ]; then exit 1; fi',
-      'exit 0',
-      '',
-    ].join('\n'), { mode: 0o755 })
-    writeFileSync(path.join(dockerDir, 'docker'), [
-      '#!/bin/sh',
-      'printf "%s\\n" "$@" > "$DOCKER_LOG"',
-      // Execute the requested entrypoint with streamed stdin and a fake mc.
-      'while [ "$#" -gt 0 ] && [ "$1" != kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z ]; do shift; done',
-      '[ "$#" -gt 0 ] || exit 2',
-      'shift',
-      'PATH="$FAKE_MC_DIR:$PATH" exec /bin/sh "$@"',
-      '',
-    ].join('\n'), { mode: 0o755 })
 
-    const run = (viaDocker, bucketState, failOn = '') => {
-      writeFileSync(mcLog, '')
-      const result = runBash(`source ${E2E_LIB}
-ensure_s3_storage() { :; }
-command() {
-  if [ "$1" = -v ] && [ "$2" = mc ]; then
-    [ "$FAKE_ROUTE" = host ]
-    return
-  fi
-  builtin command "$@"
-}
-ensure_dedicated_s3_bucket`, {
-        env: {
-          ...cleanEnvironment(),
-          PATH: `${viaDocker ? dockerDir : mcDir}:/usr/bin:/bin`,
-          FAKE_MC_DIR: mcDir,
-          FAKE_ROUTE: viaDocker ? 'docker' : 'host',
-          MC_LOG: mcLog,
-          MC_BUCKET_STATE: bucketState,
-          MC_FAIL_ON: failOn,
-          MC_VERIFY_EOF: viaDocker ? 'yes' : 'no',
-          DOCKER_LOG: dockerLog,
-          KK_STUDIO_STORAGE_S3_ENDPOINT: 'http://127.0.0.1:9000',
-          KK_STUDIO_STORAGE_S3_ACCESS_KEY: 'e2e-access',
-          KK_STUDIO_STORAGE_S3_SECRET_KEY: 'e2e-secret',
-          KK_STUDIO_STORAGE_S3_BUCKET: 'dev-user-bucket',
-        },
-      })
-      return { result, calls: readFileSync(mcLog, 'utf8').split('\n').filter(Boolean) }
-    }
+test('test intent: the default E2E stack owns its dependencies and never reclaims user ports', () => {
+  const lib = readText(E2E_LIB)
+  const run = readText(E2E_ENTRY)
+  const compose = readText(path.join(E2E_ROOT, 'stack.compose.yaml'))
+  const stack = functionBody(E2E_LIB, 'start_owned_stack')
+  const cleanup = functionBody(E2E_LIB, 'cleanup_owned_stack')
+  const ensure = functionBody(E2E_LIB, 'ensure_stack')
 
-    for (const viaDocker of [false, true]) {
-      for (const bucketState of ['existing', 'absent']) {
-        const { result, calls } = run(viaDocker, bucketState)
-        assert.equal(result.status, 0, output(result))
-        assert.ok(!output(result).includes('e2e-secret'))
-        assert.deepEqual(calls, [
-          'alias set e2e-local http://127.0.0.1:9000 e2e-access e2e-secret',
-          'ls e2e-local/kk-studio-e2e-matrix',
-          ...(bucketState === 'existing' ? ['rm --recursive --force e2e-local/kk-studio-e2e-matrix/'] : []),
-          'mb --ignore-existing e2e-local/kk-studio-e2e-matrix',
-          'anonymous set none e2e-local/kk-studio-e2e-matrix',
-          'stat e2e-local/kk-studio-e2e-matrix',
-        ])
-      }
-      for (const [bucketState, failOn] of [
-        ['existing', 'alias'], ['existing', 'rm'], ['absent', 'mb'], ['absent', 'anonymous'], ['absent', 'stat'],
-      ]) {
-        const { result, calls } = run(viaDocker, bucketState, failOn)
-        assert.notEqual(result.status, 0, `${viaDocker ? 'docker' : 'host'} ${failOn}`)
-        assert.equal(calls.at(-1).split(' ')[0], failOn)
-      }
-    }
-    assert.ok(!readFileSync(dockerLog, 'utf8').includes('e2e-secret'))
-  })
+  assert.ok(stack.includes('compose_stack'))
+  assert.ok(functionBody(E2E_LIB, 'compose_stack').includes('docker compose -p "$STACK_PROJECT"'))
+  assert.ok(stack.includes('compose_stack port postgres 5432'))
+  assert.ok(stack.includes('compose_stack port minio 9000'))
+  assert.ok(cleanup.includes('down --volumes --remove-orphans'))
+  assert.ok(cleanup.includes('$OWNED_DAEMON_PID'))
+  assert.ok(ensure.includes('start_frontend'))
+  assert.ok(ensure.includes('Frontend dependencies are missing; run npm --prefix frontend ci'))
+  assert.ok(readText(E2E_LIB).includes('--strictPort'))
+  assert.ok(stack.includes('docker image inspect "$minio_client_image"'))
+  assert.ok(stack.includes('compose_stack build minio-init'))
+  assert.ok(run.includes('trap cleanup_owned_stack EXIT'))
+  assert.ok(!lib.includes('kill_port "$BACKEND_PORT"'))
+  assert.ok(!lib.includes('kill_port "$FRONTEND_PORT"'))
+  assert.match(compose, /127\.0\.0\.1::5432/)
+  assert.match(compose, /127\.0\.0\.1::9000/)
+  assert.match(compose, /postgres-data:/)
+  assert.match(compose, /minio-data:/)
+  assert.match(compose, /pull_policy: never/)
+  assert.ok(compose.includes('image: kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z'))
+  assert.ok(!compose.includes('deploy/local/compose.yaml'))
 })

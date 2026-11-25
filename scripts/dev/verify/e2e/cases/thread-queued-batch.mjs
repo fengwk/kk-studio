@@ -7,20 +7,18 @@
  */
 import { createServer } from 'node:http'
 
-import { assert, cid, sleep, studioAuthHeaders } from '../lib/http.mjs'
+import { assert, cid, sleep } from '../lib/http.mjs'
 import {
-  applicationEventUrl,
   assertExactKeys,
   takeFrame,
   waitForSocketOpen,
 } from './app-events.mjs'
 import {
   acceptCommandBatch,
-  branchSettingsOf,
-  chatOwner,
-  createChat,
   getThreadSnapshot,
-  createNewSession,
+  createWorkspaceSpace,
+  createWorkspaceSession,
+  deleteWorkspaceSession,
   stopThread,
   threadTarget,
   userMessageCommand,
@@ -59,7 +57,8 @@ registerCase({
     let provider = null
     let model = null
     let agent = null
-    let chat = null
+    let space = null
+    let sessionId = null
     let threadId = null
     let socket = null
     let socketListener = null
@@ -130,34 +129,23 @@ registerCase({
         agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name,
         JSON.stringify(agentResponse.json),
       )
-      chat = await createChat(ctx, {
+      space = await createWorkspaceSpace(ctx, {
         title: `e2e-queue-batch-${suffix}`,
-        agentName: agent.name,
+        defaultAgentName: agent.name,
+      })
+      const created = await createWorkspaceSession(ctx, space.id, {
+        idempotencyKey: cid(),
+        message: [{ type: 'TEXT', text: initialPrompt }],
+        modelSelection: agent.execution.settings,
         yoloEnabled: false,
       })
-      const sessionId = cid()
-      const tid = cid()
-      const created = await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId,
-        threadId: tid,
-        rootSettings: branchSettingsOf(agent, {
-          ...agent.execution.settings,
-        }),
-        yoloEnabled: false,
-        commands: [userMessageCommand(initialPrompt, cid())],
-      })
-      threadId = String(tid)
-      assert(
-        String(created.thread.threadId) === threadId
-          && created.acceptedCommands.length === 1
-          && created.acceptedCommands[0].type === 'USER_MESSAGE',
-        `initial creation batch: ${JSON.stringify(created)}`,
-      )
+      sessionId = created.sessionId
+      threadId = String(created.threadId)
+      assert(threadId && sessionId, `workspace Session was not created: ${JSON.stringify(created)}`)
 
       const initialSnapshot = await getThreadSnapshot(ctx, threadId)
       initialHeadEntryId = initialSnapshot.thread.headEntryId
-      socket = new WebSocket(applicationEventUrl(ctx.baseUrl), { headers: studioAuthHeaders(ctx.baseUrl) })
+      socket = ctx.openWebSocket('/ws/events')
       socketListener = (event) => {
         try {
           socketFrames.push(JSON.parse(String(event.data)))
@@ -195,14 +183,12 @@ registerCase({
 
       // 运行中入队两条 THREAD batch：各一条 USER_MESSAGE。cursor 在入队时推进。
       const firstQueued = await acceptCommandBatch(ctx, {
-        owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
         }),
         commands: [userMessageCommand(firstPrompt, cid())],
       })
       const secondQueued = await acceptCommandBatch(ctx, {
-        owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
         }),
@@ -395,14 +381,9 @@ registerCase({
         }
       })
       await cleanup('mock server', cleanupErrors, () => mock.close())
-      await cleanup('chat', cleanupErrors, async () => {
-        if (chat?.id) {
-          await ctx.call(
-            'DELETE',
-            `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
-              chat.version,
-            )}`,
-          )
+      await cleanup('workspace Session', cleanupErrors, async () => {
+        if (space?.id && sessionId) {
+          await deleteWorkspaceSession(ctx, space.id, sessionId)
         }
       })
       await cleanup('agent', cleanupErrors, async () => {

@@ -20,6 +20,7 @@ import { SpaceMenu } from './SpaceMenu'
 import { useWorkspaceRealtime } from './useWorkspaceRealtime'
 import { useWorkspacePanes, type OpenTarget } from './useWorkspacePanes'
 import { WorkspaceInbox } from './WorkspaceInbox'
+import { WorkspaceSchedules } from './WorkspaceSchedules'
 import { WorkspaceStatus, WorkspaceTree } from './WorkspaceTree'
 import { createCanvas, createFolder, createSpace, deleteTreeRow, getSpaceTree, getThreadPlacement, moveTreeRow, patchSpace, readCanvasRevision, renameTreeRow, type TreeDeletion } from './workspace-api'
 import './workspace-shell.css'
@@ -174,7 +175,18 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
     <IconButton className="workspace-touch" label={t('workspace.settings')} onClick={goToSettings}><Settings /></IconButton>
   </div>
   return <div className="workspace-shell" data-fullscreen={fullscreen || undefined} data-drawer={drawer || undefined}
-    onKeyDown={event => { if (event.key === 'Escape' && drawer && !event.defaultPrevented) { event.stopPropagation(); closeDrawer() } }}>
+    onKeyDown={event => {
+      if (
+        event.key === 'Escape' &&
+        drawer &&
+        !event.defaultPrevented &&
+        event.target instanceof Node &&
+        event.currentTarget.contains(event.target)
+      ) {
+        event.stopPropagation()
+        closeDrawer()
+      }
+    }}>
     {!fullscreen && <>
       {drawer && <button type="button" className="workspace-drawer-backdrop" tabIndex={-1} aria-label={t('workspace.collapseSidebar')} onClick={closeDrawer} />}
       <aside className="workspace-sidebar" data-collapsed={collapsed || undefined} style={{ width }}>
@@ -193,6 +205,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
         <Tabs tabs={[
           { id: 'directory', label: t('workspace.directory') },
           { id: 'status', label: <span className="workspace-status-tab">{t('workspace.status')}{[...index.values()].some(row => row.kind === 'thread' && row.thread.state === 'NEEDS_YOU') && <i />}</span> },
+          { id: 'schedules', label: t('workspace.schedules') },
         ]} activeId={tab} onChange={setTab} ariaLabel={t('workspace.sidebar')} className="workspace-tabs" panelClassName="workspace-tab-panel">
           {tab === 'directory' ? <WorkspaceTree roots={roots} index={index} expanded={expanded} toggle={toggle} open={openRow} create={create}
             createDirectory={async (name, idempotencyKey, parentId) => {
@@ -200,7 +213,8 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
               return result.id
             }}
             rename={async (row, name) => { await write<unknown>(() => renameTreeRow(space.id, row, name)) }} remove={remove} move={move} />
-            : <WorkspaceStatus index={index} open={openRow} />}
+            : tab === 'status' ? <WorkspaceStatus index={index} open={openRow} />
+            : <WorkspaceSchedules space={space} tree={tree} open={open} report={report} />}
         </Tabs>
         {Environments && <div className="workspace-environments"><Environments open={open} findOpenView={panes.findOpenView} /></div>}
         {footer(false)}

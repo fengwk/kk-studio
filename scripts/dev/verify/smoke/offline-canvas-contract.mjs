@@ -31,7 +31,7 @@ export function assertPatch(patch, previousRevision, replay = false) {
   return revision
 }
 
-export function resourceBatch(nodeId, blobId, idempotencyKey) {
+export function resourceBatch(nodeId, uploadId, idempotencyKey) {
   return {
     idempotencyKey,
     commands: [
@@ -40,7 +40,7 @@ export function resourceBatch(nodeId, blobId, idempotencyKey) {
         nodeId,
         name: 'uploaded',
         transform: { x: 0, y: 0, width: 320, height: 260 },
-        resources: [{ type: 'BLOB', name: 'tiny.png', blobId }],
+        resources: [{ type: 'BLOB', name: 'tiny.png', uploadId }],
       },
     ],
   }

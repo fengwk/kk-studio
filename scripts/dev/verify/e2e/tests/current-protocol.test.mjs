@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getCase } from '../run-matrix.mjs'
-import { setStudioCookie } from '../lib/http.mjs'
+import { cases as attachmentCases } from '../cases/chat-attachment.mjs'
 
 const identity = {
   type: 'connected',
@@ -10,53 +10,37 @@ const identity = {
   heartbeatIntervalMillis: '20000',
 }
 
-// 执行真实 case，仅替换物理 WS；首帧与 heartbeat 使用生产形状。
-async function heartbeat(t, frames) {
-  const original = globalThis.WebSocket
-  const originalFetch = globalThis.fetch
-  setStudioCookie('http://127.0.0.1:18081', 'session=test')
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    json: async () => ({ heartbeatIntervalMillis: '20000' }),
-  })
-  globalThis.WebSocket = class extends EventTarget {
-    static OPEN = 1
-    readyState = 1
-    constructor(url, options) {
-      assert.deepEqual(options, { headers: { Cookie: 'session=test', Origin: 'http://127.0.0.1:18081' } })
-      super()
-      assert.equal(new URL(url).pathname, '/ws/events')
+// 执行真实 case，仅替换同步 workspace WebSocket contract；帧形状与原生 Node WebSocket 一致。
+async function heartbeat(frames) {
+  let requestedPath
+  const socket = new EventTarget()
+  socket.readyState = 1
+  socket.close = () => { socket.readyState = 3 }
+  const ctx = {
+    openWebSocket(path) {
+      requestedPath = path
       queueMicrotask(() => {
-        for (const frame of frames) {
-          this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(frame) }))
-        }
+        for (const frame of frames) socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(frame) }))
       })
-    }
-    close() { this.readyState = 3 }
+      return socket
+    },
+    writeArtifact() {},
   }
-  try {
-    await getCase('events.heartbeat_keepalive').run({
-      baseUrl: 'http://127.0.0.1:18081', writeArtifact() {},
-    })
-  } finally {
-    globalThis.WebSocket = original
-    globalThis.fetch = originalFetch
-  }
+  await getCase('events.heartbeat_keepalive').run(ctx)
+  assert.equal(requestedPath, '/ws/events')
 }
 
 test('heartbeat case accepts production connected identity followed by heartbeat', async (t) => {
-  await heartbeat(t, [identity, { type: 'heartbeat' }])
+  await heartbeat([identity, { type: 'heartbeat' }])
 })
 
 test('heartbeat case rejects unexpected fields and malformed connected identity', async (t) => {
-  await assert.rejects(heartbeat(t, [{ ...identity, version: 2 }]), /connected fields must be/)
-  await assert.rejects(heartbeat(t, [{ ...identity, connectionId: 'invalid' }]), /invalid connected/)
+  await assert.rejects(heartbeat([{ ...identity, version: 2 }]), /connected fields must be/)
+  await assert.rejects(heartbeat([{ ...identity, connectionId: 'invalid' }]), /invalid connected/)
 })
 
 test('heartbeat case rejects heartbeat with unexpected fields after a valid identity', async (t) => {
-  await assert.rejects(heartbeat(t, [identity, { version: 2, type: 'heartbeat' }]), /invalid heartbeat/)
+  await assert.rejects(heartbeat([identity, { version: 2, type: 'heartbeat' }]), /invalid heartbeat/)
 })
 
 const ids = [
@@ -109,7 +93,7 @@ test('attachment case resolves seed prerequisites across modules', async () => {
     const stopped = new Error(id)
     prerequisite.run = async () => { throw stopped }
     try {
-      await assert.rejects(getCase('chat.attachment_upload_contract').run({ vars }), (error) => error === stopped)
+      await assert.rejects(attachmentCases[0].run({ vars }), (error) => error === stopped)
     } finally {
       prerequisite.run = original
     }

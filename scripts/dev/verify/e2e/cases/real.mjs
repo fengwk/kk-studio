@@ -15,10 +15,12 @@ import {
   canonicalUuid,
   chatOwner,
   createChat,
+  createWorkspaceSpace,
+  createWorkspaceSession,
+  createWorkspaceBranch,
   getThread,
   getThreadSnapshot,
   listEnvironments,
-  createNewThread,
   createNewSession,
   setExecutionCommand,
   snapshotEntries,
@@ -508,6 +510,31 @@ export function sanitizeArtifact(data) {
   return data
 }
 
+async function cleanupWorkspaceSession(ctx, spaceId, sessionId) {
+  if (!spaceId || !sessionId) return
+  try {
+    const tree = (await ctx.call('GET', `/api/chat-spaces/${spaceId}/tree`)).json
+    await ctx.call(
+      'DELETE',
+      `/api/chat-spaces/${spaceId}/sessions/${sessionId}?expectedTreeVersion=${encodeURIComponent(tree.treeVersion)}`,
+    )
+  } catch {
+    // Best-effort cleanup must not replace the case result.
+  }
+}
+
+async function createRealWorkspaceSession(ctx, title, agent, message, { modelSelection = agent.execution.settings, environmentId = null } = {}) {
+  const space = await createWorkspaceSpace(ctx, { title, defaultAgentName: agent.name })
+  const session = await createWorkspaceSession(ctx, space.id, {
+    idempotencyKey: cid(),
+    message: [{ type: 'TEXT', text: message }],
+    modelSelection,
+    environmentId,
+    yoloEnabled: false,
+  })
+  return { space, session }
+}
+
 async function cleanupChat(ctx, chat) {
   if (!chat?.id) return
   try {
@@ -516,7 +543,7 @@ async function cleanupChat(ctx, chat) {
       `/api/chat/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version ?? '0')}`,
     )
   } catch {
-    // 尽力 cleanup，保留主断言失败
+    // Best-effort cleanup for attachment cases awaiting their API slice.
   }
 }
 
@@ -568,7 +595,8 @@ for (const def of REAL_MODEL_DEFINITIONS) {
       const suffix = cid().slice(0, 8)
       const systemPrompt = buildTextCacheSystemPrompt()
       let agent = null
-      let chat = null
+      let space = null
+      let sessionId = null
       try {
         const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
           name: `e2e-cache-${def.idSuffix}-${suffix}`,
@@ -578,14 +606,17 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           config: { tools: [], skills: [], subagents: [] },
         })
         agent = agentJson
-        chat = await createChat(ctx, {
-          title: `e2e-chat-${def.idSuffix}-${suffix}`,
-          agentName: agent.name,
-          yoloEnabled: false,
-        })
-
-        const sessionId = cid()
-        const threadId = cid()
+        const firstMarker = `MARKER-FIRST-${cid().slice(0, 8)}`
+        const firstUserPrompt = `Echo exactly this marker: ${firstMarker}`
+        const created = await createRealWorkspaceSession(
+          ctx,
+          `e2e-space-${def.idSuffix}-${suffix}`,
+          agent,
+          firstUserPrompt,
+        )
+        space = created.space
+        sessionId = created.session.sessionId
+        const threadId = created.session.threadId
         const evidence = {
           modelDef: {
             providerName: def.providerName,
@@ -621,20 +652,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             ? 'HIT' : followUps.length > 0 ? 'NOT_OBSERVED' : 'NOT_EVALUATED'
           ctx.writeArtifact(`real-text-cache-${def.idSuffix}.json`, JSON.stringify(evidence, null, 2))
         }
-        const firstMarker = `MARKER-FIRST-${cid().slice(0, 8)}`
-        const firstUserPrompt = `Echo exactly this marker: ${firstMarker}`
-        const accepted = await createNewSession(ctx, {
-          owner: chatOwner(chat.id),
-          sessionId,
-          threadId,
-          rootSettings: branchSettingsOf(agent, agent.execution.settings),
-          yoloEnabled: false,
-          commands: [userMessageCommand(firstUserPrompt, cid())],
-        })
-        assert(
-          accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
-          `expected USER_MESSAGE command: ${safeDiagnosticJson(accepted.acceptedCommands)}`,
-        )
 
         const firstQuiescent = await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 180_000,
@@ -688,7 +705,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           const followUpMarker = `MARKER-FOLLOWUP-${round}-${cid().slice(0, 8)}`
           const followUpPrompt = `Follow-up round ${round}. Echo exactly this marker: ${followUpMarker}`
           await acceptCommandBatch(ctx, {
-            owner: chatOwner(chat.id),
             target: threadTarget({
               threadId,
             }),
@@ -746,7 +762,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           )
         }
       } finally {
-        await cleanupChat(ctx, chat)
+        await cleanupWorkspaceSession(ctx, space?.id, sessionId)
         await cleanupAgent(ctx, agent)
       }
     },
@@ -764,7 +780,8 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
 
   for (const variant of variantsToTest) {
     let varAgent = null
-    let varChat = null
+    let varSpace = null
+    let varSessionId = null
     try {
       const varSuffix = cid().slice(0, 8)
       const varMarker = `REASON-${def.idSuffix}-${variant}-${varSuffix}`
@@ -777,27 +794,16 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         config: { tools: [], skills: [], subagents: [] },
       })
       varAgent = varAgentJson
-      varChat = await createChat(ctx, {
-        title: `e2e-reason-chat-${def.idSuffix}-${variant}-${varSuffix}`,
-        agentName: varAgent.name,
-        yoloEnabled: false,
-      })
-
-      const varSessionId = cid()
-      const varThreadId = cid()
       const varPrompt = `Calculate 29 * 31. State the final product clearly and append this marker: ${varMarker}`
-      const accepted = await createNewSession(ctx, {
-        owner: chatOwner(varChat.id),
-        sessionId: varSessionId,
-        threadId: varThreadId,
-        rootSettings: branchSettingsOf(varAgent, varAgent.execution.settings),
-        yoloEnabled: false,
-        commands: [userMessageCommand(varPrompt, cid())],
-      })
-      assert(
-        accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
-        `expected USER_MESSAGE command: ${safeDiagnosticJson(accepted.acceptedCommands)}`,
+      const created = await createRealWorkspaceSession(
+        ctx,
+        `e2e-reason-space-${def.idSuffix}-${variant}-${varSuffix}`,
+        varAgent,
+        varPrompt,
       )
+      varSpace = created.space
+      varSessionId = created.session.sessionId
+      const varThreadId = created.session.threadId
 
       const varQuiescent = await waitForQuiescentThread(ctx, varThreadId, {
         timeoutMs: 180_000,
@@ -839,7 +845,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         replySnippet: messageText(varAssistant).slice(0, 80),
       })
     } finally {
-      await cleanupChat(ctx, varChat)
+      await cleanupWorkspaceSession(ctx, varSpace?.id, varSessionId)
       await cleanupAgent(ctx, varAgent)
     }
   }
@@ -961,7 +967,8 @@ registerCase({
     const marker = `SUBAGENT-E2E-${process.hrtime.bigint()}`
     let childAgent = null
     let parentAgent = null
-    let chat = null
+    let space = null
+    let sessionId = null
     let parentThreadId = null
     try {
       childAgent = (
@@ -997,28 +1004,15 @@ registerCase({
         JSON.stringify(parentAgent.config?.subagents) === JSON.stringify([childAgent.name]),
         safeDiagnosticJson(parentAgent),
       )
-      chat = await createChat(ctx, {
-        title: `e2e-task-${suffix}`,
-        agentName: parentAgent.name,
-        yoloEnabled: false,
-      })
-      const accepted = await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId: cid(),
-        threadId: cid(),
-        rootSettings: branchSettingsOf(
-          parentAgent,
-          parentAgent.execution.settings,
-        ),
-        yoloEnabled: false,
-        commands: [
-          userMessageCommand(
-            `Use task with subagent_type "${childAgent.name}" and ask it to return exactly ${marker}.`,
-            cid(),
-          ),
-        ],
-      })
-      parentThreadId = String(accepted.thread.threadId)
+      const created = await createRealWorkspaceSession(
+        ctx,
+        `e2e-task-${suffix}`,
+        parentAgent,
+        `Use task with subagent_type "${childAgent.name}" and ask it to return exactly ${marker}.`,
+      )
+      space = created.space
+      sessionId = created.session.sessionId
+      parentThreadId = created.session.threadId
       const finalThread = await waitForQuiescentThread(ctx, parentThreadId, {
         timeoutMs: 300_000,
         intervalMs: 500,
@@ -1106,7 +1100,7 @@ registerCase({
       await captureThreadFailureDiagnostics(ctx, parentThreadId, 'task-delegation', { modelChoice })
       throw error
     } finally {
-      await cleanupChat(ctx, chat)
+      await cleanupWorkspaceSession(ctx, space?.id, sessionId)
       await cleanupAgent(ctx, parentAgent)
       await cleanupAgent(ctx, childAgent)
     }
@@ -1133,7 +1127,8 @@ registerCase({
 
     const suffix = cid().slice(0, 8)
     let tempAgent = null
-    let chat = null
+    let space = null
+    let sessionId = null
     try {
       const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-stop-agent-${suffix}`,
@@ -1144,27 +1139,18 @@ registerCase({
       })
       tempAgent = agentJson
 
-      chat = await createChat(ctx, {
+      space = await createWorkspaceSpace(ctx, {
         title: `e2e-stop-partial-${suffix}`,
-        agentName: tempAgent.name,
+        defaultAgentName: tempAgent.name,
+      })
+      const bootstrapped = await createWorkspaceSession(ctx, space.id, {
+        idempotencyKey: cid(),
+        message: [{ type: 'TEXT', text: `stop partial materialize ${suffix}` }],
+        modelSelection: { modelName: `e2e-stop-unavailable-${suffix}`, variant: 'default' },
         yoloEnabled: false,
       })
-      const sessionId = cid()
-      const tid = cid()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId,
-        threadId: tid,
-        rootSettings: branchSettingsOf(
-          { name: tempAgent.name },
-          {
-            modelName: `e2e-stop-unavailable-${suffix}`,
-            variant: 'default',
-          },
-        ),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`stop partial materialize ${suffix}`, cid())],
-      })
+      sessionId = bootstrapped.sessionId
+      const tid = bootstrapped.threadId
       const idle = await waitForQuiescentThread(ctx, tid, { timeoutMs: 60_000, intervalMs: 100 })
 
       const { signal: firstDelta, startResult } =
@@ -1173,7 +1159,6 @@ registerCase({
           tid,
           () =>
             acceptCommandBatch(ctx, {
-              owner: chatOwner(chat.id),
               target: threadTarget({
                 threadId: tid,
                 expectedHeadEntryId: idle.headEntryId,
@@ -1292,7 +1277,6 @@ registerCase({
       )
 
       const followUp = await acceptCommandBatch(ctx, {
-        owner: chatOwner(chat.id),
         target: threadTarget({
           threadId: tid,
         }),
@@ -1357,7 +1341,7 @@ registerCase({
         ),
       )
     } finally {
-      await cleanupChat(ctx, chat)
+      await cleanupWorkspaceSession(ctx, space?.id, sessionId)
       await cleanupAgent(ctx, tempAgent)
     }
   },
@@ -1373,7 +1357,8 @@ registerCase({
     const minimaxModel = await requireRealMiniMaxM3(ctx)
     const suffix = cid().slice(0, 8)
     let agent = null
-    let chat = null
+    let space = null
+    let sessionId = null
     try {
       const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-branch-agent-${suffix}`,
@@ -1383,24 +1368,20 @@ registerCase({
         config: { tools: [], skills: [], subagents: [] },
       })
       agent = agentJson
-      chat = await createChat(ctx, {
-        title: `e2e-branch-chat-${suffix}`,
-        agentName: agent.name,
-        yoloEnabled: false,
+      space = await createWorkspaceSpace(ctx, {
+        title: `e2e-branch-space-${suffix}`,
+        defaultAgentName: agent.name,
       })
 
-      const sessionId = cid()
-      const mainTid = cid()
       const mainMarker = `MAIN-BRANCH-SEED-${cid().slice(0, 8)}`
-      const accepted = await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId,
-        threadId: mainTid,
-        rootSettings: branchSettingsOf(agent, agent.execution.settings),
+      const accepted = await createWorkspaceSession(ctx, space.id, {
+        idempotencyKey: cid(),
+        message: [{ type: 'TEXT', text: `Reply with word OK: ${mainMarker}` }],
+        modelSelection: agent.execution.settings,
         yoloEnabled: false,
-        commands: [userMessageCommand(`Reply with word OK: ${mainMarker}`, cid())],
       })
-      assert(accepted.acceptedCommands.length === 1, safeDiagnosticJson(accepted.acceptedCommands))
+      sessionId = accepted.sessionId
+      const mainTid = accepted.threadId
       const mainQuiescent = await waitForQuiescentThread(ctx, mainTid, {
         timeoutMs: 180_000,
         intervalMs: 500,
@@ -1427,45 +1408,26 @@ registerCase({
         version: current.version,
         nextCommandSequence: current.nextCommandSequence,
       }
-      const branchThreadId = cid()
-      const branchThreadName = `branch ${suffix}`
       const branchUserText = '在分支上只回复单词 BRANCH，不要调用工具。'
-      const branchCommand = userMessageCommand(branchUserText, cid())
-      const branchTarget = {
-        owner: chatOwner(chat.id),
-        sessionId,
-        startEntryId,
-        threadId: branchThreadId,
-        threadName: branchThreadName,
-        // NEW_THREAD 独立 fork 新执行根：初始 YOLO 开关沿用原根当前生效值。
-        yoloEnabled: current.yoloEnabled,
-        commands: [branchCommand],
+      const branchKey = cid()
+      const branchInput = {
+        idempotencyKey: branchKey,
+        sourceThreadId: mainTid,
+        turnEndEntryId: startEntryId,
+        title: `branch ${suffix}`,
       }
-      const branched = await createNewThread(ctx, branchTarget)
-      assert(String(branched.thread.sessionId) === String(sessionId), safeDiagnosticJson(branched.thread))
-      assert(
-        branched.thread.name === branchThreadName,
-        safeDiagnosticJson(branched.thread),
-      )
-      assert(
-        String(branched.thread.threadId) === branchThreadId,
-        safeDiagnosticJson(branched.thread),
-      )
-      assert(
-        String(branched.acceptedCommands[0].sequence) === '1'
-          && branched.acceptedCommands[0].type === 'USER_MESSAGE'
-          && branched.replayed === false,
-        safeDiagnosticJson(branched),
-      )
-      // 同一 batch 精确重放（同 id/payload/threadId）：返回既有 branch Thread，不新增 Session/Thread。
-      const replay = await createNewThread(ctx, branchTarget)
-      assert(replay.replayed === true, safeDiagnosticJson(replay))
-      assert(
-        String(replay.thread.threadId) === branchThreadId
-          && String(replay.session?.sessionId) === String(sessionId)
-          && replay.acceptedCommands[0].type === 'USER_MESSAGE',
-        safeDiagnosticJson(replay),
-      )
+      const branched = await createWorkspaceBranch(ctx, space.id, sessionId, branchInput)
+      assert(String(branched.sessionId) === String(sessionId), safeDiagnosticJson(branched))
+      assert(branched.threadId, safeDiagnosticJson(branched))
+      const branchThreadId = branched.threadId
+      // Branch creation starts an idle root; continue it via the owner-free Thread command API.
+      const branchStart = await acceptCommandBatch(ctx, {
+        target: threadTarget({ threadId: branchThreadId }),
+        commands: [userMessageCommand(branchUserText, cid())],
+      })
+      assert(branchStart.thread.threadId === branchThreadId, safeDiagnosticJson(branchStart))
+      const replay = await createWorkspaceBranch(ctx, space.id, sessionId, branchInput)
+      assert(replay.threadId === branchThreadId && replay.sessionId === sessionId, safeDiagnosticJson(replay))
       const mainAfter = await getThread(ctx, mainTid)
       assert(
         String(mainAfter.headEntryId) === String(mainBefore.headEntryId)
@@ -1505,7 +1467,10 @@ registerCase({
         JSON.stringify(sanitizeArtifact({ finalThread, entries }), null, 2),
       )
     } finally {
-      await cleanupChat(ctx, chat)
+      if (space?.id && sessionId) {
+        const tree = (await ctx.call('GET', `/api/chat-spaces/${space.id}/tree`)).json
+        await ctx.call('DELETE', `/api/chat-spaces/${space.id}/sessions/${sessionId}?expectedTreeVersion=${encodeURIComponent(tree.treeVersion)}`)
+      }
       await cleanupAgent(ctx, agent)
     }
   },
@@ -1629,7 +1594,8 @@ registerCase({
       ],
       'AgentDTO',
     )
-    let chat = null
+    let space = null
+    let sessionId = null
     let tid = null
     try {
       const agentConfig = toolAgent.config
@@ -1664,40 +1630,30 @@ registerCase({
         ),
       ].join('\n')
       writeFileSync(fixturePath, fixtureContent)
-      chat = await createChat(ctx, {
-        title: `e2e-tool-chat-${suffix}`,
-        agentName: toolAgent.name,
+      const environment = (await listEnvironments(ctx)).find((candidate) => candidate.name === ctx.daemonEnv)
+      assert(environment, `daemon Environment ${ctx.daemonEnv} is missing`)
+      space = await createWorkspaceSpace(ctx, {
+        title: `e2e-tool-space-${suffix}`,
+        defaultAgentName: toolAgent.name,
+      })
+      const created = await createWorkspaceSession(ctx, space.id, {
+        idempotencyKey: cid(),
+        message: [{
+          type: 'TEXT',
+          text: `必须调用 read 工具读取文件 e2e-resource.txt，使用参数 ${JSON.stringify({ path: fixturePath })}，不要猜测或跳过工具，然后用一句话总结读取结果。`,
+        }],
+        modelSelection: toolAgent.execution.settings,
+        environmentId: environment.id,
         yoloEnabled: false,
       })
-      const accepted = await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId: cid(),
-        threadId: cid(),
-        rootSettings: branchSettingsOf(toolAgent, toolAgent.execution.settings, ctx.daemonEnv),
-        yoloEnabled: false,
-        commands: [
-          userMessageCommand(
-            `必须调用 read 工具读取文件 e2e-resource.txt，使用参数 `
-              + `${JSON.stringify({ path: fixturePath })}，`
-              + '不要猜测或跳过工具，然后用一句话总结读取结果。',
-            cid(),
-          ),
-        ],
-      })
-      tid = accepted.thread.threadId
-      // Environment 绑定的真实证据：ROOT branchSettings 携带 canonical daemon name，read 该轮解析后
-      // 冻结为 daemon Environment 的路由身份。
+      sessionId = created.sessionId
+      tid = created.threadId
+      const createdThread = await getThread(ctx, tid)
       assert(
-        accepted.thread.branchSettings.environmentName === ctx.daemonEnv,
-        `ROOT branchSettings must bind the canonical daemon Environment name: ${safeDiagnosticJson(
-          accepted.thread.branchSettings,
-        )}`,
+        createdThread.branchSettings.environmentName === ctx.daemonEnv,
+        `Workspace Environment id must resolve to daemon name: ${safeDiagnosticJson(createdThread.branchSettings)}`,
       )
-      assertExactFields(
-        accepted.thread.branchSettings,
-        ['agentName', 'execution', 'environmentName'],
-        'thread branchSettings',
-      )
+      assertExactFields(createdThread.branchSettings, ['agentName', 'execution', 'environmentName'], 'thread branchSettings')
       let waiting = null
       let readInvocation = null
       let terminal = null
@@ -1888,7 +1844,7 @@ registerCase({
       await captureThreadFailureDiagnostics(ctx, tid, 'tool-read-turn', { modelChoice })
       throw error
     } finally {
-      await cleanupChat(ctx, chat)
+      await cleanupWorkspaceSession(ctx, space?.id, sessionId)
       await cleanupAgent(ctx, toolAgent)
     }
   },
