@@ -180,10 +180,6 @@ export const resourcesCatalog = {
     'en-US': 'Name',
     'zh-CN': '名称',
   },
-  'ai.catalog.form.nameHint': {
-    'en-US': 'Globally unique logical name shared by Models and Model Groups.',
-    'zh-CN': '模型和模型组共用此命名空间，名称不可重复。',
-  },
   'ai.catalog.form.groupNameHint': {
     'en-US': 'Globally unique logical name shared with Models.',
     'zh-CN': '与模型共用的全局唯一逻辑名。',
@@ -340,10 +336,6 @@ export const resourcesCatalog = {
     'en-US': 'Model ID',
     'zh-CN': '模型 ID',
   },
-  'ai.catalog.form.modelIdHint': {
-    'en-US': 'Upstream model ID sent to the Provider; may differ from Name.',
-    'zh-CN': '发送给提供商的上游模型 ID，可以与名称不同。',
-  },
   'ai.catalog.form.remoteModelsFetch': {
     'en-US': 'Fetch models from Provider',
     'zh-CN': '从提供商拉取模型',
@@ -424,10 +416,6 @@ export const resourcesCatalog = {
     'en-US': 'Inherit system settings',
     'zh-CN': '继承系统配置',
   },
-  'ai.catalog.form.httpRetryInheritHint': {
-    'en-US': 'Inherits the system-wide HTTP retry status code list.',
-    'zh-CN': '当前提供商继承系统全局配置的 HTTP 重试状态码名单。',
-  },
   'ai.catalog.form.httpRetryCustom': {
     'en-US': 'Custom status codes',
     'zh-CN': '自定义重试名单',
@@ -451,10 +439,6 @@ export const resourcesCatalog = {
   'ai.catalog.form.inputLimit': {
     'en-US': 'Input Limit',
     'zh-CN': '输入上限',
-  },
-  'ai.catalog.form.inputLimitHint': {
-    'en-US': 'Optional cap on prompt tokens per request; leave empty to use the context window.',
-    'zh-CN': '可选的每次请求输入 token 上限；留空表示仅受上下文窗口约束。',
   },
   'ai.catalog.form.inputLimitPlaceholder': {
     'en-US': 'Uses the context window',
@@ -544,10 +528,6 @@ export const resourcesCatalog = {
     'en-US': 'Long',
     'zh-CN': '长',
   },
-  'ai.catalog.form.advancedOptions': {
-    'en-US': 'Advanced options',
-    'zh-CN': '高级选项',
-  },
   'ai.catalog.form.reasoningEffort': {
     'en-US': 'Reasoning Effort',
     'zh-CN': '思考强度',
@@ -608,21 +588,17 @@ export const resourcesCatalog = {
     'en-US': 'No tools in the catalog yet',
     'zh-CN': '目录还没有工具',
   },
-  'ai.catalog.sectionNavigation': { 'en-US': 'Section navigation', 'zh-CN': '区块导航' },
   'ai.catalog.section.basics': { 'en-US': 'Basic information', 'zh-CN': '基本信息' },
   'ai.catalog.section.limits': { 'en-US': 'Request limits and capabilities', 'zh-CN': '请求限制与能力' },
   'ai.catalog.section.presets': { 'en-US': 'Model presets', 'zh-CN': '模型预设' },
   'ai.catalog.section.pricing': { 'en-US': 'Pricing and rates', 'zh-CN': '价格与费率' },
   'ai.catalog.section.execution': { 'en-US': 'Execution', 'zh-CN': '执行' },
   'ai.catalog.section.prompt': { 'en-US': 'System prompt', 'zh-CN': '系统提示词' },
-  // 区块导航列很窄，中文标签只在“ / ”分隔处换行：「子 Agent」是不可拆分的术语，用不换行空格粘连。
+  // 「子 Agent」是不可拆分的术语，用不换行空格粘连。
   'ai.catalog.section.capabilities': { 'en-US': 'Tools, skills and subagents', 'zh-CN': '工具 / 技能 / 子\u00A0Agent' },
   'ai.catalog.form.agentTools': { 'en-US': 'Tools', 'zh-CN': '工具' },
   'ai.catalog.form.agentSkills': { 'en-US': 'Skills', 'zh-CN': '技能' },
   'ai.catalog.form.agentSubagents': { 'en-US': 'Subagents', 'zh-CN': '子 Agent' },
-  'ai.catalog.form.manageTools': { 'en-US': 'Manage tools', 'zh-CN': '管理工具' },
-  'ai.catalog.form.manageSkills': { 'en-US': 'Manage skills', 'zh-CN': '管理技能' },
-  'ai.catalog.form.manageSubagents': { 'en-US': 'Manage subagents', 'zh-CN': '管理子 Agent' },
   'ai.catalog.form.searchTools': { 'en-US': 'Search tools', 'zh-CN': '搜索工具' },
   'ai.catalog.form.searchSkills': { 'en-US': 'Search skills', 'zh-CN': '搜索技能' },
   'ai.catalog.form.searchSubagents': { 'en-US': 'Search subagents', 'zh-CN': '搜索子 Agent' },
@@ -662,29 +638,9 @@ export const resourcesCatalog = {
     'en-US': 'Offline',
     'zh-CN': '离线',
   },
-  'ai.catalog.form.variantHint': {
-    'en-US':
-      'A Variant carries reasoning effort and protocol options; IDs must be unique, and Default Variant must point to one of them.',
-    'zh-CN': '模型预设包含思考强度与原生协议选项。预设 ID 不可重复，默认预设必须是其中一项。',
-  },
-  'ai.catalog.form.reasoningHint': {
-    'en-US':
-      ' Leave empty to keep provider protocol default; off = explicitly disable reasoning; provider-defined values (e.g. low, medium, high, max) are passed through.',
-    'zh-CN':
-      ' 留空使用提供商协议的默认值；off 表示显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
-  },
-  'ai.catalog.form.reasoningDisabledHint': {
-    'en-US':
-      ' Reasoning is disabled. To configure reasoning effort, check Reasoning above to enable it.',
-    'zh-CN': '推理当前已关闭；若需配置思考强度，请勾选上方的「推理」。',
-  },
   'ai.catalog.form.maxOutputLimitHint': {
     'en-US': 'Model-level output budget; each request also narrows it by the remaining context.',
     'zh-CN': '模型级输出预算；每次请求还会按剩余上下文收敛。',
-  },
-  'ai.catalog.form.inputModalityHint': {
-    'en-US': 'Input modalities accepted by the model; keep at least one.',
-    'zh-CN': '模型可接受的输入模态；至少保留一种。',
   },
   'ai.catalog.form.reasoningPricing': {
     'en-US': 'Independent reasoning pricing',
@@ -1109,10 +1065,6 @@ export const resourcesCatalog = {
     'en-US': 'Personal Access Token',
     'zh-CN': '个人访问令牌',
   },
-  'ai.skillPackages.tokenCreateHint': {
-    'en-US': 'Optional personal access token for private repositories. Stored encrypted and never echoed.',
-    'zh-CN': '私有仓库的访问令牌，可选。加密存储且绝不回显。',
-  },
   'ai.skillPackages.tokenEditPlaceholder': {
     'en-US': 'Leave blank to keep existing token',
     'zh-CN': '留空保留已有令牌',
@@ -1309,10 +1261,6 @@ export const resourcesCatalog = {
     'en-US': 'No file selected',
     'zh-CN': '尚未选择文件',
   },
-  'ai.skillPackages.archiveFileHint': {
-    'en-US': 'Every directory that directly contains SKILL.md becomes one skill.',
-    'zh-CN': '根目录下直接包含 SKILL.md 的目录会打包为一个技能。',
-  },
   'ai.skillPackages.uploadProgress': {
     'en-US': 'Upload progress',
     'zh-CN': '上传进度',
@@ -1397,10 +1345,6 @@ export const resourcesCatalog = {
     'en-US': 'Server Name',
     'zh-CN': '服务名称',
   },
-  'ai.mcp.nameHint': {
-    'en-US': 'Lowercase letters, numbers, and underscores; must start with a letter. Pattern:',
-    'zh-CN': '小写字母、数字或下划线，需以字母开头。格式：',
-  },
   'ai.mcp.namePlaceholder': {
     'en-US': 'e.g. filesystem',
     'zh-CN': '例如 filesystem',
@@ -1412,10 +1356,6 @@ export const resourcesCatalog = {
   'ai.mcp.url': {
     'en-US': 'Endpoint URL',
     'zh-CN': '服务地址',
-  },
-  'ai.mcp.urlHint': {
-    'en-US': 'Streamable HTTP endpoint URL. Use http:// or https://.',
-    'zh-CN': 'Streamable HTTP 服务地址，使用 http:// 或 https://。',
   },
   'ai.mcp.headers': {
     'en-US': 'JSON headers',

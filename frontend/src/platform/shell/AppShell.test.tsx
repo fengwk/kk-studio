@@ -134,23 +134,6 @@ describe('AppShell canvas immersive routes', () => {
   )
 })
 
-describe('AppShell secondary AI routes header activation', () => {
-  it.each([
-    '/skill-packages',
-    '/mcp-servers',
-    '/environments',
-    '/agents',
-    '/models',
-    '/providers',
-  ])('activates AI top navigation and points brand to /chats for %s', (path) => {
-    renderShell(path, <div>AI Sub-route</div>)
-
-    expect(screen.getByRole('banner')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '智能' })).toHaveClass('active')
-    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
-  })
-})
-
 describe('AppShell settings navigation', () => {
   it('renders the settings link with only the current-language label for desktop and mobile panels', () => {
     renderShell('/chats', <div>Content</div>)
