@@ -374,7 +374,9 @@ describe('WorkspaceShell', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Planner' }))
     fireEvent.click(within(defaultsDialog).getByLabelText('Default environment'))
     fireEvent.click(await screen.findByRole('option', { name: 'Dev Env' }))
-    fireEvent.click(within(defaultsDialog).getByRole('checkbox'))
+    const yoloCheckbox = within(defaultsDialog).getByRole('checkbox')
+    expect(yoloCheckbox.closest('.ui-checkbox')).not.toBeNull()
+    fireEvent.click(yoloCheckbox)
 
     fireEvent.click(within(defaultsDialog).getByRole('button', { name: 'Confirm' }))
     expect(await within(defaultsDialog).findByRole('alert')).toHaveTextContent('Request failed')

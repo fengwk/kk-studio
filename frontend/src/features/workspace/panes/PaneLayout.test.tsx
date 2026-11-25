@@ -188,10 +188,13 @@ describe('PaneLayout / PaneHeader / PanePicker / usePaneState', () => {
     await user.click(within(pickerDialog).getByRole('button', { name: /A：First/ }))
     expect(onSelect).toHaveBeenCalledWith(firstId)
 
-    // Clicking backdrop or cancel event calls onCancel
+    // Clicking backdrop, cancel event, or Escape calls onCancel (repeat/composing ignored)
     fireEvent.click(pickerDialog)
     fireEvent(pickerDialog, new Event('cancel', { cancelable: true }))
-    expect(onCancel).toHaveBeenCalledTimes(2)
+    fireEvent.keyDown(pickerDialog, { key: 'Escape', repeat: true })
+    fireEvent.keyDown(pickerDialog, { key: 'Escape', isComposing: true })
+    fireEvent.keyDown(pickerDialog, { key: 'Escape' })
+    expect(onCancel).toHaveBeenCalledTimes(3)
 
     // Rerender without picker so narrow header menus work
     rerender(<Harness initial={state} />)

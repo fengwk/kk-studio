@@ -299,3 +299,21 @@ for (const width of [1440, 390]) {
     await capture('name-dialog')
   })
 }
+
+test('keeps long Select trigger values on a single line with ellipsis and full title', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/browser-tests/shared-controls-harness.html')
+  const longLabel = '这是一个用于验证共享下拉触发器单行省略号截断行为的非常长的选项文本 Alpha Bravo Charlie Delta'
+  const trigger = page.getByRole('button', { name: '页内 下拉' })
+  await trigger.click()
+  await page.getByRole('option', { name: longLabel }).click()
+
+  await expectHeight(trigger, 32)
+  await expect(trigger).toHaveAttribute('title', longLabel)
+  const valueSpan = trigger.locator('.ui-select-value')
+  await expect(valueSpan).toHaveCSS('white-space', 'nowrap')
+  await expect(valueSpan).toHaveCSS('overflow', 'hidden')
+  await expect(valueSpan).toHaveCSS('text-overflow', 'ellipsis')
+  const truncated = await valueSpan.evaluate((el) => el.scrollWidth > el.clientWidth)
+  expect(truncated).toBe(true)
+})

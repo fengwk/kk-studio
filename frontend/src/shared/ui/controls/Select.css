@@ -1,6 +1,7 @@
 .ui-select {
   position: relative;
   width: 100%;
+  min-width: 0;
 }
 
 .ui-select.is-open {
@@ -19,6 +20,7 @@
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
+  min-width: 0;
   min-height: var(--control-h);
   max-width: 100%;
   padding: 0 var(--space-2);
@@ -68,9 +70,11 @@
 }
 
 .ui-select-value {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ui-select-chevron {

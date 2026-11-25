@@ -321,4 +321,33 @@ describe('Select', () => {
     )
     expect(document.querySelector('.ui-select')).toHaveClass('my-select')
   })
+
+  it('exposes the full option label via title without altering accessible name', () => {
+    const longLabel = '根目录 / 非常长的会话名称用于验证单行省略与完整标题回显 Alpha Bravo Charlie'
+    const options = [
+      { value: 'long', label: longLabel },
+      { value: 'short', label: 'Alpha one', triggerLabel: '1' },
+    ]
+    const { rerender } = render(
+      <Select aria-label="会话" value="long" options={options} onChange={() => undefined} />,
+    )
+    const trigger = screen.getByRole('button', { name: '会话' })
+    expect(trigger).toHaveAttribute('title', longLabel)
+    expect(trigger.querySelector('.ui-select-value')).toHaveTextContent(longLabel)
+
+    rerender(<Select aria-label="会话" value="short" options={options} onChange={() => undefined} />)
+    expect(trigger).toHaveAttribute('title', 'Alpha one')
+    expect(trigger.querySelector('.ui-select-value')).toHaveTextContent(/^1$/)
+
+    rerender(
+      <Select
+        aria-label="会话"
+        value=""
+        placeholder="请选择会话"
+        options={options}
+        onChange={() => undefined}
+      />,
+    )
+    expect(trigger).toHaveAttribute('title', '请选择会话')
+  })
 })
