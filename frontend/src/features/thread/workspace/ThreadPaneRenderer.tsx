@@ -169,7 +169,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
       ? <CompactionBranchView key={inspection.afterEntryId} {...inspection} afterEntryId={inspection.afterEntryId} onBack={back} />
       : <ConnectedThreadView key={inspection.threadId} threadId={inspection.threadId} environments={environments} active={active}
         onParent={back} navigation={<Button variant="secondary" onClick={back}>{t('ai.runtime.childThread.back')}</Button>} />)}
-    {cut && <TurnCutDialog kind={cut.kind} initialName={cut.initialName} turnEndEntryId={cut.endEntryId}
+    {cut && <TurnCutDialog kind={cut.kind} initialName={cut.initialName} turnEndEntryId={cut.endEntryId} hasUnsent={unsent}
       sourceThreadId={threadId} sessionId={sessionId} spaceId={space.id} onClose={() => setCut(undefined)}
       onCreated={(createdThreadId) => replace({ kind: 'thread', threadId: createdThreadId })} />}
   </ThreadNavigationContext.Provider>

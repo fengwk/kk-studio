@@ -39,6 +39,7 @@ export const chatCatalog = {
   },
   'ai.runtime.branch.branchName': { 'en-US': 'Branch name', 'zh-CN': '分支名称' },
   'ai.runtime.branch.sessionName': { 'en-US': 'Session name', 'zh-CN': '会话名称' },
+  'ai.runtime.branch.continueWithoutDraft': { 'en-US': 'Switch this pane to the new thread without carrying over unsent input.', 'zh-CN': '在当前窗格打开新 Thread，不带入未发送内容。' },
   'ai.runtime.branch.create': { 'en-US': 'Create', 'zh-CN': '创建' },
   'ai.runtime.branch.suggestedTitle': { 'en-US': 'Branch {{number}}', 'zh-CN': '分支 {{number}}' },
   'ai.runtime.branch.suggestedFork': { 'en-US': '{{title}} · Fork', 'zh-CN': '{{title}} · 分叉' },

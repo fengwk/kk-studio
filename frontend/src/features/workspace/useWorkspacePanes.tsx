@@ -53,7 +53,7 @@ export function useWorkspacePanes({ userId, space, rows, renderers, closeView, o
     return current !== undefined && unsent[id] === targetKey(current)
   }
 
-  function transition(id: string, update: (previous: Bindings) => Bindings, next?: PaneTarget, replacesAfterSend = false) {
+  function transition(id: string, update: (previous: Bindings) => Bindings, next?: PaneTarget, replacementAlreadyAuthorized = false) {
     if (locking.current) return
     const current = state.bindings[id]
     if (next && sameTarget(current, next)) {
@@ -72,7 +72,7 @@ export function useWorkspacePanes({ userId, space, rows, renderers, closeView, o
         setBusy(false)
       })
     }
-    if (!replacesAfterSend && hasUnsent(id)) setConfirm({ run })
+    if (!replacementAlreadyAuthorized && hasUnsent(id)) setConfirm({ run })
     else run()
   }
 
@@ -89,6 +89,7 @@ export function useWorkspacePanes({ userId, space, rows, renderers, closeView, o
     const props: Omit<PaneRendererProps<PaneTarget>, 'target'> = {
       space,
       active: id === state.focusedPaneId,
+      // First sends and confirmed branch/fork actions have already authorized this replacement.
       replace: next => transition(id, previous => bindPane(previous, id, next), next, true),
       open,
       openBeside: next => {

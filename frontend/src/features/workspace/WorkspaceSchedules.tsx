@@ -9,6 +9,7 @@ import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Switch } from '@/shared/ui/controls/Switch'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { Menu } from '@/shared/ui/overlays/Menu'
 import type { PaneTarget } from './pane-target'
 import { workspaceKeys } from './queries'
@@ -200,10 +201,11 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLButtonElement } | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
-  const [editor, setEditor] = useState<{ schedule: ScheduleDTO | null } | null>(null)
+  const [editor, setEditor] = useState<{ schedule: ScheduleDTO | null; reloadCount?: number } | null>(null)
   const [deleting, setDeleting] = useState<{
     schedule: ScheduleDTO
     busy?: boolean
+    conflict?: boolean
     error?: string
   } | null>(null)
 
@@ -219,13 +221,6 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
       setCursorState(INITIAL_HISTORY_CURSORS)
     }
   }, [expandedId, schedulesQuery.data])
-
-  const latestEditingVersion = editor?.schedule
-    ? schedules.find(item => item.id === editor.schedule!.id)?.version
-    : undefined
-  const latestDeletingVersion = deleting
-    ? schedules.find(item => item.id === deleting.schedule.id)?.version
-    : undefined
 
   function toggleExpand(scheduleId: string) {
     setCursorState(INITIAL_HISTORY_CURSORS)
@@ -279,11 +274,11 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
   }
 
   async function handleConfirmDelete() {
-    if (!deleting || deleting.busy) return
+    if (!deleting || deleting.busy || deleting.conflict) return
     const target = deleting.schedule
     setDeleting({ ...deleting, busy: true, error: undefined })
     try {
-      await deleteSchedule(space.id, target.id, latestDeletingVersion ?? target.version)
+      await deleteSchedule(space.id, target.id, target.version)
       if (expandedId === target.id) {
         setExpandedId(null)
         setCursorState(INITIAL_HISTORY_CURSORS)
@@ -294,7 +289,7 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
     } catch (error) {
       if (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT')) {
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
-        setDeleting({ schedule: target, busy: false, error: t('workspace.versionConflict') })
+        setDeleting({ schedule: target, conflict: true })
       } else {
         setDeleting({
           schedule: target,
@@ -424,10 +419,11 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
 
       {editor && (
         <ScheduleEditorDialog
+          key={editor.reloadCount ?? 0}
           space={space}
           tree={tree}
           schedule={editor.schedule}
-          latestVersion={latestEditingVersion}
+          onReloaded={schedule => setEditor(current => ({ schedule, reloadCount: (current?.reloadCount ?? 0) + 1 }))}
           onClose={() => setEditor(null)}
           onSaved={() => {
             setEditor(null)
@@ -442,7 +438,7 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
         error={deleting?.error}
         onClose={() => setDeleting(null)}
         modal={
-          deleting
+          deleting && !deleting.conflict
             ? {
                 title: t('workspace.schedule.deleteTitle', { name: deleting.schedule.title }),
                 description: t('workspace.schedule.deletePrompt'),
@@ -453,6 +449,14 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
             : null
         }
       />
+      {deleting?.conflict && (
+        <Dialog title={t('workspace.schedule.deleteConflictTitle')} onClose={() => setDeleting(null)}>
+          <div className="modal-body">{t('workspace.schedule.deleteConflict')}</div>
+          <div className="modal-footer">
+            <Button onClick={() => setDeleting(null)}>{t('shared.close')}</Button>
+          </div>
+        </Dialog>
+      )}
     </div>
   )
 }

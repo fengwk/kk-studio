@@ -101,7 +101,7 @@
 
 **从回合末尾分支或新建会话**
 
-- 前端：回合末尾的两个按钮各打开名称框，建议名分别是「分支 N」和「原标题 · 分叉」；取消不发请求。成功后在当前窗格打开新的 Thread，展开所在目录并聚焦输入框。
+- 前端：回合末尾的两个按钮各打开名称框，建议名分别是「分支 N」和「原标题 · 分叉」。若输入框有未发送内容，须先在名称框中确认不带入这些内容才能创建；取消不发请求。成功后在当前窗格打开新的 Thread，展开所在目录并聚焦输入框。
 - 接口：`POST /sessions/{id}/branches` 或 `POST /sessions/{id}/forks`，请求体为 `{sourceThreadId, turnEndEntryId, title}`，带 `Idempotency-Key`。
 - 分支事务：锁 Session 行 → 校验切点是源 Thread 可见路径上的 `TURN_END`，分支名在 Session 内唯一 → 创建以该切点为 head 的公开根 Thread，复制切点处的设置；不调用模型。
 - 新会话事务：锁空间行 → 把有效上下文复制到新 Session（新 ID、重写内部引用、为引用的 Blob 登记持有）→ 在源 Session 所在目录的最上面写目录边 → `tree_version` 加一。
@@ -172,7 +172,7 @@
 
 **新建与编辑**
 
-- 前端：编辑弹窗。触发规则变化时调用 `POST /schedules/preview` 显示最近三次运行时间；保存时字段错误标在对应字段，冲突时保留表单并重新读取。
+- 前端：编辑弹窗。触发规则变化时调用 `POST /schedules/preview` 显示最近三次运行时间；保存时字段错误标在对应字段，保存以打开时的任务版本为准。冲突时刷新列表并保留表单，禁用保存，直到用户主动放弃修改并重新读取最新配置。
 - 接口：`GET /schedules` 查询当前空间任务；`POST /schedules` 创建；`PATCH /schedules/{id}` 更新（带 `expectedVersion`）。
 - 事务：锁空间行和任务行 → 校验目标（新建位置的目录、Agent，或分支切点、续作 Thread）→ 计算 `next_due_at` → 写入任务和对应的唤醒 Work。
 - 事件：任务配置提交后发送 `schedules`，数据为 `{scheduleId}`。
@@ -182,7 +182,7 @@
 
 - 启停：开关调用 `PATCH /schedules/{id}`（`{enabled, expectedVersion}`）。暂停只取消之后的自动触发，不停止已提交的回合。
 - 立即运行：`POST /schedules/{id}/runs`，每次操作一个独立的 `Idempotency-Key`。与自动触发走同一个业务事务，但不推进 `next_due_at`，暂停的任务也能运行。返回本次执行记录，前端展开该任务的最新一页，不打开窗格。
-- 删除：编辑弹窗里的「删除任务」，确认后调用 `DELETE /schedules/{id}?expectedVersion=…`。同一事务删除任务、唤醒 Work 和执行记录，已产生的会话和 Thread 保留。
+- 删除：编辑弹窗里的「删除任务」，确认后用编辑弹窗打开时的版本调用 `DELETE /schedules/{id}?expectedVersion=…`。冲突时刷新列表，须重新打开任务核对后才能再次删除。同一事务删除任务、唤醒 Work 和执行记录，已产生的会话和 Thread 保留。
 
 **执行记录**
 

@@ -43,6 +43,7 @@ import {
   createSchedule,
   getThreadEntriesSnapshot,
   listAgentSummaries,
+  listSchedules,
   patchSchedule,
   previewSchedule,
 } from './workspace-api'
@@ -66,7 +67,7 @@ export interface ScheduleEditorDialogProps {
   space: ChatSpaceDTO
   tree: WorkspaceTreeDTO
   schedule: ScheduleDTO | null
-  latestVersion?: string
+  onReloaded: (schedule: ScheduleDTO) => void
   onClose: () => void
   onSaved: (schedule: ScheduleDTO) => void
   onRequestDelete: (schedule: ScheduleDTO) => void
@@ -76,7 +77,7 @@ export function ScheduleEditorDialog({
   space,
   tree,
   schedule,
-  latestVersion,
+  onReloaded,
   onClose,
   onSaved,
   onRequestDelete,
@@ -138,6 +139,27 @@ export function ScheduleEditorDialog({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldErrorKey, string>>>({})
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [conflict, setConflict] = useState(false)
+
+  async function reloadSchedule() {
+    if (!schedule || saving) return
+    setSaving(true)
+    setFormError('')
+    try {
+      const schedules = await queryClient.fetchQuery({
+        queryKey: workspaceKeys.schedules(space.id),
+        queryFn: ({ signal }) => listSchedules(space.id, signal),
+        staleTime: 0,
+      })
+      const latest = schedules.find(item => item.id === schedule.id)
+      if (latest) onReloaded(latest)
+      else setFormError(t('workspace.schedule.noLongerExists'))
+    } catch {
+      setFormError(t('shared.requestFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
   const [idempotencyKey, setIdempotencyKey] = useState(() => createUuid())
   const [hadWriteError, setHadWriteError] = useState(false)
 
@@ -349,7 +371,7 @@ export function ScheduleEditorDialog({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (saving) return
+    if (saving || conflict) return
 
     const errors: Partial<Record<FieldErrorKey, string>> = {}
     let firstErrorKey: FieldErrorKey | undefined
@@ -417,7 +439,7 @@ export function ScheduleEditorDialog({
 
       const saved = isEdit
         ? await patchSchedule(space.id, schedule.id, {
-            expectedVersion: latestVersion ?? schedule.version,
+            expectedVersion: schedule.version,
             title: title.trim(),
             message: message.trim(),
             enabled: schedule.enabled,
@@ -444,7 +466,7 @@ export function ScheduleEditorDialog({
         const reason = error.reason ?? error.code
         if (error.status === 409 && reason === 'VERSION_CONFLICT') {
           await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
-          setFormError(t('workspace.versionConflict'))
+          setConflict(true)
           return
         }
         if (reason === 'INVALID_TURN_END') {
@@ -895,6 +917,14 @@ export function ScheduleEditorDialog({
             </p>
           </fieldset>
 
+          {conflict && (
+            <div>
+              <FieldError role="alert">{t('workspace.schedule.editConflict')}</FieldError>
+              <Button type="button" variant="secondary" disabled={saving} onClick={() => void reloadSchedule()}>
+                {t('workspace.schedule.reloadDiscard')}
+              </Button>
+            </div>
+          )}
           {formError && <FieldError role="alert">{formError}</FieldError>}
         </div>
 
@@ -905,7 +935,7 @@ export function ScheduleEditorDialog({
                 type="button"
                 variant="secondary"
                 danger
-                disabled={saving}
+                disabled={saving || conflict}
                 onClick={() => onRequestDelete(schedule)}
               >
                 {t('workspace.schedule.delete')}
@@ -915,7 +945,7 @@ export function ScheduleEditorDialog({
           <Button type="button" variant="secondary" disabled={saving} onClick={onClose}>
             {t('shared.cancel')}
           </Button>
-          <Button type="submit" variant="primary" loading={saving}>
+          <Button type="submit" variant="primary" loading={saving} disabled={conflict}>
             {t('workspace.schedule.save')}
           </Button>
         </div>

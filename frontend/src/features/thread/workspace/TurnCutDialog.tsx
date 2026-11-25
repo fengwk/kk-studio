@@ -5,18 +5,20 @@ import { workspaceKeys } from '@/features/workspace/queries'
 import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 
-export function TurnCutDialog({ kind, initialName, spaceId, sessionId, sourceThreadId, turnEndEntryId, onCreated, onClose }: {
+export function TurnCutDialog({ kind, initialName, spaceId, sessionId, sourceThreadId, turnEndEntryId, hasUnsent, onCreated, onClose }: {
   kind: 'branch' | 'fork'
   initialName: string
   spaceId: string
   sessionId: string
   sourceThreadId: string
   turnEndEntryId: string
+  hasUnsent: boolean
   onCreated: (threadId: string) => void
   onClose: () => void
 }) {
@@ -26,6 +28,8 @@ export function TurnCutDialog({ kind, initialName, spaceId, sessionId, sourceThr
   const cache = useQueryClient()
   const [name, setName] = useState(initialName)
   const title = normalizeThreadName(name)
+  const [continueWithoutDraft, setContinueWithoutDraft] = useState(false)
+  const canCreate = title != null && (!hasUnsent || continueWithoutDraft)
   const [key, setKey] = useState(() => crypto.randomUUID())
   useEffect(() => {
     inputRef.current?.select()
@@ -46,7 +50,7 @@ export function TurnCutDialog({ kind, initialName, spaceId, sessionId, sourceThr
     onClose={onClose} pending={create.isPending} initialFocusSelector="input">
     <form className="turn-cut-form" onSubmit={(event) => {
       event.preventDefault()
-      if (title != null && !create.isPending) create.mutate(title, { onSuccess: ({ threadId }) => onCreated(threadId) })
+      if (canCreate && !create.isPending) create.mutate(title, { onSuccess: ({ threadId }) => onCreated(threadId) })
     }}>
       <h2 id={`${inputId}-title`}>{t(kind === 'branch' ? 'ai.chat.branch.fromHere' : 'ai.chat.branch.forkSession')}</h2>
       <div className="turn-cut-field">
@@ -62,9 +66,11 @@ export function TurnCutDialog({ kind, initialName, spaceId, sessionId, sourceThr
           }} />
         {error && <FieldError id={`${inputId}-error`} role="alert">{error}</FieldError>}
       </div>
+      {hasUnsent && <Checkbox checked={continueWithoutDraft} onChange={setContinueWithoutDraft}
+        disabled={create.isPending} label={t('ai.runtime.branch.continueWithoutDraft')} />}
       <div className="turn-cut-actions">
         <Button type="button" variant="secondary" onClick={onClose} disabled={create.isPending}>{t('shared.cancel')}</Button>
-        <Button type="submit" disabled={title == null} loading={create.isPending}>{t('ai.runtime.branch.create')}</Button>
+        <Button type="submit" disabled={!canCreate} loading={create.isPending}>{t('ai.runtime.branch.create')}</Button>
       </div>
     </form>
   </Dialog>
