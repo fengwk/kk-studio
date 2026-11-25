@@ -34,17 +34,12 @@ import {
   writeCaseResult,
   writeSummaryAndReport,
 } from './report.mjs'
-import { assert, httpJson, listResults, cid } from '../e2e/lib/http.mjs'
+import { assert, listResults, cid, createHttpClient } from '../e2e/lib/http.mjs'
 import {
   assertRootYoloEnabled,
-  branchSettingsOf,
-  chatOwner,
-  createChat,
   getThreadSnapshot,
   listEnvironments,
-  createNewSession,
   stopThread,
-  userMessageCommand,
   waitForQuiescentThread,
 } from '../e2e/lib/harness.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
@@ -79,10 +74,20 @@ export async function main(argv = process.argv.slice(2)) {
     byteLength: Buffer.byteLength(systemPrompt),
     sha256: sha256(systemPrompt),
   }
+  const http = createHttpClient({ baseUrl: args.baseUrl, origin: new URL(args.baseUrl).origin })
   const ctx = {
     baseUrl: args.baseUrl,
-    call(method, requestPath, body, timeoutMs) {
-      return httpJson(args.baseUrl, method, requestPath, body, timeoutMs)
+    async call(method, requestPath, body, timeoutMs, headers = {}) {
+      const response = await http.request(requestPath, {
+        method,
+        headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs),
+      })
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response.status} ${method} ${requestPath}: ${response.text}`)
+      }
+      return response
     },
   }
   const docker = new DockerCaseHarness({ repoRoot: REPO_ROOT })
@@ -92,6 +97,7 @@ export async function main(argv = process.argv.slice(2)) {
   let runError = null
 
   try {
+    await http.login('kkstudio', 'kkstudio')
     preflight = await validatePreflight(ctx, args.daemonEnv)
     const selectedModelRefs = new Set(selectedCases.map((testCase) => testCase.model.ref))
     for (const model of MODELS.filter((candidate) => selectedModelRefs.has(candidate.ref))) {
@@ -118,6 +124,7 @@ export async function main(argv = process.argv.slice(2)) {
         testCase,
         agent: agents.get(testCase.model.ref),
         daemonEnv: args.daemonEnv,
+        environmentId: preflight.environment.id,
       })
       results.push(result)
       if (result.metrics?.costTotal != null) {
@@ -269,11 +276,12 @@ async function deleteAgent(ctx, agent) {
   )
 }
 
-async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) {
+async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv, environmentId }) {
   const startedAt = new Date().toISOString()
   const result = baseResult(testCase, startedAt)
   const artifacts = {}
-  let chat = null
+  let space = null
+  let sessionId = null
   let threadId = null
   let latestSnapshot = null
   let primaryError = null
@@ -283,20 +291,23 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
     result.tests.precheck =
       testCase.taskClass === 'repair' ? 'expected-fail-confirmed' : 'clean-read-only'
 
-    chat = await createChat(ctx, {
-      title: `reliability-${testCase.id}`,
-      agentName: agent.name,
-      yoloEnabled: true,
-    })
-    const request = buildNewSessionRequest({
-      chat,
-      agent,
+    space = await createReliabilitySpace(ctx, testCase, agent, environmentId)
+    const request = buildNewSessionRequest({ testCase, prompt: buildUserPrompt(testCase) })
+    const accepted = await ctx.call(
+      'POST',
+      `/api/chat-spaces/${space.id}/sessions`,
+      request,
+      undefined,
+      { 'Idempotency-Key': cid() },
+    )
+    sessionId = accepted.json.sessionId
+    threadId = accepted.json.threadId
+    const acceptedSnapshot = await getThreadSnapshot(ctx, threadId)
+    assertThreadSettings(
+      { thread: acceptedSnapshot.thread, acceptedCommands: [{ threadId }] },
       testCase,
-      prompt: buildUserPrompt(testCase),
-    })
-    const accepted = await createNewSession(ctx, request)
-    threadId = accepted.thread.threadId
-    assertThreadSettings(accepted, testCase, agent.name)
+      agent.name,
+    )
     result.turnStarted = true
 
     try {
@@ -402,17 +413,24 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
         // Preserve the primary failure while still attempting cleanup.
       }
     }
-    if (chat?.id) {
+    if (space?.id) {
       try {
-        await ctx.call(
-          'DELETE',
-          `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
-        )
+        if (sessionId) {
+          const tree = (await ctx.call('GET', `/api/chat-spaces/${space.id}/tree`)).json
+          await ctx.call(
+            'DELETE',
+            `/api/chat-spaces/${space.id}/sessions/${sessionId}?expectedTreeVersion=${encodeURIComponent(tree.treeVersion)}`,
+          )
+        }
+        await ctx.call('PATCH', `/api/chat-spaces/${space.id}`, {
+          expectedVersion: space.version,
+          archived: true,
+        })
       } catch (error) {
         if (result.status !== 'fail') {
           result.status = 'fail'
           result.failureCategory = 'setup'
-          result.error = `Chat cleanup failed: ${error.message}`
+          result.error = `Chat Space cleanup failed: ${error.message}`
         }
       }
     }
@@ -570,16 +588,33 @@ async function postcheckCase(docker, testCase, precheck) {
   }
 }
 
-/** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 冻结 Agent/Model，yolo true，首条 USER command。 */
-export function buildNewSessionRequest({ chat, agent, testCase, prompt }) {
+/** Build the initial Session request with an explicit model selection and user message. */
+export function buildNewSessionRequest({ testCase, prompt }) {
   return {
-    owner: chatOwner(chat.id),
-    sessionId: cid(),
-    threadId: cid(),
-    rootSettings: branchSettingsOf(agent, agent.execution),
+    folderId: null,
+    message: [{ type: 'TEXT', text: prompt }],
+    modelSelection: { modelName: testCase.model.modelName, variant: VARIANT },
     yoloEnabled: true,
-    commands: [userMessageCommand(prompt, cid())],
   }
+}
+
+async function createReliabilitySpace(ctx, testCase, agent, environmentId) {
+  const { status, json } = await ctx.call(
+    'POST',
+    '/api/chat-spaces',
+    {
+      title: `reliability-${testCase.id}-${cid().slice(0, 8)}`,
+      rootFolderName: 'Root',
+      defaultAgentName: agent.name,
+      defaultEnvironmentId: environmentId,
+      defaultYoloEnabled: true,
+    },
+    undefined,
+    { 'Idempotency-Key': cid() },
+  )
+  assert(status >= 200 && status < 300, `create Chat Space status ${status}`)
+  assert(json?.id && json.defaultAgentName === agent.name, `created Chat Space identity mismatch: ${JSON.stringify(json)}`)
+  return json
 }
 
 export function assertThreadSettings(accepted, testCase, agentName) {

@@ -18,14 +18,10 @@ import {
   functionBatch,
   resourceBatch,
 } from '../offline-canvas-contract.mjs'
-import { buildOfflineChatBatchRequest } from '../offline-chat-payload.mjs'
+import { buildOfflineSessionRequest } from '../offline-chat-payload.mjs'
 import {
-  BLOB_ID,
-  CHAT_ID,
-  COMMAND_ID,
   MARKER,
   REQUIRED_FUNCTIONS,
-  SESSION_ID,
   THREAD_ID,
   documentDto,
   functionDefinitions,
@@ -35,8 +31,8 @@ import {
 
 // ---------- 命令批 payload 必须是当前 CanvasCommandDTO 的精确形状 ----------
 
-test('test intent: the upload batch is one CREATE_NODE whose resource is a BLOB with a blobId', () => {
-  assert.deepEqual(resourceBatch('node-1', BLOB_ID, 'key-1'), {
+test('test intent: the upload batch claims the READY upload by uploadId', () => {
+  assert.deepEqual(resourceBatch('node-1', 'upload-1', 'key-1'), {
     idempotencyKey: 'key-1',
     commands: [
       {
@@ -44,7 +40,7 @@ test('test intent: the upload batch is one CREATE_NODE whose resource is a BLOB 
         nodeId: 'node-1',
         name: 'uploaded',
         transform: { x: 0, y: 0, width: 320, height: 260 },
-        resources: [{ type: 'BLOB', name: 'tiny.png', blobId: BLOB_ID }],
+        resources: [{ type: 'BLOB', name: 'tiny.png', uploadId: 'upload-1' }],
       },
     ],
   })
@@ -187,46 +183,22 @@ test('test intent: non-strict, unavailable, or missing definitions fail the smok
   }
 })
 
-// ---------- 离线 Chat 批请求必须匹配当前 harness wire ----------
+// ---------- 离线会话请求必须匹配 Chat Space 创建接口 ----------
 
-test('test intent: the NEW_SESSION batch uses canonical root settings and the owner is the chat', () => {
-  const request = buildOfflineChatBatchRequest({
-    chatId: CHAT_ID,
-    sessionId: SESSION_ID,
-    threadId: THREAD_ID,
-    commandId: COMMAND_ID,
-    marker: MARKER,
-  })
-  assert.deepEqual(request.owner, { kind: 'CHAT', id: CHAT_ID })
-  assert.deepEqual(request.target, {
-    type: 'NEW_SESSION',
-    sessionId: SESSION_ID,
-    threadId: THREAD_ID,
-    // canonical root settings 精确为 agentName + execution + environmentName 三字段：
-    // environmentName 是 nullable 快照字段，null 表示未选择 Environment。
-    rootSettings: {
-      agentName: 'default-assistant',
-      execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: 'default' } },
-      environmentName: null,
-    },
+test('test intent: session creation submits the initial user message and YOLO state', () => {
+  assert.deepEqual(buildOfflineSessionRequest({ marker: MARKER }), {
+    message: [{ type: 'TEXT', text: MARKER }],
     yoloEnabled: false,
   })
-  assert.deepEqual(request.commands, [
-    { type: 'USER_MESSAGE', idempotencyKey: COMMAND_ID, contents: [{ type: 'TEXT', text: MARKER }] },
-  ])
+  assert.deepEqual(buildOfflineSessionRequest({ marker: MARKER, yoloEnabled: true }), {
+    message: [{ type: 'TEXT', text: MARKER }],
+    yoloEnabled: true,
+  })
 })
 
-test('test intent: the builder rejects unknown options', () => {
+test('test intent: the session request builder rejects unknown options', () => {
   assert.throws(
-    () =>
-      buildOfflineChatBatchRequest({
-        chatId: CHAT_ID,
-        sessionId: SESSION_ID,
-        threadId: THREAD_ID,
-        commandId: COMMAND_ID,
-        marker: MARKER,
-        unknownOption: 'src/tests',
-      }),
+    () => buildOfflineSessionRequest({ marker: MARKER, threadId: THREAD_ID }),
     TypeError,
   )
 })
