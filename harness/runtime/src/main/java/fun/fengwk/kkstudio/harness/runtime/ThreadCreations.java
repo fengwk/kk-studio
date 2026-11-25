@@ -553,6 +553,12 @@ final class ThreadCreations {
         HarnessConflictReason.THREAD_ID_REUSED.name(), "thread or fork session id already exists");
   }
 
+  static void validateBranchCut(HarnessStore.Transaction tx, UUID sourceId, UUID cutId) {
+    tx.threads().lockTree(sourceId);
+    ThreadState source = lockIdleSource(tx, sourceId);
+    requireTurnEndCut(tx, source, cutId);
+  }
+
   private static ThreadState lockIdleSource(HarnessStore.Transaction tx, UUID sourceId) {
     ThreadState source =
         tx.threads()
