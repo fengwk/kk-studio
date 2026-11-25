@@ -37,7 +37,7 @@ x-minio-credentials: &minio-credentials
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
     environment:
       POSTGRES_DB: kk_studio_distributed
       POSTGRES_USER: kk_studio
@@ -95,7 +95,7 @@ services:
       - node-a-db
 
   http-mock:
-    image: node:22-alpine
+    image: node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
     init: true
     read_only: true
     command:

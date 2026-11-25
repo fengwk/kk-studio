@@ -13,6 +13,12 @@
 local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc 构建事实统一见
 [开发栈 MinIO 依赖](../../deploy/dependencies/minio-client/README.md)，这些依赖只用于开发和隔离验证。
 
+开发与隔离 Compose 中的第三方镜像以 `tag@sha256` 固定，摘要取自对应 tag 的 OCI 多架构 index：
+PostgreSQL `17-alpine`（`docker.io/library/postgres`，
+`sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73`）和 Node `22-alpine`
+（`docker.io/library/node`，`sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a`）。
+Compose 中 MinIO 仍使用已记录来源的固定 digest；项目本地构建的 App 与 mc 镜像不使用第三方镜像引用。
+
 ## 首次安装
 
 1. 准备 PostgreSQL 与可访问的私有 S3 bucket，确认数据库角色、对象存储凭据和备份策略。
