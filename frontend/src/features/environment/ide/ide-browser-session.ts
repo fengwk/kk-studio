@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createUuid } from '@/shared/lib/uuid'
 import {
   saveIdeSession,
-  type IdeTabLoadResult,
-  type IdeTabStorage,
-} from '@/features/environment/ide/ide-tab-state'
+  type IdeSessionLoadResult,
+  type IdeSessionStorage,
+} from '@/features/environment/ide/ide-session-state'
 
 export type IdeBrowserSessionStatus =
   | 'acquiring'
@@ -107,8 +107,8 @@ function acquireBrowserSessionLock(
 }
 
 interface UseIdeBrowserSessionOptions {
-  initial: IdeTabLoadResult
-  storage?: IdeTabStorage
+  initial: IdeSessionLoadResult
+  storage?: IdeSessionStorage
   /** 克隆 tab 丢弃复制来的运行身份；只保留展示偏好。 */
   onClone: (browserSessionId: string) => void
   /** 正常页面恢复（含 BFCache）后重新确认权威绑定。 */
@@ -177,7 +177,6 @@ export function useIdeBrowserSession({
           const clonedId = createUuid()
           const saved = saveIdeSession(
             clonedId,
-            initialRef.current.presentation,
             {},
             storageRef.current,
           )

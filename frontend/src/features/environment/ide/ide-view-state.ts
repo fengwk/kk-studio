@@ -4,9 +4,8 @@ import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { CANONICAL_POSITIVE_DECIMAL } from '@/features/environment/ide/ide-decimal'
 import type {
   IdePendingClaim,
-  IdePresentation,
   IdeRecovery,
-} from '@/features/environment/ide/ide-tab-state'
+} from '@/features/environment/ide/ide-session-state'
 
 export type IdeViewStatus =
   | 'reconciling'
@@ -44,15 +43,10 @@ export interface IdeViewState {
 
 /** 从 session 恢复的运行身份进入统一对账；不预置任何“已绑定”结论。 */
 export function initialViews(
-  presentation: IdePresentation,
   recoveryByView: Record<string, IdeRecovery>,
 ): Record<string, IdeViewState> {
   const views: Record<string, IdeViewState> = {}
   for (const [viewId, recovery] of Object.entries(recoveryByView)) {
-    if (presentation.viewIdsByEnvironment[recovery.environmentId] != null
-      && !presentation.viewIdsByEnvironment[recovery.environmentId]?.includes(viewId)) {
-      continue
-    }
     const environmentId = recovery.environmentId
     views[viewId] = {
       environmentId,
@@ -102,8 +96,6 @@ export function recoveryFromViews(
 /** 使用证明只声明当前 tab 仍持有的 view 意图；不据此推断 Daemon 绑定事实。 */
 export function buildUsageViews(
   views: Record<string, IdeViewState>,
-  openedEnvironmentIds: readonly string[],
-  viewIdsByEnvironment?: Record<string, string[]>,
   override?: {
     environmentId: string
     viewId: string
@@ -112,18 +104,9 @@ export function buildUsageViews(
   },
 ): ApplicationEventIdeUseView[] {
   const result: ApplicationEventIdeUseView[] = []
-  for (const environmentId of openedEnvironmentIds) {
-    const viewIds = viewIdsByEnvironment?.[environmentId]
-      ?? Object.keys(views).filter((key) => views[key]?.environmentId === environmentId)
-    const completeViewIds = override?.environmentId === environmentId && !viewIds.includes(override.viewId)
-      ? [...viewIds, override.viewId]
-      : viewIds
-    for (const viewId of completeViewIds.length > 0 ? completeViewIds : [environmentId]) {
-      const view = views[viewId] ?? views[environmentId]
-      if (view == null) {
-        continue
-      }
-      const isOverride = override?.environmentId === environmentId && override.viewId === viewId
+  for (const [viewId, view] of Object.entries(views)) {
+    const environmentId = view.environmentId
+    const isOverride = override?.environmentId === environmentId && override.viewId === viewId
     const claimId = isOverride ? override.claimId : view.pending?.claimId ?? view.claimId
     if (
       !isOverride
@@ -150,8 +133,7 @@ export function buildUsageViews(
     ) {
       entry.bindingEpoch = bindingEpoch
     }
-      result.push(entry)
-    }
+    result.push(entry)
   }
   return result
 }

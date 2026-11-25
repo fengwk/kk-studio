@@ -511,29 +511,16 @@ Agent 引用的技能”只是提示，最终阻塞仍以服务端校验为准�
 失败时优先展示后端 `detail`，缺失时展示错误消息。
 文案键集中在 `ai.skillPackages.*`，按钮与标题不使用括号补充说明。
 
-### Chat IDE 工作区
+### IDE 工作区
 
-IDE 只属于 Chat 详情页，不再由应用外壳的全局面板包装。应用路由组合层为 `/chats/:chatId` 保留一个持久的
-ChatIdeWorkspace：切换 Chat 时卸载当前页面内容，但 IDE view/iframe 停放在同一 DOM，不移动 portal 或更换父根；
-离开 Chat 后宿主 hidden + inert，无布局占位、分隔条、焦点与快捷键。非 Chat 页面使用独立全宽布局，Chat 列表、
-`/threads/:threadId` 独立页、设置、Environment 与 Canvas 均不显示 IDE；非 Chat 根 AgentPane 不保留只改变隐藏状态
-的 IDE 命令入口。路由变化不是 CLOSE_VIEW，只有显式关闭才触发原生 dirty 保存 / 不保存 / 取消流程。
+工作区侧栏列出当前用户可访问的环境；就绪环境可以打开 VS Code。普通打开优先复用该环境在窗格中的工作台，
+其次复用本浏览器会话已认领的视图。原生 New Window 使用独立 `viewId`：优先占用空的「新会话」窗格，否则拆分当前窗格。
+窗格未放置时不创建服务端视图。拆分、交换、关闭兄弟窗格、全屏与窄屏切换仅改变布局和可见性，不重载 iframe。
+关闭或替换工作台前使用原生保存 / 不保存 / 取消流程；仅在关闭结果未知或控制通道不可用时提示用户确认强制关闭。
 
-每个浏览器 tab 一个 Chat IDE 会话；同一 Environment 的 view 可在 Chat 间复用。切换到另一个 Chat 时按该 Chat
-的 Environment 匹配：已有打开 view 就聚焦，没有则不自动创建；无 Environment 的 Chat 不展示无关环境面板；
-后台 view 不因切换关闭。返回 Chat 恢复同一 iframe，内部导航不重新 bootstrap，usage 可以继续维持已有编辑会话。
-关闭结果未知或控制通道不可用时，提示保留在发起关闭的原绑定上；离开该视图后不会弹出强制关闭确认，返回仍可查看
-原因并显式重试。强制关闭必须由用户针对仍选中的原绑定确认。
-
-sessionStorage 保存 `browserSessionId`、`viewId`、`daemonInstanceId`、最后确认的 `bindingEpoch`、目录与尚未完成
-操作的冻结描述；claim 发出前先写恢复描述，存储失败显式报错，不承诺可跨刷新恢复。localStorage 只保存非运行态
-展示偏好，不保存 view、连接或窗口身份。entryUrl、bootstrap token 与 cookie 不进入任一持久化快照。
-
-同一 `browserSessionId` 使用浏览器 Web Locks 做同源独占，不实现 localStorage 心跳或超时猜测：刷新复用会话；
-复制 tab 发现会话已被活页面持有就生成新会话并清空复制来的运行身份，只保留展示偏好。锁是会话互斥，不是网络
-在线判据。页面销毁由浏览器释放锁；pagehide 只撤回或暂停使用证明，是优化而不是服务端恢复正确性的前提。
-BFCache pageshow 必须重新确认锁与权威绑定；所有权冲突时停止发送旧 proof，不用旧 iframe 回调关闭新绑定。
-Web Locks 不可用时明确报告浏览器能力不足，不退回共享身份或基于本地时间的接管。
+`sessionStorage` 只保存当前浏览器标签页的 `browserSessionId` 和各 `viewId` 的恢复描述；发出 claim 前先保存其冻结参数。
+不保存入口 URL、引导票据或 cookie。Web Locks 保证同源会话身份互斥；复制标签页时使用独立身份，回到 BFCache 时重新确认锁和视图绑定。
+浏览器缺少锁能力时不尝试接管旧会话。
 
 前端恢复状态统一为 waiting-ready / reconciling / binding / ready / detached / gone / error；READY、连接身份变化
 与 BFCache 返回都进入同一对账入口。明确拒绝与结果未知分开，不添加轮询抢占、固定延时接管或任意重试。连接内
