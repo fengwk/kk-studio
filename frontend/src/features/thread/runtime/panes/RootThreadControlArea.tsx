@@ -50,6 +50,7 @@ export function RootThreadControlArea({
     parts,
     pending,
     disabled,
+    sendDisabled,
     onPartsChange,
     onHistoryPartsChange,
     onSubmit,
@@ -99,6 +100,7 @@ export function RootThreadControlArea({
         parts={parts}
         pending={pending}
         disabled={disabled}
+        sendDisabled={sendDisabled}
         onPartsChange={onPartsChange}
         onHistoryPartsChange={onHistoryPartsChange}
         onSubmit={onSubmit}

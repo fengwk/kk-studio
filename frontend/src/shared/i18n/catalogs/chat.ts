@@ -230,6 +230,17 @@ export const chatCatalog = {
     'en-US': 'Create a chat with the Agent below.',
     'zh-CN': '在下方用该 Agent 新建对话。',
   },
+  'ai.runtime.draft.defaultAgentMissing': {
+    'en-US': 'Select an available default Agent for this space to send a message.',
+    'zh-CN': '请为空间选择可用的默认 Agent 后再发送。',
+  },
+  'ai.runtime.draft.spaceSettings': { 'en-US': 'Space settings', 'zh-CN': '空间设置' },
+  'ai.runtime.draft.agentSettings': { 'en-US': 'Agent settings', 'zh-CN': 'Agent 设置' },
+  'ai.runtime.draft.invalidFolder': {
+    'en-US': 'This folder is no longer available. Choose another folder to send your message.',
+    'zh-CN': '此目录已不可用。请选择其他目录后再发送。',
+  },
+  'ai.runtime.draft.environmentDefault': { 'en-US': 'Space default', 'zh-CN': '空间默认' },
   'ai.chat.noAgents': {
     'en-US': 'No Agents available',
     'zh-CN': '暂无可用 Agent',
@@ -358,6 +369,8 @@ export const chatCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
+  'ai.runtime.branch.suggestedTitle': { 'en-US': 'Branch {{number}}', 'zh-CN': '分支 {{number}}' },
+  'ai.runtime.branch.suggestedFork': { 'en-US': '{{title}} · Fork', 'zh-CN': '{{title}} · 分叉' },
   'ai.chat.branch.historyTree': {
     'en-US': 'History tree',
     'zh-CN': '历史树',

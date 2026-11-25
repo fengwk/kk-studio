@@ -64,14 +64,16 @@ export function ThreadComposerControls({
   const selectableModels = useMemo(() => usableModels(models), [models])
   const currentModel = models.find((model) => model.name === modelSelection?.modelName)
   const variantTarget = variantModel ?? currentModel ?? null
+  const defaultEnvironmentLabel = settings.defaultEnvironmentLabel
   const items = useMemo<SelectableItem[]>(() => menuItems({
     menu,
     environmentNames,
+    defaultEnvironmentLabel,
     models: selectableModels,
     query,
     variantTarget,
     t,
-  }), [environmentNames, menu, query, selectableModels, t, variantTarget])
+  }), [defaultEnvironmentLabel, environmentNames, menu, query, selectableModels, t, variantTarget])
 
   useMenuOpenEffect({
     menu,

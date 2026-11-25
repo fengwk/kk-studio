@@ -1,27 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  HarnessCommandBatchDTO,
-  HarnessThreadCommandBatchDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadCommandBatchDTO } from '@/shared/api/contracts/ai-runtime'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import {
-  type AgentRuntimeOwnerDTO,
-  createBuiltinExecution,
-} from '@/shared/api/contracts/ai-runtime'
-import {
-  acceptanceStorageKey,
   clearBoundPendingMessage,
-  clearPendingAcceptance,
-  inspectPendingAcceptanceSlot,
-  isBoundPendingMessageValue,
-  isPendingAcceptanceValue,
   loadBoundPendingMessage,
-  loadPendingAcceptance,
   saveBoundPendingMessage,
-  savePendingAcceptance,
   sameBatchRequestIdentity,
-  samePendingAcceptanceIdentity,
   type BoundPendingMessage,
-  type PendingAcceptance,
 } from './pending-request-store'
 
 function memoryStorage(): Storage {
@@ -39,47 +24,7 @@ function memoryStorage(): Storage {
 }
 
 describe('pending-request-store', () => {
-  const owner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-001' }
   const threadId = '11111111-2222-4333-8444-555555555555'
-
-  const acceptanceRequest: HarnessCommandBatchDTO = {
-    owner,
-    target: {
-      type: 'NEW_SESSION',
-      sessionId: 'sess-1',
-      threadId: 'thread-1',
-      rootSettings: {
-        agentName: 'assistant',
-        execution: createBuiltinExecution('MiniMax', 'default'),
-        environmentName: null,
-      },
-      yoloEnabled: false,
-    },
-    commands: [
-      {
-        type: 'USER_MESSAGE',
-        idempotencyKey: 'cmd-acc-1',
-        contents: [{ type: 'TEXT', text: 'initial acceptance prompt' }],
-      },
-    ],
-  }
-
-  const pendingAcceptance: PendingAcceptance = {
-    owner,
-    target: { kind: 'NEW_SESSION_DRAFT' },
-    request: acceptanceRequest,
-    branchDraft: {
-      agentName: 'assistant',
-      execution: createBuiltinExecution('MiniMax', 'default'),
-      environmentName: null,
-      yoloEnabled: false,
-    },
-    composerParts: [
-      { partId: 'part-1', type: 'text', text: 'initial acceptance prompt' },
-    ],
-    generation: 1,
-    unknownOutcome: true,
-  }
 
   const boundBatchRequest: HarnessThreadCommandBatchDTO = {
     commands: [
@@ -105,52 +50,6 @@ describe('pending-request-store', () => {
     ],
     unknownOutcome: true,
   }
-
-  it('正确识别与校验 acceptance 和 bound message 两种 discriminated variant', () => {
-    expect(isPendingAcceptanceValue(pendingAcceptance)).toBe(true)
-    expect(isBoundPendingMessageValue(boundPendingMessage)).toBe(true)
-
-    // 交叉校验均应拒绝
-    expect(isPendingAcceptanceValue(boundPendingMessage)).toBe(false)
-    expect(isBoundPendingMessageValue(pendingAcceptance)).toBe(false)
-  })
-
-  it('acceptance 槽位隔离持久化与精确身份对比', () => {
-    const storage = memoryStorage()
-    expect(savePendingAcceptance(owner, 'pane-1', pendingAcceptance, storage)).toBe(true)
-
-    const loaded = loadPendingAcceptance(owner, 'pane-1', storage)
-    expect(loaded).toEqual(pendingAcceptance)
-    expect(samePendingAcceptanceIdentity(loaded!, pendingAcceptance)).toBe(true)
-
-    // 不同 owner 或不同 pane 隔离
-    const otherOwner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-002' }
-    expect(loadPendingAcceptance(otherOwner, 'pane-1', storage)).toBeNull()
-    expect(loadPendingAcceptance(owner, 'pane-2', storage)).toBeNull()
-
-    // 禁止同一槽位被不同请求身份覆盖（防重复拥有/冲突）
-    const conflictingPending: PendingAcceptance = {
-      ...pendingAcceptance,
-      request: {
-        ...acceptanceRequest,
-        commands: [
-          {
-            type: 'USER_MESSAGE',
-            idempotencyKey: 'cmd-acc-diff',
-            contents: [{ type: 'TEXT', text: 'different' }],
-          },
-        ],
-      },
-    }
-    expect(savePendingAcceptance(owner, 'pane-1', conflictingPending, storage)).toBe(false)
-
-    // 只有匹配 expected 身份才允许清除
-    expect(clearPendingAcceptance(owner, 'pane-1', conflictingPending, storage)).toBe(false)
-    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
-
-    expect(clearPendingAcceptance(owner, 'pane-1', pendingAcceptance, storage)).toBe(true)
-    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
-  })
 
   it('bound message 槽位独立持久化、冲突防护与 unknown 重放恢复', () => {
     const storage = memoryStorage()
@@ -217,9 +116,6 @@ describe('pending-request-store', () => {
     }
     expect(() => saveBoundPendingMessage(threadId, anotherRequest, storage)).toThrow(/Conflict/)
 
-    // 3. 槽位状态检查
-    const inspected = inspectPendingAcceptanceSlot(owner, 'pane-empty', storage)
-    expect(inspected.status).toBe('empty')
   })
 
   it('sameBatchRequestIdentity 准确比对 commands 幂等键', () => {
@@ -231,39 +127,6 @@ describe('pending-request-store', () => {
     expect(sameBatchRequestIdentity(reqA, reqB)).toBe(true)
     expect(sameBatchRequestIdentity(reqA, reqC)).toBe(false)
     expect(sameBatchRequestIdentity(reqA, reqD)).toBe(false)
-  })
-
-  it('acceptance 目标匹配过滤、损坏数据与不可用 storage 防护', () => {
-    const storage = memoryStorage()
-    savePendingAcceptance(owner, 'pane-1', pendingAcceptance, storage)
-
-    // expectedTarget 匹配时返回，不匹配时返回 null
-    const matched = loadPendingAcceptance(owner, 'pane-1', storage, { kind: 'NEW_SESSION_DRAFT' })
-    expect(matched).not.toBeNull()
-
-    const mismatched = loadPendingAcceptance(owner, 'pane-1', storage, { kind: 'BOUND_THREAD', threadId: 'other-id' })
-    expect(mismatched).toBeNull()
-
-    // 槽位损坏（坏 JSON）
-    storage.setItem(acceptanceStorageKey(owner, 'pane-1'), 'not-json')
-    const corruptedSlot = inspectPendingAcceptanceSlot(owner, 'pane-1', storage)
-    expect(corruptedSlot.status).toBe('invalid')
-
-    // 尝试写入损坏槽位直接拒绝
-    expect(savePendingAcceptance(owner, 'pane-1', pendingAcceptance, storage)).toBe(false)
-
-    // 存储不可用（抛错）
-    const throwingStorage: Storage = {
-      getItem: () => { throw new Error('QuotaExceeded') },
-      setItem: () => { throw new Error('QuotaExceeded') },
-      removeItem: () => { throw new Error('QuotaExceeded') },
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    }
-    expect(inspectPendingAcceptanceSlot(owner, 'pane-1', throwingStorage).status).toBe('unavailable')
-    expect(savePendingAcceptance(owner, 'pane-1', pendingAcceptance, throwingStorage)).toBe(false)
-    expect(clearPendingAcceptance(owner, 'pane-1', pendingAcceptance, throwingStorage)).toBe(false)
   })
 
   it('bound message 边界校验、损坏清理与回读验证', () => {
@@ -312,10 +175,6 @@ describe('pending-request-store', () => {
     localStorage.clear()
 
     // 默认 storage 路径
-    expect(savePendingAcceptance(owner, 'pane-default', pendingAcceptance)).toBe(true)
-    expect(loadPendingAcceptance(owner, 'pane-default')).not.toBeNull()
-    expect(clearPendingAcceptance(owner, 'pane-default', pendingAcceptance)).toBe(true)
-
     saveBoundPendingMessage(threadId, boundPendingMessage)
     expect(loadBoundPendingMessage(threadId)).not.toBeNull()
     expect(clearBoundPendingMessage(threadId)).toBe(true)
@@ -324,9 +183,6 @@ describe('pending-request-store', () => {
     expect(loadBoundPendingMessage('')).toBeNull()
     expect(clearBoundPendingMessage('')).toBe(true)
 
-    // 不匹配的 owner 保存拒绝
-    const mismatchOwner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-other' }
-    expect(savePendingAcceptance(mismatchOwner, 'pane-1', pendingAcceptance, memoryStorage())).toBe(false)
   })
 
   it('localStorage getter 抛安全异常时安全返回 false 或 null，绝不向外 throw', () => {
@@ -340,10 +196,6 @@ describe('pending-request-store', () => {
       })
 
       // 不传 storage 参数调用，resolveStorage 必须在内部安全兜底并返回 false / null / unavailable
-      expect(savePendingAcceptance(owner, 'pane-sec', pendingAcceptance)).toBe(false)
-      expect(clearPendingAcceptance(owner, 'pane-sec', pendingAcceptance)).toBe(false)
-      expect(loadPendingAcceptance(owner, 'pane-sec')).toBeNull()
-      expect(inspectPendingAcceptanceSlot(owner, 'pane-sec').status).toBe('unavailable')
       expect(loadBoundPendingMessage(threadId)).toBeNull()
       expect(clearBoundPendingMessage(threadId)).toBe(true)
       expect(() => saveBoundPendingMessage(threadId, boundPendingMessage)).toThrow(/Storage is unavailable/)

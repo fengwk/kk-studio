@@ -26,6 +26,7 @@ export interface ThreadComposerProps {
   parts: ComposerPart[]
   pending: boolean
   disabled: boolean
+  sendDisabled?: boolean
   onPartsChange: (parts: ComposerPart[]) => void
   onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /**

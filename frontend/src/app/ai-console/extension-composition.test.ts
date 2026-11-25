@@ -4,14 +4,9 @@ import { aiExtension } from '@/app/ai-console/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 
 describe('AI extension composition', () => {
-  it('registers chat routes through the AI extension', () => {
-    expect(aiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
-      ['ai.chats', 'chats'],
-      ['ai.chat-workspace', 'chats/:chatId'],
-      ['ai.thread-workspace', 'threads/:threadId'],
-    ])
+  it('registers AI dialogs through the AI extension', () => {
+    expect(aiExtension.pages).toEqual([])
     expect(aiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
-      'ai.create-chat',
       'ai.resource-editor',
       'ai.delete-resource',
     ])
@@ -23,9 +18,6 @@ describe('AI extension composition', () => {
       ['canvas.editor', 'canvas/:canvasId'],
     ])
     expect(applicationContributions.pages.map((page) => page.id)).toEqual([
-      'ai.chats',
-      'ai.chat-workspace',
-      'ai.thread-workspace',
       'canvas.home',
       'canvas.editor',
     ])

@@ -38,12 +38,10 @@ import {
 } from '@/features/thread/composer/composer-parts'
 import {
   filterThreadCommands,
-  threadCommandsForTarget,
   THREAD_COMMANDS,
   type ThreadCommand,
 } from '@/features/thread/runtime/thread-panel/thread-commands'
 import type { ComposerHistoryMessage } from '@/features/thread/runtime/thread-panel/thread-composer-contract'
-import { firstEnabledCommandIndex } from '@/features/thread/runtime/thread-panel/thread-command-navigation'
 import { storeUnknownUploads } from '@/features/thread/composer/composer-draft'
 import type { StorageService } from '@/features/thread/composer'
 import { ThreadCommandPalette } from '@/features/thread/runtime/thread-panel/ThreadCommandPalette'
@@ -76,9 +74,11 @@ function InteractionComposer({
   queuedUserMessages = [],
   focusOnEscape = false,
   settings,
+  commands,
 }: {
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
+  commands?: ThreadCommand[]
   initial?: ComposerPart[]
   historicalUserMessages?: readonly (string | ComposerHistoryMessage)[]
   queuedUserMessages?: readonly (string | ComposerHistoryMessage)[]
@@ -94,6 +94,7 @@ function InteractionComposer({
       onPartsChange={setParts}
       onSubmit={onSubmit}
       onCommand={onCommand}
+      commands={commands}
       historicalUserMessages={historicalUserMessages}
       queuedUserMessages={queuedUserMessages}
       focusOnEscape={focusOnEscape}
@@ -120,74 +121,17 @@ function ariaOwner(element: Element): Element | null {
 }
 
 describe('ThreadComposer and commands', () => {
-  it('keeps stable command order and grays unsupported blank-scene commands', () => {
-    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual([
-      'thread',
-      'agent',
-      'yolo',
-      'models',
-      'history',
-      'stop',
-      'new',
-      'upload',
-      'debug',
-      'subagent',
-      'shortcuts',
-      'compact',
-      'rename-session',
-      'rename-thread',
-      'files',
-      'shell',
+  it('filters the real command registry and preserves caller-provided command behavior', () => {
+    expect(THREAD_COMMANDS.map((command) => command.id)).toEqual([
+      'yolo', 'models', 'stop', 'new', 'upload', 'debug', 'subagent', 'shortcuts', 'compact', 'files',
     ])
-    // 命令可用性只由目标 kind 与显式能力决定。
-    const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
-    expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    // 空面板还没有 Thread，因此 `/history`/`/stop`/`/new`/`/debug`/`/compact`
-    // 不可用；面板切换、快捷键以及文件/终端入口保持可用。
-    expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
-      'thread',
-      'agent',
-      'yolo',
-      'models',
-      'upload',
-      'shortcuts',
-      'files',
-      'shell',
-    ])
-    expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'history')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'debug')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'subagent')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'compact')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'rename-session')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'rename-thread')?.disabled).toBe(true)
-    const bound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 'thread-1' })
-    expect(bound.filter((c) => c.disabled).map((c) => c.id)).toEqual(['agent'])
-    expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
-    expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop', 'history'])
-    expect(filterThreadCommands('hist')[0]?.id).toBe('history')
+    expect(filterThreadCommands('yo').map((command) => command.id)).toEqual(['yolo'])
+    expect(filterThreadCommands('sto').map((command) => command.id)).toEqual(['stop'])
     expect(filterThreadCommands('debug')[0]?.id).toBe('debug')
-    expect(filterThreadCommands('shortcuts')[0]?.id).toBe('shortcuts')
-    expect(['history', 'branch'].every((keyword) =>
-      filterThreadCommands(keyword).some((command) => command.id === 'history'))).toBe(true)
-    expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    expect(firstEnabledCommandIndex(blank)).toBe(0)
-    expect(filterThreadCommands('missing')).toEqual([])
-  })
-
-  it('exposes navigation commands for bound threads without owner gating', () => {
-    // 既有 Thread 的命令可用性由目标 kind 与显式能力选项决定，owner 不参与裁剪。
-    const bound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
-    expect(bound.find((command) => command.id === 'thread')?.disabled).toBe(false)
-    expect(bound.find((command) => command.id === 'new')?.disabled).toBe(false)
-
-    // 显式能力选项仍然生效：禁止分支时导航命令被禁用。
-    const noBranching = threadCommandsForTarget(
-      { kind: 'BOUND_THREAD', threadId: 't1' },
-      { allowBranching: false },
+    expect(filterThreadCommands('', THREAD_COMMANDS).map((command) => command.id)).toEqual(
+      THREAD_COMMANDS.map((command) => command.id),
     )
-    expect(noBranching.find((command) => command.id === 'thread')?.disabled).toBe(true)
-    expect(noBranching.find((command) => command.id === 'new')?.disabled).toBe(true)
+    expect(filterThreadCommands('missing')).toEqual([])
   })
 
   it('uses slash as a text-only shortcut without consuming attachments', () => {
@@ -236,7 +180,7 @@ describe('ThreadComposer and commands', () => {
     onCommand.mockClear()
     rerender(
       <ThreadComposer
-        parts={[createTextPart('/history')]}
+        parts={[createTextPart('/debug')]}
         pending={false}
         disabled={false}
         onPartsChange={onPartsChange}
@@ -246,7 +190,7 @@ describe('ThreadComposer and commands', () => {
     )
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('{Enter}')
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'history' }))
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'debug' }))
   })
 
   it('opens the primary command menu from plus without writing slash into the editor', async () => {
@@ -292,9 +236,9 @@ describe('ThreadComposer and commands', () => {
     expect(editor).toHaveTextContent('保留这段草稿')
     expect(onPartsChange).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole('option', { name: /^agent/ }))
+    await user.click(screen.getByRole('option', { name: /^debug/ }))
 
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'debug' }))
     expect(onPartsChange).not.toHaveBeenCalled()
     expect(editor).toHaveTextContent('保留这段草稿')
   })
@@ -753,13 +697,13 @@ describe('ThreadComposer interactions', () => {
     expect(editor).toHaveAttribute('aria-controls', listbox.id)
     const firstId = editor.getAttribute('aria-activedescendant')
     expect(firstId).toBeTruthy()
-    expect(document.getElementById(firstId!)).toHaveTextContent(/^thread/)
+    expect(document.getElementById(firstId!)).toHaveTextContent(/^yolo/)
 
     await user.keyboard('{ArrowDown}')
     const nextId = editor.getAttribute('aria-activedescendant')
     expect(nextId).not.toBe(firstId)
     expect(document.getElementById(nextId!)).toHaveAttribute('aria-selected', 'true')
-    expect(document.getElementById(nextId!)).toHaveTextContent(/^agent/)
+    expect(document.getElementById(nextId!)).toHaveTextContent(/^models/)
 
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('listbox', { name: '命令表' })).not.toBeInTheDocument()
@@ -799,16 +743,21 @@ describe('ThreadComposer interactions', () => {
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'yolo' }))
   })
 
-  it('navigates slash options with ArrowUp/ArrowDown then confirms with Enter', async () => {
+  it('executes a model command from the filtered slash palette', async () => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
-    render(<InteractionComposer onSubmit={vi.fn()} onCommand={onCommand} />)
+    render(<InteractionComposer
+      onSubmit={vi.fn()}
+      onCommand={onCommand}
+      commands={THREAD_COMMANDS.slice(0, 2)}
+    />)
     const editor = screen.getByLabelText('给 AI 发送消息')
-    await user.type(editor, '/')
+    await user.type(editor, '/mo')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    // 稳定产品顺序保持不变：thread -> agent -> environment；初始 active 是第一项。
-    await user.keyboard('{ArrowDown}{Enter}')
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
+    // 当前唯一匹配项为 models，选择它应执行对应设置动作。
+    await user.click(screen.getByRole('option', { name: /^models/ }))
+    expect(onCommand).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
   })
 
   it('navigates historical users, queued users, then restores the current draft', async () => {
@@ -1345,7 +1294,7 @@ describe('ThreadCommandPalette', () => {
     const active = document.getElementById(activeId!)
     expect(active).toHaveAttribute('role', 'option')
     expect(active).toHaveAttribute('aria-selected', 'true')
-    expect(active).toHaveTextContent(/^agent/)
+    expect(active).toHaveTextContent(/^models/)
   })
 })
 
@@ -1548,13 +1497,16 @@ describe('ThreadComposer edge interactions', () => {
   })
 
   it.each([
-    { readOnly: false, expected: 'shell' },
-    { readOnly: true, expected: 'shortcuts' },
-  ])('wraps ArrowUp to $expected in the plus palette when readOnly=$readOnly', async ({ readOnly, expected }) => {
+    { readOnly: false, expected: 'files' },
+    { readOnly: true, expected: 'compact' },
+  ])('wraps ArrowUp to $expected in the plus palette when the last command is disabled=$readOnly', async ({ readOnly, expected }) => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
-    // 普通草稿环绕到 shell；只读草稿必须跳过末尾禁用项，落到 shortcuts。
-    const commands = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' }, { readOnly })
+    // 禁用末尾命令时，导航应跳过它并落到前一个真实可用命令。
+    const commands = THREAD_COMMANDS.map((command) => ({
+      ...command,
+      disabled: readOnly && command.id === 'files',
+    }))
     render(<Harness onCommand={onCommand} commands={commands} />)
     await user.click(screen.getByRole('button', { name: '打开命令表' }))
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()

@@ -1,11 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { BrowserRouter, createMemoryRouter, RouterProvider } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/features/chat/chat-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { interactionService } from '@/shared/api/interaction-service'
 
@@ -27,7 +26,6 @@ vi.mock('@/shared/app-events', async (importOriginal) => {
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },
 }))
-vi.mock('@/features/chat/chat-service', () => ({ chatService: { listChats: vi.fn() } }))
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
@@ -46,11 +44,9 @@ describe('App routes', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }), { headers: { 'Content-Type': 'application/json' } })))
     vi.clearAllMocks()
-    window.history.replaceState({}, '', '/')
     vi.mocked(agentService.listProviders).mockResolvedValue([])
     vi.mocked(agentService.listModels).mockResolvedValue([])
     vi.mocked(agentService.listAgents).mockResolvedValue([])
-    vi.mocked(chatService.listChats).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
       items: [],
@@ -58,14 +54,6 @@ describe('App routes', () => {
       total: 0,
       freshnessAt: null,
     })
-  })
-
-  it('redirects root to Chat console', async () => {
-    render(<BrowserRouter><AppProviders><App /></AppProviders></BrowserRouter>)
-    await waitFor(() => expect(window.location.pathname).toBe('/chats'))
-    // 路由重定向必须完成异步资源加载并渲染 Chat 控制台。
-    expect(await screen.findByRole('button', { name: '新建对话' }, { timeout: 3000 })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
   })
 
   it('renders lazy interactions page with workbench shell semantics', async () => {

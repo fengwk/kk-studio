@@ -9,8 +9,6 @@ describe('Frontend entry contracts', () => {
     expect(navIds).toContain('interactions')
     expect(PRIMARY_NAV_ITEMS.find((item) => item.id === 'interactions')?.to).toBe('/interactions')
 
-    const threadRoute = aiExtension.pages?.find((page) => page.path === 'threads/:threadId')
-    expect(threadRoute).toBeDefined()
-    expect(threadRoute?.workspace).toBe(true)
+    expect(aiExtension.pages).toEqual([])
   })
 })

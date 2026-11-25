@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
+import { ThreadPaneRenderer } from '@/features/thread/workspace'
 import { agentService } from '@/shared/api/agent-service'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -255,7 +255,12 @@ describe('useThreadSnapshotSync', () => {
     queryClient.setQueryData(queryKeys.threads.snapshot(healthyId), healthy('1'))
     function Fixture({ show }: { show: boolean }) {
       useThreadSnapshotSync(healthyId, true)
-      return show ? <MemoryRouter><AgentPane paneId={THREAD} agents={[]} /></MemoryRouter> : null
+      const noop = () => {}
+      return show ? <MemoryRouter><ThreadPaneRenderer
+        space={{ id: 'space', title: 'Workspace', version: '1', defaultYoloEnabled: false }}
+        target={{ kind: 'thread', threadId: THREAD }} active
+        replace={noop} open={noop} openBeside={noop} onUnsentChange={noop} openSpaceSettings={noop}
+      /></MemoryRouter> : null
     }
     const { container, rerender } = render(<Fixture show />, { wrapper })
     const socket = sockets.openLatest()

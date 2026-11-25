@@ -37,6 +37,7 @@ export interface ThreadComposerSettingsInput {
   models: readonly ThreadComposerModelOption[]
   yoloEnabled: boolean
   environmentName: string | null
+  defaultEnvironmentLabel?: string
   environments: readonly ThreadComposerEnvironmentOption[]
   status?: ThreadComposerSettingsStatus
   /** 执行根有正在运行的子代理时的环境切换提示；由宿主按执行树决定，不在 Composer 内推断。 */

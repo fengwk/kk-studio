@@ -1,15 +1,11 @@
 import { request } from '@/shared/api/client'
 import type {
   HarnessAcceptedCommandsDTO,
-  HarnessCommandBatchDTO,
   HarnessExecutionAbandonDTO,
   HarnessManualCompactionDTO,
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
-  HarnessNameUpdateDTO,
   HarnessProviderRequestPreviewDTO,
-  HarnessSessionDTO,
-  HarnessSessionEntryPageDTO,
   HarnessThreadCommandBatchDTO,
   HarnessThreadCompactDTO,
   HarnessThreadCompactResultDTO,
@@ -17,7 +13,6 @@ import type {
   HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
-  HarnessThreadSummaryDTO,
   HarnessThreadTreeNodeDTO,
   HarnessThreadYoloUpdateDTO,
   HarnessToolApprovalDTO,
@@ -26,12 +21,6 @@ import type {
 
 interface GetThreadSnapshotOptions {
   afterEntryId?: string | null
-  signal?: AbortSignal
-}
-
-interface ListSessionEntriesOptions {
-  cursor?: string | null
-  limit?: number
   signal?: AbortSignal
 }
 
@@ -45,9 +34,6 @@ interface GetCompactionAvailabilityOptions {
 
 /** Harness runtime 的 UI 调用入口；路由、参数与响应类型全部来自生成契约。 */
 export const harnessService = {
-  acceptCommandBatch: (data: HarnessCommandBatchDTO): Promise<HarnessAcceptedCommandsDTO> =>
-    request('POST /api/harness/command-batches', { body: data }),
-
   /**
    * 既有 Thread 的通用命令写入口：服务端从 path 解析 Session 与 owner 之外的授权，
    * 客户端只提交 CAS 游标与命令，不包含产品 owner。
@@ -58,34 +44,6 @@ export const harnessService = {
   ): Promise<HarnessAcceptedCommandsDTO> =>
     request('POST /api/harness/threads/{threadId}/command-batches', {
       path: { threadId },
-      body: data,
-    }),
-
-  listSessionThreads: (sessionId: string): Promise<HarnessThreadSummaryDTO[]> =>
-    request('GET /api/harness/sessions/{sessionId}/threads', {
-      path: { sessionId },
-    }),
-
-  /** 一页 Session Entry；`nextCursor` 原样回传即可继续翻页，null 表示末页。 */
-  listSessionEntries: (
-    sessionId: string,
-    options?: ListSessionEntriesOptions,
-  ): Promise<HarnessSessionEntryPageDTO> =>
-    request(
-      'GET /api/harness/sessions/{sessionId}/entries',
-      {
-        path: { sessionId },
-        query: {
-          ...(options?.cursor != null ? { cursor: options.cursor } : {}),
-          ...(options?.limit != null ? { limit: options.limit } : {}),
-        },
-      },
-      { signal: options?.signal },
-    ),
-
-  renameSession: (sessionId: string, data: HarnessNameUpdateDTO): Promise<HarnessSessionDTO> =>
-    request('PUT /api/harness/sessions/{sessionId}/name', {
-      path: { sessionId },
       body: data,
     }),
 
@@ -121,12 +79,6 @@ export const harnessService = {
       { path: { threadId } },
       { signal: options?.signal },
     ),
-
-  renameThread: (threadId: string, data: HarnessNameUpdateDTO): Promise<HarnessThreadDTO> =>
-    request('PUT /api/harness/threads/{threadId}/name', {
-      path: { threadId },
-      body: data,
-    }),
 
   compactThread: (
     threadId: string,
