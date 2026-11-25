@@ -17,6 +17,7 @@ import { workspaceKeys } from './queries'
 import { indexRows, treeRows, type TreeDrop, type TreeRow } from './resource-tree'
 import { SpaceDefaults } from './SpaceDefaults'
 import { SpaceMenu } from './SpaceMenu'
+import { useWorkspaceRealtime } from './useWorkspaceRealtime'
 import { useWorkspacePanes, type OpenTarget } from './useWorkspacePanes'
 import { WorkspaceStatus, WorkspaceTree } from './WorkspaceTree'
 import { createCanvas, createFolder, createSpace, deleteTreeRow, getSpaceTree, getThreadPlacement, moveTreeRow, patchSpace, readCanvasRevision, renameTreeRow, type TreeDeletion } from './workspace-api'
@@ -46,6 +47,7 @@ export type WorkspaceShellProps = {
 
 export function WorkspaceShell(props: WorkspaceShellProps) {
   const { t } = useI18n()
+  useWorkspaceRealtime(props.space.id)
   const tree = useQuery({ queryKey: workspaceKeys.tree(props.space.id), queryFn: ({ signal }) => getSpaceTree(props.space.id, signal) })
   if (!tree.data) return <StateBlock title={t(tree.isError ? 'workspace.unavailable' : 'workspace.loading')} tone={tree.isError ? 'danger' : undefined} />
   return <WorkspaceBody {...props} tree={tree.data} />
