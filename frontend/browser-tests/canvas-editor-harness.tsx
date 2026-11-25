@@ -80,8 +80,33 @@ const missingFunctionNode: CanvasResourceNodeDTO = {
   run: null,
 }
 
+const attachmentUrl = params.get('attachmentUrl')
+const attachmentNode: CanvasResourceNodeDTO = {
+  ...missingFunctionNode,
+  name: 'Attachment node',
+  function: null,
+  resources: [{
+    type: 'BLOB',
+    id: 'b0000000-0000-4000-8000-000000000002',
+    ownerNodeId: missingFunctionNode.id,
+    canvasId: CANVAS_ID,
+    blobId: 'b0000000-0000-4000-8000-000000000003',
+    resourceIndex: 0,
+    name: '画布 sample.png',
+    kind: 'IMAGE',
+    mediaType: 'image/png',
+    sizeBytes: '70',
+    width: 1,
+    height: 1,
+    durationMs: null,
+    createdAt: documentFixture.createdAt,
+  }],
+}
+
 let revision = 0
-let nodes: CanvasResourceNodeDTO[] = params.get('nodes') === 'function' ? [missingFunctionNode] : []
+let nodes: CanvasResourceNodeDTO[] = attachmentUrl
+  ? [attachmentNode]
+  : params.get('nodes') === 'function' ? [missingFunctionNode] : []
 let catalogFailureCount = 0
 
 function snapshot(): CanvasSnapshotDTO {
@@ -159,6 +184,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
 
   if (method === 'GET' && path === `/api/canvas/canvases/${CANVAS_ID}`) {
     return jsonResponse(200, snapshot())
+  }
+  if (method === 'POST' && attachmentUrl) {
+    const resource = attachmentNode.resources[0]
+    if (resource.type === 'BLOB') {
+      const { pathname, searchParams } = new URL(path, window.location.origin)
+      const blobPath = `/api/canvas/canvases/${CANVAS_ID}/blobs/${resource.blobId}`
+      if (pathname === `${blobPath}/download-url` && searchParams.get('downloadName') === resource.name) {
+        return jsonResponse(200, { method: 'GET', url: attachmentUrl, headers: {}, expiresAt: Date.now() + 60000 })
+      }
+    }
   }
   if (method === 'GET' && path === '/api/canvas/functions') {
     if (catalogMode === 'pending') {

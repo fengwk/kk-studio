@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import fs from 'node:fs'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { expect, test, type Locator, type Page } from './fixture'
 
@@ -97,6 +99,48 @@ const LOCALES = ['zh-CN', 'en-US'] as const
 function localeMatrix(): Array<{ locale: SliceLocale; viewport: { width: number; height: number } }> {
   return LOCALES.flatMap((locale) => VIEWPORTS.map((viewport) => ({ locale, viewport })))
 }
+
+test('downloads a cross-origin Canvas attachment without navigating the workspace', async ({ page }) => {
+  const name = '画布 sample.png'
+  const bytes = 'canvas attachment fixture'
+  // Use a real second origin without CORS: the browser must handle the attachment response itself.
+  const server = createServer((_request, response) => {
+    response.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+    }).end(bytes)
+  }).listen(0, '127.0.0.1')
+  try {
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Missing attachment server address')
+    }
+    const attachmentUrl = `http://127.0.0.1:${address.port}/original`
+    await page.goto(`${HARNESS_URL}?${new URLSearchParams({ locale: 'en-US', attachmentUrl })}`)
+    const canvasUrl = page.url()
+    expect(new URL(canvasUrl).origin).not.toBe(new URL(attachmentUrl).origin)
+    const navigations: string[] = []
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        navigations.push(frame.url())
+      }
+    })
+    await page.locator('.react-flow__node').click({ button: 'right' })
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('menuitem', { name: 'Download', exact: true }).click(),
+    ])
+    expect(download.url()).toBe(attachmentUrl)
+    expect(download.suggestedFilename()).toBe(name)
+    expect(fs.readFileSync(await download.path(), 'utf8')).toBe(bytes)
+    expect(page.url()).toBe(canvasUrl)
+    expect(navigations).toEqual([])
+    expect(page.context().pages()).toEqual([page])
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
+})
 
 test.describe('Canvas editor canvas-only surface regressions', () => {
   for (const { locale, viewport } of localeMatrix()) {

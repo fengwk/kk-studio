@@ -381,7 +381,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 矩阵分成 L1 免费 API 契约、L2 真实 Provider 文本/推理/图片输入、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题、输入、期望 wire 与覆盖边界
 以 `--list` / `--docs` 当前输出为准，不要复制 case 清单；默认执行哪些 case 由 flag 组合和 case 的
-`requires` 共同决定。默认 L1 覆盖工作区会话创建、同会话分支与跨会话分叉（`thread.workspace_session_branch_fork`），以及定时任务立即运行与记录分页、Session/Canvas 附件持有者取址、同源附件流及双用户隔离。L3 真实分支先在工作区创建空闲分支，再通过 Thread 命令批续写。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
+`requires` 共同决定。默认 L1 覆盖工作区会话创建、同会话分支与跨会话分叉（`thread.workspace_session_branch_fork`），以及定时任务立即运行与记录分页、Session/Canvas 附件持有者取址、同源附件流及双用户隔离。`canvas.storage_upload_contract` 还验证 MinIO 预签名响应的附件模式、UTF-8 文件名和跨用户取址拒绝。L3 真实分支先在工作区创建空闲分支，再通过 Thread 命令批续写。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
 精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
 阅读 case 结果时还需保留两个边界：

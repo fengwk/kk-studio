@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.canvas.http;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.canvas.dto.CanvasPresignedUrlDTO;
@@ -30,19 +31,18 @@ public class CanvasResourceController {
 
   @PostMapping("/{blobId}/download-url")
   public CanvasPresignedUrlDTO originalUrl(
-      @PathVariable UUID canvasId, @PathVariable UUID blobId, StudioPrincipal principal) {
-    return sign(principal, canvasId, blobId, true);
+      @PathVariable UUID canvasId,
+      @PathVariable UUID blobId,
+      @RequestParam(required = false) String downloadName,
+      StudioPrincipal principal) {
+    return CanvasDtoMapper.toPresignedUrlDto(
+        resourceUrlService.originalUrl(principal, canvasId, blobId, downloadName));
   }
 
   @PostMapping("/{blobId}/preview-url")
   public CanvasPresignedUrlDTO previewUrl(
       @PathVariable UUID canvasId, @PathVariable UUID blobId, StudioPrincipal principal) {
-    return sign(principal, canvasId, blobId, false);
-  }
-
-  private CanvasPresignedUrlDTO sign(
-      StudioPrincipal principal, UUID canvasId, UUID blobId, boolean original) {
     return CanvasDtoMapper.toPresignedUrlDto(
-        resourceUrlService.presign(principal, canvasId, blobId, original));
+        resourceUrlService.previewUrl(principal, canvasId, blobId));
   }
 }

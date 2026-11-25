@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.canvas.infra.platform;
 
+import org.springframework.http.ContentDisposition;
+
+import fun.fengwk.kkstudio.canvas.CanvasValidation;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
@@ -7,6 +10,7 @@ import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -26,14 +30,33 @@ public class CanvasResourceUrlService {
     this.resourceAccess = Objects.requireNonNull(resourceAccess, "resourceAccess");
   }
 
-  public StoragePresignedUrlDTO presign(
-      StudioPrincipal principal, UUID canvasId, UUID blobId, boolean original) {
+  public StoragePresignedUrlDTO originalUrl(
+      StudioPrincipal principal, UUID canvasId, UUID blobId, String downloadName) {
+    requireHeldBlob(principal, canvasId, blobId);
+    if (downloadName == null) {
+      return blobManager.presignOriginalUrl(blobId);
+    }
+    String filename =
+        CanvasValidation.requireResourceName(downloadName, "downloadName")
+            .replace('/', '_')
+            .replace('\\', '_');
+    if (filename.equals(".") || filename.equals("..")) {
+      filename = "resource";
+    }
+    var attachment =
+        ContentDisposition.attachment().filename(filename, StandardCharsets.UTF_8).build();
+    return blobManager.presignOriginalUrl(blobId, attachment);
+  }
+
+  public StoragePresignedUrlDTO previewUrl(StudioPrincipal principal, UUID canvasId, UUID blobId) {
+    requireHeldBlob(principal, canvasId, blobId);
+    return blobManager.presignPreviewUrl(blobId);
+  }
+
+  private void requireHeldBlob(StudioPrincipal principal, UUID canvasId, UUID blobId) {
     resourceAccess.require(principal, Kind.CANVAS, canvasId);
     if (!queryService.containsHeldBlob(canvasId, blobId)) {
       throw ResourceAccess.notFound();
     }
-    return original
-        ? blobManager.presignOriginalUrl(blobId)
-        : blobManager.presignPreviewUrl(blobId);
   }
 }

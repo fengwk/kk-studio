@@ -3250,6 +3250,7 @@ export interface ApiRoutes {
   }
   'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url': {
     path: { blobId: string; canvasId: string }
+    query: { downloadName?: string }
     response: CanvasPresignedUrlDTO
   }
   'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/preview-url': {

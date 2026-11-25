@@ -74,7 +74,7 @@ describe('useCanvasResourceActions', () => {
     act(() => result.current.ensureSigned('open'))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, BLOB_ID)
+    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, BLOB_ID, undefined)
     expect(result.current.fulfilled).toBe(true)
     expect(result.current.error).toBeNull()
     expect(clickSpy).toHaveBeenCalledOnce()
@@ -98,10 +98,11 @@ describe('useCanvasResourceActions', () => {
     act(() => result.current.ensureSigned('download'))
 
     await waitFor(() => expect(result.current.fulfilled).toBe(true))
+    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledWith(CANVAS_ID, BLOB_ID, { downloadName: 'asset.png' })
     expect(anchorCalls()).toEqual([{
       href: 'https://s3.example/original',
       target: '',
-      download: 'asset.png',
+      download: '',
     }])
     expect(clickSpy).toHaveBeenCalledOnce()
   })
