@@ -34,12 +34,15 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Owner;
 
 import java.time.Instant;
 import java.util.List;
@@ -67,7 +70,9 @@ class InteractionQueryServiceTest {
     return assertInstanceOf(InteractionDTO.EnvironmentWait.class, item);
   }
 
-  private SessionOwnership ownership;
+  private static final StudioPrincipal ACTOR =
+      new StudioPrincipal(new UUID(0, 1), "tester", StudioRole.ADMIN);
+  private ResourceAccess ownership;
   private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
@@ -76,7 +81,8 @@ class InteractionQueryServiceTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    ownership = mock(SessionOwnership.class);
+    ownership = mock(ResourceAccess.class);
+    when(ownership.allowInteractionRoot(any(), any())).thenReturn(true);
     environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
@@ -85,19 +91,17 @@ class InteractionQueryServiceTest {
     // 默认没有环境等待分组；需要环境等待的用例再显式覆盖本 stub。
     when(runtime.listEnvironmentWaitCandidates(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
-    service = new InteractionQueryService(List.of(ownership), environmentService, runtimes);
+    service = new InteractionQueryService(ownership, environmentService, runtimes);
   }
 
   private void stubOwner(UUID root, UUID session, String kind, UUID ownerId, String title) {
-    when(ownership.findOwner(root, session))
-        .thenReturn(Optional.of(new SessionOwnerDisplay(kind, ownerId.toString(), title, null)));
+    when(ownership.owner(Kind.SESSION, session))
+        .thenReturn(Optional.of(new Owner(ownerId, title, ACTOR.userId())));
   }
 
-  /** 两个产品分别命中不同的根时都应可见，不能误判为冲突。 */
+  /** 即使调用方是管理员，分页和总数也排除他人空间。 */
   @Test
-  void differentProductsOnDifferentRootsAreVisible() {
-    SessionOwnership other = mock(SessionOwnership.class);
-    service = new InteractionQueryService(List.of(ownership, other), environmentService, runtimes);
+  void administratorsCannotSeeAnotherUsersSpace() {
     UUID root1 = id(101);
     UUID session1 = id(102);
     UUID root2 = id(201);
@@ -105,8 +109,8 @@ class InteractionQueryServiceTest {
     stubRoot(root1);
     stubRoot(root2);
     stubOwner(root1, session1, "CHAT", id(103), "chat");
-    when(other.findOwner(root2, session2))
-        .thenReturn(Optional.of(new SessionOwnerDisplay("CUSTOM", "issue:agent", "issue", null)));
+    when(ownership.owner(Kind.SESSION, session2))
+        .thenReturn(Optional.of(new Owner(id(203), "other", id(99))));
     Instant time = Instant.parse("2026-03-01T10:00:00Z");
     PendingInteraction first = waitingInput(id(104), root1, session1, time);
     PendingInteraction second = waitingInput(id(204), root2, session2, time.plusSeconds(1));
@@ -114,12 +118,10 @@ class InteractionQueryServiceTest {
         .thenReturn(new PendingInteractionPage(List.of(first, second), false));
     stubCountPage(List.of(first, second), false);
 
-    InteractionPageDTO page = service.listInteractions(null, null, 10);
-    assertEquals(2, page.getTotal());
-    assertEquals("CHAT", page.getItems().get(0).owner().getKind());
-    assertEquals("issue:agent", page.getItems().get(1).owner().getId());
-    verify(other).findOwner(root1, session1);
-    verify(ownership).findOwner(root2, session2);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 10);
+    assertEquals(1, page.getTotal());
+    assertEquals(1, page.getItems().size());
+    assertEquals("CHAT_SPACE", page.getItems().getFirst().owner().getKind());
   }
 
   /** 显式过滤根/直接来源根必须解析为执行根；同时提供该根的快照（展示名）。后代来源会用 {@link #stubRootSession} 覆盖同一根的快照。 */
@@ -214,18 +216,14 @@ class InteractionQueryServiceTest {
     PendingInteraction row3 = waitingInput(invocationId3, threadId3, sessionId3, t3);
     stubRoot(threadId3);
 
-    when(ownership.findOwner(threadId1, sessionId1))
-        .thenReturn(
-            Optional.of(
-                new SessionOwnerDisplay(
-                    "CHAT", id(1001).toString(), "deploy chat", "/chats/1001")));
+    stubOwner(threadId1, sessionId1, "CHAT", id(1001), "deploy chat");
     stubOwner(threadId2, sessionId2, "CUSTOM", id(2001), "fix the pipeline");
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row1, row2, row3), false));
     stubCountPage(List.of(row1, row2, row3), false);
 
-    InteractionPageDTO page = service.listInteractions(null, null, 10);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 10);
 
     assertEquals(2, page.getItems().size());
     assertNull(page.getNextCursor());
@@ -240,10 +238,10 @@ class InteractionQueryServiceTest {
     assertEquals("ask_user", dto1.toolName());
     assertEquals("{}", dto1.argumentsJson());
     assertEquals(t1, dto1.createdAt());
-    assertEquals("CHAT", dto1.owner().getKind());
+    assertEquals("CHAT_SPACE", dto1.owner().getKind());
     assertEquals(id(1001).toString(), dto1.owner().getId());
     assertEquals("deploy chat", dto1.owner().getTitle());
-    assertEquals("/chats/1001", dto1.owner().getLink());
+    assertEquals("/chat-spaces/" + id(1001), dto1.owner().getLink());
 
     InteractionDTO.Approval dto2 = approval(page.getItems().get(1));
     assertEquals(invocationId2.toString(), dto2.toolInvocationId());
@@ -253,14 +251,14 @@ class InteractionQueryServiceTest {
     assertEquals("{\"env\":\"prod\"}", dto2.argumentsJson());
     assertEquals(JsonValues.readTree("{\"allowed\":false}"), dto2.approval());
     assertEquals(t2, dto2.createdAt());
-    assertEquals("CUSTOM", dto2.owner().getKind());
+    assertEquals("CHAT_SPACE", dto2.owner().getKind());
     assertEquals(id(2001).toString(), dto2.owner().getId());
     assertEquals("fix the pipeline", dto2.owner().getTitle());
-    assertNull(dto2.owner().getLink());
+    assertEquals("/chat-spaces/" + id(2001), dto2.owner().getLink());
 
     // 列表和计数共用请求级缓存。
-    verify(ownership, times(1)).findOwner(threadId1, sessionId1);
-    verify(ownership, times(1)).findOwner(threadId2, sessionId2);
+    verify(ownership, times(1)).owner(Kind.SESSION, sessionId1);
+    verify(ownership, times(1)).owner(Kind.SESSION, sessionId2);
   }
 
   /** 测试意图：只统计同一 Assistant、同一 Environment、同一归一化文件路径上仍未结束的后继审批调用。 */
@@ -289,7 +287,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(row), false);
 
     InteractionDTO.Approval approval =
-        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+        approval(service.listInteractions(ACTOR, null, null, 10).getItems().getFirst());
 
     assertEquals(1, approval.queuedSameFileCount());
     verify(runtime).countQueuedSameFileMutationsAfter(id(64));
@@ -319,7 +317,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(row), false);
 
     InteractionDTO.Approval dto =
-        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+        approval(service.listInteractions(ACTOR, null, null, 10).getItems().getFirst());
 
     assertEquals(0, dto.queuedSameFileCount());
     verify(runtime, never()).countQueuedSameFileMutationsAfter(any());
@@ -345,7 +343,7 @@ class InteractionQueryServiceTest {
         .thenReturn(new PendingInteractionPage(List.of(childRow), false));
     stubCountPage(List.of(childRow), false);
 
-    InteractionPageDTO page = service.listInteractions(null, null, 10);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 10);
 
     assertEquals(1, page.getItems().size());
     assertEquals(1, page.getTotal());
@@ -353,7 +351,7 @@ class InteractionQueryServiceTest {
     assertEquals(childThreadId.toString(), dto.threadId());
     assertEquals(childSessionId.toString(), dto.sessionId());
     assertEquals(rootThreadId.toString(), dto.rootThreadId());
-    assertEquals("CHAT", dto.owner().getKind());
+    assertEquals("CHAT_SPACE", dto.owner().getKind());
     assertEquals(id(700).toString(), dto.owner().getId());
   }
 
@@ -396,7 +394,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(rootRow, otherRow), true);
     stubCountPage(t2, id(902), List.of(childRow), false);
 
-    InteractionPageDTO page = service.listInteractions(rootThreadId, null, 2);
+    InteractionPageDTO page = service.listInteractions(ACTOR, rootThreadId, null, 2);
 
     assertEquals(2, page.getItems().size());
     assertEquals(id(901).toString(), input(page.getItems().get(0)).toolInvocationId());
@@ -417,7 +415,8 @@ class InteractionQueryServiceTest {
     when(runtime.findRootThreadId(id(999))).thenReturn(Optional.empty());
     assertEquals(
         DomainErrorCode.NOT_FOUND,
-        assertThrows(DomainException.class, () -> service.listInteractions(id(999), null, 10))
+        assertThrows(
+                DomainException.class, () -> service.listInteractions(ACTOR, id(999), null, 10))
             .code());
 
     UUID child = id(501);
@@ -425,7 +424,7 @@ class InteractionQueryServiceTest {
     when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
     assertEquals(
         DomainErrorCode.VALIDATION,
-        assertThrows(DomainException.class, () -> service.listInteractions(child, null, 10))
+        assertThrows(DomainException.class, () -> service.listInteractions(ACTOR, child, null, 10))
             .code());
 
     verify(runtime, never()).listPendingInteractions(any(), any(), anyInt());
@@ -475,7 +474,7 @@ class InteractionQueryServiceTest {
 
     stubCountPage(List.of(row1, row2, row3, row4, row5), false);
 
-    InteractionPageDTO page = service.listInteractions(null, null, 3);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 3);
 
     assertEquals(3, page.getItems().size());
     assertEquals(id(30).toString(), input(page.getItems().get(0)).toolInvocationId());
@@ -521,7 +520,7 @@ class InteractionQueryServiceTest {
     // 计数页始终从首屏游标扫描完整源，与当前请求的 limit/游标无关。
     stubCountPage(List.of(row1, row2, row3), false);
 
-    InteractionPageDTO firstPage = service.listInteractions(null, null, 1);
+    InteractionPageDTO firstPage = service.listInteractions(ACTOR, null, null, 1);
     assertEquals(1, firstPage.getItems().size());
     String expectedCursor1 = t1.toEpochMilli() + ":" + id(10);
     assertEquals(expectedCursor1, firstPage.getNextCursor());
@@ -534,7 +533,8 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(t2, id(20), 1))
         .thenReturn(new PendingInteractionPage(List.of(row3), false));
 
-    InteractionPageDTO secondPage = service.listInteractions(null, firstPage.getNextCursor(), 1);
+    InteractionPageDTO secondPage =
+        service.listInteractions(ACTOR, null, firstPage.getNextCursor(), 1);
     assertEquals(1, secondPage.getItems().size());
     assertEquals(id(30).toString(), input(secondPage.getItems().get(0)).toolInvocationId());
     assertNull(secondPage.getNextCursor());
@@ -553,7 +553,7 @@ class InteractionQueryServiceTest {
         .thenReturn(new PendingInteractionPage(List.of(), false));
     stubCountPage(List.of(), false);
 
-    InteractionPageDTO pageEmpty = service.listInteractions(null, null, 10);
+    InteractionPageDTO pageEmpty = service.listInteractions(ACTOR, null, null, 10);
     assertEquals(0, pageEmpty.getItems().size());
     assertNull(pageEmpty.getNextCursor());
     assertEquals(0, pageEmpty.getTotal());
@@ -569,7 +569,7 @@ class InteractionQueryServiceTest {
         .thenReturn(new PendingInteractionPage(List.of(row), false));
     stubCountPage(List.of(row), false);
 
-    InteractionPageDTO pageWithItems = service.listInteractions(null, null, 5);
+    InteractionPageDTO pageWithItems = service.listInteractions(ACTOR, null, null, 5);
     assertEquals(1, pageWithItems.getItems().size());
     assertNull(pageWithItems.getNextCursor());
     assertEquals(1, pageWithItems.getTotal());
@@ -602,7 +602,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(row1, row2), true);
     stubCountPage(t2, id(20), List.of(row3, row4), false);
 
-    InteractionPageDTO page = service.listInteractions(null, null, 1);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 1);
 
     assertEquals(1, page.getItems().size());
     assertEquals(id(10).toString(), input(page.getItems().get(0)).toolInvocationId());
@@ -625,7 +625,8 @@ class InteractionQueryServiceTest {
 
     for (String cursor : malformedCursors) {
       DomainException error =
-          assertThrows(DomainException.class, () -> service.listInteractions(null, cursor, 10));
+          assertThrows(
+              DomainException.class, () -> service.listInteractions(ACTOR, null, cursor, 10));
       assertEquals(DomainErrorCode.VALIDATION, error.code());
     }
 
@@ -637,7 +638,8 @@ class InteractionQueryServiceTest {
   void outOfRangeLimitIsValidationError() {
     for (int limit : new int[] {0, -1, InteractionQueryService.MAX_LIMIT + 1}) {
       DomainException error =
-          assertThrows(DomainException.class, () -> service.listInteractions(null, null, limit));
+          assertThrows(
+              DomainException.class, () -> service.listInteractions(ACTOR, null, null, limit));
       assertEquals(DomainErrorCode.VALIDATION, error.code());
     }
     verifyNoInteractions(runtime);
@@ -647,7 +649,8 @@ class InteractionQueryServiceTest {
   @Test
   void runtimeUnavailableThrowsIllegalStateException() {
     when(runtimes.getIfAvailable()).thenReturn(null);
-    assertThrows(IllegalStateException.class, () -> service.listInteractions(null, null, 10));
+    assertThrows(
+        IllegalStateException.class, () -> service.listInteractions(ACTOR, null, null, 10));
   }
 
   /** 环境等待投影使用的环境身份；用例只需一致的字符串 id 与环境展示名。 */
@@ -710,13 +713,13 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(manual), false);
     stubEnvironmentCountPage(List.of(environment));
 
-    InteractionPageDTO page = service.listInteractions(null, null, 10);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 10);
     assertEquals(2, page.getTotal());
     assertEquals(childSession.toString(), input(page.getItems().get(0)).sessionId());
     assertEquals(root.toString(), page.getItems().get(0).rootThreadId());
     assertEquals(id(86).toString(), page.getItems().get(0).owner().getId());
     assertEquals(page.getItems().get(0).owner(), page.getItems().get(1).owner());
-    verify(ownership).findOwner(root, rootSession);
+    verify(ownership).owner(Kind.SESSION, rootSession);
   }
 
   /**
@@ -754,7 +757,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(manual), false);
     stubEnvironmentCountPage(List.of(earlier, later));
 
-    InteractionPageDTO page = service.listInteractions(null, null, 10);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 10);
 
     assertEquals(3, page.getItems().size());
     assertEquals(3, page.getTotal());
@@ -765,7 +768,7 @@ class InteractionQueryServiceTest {
     assertEquals("dev-env", environmentItem.environmentName());
     assertEquals(3, environmentItem.waitingCount());
     assertEquals(environmentRootThreadId.toString(), environmentItem.rootThreadId());
-    assertEquals("CHAT", environmentItem.owner().getKind());
+    assertEquals("CHAT_SPACE", environmentItem.owner().getKind());
     assertEquals(id(23).toString(), environmentItem.owner().getId());
     assertEquals(earlierCreatedAt, environmentItem.createdAt());
 
@@ -796,7 +799,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(manual), false);
     stubEnvironmentCountPage(List.of(online));
 
-    InteractionPageDTO page = service.listInteractions(null, null, 1);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 1);
 
     assertEquals(1, page.getTotal());
     assertEquals(id(101).toString(), input(page.getItems().getFirst()).toolInvocationId());
@@ -829,14 +832,14 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(), false);
     stubEnvironmentCountPage(List.of(first, second));
 
-    InteractionPageDTO firstPage = service.listInteractions(null, null, 1);
+    InteractionPageDTO firstPage = service.listInteractions(ACTOR, null, null, 1);
     assertEquals(1, firstPage.getItems().size());
     assertEquals(1, environmentWait(firstPage.getItems().get(0)).waitingCount());
     assertEquals(2, firstPage.getTotal());
     String cursor = firstPage.getNextCursor();
     assertEquals(InteractionCursor.encode(firstCreatedAt, id(901)), cursor);
 
-    InteractionPageDTO secondPage = service.listInteractions(null, cursor, 1);
+    InteractionPageDTO secondPage = service.listInteractions(ACTOR, null, cursor, 1);
     assertEquals(1, secondPage.getItems().size());
     assertEquals(2, environmentWait(secondPage.getItems().get(0)).waitingCount());
     assertEquals(secondCreatedAt, environmentWait(secondPage.getItems().get(0)).createdAt());
@@ -872,7 +875,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(otherManual), false);
     stubEnvironmentCountPage(List.of(environmentItem));
 
-    InteractionPageDTO page = service.listInteractions(environmentRootThreadId, null, 10);
+    InteractionPageDTO page = service.listInteractions(ACTOR, environmentRootThreadId, null, 10);
 
     assertEquals(1, page.getItems().size());
     assertInstanceOf(InteractionDTO.EnvironmentWait.class, page.getItems().get(0));
@@ -899,7 +902,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(), false);
     stubEnvironmentCountPage(List.of(orphan));
 
-    InteractionPageDTO page = service.listInteractions(null, null, 1);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 1);
 
     assertEquals(0, page.getItems().size());
     assertEquals(0, page.getTotal());
@@ -934,7 +937,7 @@ class InteractionQueryServiceTest {
     stubCountPage(List.of(approval), false);
     stubEnvironmentCountPage(List.of());
 
-    InteractionPageDTO page = service.listInteractions(null, null, 5);
+    InteractionPageDTO page = service.listInteractions(ACTOR, null, null, 5);
 
     assertEquals(1, page.getItems().size());
     InteractionOwnerDTO owner = page.getItems().get(0).owner();
@@ -952,10 +955,9 @@ class InteractionQueryServiceTest {
         NullPointerException.class,
         () -> new InteractionQueryService(null, environmentService, runtimes));
     assertThrows(
-        NullPointerException.class,
-        () -> new InteractionQueryService(List.of(ownership), null, runtimes));
+        NullPointerException.class, () -> new InteractionQueryService(ownership, null, runtimes));
     assertThrows(
         NullPointerException.class,
-        () -> new InteractionQueryService(List.of(ownership), environmentService, null));
+        () -> new InteractionQueryService(ownership, environmentService, null));
   }
 }

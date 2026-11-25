@@ -15,12 +15,13 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -38,7 +39,7 @@ import java.util.UUID;
  * <p>Harness 提供人工等待和按根、冻结环境聚合的可领取 Work 候选；环境服务判断 READY 租约。两者都不复制待办台账、不落地持久等待状态。
  *
  * <p>产品 owner 与根由服务端按来源 Thread 不可变的执行根解析：人工等待用 {@link HarnessRuntime#findRootThreadId}
- * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后通过产品 SPI 解析根归属。没有产品归属时，控制器或插件发起的独立执行根作为 Agent 任务暴露。
+ * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后按根 Session 的工作区归属授权；未登记的插件后台任务仅管理员可见。
  *
  * <p>两种来源共享同一 {@code (createdAt, id)} 排序键域：人工等待用调用自身坐标，环境等待用组内最早调用的坐标。本用例对两条升序流做 k 路归并，因此可以跨来源、
  * 跨页稳定分页且不重复分组，{@code limit} 只截断可见项；{@code total} 在同过滤条件下分类计数两条流，绝不把首页长度当总数。
@@ -52,15 +53,15 @@ public class InteractionQueryService {
   /** 单页最多可见条目数；越界请求立即失败，而不是静默截断。 */
   static final int MAX_LIMIT = 100;
 
-  private final List<SessionOwnership> ownerships;
+  private final ResourceAccess access;
   private final EnvironmentService environmentService;
   private final InteractionRootResolver rootResolver;
 
   public InteractionQueryService(
-      List<SessionOwnership> ownerships,
+      ResourceAccess access,
       EnvironmentService environmentService,
       ObjectProvider<HarnessRuntime> runtimes) {
-    this.ownerships = List.copyOf(ownerships);
+    this.access = Objects.requireNonNull(access, "access");
     this.environmentService = Objects.requireNonNull(environmentService, "environmentService");
     this.rootResolver = new InteractionRootResolver(runtimes);
   }
@@ -72,13 +73,17 @@ public class InteractionQueryService {
    * <p>{@code nextCursor} 只定位本页最后一条「已消费的原始行/分组代表」，因此即使整页都被归属过滤/根过滤后为空，客户端回传同一游标也能继续向前翻页而不 漏项、不空转；
    * 两条流都耗尽时返回 {@code null}。
    */
-  public InteractionPageDTO listInteractions(UUID rootThreadId, String cursor, int limit) {
+  public InteractionPageDTO listInteractions(
+      StudioPrincipal principal, UUID rootThreadId, String cursor, int limit) {
     requireValidLimit(limit);
     HarnessRuntime runtime = rootResolver.requireRuntime();
     if (rootThreadId != null) {
       requireCanonicalRoot(rootThreadId);
+      if (!access.allowInteractionRoot(principal, rootThreadId)) {
+        throw ResourceAccess.notFound();
+      }
     }
-    QueryContext context = new QueryContext(runtime, rootThreadId);
+    QueryContext context = new QueryContext(runtime, principal, rootThreadId);
     PendingPage page = new PendingPage(context, parseCursor(cursor), limit);
     page.collectVisibleItems();
     // 引擎候选包含在线环境；页满后排除尾部在线候选，避免为不存在的后续等待项产生空游标页。
@@ -383,6 +388,7 @@ public class InteractionQueryService {
   private final class QueryContext {
 
     private final HarnessRuntime runtime;
+    private final StudioPrincipal principal;
     private final UUID filterRootThreadId;
     private final Map<UUID, UUID> rootBySourceThread = new HashMap<>();
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
@@ -391,8 +397,10 @@ public class InteractionQueryService {
     private final Map<UUID, Integer> queuedSameFileCountByInvocation = new HashMap<>();
     private final Map<EnvironmentId, Optional<Instant>> readyLeaseById = new HashMap<>();
 
-    private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
+    private QueryContext(
+        HarnessRuntime runtime, StudioPrincipal principal, UUID filterRootThreadId) {
       this.runtime = runtime;
+      this.principal = Objects.requireNonNull(principal, "principal");
       this.filterRootThreadId = filterRootThreadId;
     }
 
@@ -459,36 +467,28 @@ public class InteractionQueryService {
 
     private Optional<InteractionOwnerDTO> ownerForRootSession(
         UUID rootThreadId, UUID rootSessionId) {
-      SessionOwnerDisplay display = null;
-      for (SessionOwnership ownership : ownerships) {
-        Optional<SessionOwnerDisplay> candidate = ownership.findOwner(rootThreadId, rootSessionId);
-        if (candidate.isPresent()) {
-          if (display != null) {
-            throw new IllegalStateException("multiple owners for execution root: " + rootThreadId);
-          }
-          display = candidate.get();
-        }
+      var placement = access.owner(Kind.SESSION, rootSessionId);
+      if (!ResourceAccess.allowsInteraction(
+          principal,
+          placement,
+          () -> rootSnapshot(rootThreadId).thread().kind() == ThreadKind.PLUGIN_TASK)) {
+        return Optional.empty();
       }
-      if (display != null) {
-        InteractionOwnerDTO owner = new InteractionOwnerDTO();
-        owner.setKind(Objects.requireNonNull(display.kind(), "owner kind"));
-        owner.setId(Objects.requireNonNull(display.id(), "owner id"));
-        owner.setTitle(display.title());
-        owner.setLink(display.link());
-        return Optional.of(owner);
-      }
-      ThreadSnapshot root = rootSnapshot(rootThreadId);
-      ThreadKind trigger = root.thread().kind();
-      if (trigger == ThreadKind.PLUGIN_TASK) {
-        InteractionOwnerDTO owner = new InteractionOwnerDTO();
+      InteractionOwnerDTO owner = new InteractionOwnerDTO();
+      if (placement.isPresent()) {
+        var space = placement.get();
+        owner.setKind("CHAT_SPACE");
+        owner.setId(space.spaceId().toString());
+        owner.setTitle(space.spaceTitle());
+        owner.setLink("/chat-spaces/" + space.spaceId());
+      } else {
+        ThreadSnapshot root = rootSnapshot(rootThreadId);
         owner.setKind("AGENT_TASK");
         owner.setId(rootThreadId.toString());
         String agentName = root.entryState().baseSettings().agentName();
         owner.setTitle(agentName != null ? agentName : root.thread().name());
-        owner.setLink(null);
-        return Optional.of(owner);
       }
-      return Optional.empty();
+      return Optional.of(owner);
     }
 
     /** 环境展示名只按环境 id 从注册表补齐一次（按页去重），绝不按当前 composer 环境猜测，也不逐卡快照。 */

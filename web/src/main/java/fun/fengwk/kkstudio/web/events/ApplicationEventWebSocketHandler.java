@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry.Acceptance;
 import fun.fengwk.kkstudio.platform.account.StudioAccountService;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
-import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
@@ -416,10 +415,6 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           enqueueResourceError("RESOURCE_NOT_FOUND", "Resource not found", resource);
           return;
         }
-        if (principal.role() != StudioRole.ADMIN && adminOnly(resource.kind())) {
-          enqueueResourceError("ADMIN_REQUIRED", "Administrator required", resource);
-          return;
-        }
         if (subscriptions.containsKey(resource)) {
           return; // 重复 subscribe 幂等
         }
@@ -432,6 +427,11 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
                   signal -> {
                     synchronized (closeLock) {
                       if (closed || subscriptions.get(resource) != current[0]) {
+                        return;
+                      }
+                      if (resource.kind() == ResourceKind.INTERACTIONS
+                          && signal instanceof Signal.InteractionsChanged changed
+                          && !access.allowInteractionRoot(principal, changed.rootThreadId())) {
                         return;
                       }
                       // 快照未被接受时抛给发布器：它只在实际投递成功后推进订阅游标，重试时仍从旧游标投影。
@@ -694,21 +694,11 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       };
     }
 
-    private static boolean adminOnly(ResourceKind kind) {
-      return kind == ResourceKind.INTERACTIONS;
-    }
-
     private boolean recheckAuthentication(long nowNanos) {
       StudioPrincipal current = accounts.authenticate(token).orElse(null);
       if (current == null || !current.userId().equals(principal.userId())) {
         fail("NOT_AUTHENTICATED", "Login required", LOGIN_REQUIRED_CLOSE_CODE);
         return false;
-      }
-      if (principal.role() == StudioRole.ADMIN && current.role() != StudioRole.ADMIN) {
-        subscriptions.keySet().stream()
-            .filter(key -> adminOnly(key.kind()))
-            .toList()
-            .forEach(this::unsubscribe);
       }
       subscriptions.keySet().stream()
           .filter(resource -> !canRead(resource, current))
