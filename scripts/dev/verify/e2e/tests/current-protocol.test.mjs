@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getCase } from '../run-matrix.mjs'
-import { cases as attachmentCases } from '../cases/chat-attachment.mjs'
 
 const identity = {
   type: 'connected',
@@ -82,21 +81,11 @@ test('tool.read_turn executes the daemon.ready prerequisite', async () => {
   }), (error) => error === stopped)
 })
 
-test('attachment case resolves seed prerequisites across modules', async () => {
-  // 替换前置 case 的边界，验证两个独立分支均能定位到原对象。
-  for (const [id, vars] of [
-    ['seed.agent_and_provider', {}],
-    ['seed.structured_model_config', { agent: {} }],
-  ]) {
-    const prerequisite = getCase(id)
-    const original = prerequisite.run
-    const stopped = new Error(id)
-    prerequisite.run = async () => { throw stopped }
-    try {
-      await assert.rejects(attachmentCases[0].run({ vars }), (error) => error === stopped)
-    } finally {
-      prerequisite.run = original
-    }
+test('holder-scoped attachment cases are registered in the default L1 matrix', () => {
+  for (const id of ['session.attachment_sign_and_stream', 'canvas.storage_upload_contract']) {
+    const entry = getCase(id)
+    assert.equal(entry.level, 'L1')
+    assert.equal(entry.requires.size, 0)
   }
 })
 

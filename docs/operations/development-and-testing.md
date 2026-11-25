@@ -314,7 +314,7 @@ COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/t
 [`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
 [`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
-`compose run --rm` 执行初始化。`--with-app` 验证全局 Blob、Canvas revision 与 typed command
+`compose run --rm` 执行初始化。`--with-app` 验证 Canvas 持有的 Blob、Canvas revision 与 typed command
 变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线工作区。
 Harness command batch 针对 path 中的既有 Thread 提交命令；画布使用 `CREATE_NODE`、
 `SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
@@ -370,7 +370,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--real` | 启用真实 Provider case，要求四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
 | `--with-tools` | 启用 Daemon/Tool case；`daemon.ready` 校验能力目录，包括 `find` 对应的 `fs.find-files` |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
-| `--with-canvas-storage` | 启用 Canvas Resource/Blob 契约用例（Backend 无论何种模式均要求 S3/MinIO 基础设施就绪） |
+| `--with-canvas-storage` | 允许依赖附件存储的真实模型、工具用例；默认 L1 的 Session/Canvas Blob 契约用例不需要此开关 |
 | `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用工作区 Canvas fake 链路 UI 用例，该用例只绑定 `fake-image`，不会提交付费 Function |
 | `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-*` 组合 |
 | `--ui` | 在 API 矩阵后执行可选 Playwright Workspace UI smoke，截图并入同一 run |
@@ -381,7 +381,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 矩阵分成 L1 免费 API 契约、L2 真实 Provider 文本/推理/图片输入、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题、输入、期望 wire 与覆盖边界
 以 `--list` / `--docs` 当前输出为准，不要复制 case 清单；默认执行哪些 case 由 flag 组合和 case 的
-`requires` 共同决定。当前 L1 Workspace case 覆盖定时任务立即运行记录分页及双用户资源隔离；不要据此推断 Workspace 附件测试已迁入矩阵。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
+`requires` 共同决定。默认 L1 覆盖定时任务立即运行与记录分页、Session/Canvas 附件持有者取址、同源附件流及双用户隔离。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
 精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
 阅读 case 结果时还需保留两个边界：
