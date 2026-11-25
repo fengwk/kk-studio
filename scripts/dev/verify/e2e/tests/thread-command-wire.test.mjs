@@ -3,8 +3,6 @@ import test from 'node:test'
 
 import {
   acceptCommandBatch,
-  chatOwner,
-  newThreadTarget,
   stopThread,
   stopThreadForCleanup,
   threadTarget,
@@ -40,8 +38,7 @@ const acceptedDto = (threadId, command) => ({
 })
 
 test('THREAD continuation routes to the owner-free thread command-batches endpoint', async () => {
-  // 测试意图：既有 Thread 续写面 owner-free——cursor-bound 批次的 wire body 只含 cursor 与 commands，
-  // 即使调用方传入 owner 也绝不进入 wire，也不带 helper 路由描述符的 type/threadId。
+  // 测试意图：cursor-bound 批次的 wire body 只含 cursor 与 commands，不带 helper 路由描述符。
   const threadId = cid()
   const headEntryId = cid()
   const command = userMessageCommand('ship it', cid())
@@ -53,7 +50,6 @@ test('THREAD continuation routes to the owner-free thread command-batches endpoi
     },
   }
   await acceptCommandBatch(ctx, {
-    owner: chatOwner(cid()),
     target: threadTarget({
       threadId,
       expectedHeadEntryId: headEntryId,
@@ -151,84 +147,6 @@ test('THREAD continuation surfaces the public rejection of NOTIFICATION commands
         commands: [command],
       }),
     (error) => error instanceof HttpError && error.status === 400,
-  )
-})
-
-test('NEW_THREAD target requires an explicit normalized threadName', () => {
-  // 测试意图：分支名不再是服务端派生默认值，而是进入创建请求身份；helper 必须先于 wire 规范化并拒绝非法名。
-  const target = newThreadTarget({
-    sessionId: cid(),
-    startEntryId: cid(),
-    threadId: cid(),
-    threadName: '  branch   name  ',
-  })
-  assert.deepEqual(Object.keys(target).sort(), [
-    'sessionId',
-    'startEntryId',
-    'threadId',
-    'threadName',
-    'type',
-    'yoloEnabled',
-  ])
-  assert.equal(target.threadName, 'branch name')
-  assert.equal(target.yoloEnabled, false)
-
-  for (const threadName of [undefined, null, '', '   ', 'a'.repeat(257)]) {
-    assert.throws(() =>
-      newThreadTarget({
-        sessionId: cid(),
-        startEntryId: cid(),
-        threadId: cid(),
-        threadName,
-      }),
-    )
-  }
-  // 256 码点边界仍是合法名（按码点而非 UTF-16 长度计数）。
-  assert.equal(
-    newThreadTarget({
-      sessionId: cid(),
-      startEntryId: cid(),
-      threadId: cid(),
-      threadName: '分支'.repeat(128),
-    }).threadName.length,
-    256,
-  )
-})
-
-test('NEW_THREAD first creation asserts the normalized name, exact replay does not', async () => {
-  // 测试意图：CREATE 响应的分支名必须等于规范化后的请求名；replay 可能命中已重命名的 Thread，
-  // helper 不做默认名断言，但也绝不能把「已重命名」误判为失败。
-  const threadId = cid()
-  const sessionId = cid()
-  const command = userMessageCommand('branch', cid())
-  const target = newThreadTarget({ sessionId, startEntryId: cid(), threadId, threadName: 'branch   name' })
-  const response = (threadName, replayed) => ({
-    status: 202,
-    json: {
-      ...acceptedDto(threadId, command),
-      session: { sessionId, name: 'fixture-session' },
-      rootEntry: { entryId: cid(), entryType: 'ROOT', sessionId },
-      thread: { ...threadDto(threadId), sessionId, name: threadName },
-      replayed,
-    },
-  })
-
-  const owner = chatOwner(cid())
-  await acceptCommandBatch(
-    { call: async () => response('branch name', false) },
-    { owner, target, commands: [command] },
-  )
-  await assert.rejects(
-    () =>
-      acceptCommandBatch(
-        { call: async () => response('branch-name', false) },
-        { owner, target, commands: [command] },
-      ),
-    /thread name/,
-  )
-  await acceptCommandBatch(
-    { call: async () => response('renamed later', true) },
-    { owner, target, commands: [command] },
   )
 })
 

@@ -6,30 +6,20 @@ import {
 } from './http.mjs'
 
 /**
- * Harness Runtime 单轨契约 helper（创建型 owner-aware batch + owner-free Thread 续写 + Session/Thread 查询）。
+ * Harness Runtime 的当前契约辅助函数。
  *
- * 端点事实源（web 模块）：
- * - POST /api/harness/command-batches         创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
- * - POST /api/harness/threads/{id}/command-batches  既有 Thread 续写：owner-free，body 只带 cursor 与 commands
- * - GET  /api/chat/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
- * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
- * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
- * - GET  /api/harness/threads/{id}     一致快照（单事务，含 stopReceipts）
- * - PUT  /api/harness/threads/{id}/yolo  {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
- * - POST /api/harness/threads/{id}/stop  {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
+ * 当前端点：
+ * - POST /api/harness/threads/{id}/command-batches：Thread 命令批次
+ * - GET  /api/harness/threads/{id}：一致快照（含 stopReceipts）
+ * - PUT  /api/harness/threads/{id}/yolo；POST /api/harness/threads/{id}/stop
  * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
- * - PUT  /api/harness/threads/{id}/name  {name}（200 权威 HarnessThreadDTO）
- * - WS   /ws/events                        应用级 Thread/Canvas 事件订阅
- * - GET  /api/platform/environments      只读 Environment 注册表（Environment UUID id = canonical 路由身份）
+ * - GET  /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request：历史请求预览
+ * - WS   /ws/events：应用级 Thread/Canvas 事件订阅
+ * - GET  /api/platform/environments：只读 Environment 注册表
+ * - /api/chat-spaces：工作区及 Session、branch、fork 创建；创建请求使用 canonical UUID Idempotency-Key。
  *
- * 创建型 owner 只接受 CHAT；已有 Thread 的 Continue/Preview 不再需要 owner：
- * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
- * - NEW_THREAD{sessionId,startEntryId,threadId,threadName,yoloEnabled}：在既有 Session 的合法 fork 边界
- *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
- * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
- * commands 必须是固定顺序 SET_EXECUTION,SET_ENVIRONMENT 前缀 +
- * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
+ * 命令批次命令按固定顺序携带 SET_EXECUTION、SET_ENVIRONMENT 前缀及恰一条末尾 USER_MESSAGE；
+ * CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
  */
 
 function positiveDecimal(value, field) {
@@ -52,21 +42,6 @@ function nonNegativeDecimal(value, field) {
   const raw = String(value ?? '')
   assert(/^(0|[1-9]\d*)$/.test(raw), `expected non-negative decimal ${field}: ${JSON.stringify(value)}`)
   return raw
-}
-
-/**
- * 分支显示名的规范化与校验，镜像后端 {@code Names.normalize}：把任意 Unicode 空白折叠为单个空格、去掉首尾，
- * 结果必须非空且至多 256 个码点（超长是调用方错误，绝不截断）。返回规范化后的名称。
- */
-export function normalizeThreadName(value) {
-  assert(typeof value === 'string', `threadName must be a string: ${JSON.stringify(value)}`)
-  const collapsed = value.replace(/\s+/gu, ' ').trim()
-  assert(collapsed.length > 0, 'threadName must not be blank')
-  assert(
-    [...collapsed].length <= 256,
-    `threadName must not exceed 256 code points: ${JSON.stringify(value)}`,
-  )
-  return collapsed
 }
 
 /**
@@ -160,39 +135,6 @@ export function threadIdOf(thread) {
 /** Thread 自身执行活动、退出等待与空闲状态；STOP 与这些状态正交。 */
 const THREAD_RUNTIME_STATUSES = new Set(['RUNNING', 'EXIT_PENDING', 'WAITING', 'IDLE'])
 
-/**
- * 创建 Chat（name-based Agent 引用；可选默认 Environment name，Chat 不携带任何 workspace 状态）。
- *
- * POST 请求体的 `environmentName` 可选：省略或 null 都表示无默认环境，提供时必须是已存在的 canonical
- * Environment 名。Chat 响应投影的 `environmentName` 是 required-nullable 字段（DTO 用 ALWAYS 显式发 null），
- * helper 断言它始终存在且等于请求值。
- */
-export async function createChat(
-  ctx,
-  { title, agentName, yoloEnabled = false, environmentName = null },
-) {
-  canonicalEnvironmentName(environmentName, 'environmentName')
-  const { status, json } = await ctx.call('POST', '/api/chat/chats', {
-    title,
-    agentName,
-    yoloEnabled,
-    environmentName,
-  })
-  assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
-  const chat = json
-  assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
-  assert(
-    Object.hasOwn(chat, 'environmentName'),
-    `Chat must project required-nullable environmentName: ${JSON.stringify(chat)}`,
-  )
-  canonicalEnvironmentName(chat.environmentName, 'Chat.environmentName')
-  assert(
-    chat.environmentName === environmentName,
-    `Chat environmentName ${JSON.stringify(chat.environmentName)} != requested ${JSON.stringify(environmentName)}: ${JSON.stringify(chat)}`,
-  )
-  return chat
-}
-
 /** 校验 nullable canonical Environment 名称：null 表示未选择；非 null 必须非 blank、无首尾空白、不含 '/' 且不超过 64 字符。 */
 export function canonicalEnvironmentName(value, field = 'environmentName') {
   if (value === null) return null
@@ -234,43 +176,11 @@ export function branchSettingsOf(agent, executionOrModel, environmentName = null
   }
 }
 
-// ---------- owner / target 构造 ----------
-
-/** Chat owner 引用（canonical chatId）。 */
-export function chatOwner(chatId) {
-  return { kind: 'CHAT', id: canonicalUuid(chatId, 'chatId') }
-}
-
-/** NEW_SESSION target：预分配 sessionId/threadId，携带 root settings 与 initial yolo。 */
-export function newSessionTarget({ sessionId, threadId, rootSettings, yoloEnabled = false }) {
-  canonicalUuid(sessionId, 'target.sessionId')
-  canonicalUuid(threadId, 'target.threadId')
-  assert(rootSettings && typeof rootSettings === 'object', `rootSettings required: ${JSON.stringify(rootSettings)}`)
-  assert(typeof yoloEnabled === 'boolean', 'target.yoloEnabled must be boolean')
-  return { type: 'NEW_SESSION', sessionId, threadId, rootSettings, yoloEnabled }
-}
-
-/** NEW_THREAD target：在既有 Session 的合法 fork 边界（ROOT 或已闭合 TURN_END）下开新 Thread（不复制 Entry）。 */
-export function newThreadTarget({ sessionId, startEntryId, threadId, threadName, yoloEnabled = false }) {
-  canonicalUuid(sessionId, 'target.sessionId')
-  canonicalUuid(startEntryId, 'target.startEntryId')
-  canonicalUuid(threadId, 'target.threadId')
-  assert(typeof yoloEnabled === 'boolean', 'target.yoloEnabled must be boolean')
-  return {
-    type: 'NEW_THREAD',
-    sessionId,
-    startEntryId,
-    threadId,
-    threadName: normalizeThreadName(threadName),
-    yoloEnabled,
-  }
-}
-
 /**
- * THREAD target：既有 Thread 续写的 helper 路由描述符（内部转为 owner-free body）。
+ * THREAD target：既有 Thread 续写的 helper 路由描述符。
  *
  * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/harness/threads/{threadId}/command-batches}，body 只含 {@code commands}
- * 与（非单条纯 USER_MESSAGE 批次必需的）{@code expectedHeadEntryId, expectedNextCommandSequence}，不带 owner/target/type。
+ * 与（非单条纯 USER_MESSAGE 批次必需的）{@code expectedHeadEntryId, expectedNextCommandSequence}，不带 target/type。
  */
 export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
   canonicalUuid(threadId, 'target.threadId')
@@ -308,21 +218,9 @@ function assertAcceptedCommands(accepted) {
   assert(typeof accepted.replayed === 'boolean', JSON.stringify(accepted))
 }
 
-/**
- * 唯一产品用户命令写入口：owner-aware command batch（202 accepted）。
- *
- * 自动基于请求 target/commands 严格校验响应形状（无需调用方传 options）：
- * - 返回 threadId 必须等于 target.threadId；
- * - NEW_SESSION/NEW_THREAD 的 sessionId 必须等于 target.sessionId；
- * - NEW_THREAD 且 accepted.replayed=false 时（真正首次创建）：accepted.thread.name 必须等于
- *   target.threadName 经 Names 规则规范化后的名称（名称进入创建请求身份）；replayed=true 的 exact replay
- *   可能发生在该 Thread 已被控制面重命名之后，服务端返回当前权威 name，helper 不做默认名断言；
- * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
- * - acceptedCommands 的 count/type/idempotencyKey/order 必须与请求 commands 一致，
- *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
- */
-export async function acceptCommandBatch(ctx, { owner, target, commands }) {
-  assert(target?.type, `target required: ${JSON.stringify(target)}`)
+/** 接受一个既有 Thread 的命令批次并严格校验响应形状。 */
+export async function acceptCommandBatch(ctx, { target, commands }) {
+  assert(target?.type === 'THREAD', `target.type must be THREAD: ${JSON.stringify(target)}`)
   assert(Array.isArray(commands) && commands.length > 0, 'commands required')
   for (const command of commands) {
     assert(
@@ -331,81 +229,32 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     )
   }
 
-  let accepted
-  if (target.type === 'THREAD') {
-    // 既有 Thread 续写面 owner-free：body 只带 commands 与（可选）cursor，绝不发送 owner/target。
-    const threadId = canonicalUuid(target.threadId, 'target.threadId')
-    const body = { commands }
-    if (target.expectedHeadEntryId != null || target.expectedNextCommandSequence != null) {
-      body.expectedHeadEntryId = canonicalUuid(
-        target.expectedHeadEntryId,
-        'target.expectedHeadEntryId',
-      )
-      body.expectedNextCommandSequence = positiveDecimal(
-        target.expectedNextCommandSequence,
-        'target.expectedNextCommandSequence',
-      )
-    }
-    const { status, json } = await ctx.call(
-      'POST',
-      `/api/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
-      body,
+  // 续写请求只带 commands 与（可选）cursor，不发送 helper target。
+  const threadId = canonicalUuid(target.threadId, 'target.threadId')
+  const body = { commands }
+  if (target.expectedHeadEntryId != null || target.expectedNextCommandSequence != null) {
+    body.expectedHeadEntryId = canonicalUuid(
+      target.expectedHeadEntryId,
+      'target.expectedHeadEntryId',
     )
-    assert(status === 202, `accept thread command batch status ${status}: ${JSON.stringify(json)}`)
-    accepted = json
-    assertAcceptedCommands(accepted)
-    assert(
-      String(accepted.thread?.threadId) === threadId,
-      `accepted threadId ${accepted.thread?.threadId} != target ${threadId}: ${JSON.stringify(accepted)}`,
+    body.expectedNextCommandSequence = positiveDecimal(
+      target.expectedNextCommandSequence,
+      'target.expectedNextCommandSequence',
     )
-    assertAcceptedCommandList(accepted, commands, threadId)
-    return accepted
   }
-
-  assert(
-    owner?.kind === 'CHAT',
-    `owner.kind must be CHAT: ${JSON.stringify(owner)}`,
+  const { status, json } = await ctx.call(
+    'POST',
+    `/api/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
+    body,
   )
-  canonicalUuid(owner.id, 'owner.id')
-  assert(
-    Object.keys(owner).sort().join(',') === 'id,kind',
-    `owner must contain only kind and id: ${JSON.stringify(owner)}`,
-  )
-  const { status, json } = await ctx.call('POST', '/api/harness/command-batches', {
-    owner,
-    target,
-    commands,
-  })
-  assert(status === 202, `accept command batch status ${status}: ${JSON.stringify(json)}`)
-  accepted = json
+  assert(status === 202, `accept thread command batch status ${status}: ${JSON.stringify(json)}`)
+  const accepted = json
   assertAcceptedCommands(accepted)
-  // target 一致性：threadId 恒等于 target.threadId。
   assert(
-    String(accepted.thread?.threadId) === String(target.threadId),
-    `accepted threadId ${accepted.thread?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
+    String(accepted.thread?.threadId) === threadId,
+    `accepted threadId ${accepted.thread?.threadId} != target ${threadId}: ${JSON.stringify(accepted)}`,
   )
-  if (target.type === 'NEW_SESSION' || target.type === 'NEW_THREAD') {
-    assert(
-      String(accepted.session?.sessionId) === String(target.sessionId),
-      `accepted sessionId ${accepted.session?.sessionId} != target ${target.sessionId}: ${JSON.stringify(accepted)}`,
-    )
-  }
-  if (target.type === 'NEW_THREAD' && accepted.replayed === false) {
-    // 真正首次创建：分支名由调用方显式给出并规范化，是创建请求身份的一部分。
-    // （replayed=true 的 exact replay 可能命中已重命名的 Thread，返回当前权威 name，不在此断言。）
-    assert(
-      accepted.thread?.name === normalizeThreadName(target.threadName),
-      `NEW_THREAD first-creation thread name ${accepted.thread?.name} != normalized target.threadName for ${target.threadId}: ${JSON.stringify(
-        accepted.thread,
-      )}`,
-    )
-  }
-  assert(
-    String(accepted.rootEntry?.sessionId) === String(accepted.session?.sessionId)
-      && String(accepted.thread?.sessionId) === String(accepted.session?.sessionId),
-    `rootEntry/thread session must equal accepted session: ${JSON.stringify(accepted)}`,
-  )
-  assertAcceptedCommandList(accepted, commands, target.threadId)
+  assertAcceptedCommandList(accepted, commands, threadId)
   return accepted
 }
 
@@ -436,21 +285,6 @@ function assertAcceptedCommandList(accepted, commands, threadId) {
       `accepted command ${i} sequence must be positive decimal: ${JSON.stringify(response)}`,
     )
   }
-}
-
-/**
- * NEW_SESSION 原子创建：创建 Session + ROOT + Thread 并接受本批 commands。
- * rootSettings 通常是 branchSettingsOf(...) 的完整分支草稿；sessionId/threadId 由调用方预分配。
- */
-export async function createNewSession(
-  ctx,
-  { owner, sessionId, threadId, rootSettings, yoloEnabled = false, commands },
-) {
-  return acceptCommandBatch(ctx, {
-    owner,
-    target: newSessionTarget({ sessionId, threadId, rootSettings, yoloEnabled }),
-    commands,
-  })
 }
 
 /** Create a Chat Space with an explicit default agent when a case needs isolated model behavior. */
@@ -589,18 +423,6 @@ async function createWorkspaceTurnCut(ctx, spaceId, sessionId, operation, {
   return response.json ?? response
 }
 
-/** NEW_THREAD 原子创建：在既有 Session 的合法 fork 边界下开新 Thread（不复制 Entry）。 */
-export async function createNewThread(
-  ctx,
-  { owner, sessionId, startEntryId, threadId, threadName, yoloEnabled = false, commands },
-) {
-  return acceptCommandBatch(ctx, {
-    owner,
-    target: newThreadTarget({ sessionId, startEntryId, threadId, threadName, yoloEnabled }),
-    commands,
-  })
-}
-
 /**
  * 历史请求预览响应 DTO 的精确 wire 字段集；null 字段由全局 NON_NULL 省略。
  *
@@ -682,102 +504,6 @@ export async function previewHistoricalRequest(ctx, sessionId, entryId) {
   return assertProviderPreview(json)
 }
 
-// ---------- Session / Thread 查询 ----------
-
-/** 严格校验 Session 摘要 DTO（name 是服务端派生的必填非空展示名）。 */
-function assertSessionSummary(item) {
-  canonicalUuid(item?.sessionId, 'session.sessionId')
-  assert(
-    typeof item.name === 'string' && item.name.trim().length > 0,
-    `Session summary name must be non-blank: ${JSON.stringify(item)}`,
-  )
-  assert(
-    typeof item.createdAt === 'number' && Number.isSafeInteger(item.createdAt),
-    JSON.stringify(item),
-  )
-  assert(
-    typeof item.lastActivityAt === 'number' && Number.isSafeInteger(item.lastActivityAt),
-    JSON.stringify(item),
-  )
-  // firstMessagePreview 与名称独立：最近消息预览可为 null，绝不回退为 name/id。
-  assert(
-    item.firstMessagePreview === null || typeof item.firstMessagePreview === 'string',
-    JSON.stringify(item),
-  )
-  assert(Number.isSafeInteger(item.threadCount) && item.threadCount >= 0, JSON.stringify(item))
-  return item
-}
-
-/** 读取 Chat 的 keyset 分页，保留服务端顺序。 */
-async function listChatPages(ctx, path, validateItem = () => {}) {
-  const items = []
-  let cursor = null
-  do {
-    const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
-    const { status, json } = await ctx.call('GET', `${path}${query}`)
-    assert(status === 200, `Chat page status ${status}: ${JSON.stringify(json)}`)
-    const page = json
-    assert(Array.isArray(page?.items), `expected Chat page: ${JSON.stringify(json)}`)
-    assert(
-      Object.hasOwn(page, 'nextCursor')
-        && (page.nextCursor === null || (typeof page.nextCursor === 'string' && page.nextCursor.length > 0)),
-      `invalid Chat page cursor: ${JSON.stringify(json)}`,
-    )
-    for (const item of page.items) {
-      validateItem(item)
-      items.push(item)
-    }
-    cursor = page.nextCursor
-  } while (cursor !== null)
-  return items
-}
-
-export async function listChats(ctx) {
-  return listChatPages(ctx, '/api/chat/chats')
-}
-
-/** Chat owner 的 Session 摘要数组（归属时间新到旧）。 */
-export async function listChatSessions(ctx, chatId) {
-  return listChatPages(ctx, `/api/chat/chats/${encodeURIComponent(chatId)}/sessions`, assertSessionSummary)
-}
-
-/** Session 下的 Thread 摘要数组（runtime 确定性顺序）。 */
-export async function listSessionThreads(ctx, sessionId) {
-  const { json } = await ctx.call(
-    'GET',
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/threads`,
-  )
-  const threads = json
-  assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
-  for (const item of threads) {
-    canonicalUuid(item?.threadId, 'thread.threadId')
-    assert(Object.hasOwn(item, 'parentThreadId'), 'Thread summary parentThreadId is required')
-    if (item.parentThreadId !== null) {
-      canonicalUuid(item.parentThreadId, 'thread.parentThreadId')
-    }
-    // name 是 Thread 的必需非空展示名称（主展示文本，绝不回退为 id）。
-    assert(
-      typeof item.name === 'string' && item.name.trim().length > 0,
-      `Thread summary name must be non-blank: ${JSON.stringify(item)}`,
-    )
-    assert(
-      typeof item.createdAt === 'number' && Number.isSafeInteger(item.createdAt),
-      JSON.stringify(item),
-    )
-    assert(
-      typeof item.updatedAt === 'number' && Number.isSafeInteger(item.updatedAt),
-      JSON.stringify(item),
-    )
-    assert(typeof item.status === 'string', JSON.stringify(item))
-    assert(item.execution?.driver && item.execution?.settings, JSON.stringify(item))
-    assert(
-      item.headMessagePreview === null || typeof item.headMessagePreview === 'string',
-      JSON.stringify(item),
-    )
-  }
-  return threads
-}
-
 /**
  * Session Entry 的读取时费用投影：`usageCost` 永远存在（NON_NULL 全局省略只对 null 生效，DTO 声明 ALWAYS），
  * 未计价/非模型输出时为 null，否则是 {@code {currency, amount}} 且 amount 是精确十进制文本（不做展示舍入）。
@@ -824,31 +550,6 @@ export function assertSessionEntry(entry, { sessionId } = {}) {
   return entry
 }
 
-/** Session 的完整不可变 Entry Tree（parentEntryId 连接父节点；含非当前 head 历史分支）。 */
-export async function listSessionEntries(ctx, sessionId) {
-  const entries = []
-  let cursor = null
-  do {
-    const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
-    const { json } = await ctx.call(
-      'GET',
-      `/api/harness/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
-    )
-    const page = json
-    assert(Array.isArray(page?.items), `expected Session Entry page: ${JSON.stringify(json)}`)
-    for (const entry of page.items) {
-      assertSessionEntry(entry, { sessionId })
-      entries.push(entry)
-    }
-    cursor = page.nextCursor ?? null
-    assert(
-      cursor == null || typeof cursor === 'string',
-      `invalid Session Entry cursor: ${JSON.stringify(json)}`,
-    )
-  } while (cursor != null)
-  return entries
-}
-
 export async function getThreadSnapshot(ctx, threadId) {
   const { json } = await ctx.call(
     'GET',
@@ -858,36 +559,6 @@ export async function getThreadSnapshot(ctx, threadId) {
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
   return snapshot
-}
-
-/** 等待指定消息进入完整 Session Entry Tree，并同时确认 Thread 已真正 quiescent。 */
-export async function waitForDurableMessages(
-  ctx,
-  threadId,
-  expectedTexts,
-  { timeoutMs = 60_000, intervalMs = 100 } = {},
-) {
-  const deadline = Date.now() + timeoutMs
-  let last = null
-  let quiescentKey = null
-  while (Date.now() <= deadline) {
-    const snapshot = await getThreadSnapshot(ctx, threadId)
-    const entries = await listSessionEntries(ctx, snapshot.thread.sessionId)
-    last = { snapshot, entries }
-    const payloads = entries.map((entry) => JSON.stringify(entry.payload))
-    const hasExpectedMessages = expectedTexts.every(
-      (text) => payloads.some((payload) => payload.includes(text)),
-    )
-    const observation = observeQuiescentSnapshot(quiescentKey, snapshot)
-    if (hasExpectedMessages && observation.stable) {
-      return last
-    }
-    quiescentKey = hasExpectedMessages ? observation.key : null
-    await sleep(intervalMs)
-  }
-  throw new Error(
-    `durable messages did not stabilize: ${JSON.stringify({ expectedTexts, last })}`,
-  )
 }
 
 export async function getThread(ctx, threadId) {
@@ -984,48 +655,6 @@ export async function setThreadYolo(ctx, threadId, { yoloEnabled }) {
   const updated = json
   threadIdOf(updated)
   return updated
-}
-
-/**
- * 重命名 Session（PUT /sessions/{id}/name，body={name}）：返回权威 HarnessSessionDTO
- * （sessionId/name/createdAt）。name 规范化由服务端权威处理，helper 只保证请求名非空白。
- */
-export async function renameSession(ctx, sessionId, name) {
-  assert(typeof name === 'string' && name.trim().length > 0, 'rename session name must be non-blank')
-  canonicalUuid(sessionId, 'sessionId')
-  const { status, json } = await ctx.call(
-    'PUT',
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/name`,
-    { name },
-  )
-  assert(status === 200, `rename session status ${status}: ${JSON.stringify(json)}`)
-  const renamed = json
-  canonicalUuid(renamed?.sessionId, 'renamed.sessionId')
-  assert(String(renamed.sessionId) === String(sessionId), JSON.stringify(renamed))
-  assert(
-    typeof renamed.name === 'string' && renamed.name.trim().length > 0,
-    `renamed session name must be non-blank: ${JSON.stringify(renamed)}`,
-  )
-  return renamed
-}
-
-/**
- * 重命名 Thread（PUT /threads/{id}/name，body={name}）：返回权威 HarnessThreadDTO。
- * 实际名称变化使 version 精确 +1；规范化同名是 no-op（version 零触碰）——具体断言由 case 负责。
- */
-export async function renameThread(ctx, threadId, name) {
-  assert(typeof name === 'string' && name.trim().length > 0, 'rename thread name must be non-blank')
-  canonicalUuid(threadId, 'threadId')
-  const { status, json } = await ctx.call(
-    'PUT',
-    `/api/harness/threads/${encodeURIComponent(threadId)}/name`,
-    { name },
-  )
-  assert(status === 200, `rename thread status ${status}: ${JSON.stringify(json)}`)
-  const renamed = json
-  threadIdOf(renamed)
-  assert(String(renamed.threadId) === String(threadId), JSON.stringify(renamed))
-  return renamed
 }
 
 /** 校验一条 StoppedThreadReceiptDTO：身份、边界、计数与仅含 USER_MESSAGE 的 cancelledInputs。 */

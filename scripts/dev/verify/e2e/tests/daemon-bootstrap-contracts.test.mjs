@@ -358,12 +358,8 @@ test('test intent: UI smoke creates an agent without an implicit Environment', (
   for (const expected of present) {
     assert.ok(ui.includes(expected), expected)
   }
+  assert.doesNotMatch(ui, /\/api\/chat\/chats/)
   for (const absent of [
-    '/chats',
-    '/api/chat/chats',
-    'ui.chat.create_flow',
-    'Create Chat',
-    'ui.chat.create_agent_bound_environment',
     'environmentId: card.id',
     'modelProviderName',
     'agentCreateRes.status === 200',
