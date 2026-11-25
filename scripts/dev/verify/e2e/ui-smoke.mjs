@@ -887,6 +887,7 @@ async function main(argv) {
     args,
     backendUrl: args.backendUrl,
     consoleErrors,
+    daemonEnv: args.daemonEnv,
     ensureSignedIn,
     expectNoFatal,
     goto,
