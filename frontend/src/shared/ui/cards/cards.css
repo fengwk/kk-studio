@@ -35,6 +35,13 @@
   color: var(--accent);
 }
 
+.resource-card-icon[data-style='plain'] {
+  width: var(--control-h);
+  height: var(--control-h);
+  flex-basis: var(--control-h);
+  background: transparent;
+}
+
 .resource-card-icon svg {
   width: 20px;
   height: 20px;
@@ -52,6 +59,22 @@
   align-items: center;
   gap: 6px;
   margin-left: 8px;
+}
+
+.resource-card[data-wrap-badges] { container: resource-card / inline-size; }
+
+@container resource-card (max-width: 440px) {
+  .resource-card-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+
+  .resource-card-badge {
+    grid-column: 2;
+    flex-wrap: wrap;
+    margin: 0;
+  }
 }
 
 .resource-card-title {

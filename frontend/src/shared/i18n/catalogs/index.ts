@@ -1,3 +1,4 @@
+import { accountCatalog } from '@/shared/i18n/catalogs/account'
 import { canvasCatalog } from '@/shared/i18n/catalogs/canvas'
 import { chatCatalog } from '@/shared/i18n/catalogs/chat'
 import { environmentCatalog } from '@/shared/i18n/catalogs/environment'
@@ -11,6 +12,7 @@ import { workspacePanesCatalog } from '@/shared/i18n/catalogs/workspacePanes'
 
 export const messageCatalog = {
   ...platformCatalog,
+  ...accountCatalog,
   ...sharedCatalog,
   ...chatCatalog,
   ...resourcesCatalog,

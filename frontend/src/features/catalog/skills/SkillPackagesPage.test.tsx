@@ -27,10 +27,6 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => <div data-testid="navigation-slot" />,
-}))
-
 const PACKAGE_VERSION = '1111111111111111111111111111111111111111'
 const HEAD_COMMIT = '2222222222222222222222222222222222222222'
 

@@ -35,6 +35,7 @@ export default defineConfig({
         '**/tool-card.pw.ts',
         '**/plugin-*.pw.ts',
         '**/mutation-review.pw.ts',
+        '**/account-settings.pw.ts',
       ],
       outputDir: '../reports/layout',
       use: {
@@ -98,6 +99,12 @@ export default defineConfig({
       use: {
         screenshot: 'only-on-failure',
       },
+    },
+    {
+      name: 'account-settings',
+      testMatch: '**/account-settings.pw.ts',
+      outputDir: '../reports/browser/account-settings',
+      use: { screenshot: 'on' },
     },
     {
       name: 'tool-card',

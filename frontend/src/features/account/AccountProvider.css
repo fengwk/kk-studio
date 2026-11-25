@@ -1,0 +1,14 @@
+.account-gate {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--stage-bg);
+}
+
+.account-content { display: contents; }
+
+.account-relogin {
+  width: min(100%, 400px);
+  padding: var(--space-4);
+}

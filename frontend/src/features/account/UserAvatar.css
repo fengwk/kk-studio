@@ -1,0 +1,12 @@
+.user-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-h);
+  height: var(--control-h);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--fg);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}

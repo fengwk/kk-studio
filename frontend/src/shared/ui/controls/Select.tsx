@@ -23,6 +23,7 @@ interface SelectProps {
   required?: boolean
   placeholder?: string
   compact?: boolean
+  touch?: boolean
   className?: string
   'aria-label'?: string
   'aria-describedby'?: string
@@ -46,6 +47,7 @@ export function Select({
   required = false,
   placeholder,
   compact = false,
+  touch = false,
   className,
   'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy,
@@ -157,6 +159,7 @@ export function Select({
         type="button"
         className="ui-select-trigger"
         data-ui-focus="control"
+        data-touch={touch || undefined}
         disabled={disabled}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}

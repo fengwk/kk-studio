@@ -31,15 +31,17 @@ import type { SystemSettingsDTO } from '@/shared/api/generated/contracts'
  *   重新读取最新权威聚合；
  * - draft 数值字段全程字符串（非有损），组装请求体时校验并转换。
  */
-export function useSystemSettingsEditor() {
+export function useSystemSettingsEditor(enabled = true) {
   const queryClient = useQueryClient()
   const { t } = useI18n()
 
   const query = useQuery({
+    enabled,
     queryKey: queryKeys.systemSettings.all,
     queryFn: () => systemSettingsService.get(),
   })
   const schemaQuery = useQuery({
+    enabled,
     queryKey: queryKeys.systemSettings.schema,
     queryFn: () => systemSettingsService.getSchema(),
   })
@@ -59,8 +61,7 @@ export function useSystemSettingsEditor() {
     setSections,
   } = useSystemSettingsDraftCursor(authoritative)
 
-  // 只有通过 fail-closed 校验的 schema 才交给 UI：SettingsPage 拿到的 schema 为 null 时
-  // 不会构建任何 server tab，invalid schema 永远进不了渲染器。
+  // 仅将通过完整校验的 schema 交给导航和字段渲染器。
   const schema = useMemo(() => {
     if (rawSchema == null || draft == null) {
       return null

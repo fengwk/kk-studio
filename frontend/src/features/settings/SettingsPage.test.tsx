@@ -2,13 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import {
   BrowserPreferencesProvider,
 } from '@/features/settings/browser-preferences'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { setLocale } from '@/shared/i18n'
 import type { ConfigSyncImportCheckDTO } from '@/shared/api/generated/contracts'
-import { SettingsPage } from '@/features/settings/SettingsPage'
+import { SettingsRoute } from '@/app/SettingsRoute'
+import { AccountContext } from '@/features/account/account-context'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
@@ -79,9 +81,13 @@ function renderSettings() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <BrowserPreferencesProvider>
-        <SettingsPage />
-      </BrowserPreferencesProvider>
+      <AccountContext.Provider value={{ user: { id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }, refresh: async () => {}, signOut: async () => {} }}>
+        <BrowserPreferencesProvider>
+          <MemoryRouter initialEntries={['/settings/preferences']}>
+            <Routes><Route path="/settings/:section" element={<SettingsRoute />} /></Routes>
+          </MemoryRouter>
+        </BrowserPreferencesProvider>
+      </AccountContext.Provider>
     </QueryClientProvider>,
   )
 }
@@ -91,7 +97,7 @@ function switchControl() {
 }
 
 async function tabByName(name: string) {
-  return await screen.findByRole('tab', { name })
+  return await screen.findByRole('link', { name })
 }
 
 describe('SettingsPage general tab + notifications', () => {
@@ -125,16 +131,9 @@ describe('SettingsPage general tab + notifications', () => {
   it('renders every top-level settings tab with Sync after Advanced', async () => {
     renderSettings()
     await tabByName('后端网络')
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '常规',
-      '插件',
-      'AI 运行时',
-      '工具与权限',
-      '环境',
-      '后端网络',
-      '存储与媒体',
-      '高级',
-      '同步',
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      '偏好', 'Agent', '模型', '提供商', '技能包', '环境', 'MCP 服务',
+      '常规', '用户', '插件', 'AI 运行时', '工具与权限', '环境默认值', '后端网络', '存储与媒体', '高级', '同步',
     ])
   })
 
@@ -273,55 +272,14 @@ describe('SettingsPage general tab + notifications', () => {
   })
 })
 
-describe('settings tabs roving tabindex + keyboard navigation', () => {
-  function selectedTab() {
-    return screen.getByRole('tab', { selected: true })
-  }
-
-  it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', async () => {
-    renderSettings()
-    expect(await tabByName('常规')).toHaveAttribute('tabindex', '0')
-    for (const name of ['AI 运行时', '工具与权限', '环境', '后端网络', '存储与媒体', '高级', '同步']) {
-      expect(await tabByName(name)).toHaveAttribute('tabindex', '-1')
-    }
-  })
-
-  it('moves selection and focus with Left/Right/Home/End, wrapping on arrows', async () => {
-    const user = userEvent.setup()
-    renderSettings()
-
-    const generalTab = await tabByName('常规')
-    await tabByName('高级')
-    generalTab.focus()
-    await user.keyboard('{ArrowRight}')
-    expect(selectedTab()).toBe(await tabByName('插件'))
-    expect(document.activeElement).toBe(await tabByName('插件'))
-
-    await user.keyboard('{ArrowRight}')
-    expect(selectedTab()).toBe(await tabByName('AI 运行时'))
-    expect(document.activeElement).toBe(await tabByName('AI 运行时'))
-
-    await user.keyboard('{End}')
-    expect(selectedTab()).toBe(await tabByName('同步'))
-    expect(document.activeElement).toBe(await tabByName('同步'))
-
-    await user.keyboard('{Home}')
-    expect(selectedTab()).toBe(await tabByName('常规'))
-    expect(document.activeElement).toBe(await tabByName('常规'))
-
-    // Arrow 环绕：从首项向左回到末项。
-    await user.keyboard('{ArrowLeft}')
-    expect(selectedTab()).toBe(await tabByName('同步'))
-    expect(document.activeElement).toBe(await tabByName('同步'))
-  })
-
-  it('keeps click selection working with focus on the clicked tab', async () => {
-    const user = userEvent.setup()
-    renderSettings()
-    await user.click(await tabByName('高级'))
-    expect(selectedTab()).toBe(await tabByName('高级'))
-    expect(document.activeElement).toBe(await tabByName('高级'))
-  })
+it('activates a category from the keyboard and keeps focus on its link', async () => {
+  const user = userEvent.setup()
+  renderSettings()
+  const category = await tabByName('高级')
+  category.focus()
+  await user.keyboard('{Enter}')
+  expect(category).toHaveAttribute('aria-current', 'page')
+  expect(category).toHaveFocus()
 })
 
 describe('settings sync tab', () => {

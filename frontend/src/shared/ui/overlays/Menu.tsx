@@ -11,13 +11,14 @@ interface MenuProps {
   items: MenuItem[]
   onClose: () => void
   returnFocusTo?: HTMLElement | null
+  placement?: 'above-start'
 }
 
 function enabledItems(menu: HTMLElement | null) {
   return Array.from(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])
 }
 
-export function Menu({ items, onClose, returnFocusTo }: MenuProps) {
+export function Menu({ items, onClose, returnFocusTo, placement }: MenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const first = enabledItems(ref.current)[0] ?? ref.current
@@ -60,7 +61,7 @@ export function Menu({ items, onClose, returnFocusTo }: MenuProps) {
   }
 
   return (
-    <div ref={ref} className="ui-menu" role="menu" tabIndex={-1} onKeyDown={onKeyDown}>
+    <div ref={ref} className="ui-menu" data-placement={placement} role="menu" tabIndex={-1} onKeyDown={onKeyDown}>
       {items.map((item) => (
         <button key={item.label} type="button" role="menuitem" tabIndex={-1} data-ui-focus="row"
           disabled={item.disabled} onClick={() => { close(); item.onSelect() }}>

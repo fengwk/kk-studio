@@ -6,19 +6,21 @@ export function CreateCard({
   title,
   subtitle,
   onClick,
+  compact = false,
 }: {
   title: string
-  subtitle: string
+  subtitle?: string
   onClick: () => void
+  compact?: boolean
 }) {
   return (
-    <button className="create-card" type="button" onClick={onClick} aria-label={title}>
+    <button className="create-card" data-compact={compact || undefined} type="button" onClick={onClick} aria-label={title}>
       <span className="create-card-icon" aria-hidden="true">
         <Plus />
       </span>
       <span className="create-card-text">
         <strong>{title}</strong>
-        <small>{subtitle}</small>
+        {subtitle && <small>{subtitle}</small>}
       </span>
     </button>
   )

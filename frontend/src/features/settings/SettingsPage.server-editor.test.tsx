@@ -2,11 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
-import { SettingsPage } from '@/features/settings/SettingsPage'
+import { SettingsRoute } from '@/app/SettingsRoute'
+import { AccountContext } from '@/features/account/account-context'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { SystemSettingsDTO, SystemSettingsUpdateDTO } from '@/shared/api/generated/contracts'
 
@@ -78,16 +80,20 @@ function renderSettings(reloadPage?: () => void, cached?: SystemSettingsDTO) {
   }
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <BrowserPreferencesProvider>
-        <SettingsPage reloadPage={reloadPage} />
-      </BrowserPreferencesProvider>
+      <AccountContext.Provider value={{ user: { id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }, refresh: async () => {}, signOut: async () => {} }}>
+        <BrowserPreferencesProvider>
+          <MemoryRouter initialEntries={['/settings/preferences']}>
+            <Routes><Route path="/settings/:section" element={<SettingsRoute reloadPage={reloadPage} />} /></Routes>
+          </MemoryRouter>
+        </BrowserPreferencesProvider>
+      </AccountContext.Provider>
     </QueryClientProvider>,
   )
   return { queryClient, ...result }
 }
 
 async function serverTab(name: string) {
-  return await screen.findByRole('tab', { name })
+  return await screen.findByRole('link', { name })
 }
 
 describe('SettingsPage server editor', () => {
@@ -100,7 +106,7 @@ describe('SettingsPage server editor', () => {
     renderSettings()
 
     await userEvent.click(await serverTab('后端网络'))
-    const panel = screen.getByRole('tabpanel')
+    const panel = screen.getByRole('region', { name: '设置内容' })
     expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
     expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
@@ -162,11 +168,10 @@ describe('SettingsPage server editor', () => {
     expect(screen.getByLabelText('保留最近 token')).toHaveValue('20000')
   })
 
-  it('explains settings take effect immediately and omits timing badges', async () => {
+  it('does not display redundant timing badges', async () => {
     mocks.get.mockResolvedValue(makeSettingsDto())
     renderSettings()
 
-    expect(screen.getByText('设置保存后立即生效，进行中的调用沿用开始时的值。')).toBeInTheDocument()
     await userEvent.click(await serverTab('工具与权限'))
     expect(screen.queryByText('下次调用生效')).not.toBeInTheDocument()
     expect(screen.queryByText('重启后生效')).not.toBeInTheDocument()
@@ -181,8 +186,8 @@ describe('SettingsPage server editor', () => {
     )
     renderSettings()
 
-    expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: '常规' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'AI 运行时' })).not.toBeInTheDocument()
 
     resolveGet!(makeSettingsDto())
     await userEvent.click(await serverTab('AI 运行时'))
@@ -207,11 +212,11 @@ describe('SettingsPage server editor', () => {
     mocks.getSchema.mockResolvedValue({ sections: [] })
     renderSettings()
 
-    expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '工具与权限' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: '常规' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'AI 运行时' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '工具与权限' })).not.toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent('无法加载设置表单。')
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('键盘快捷键')
+    expect(screen.getByRole('region', { name: '设置内容' })).toHaveTextContent('键盘快捷键')
   })
 
   it('saves the complete aggregate with expectedVersion and clears the dirty state on success', async () => {
@@ -409,7 +414,7 @@ describe('SettingsPage server editor', () => {
     mocks.get.mockImplementation(backend.get)
     const { queryClient } = renderSettings()
 
-    await userEvent.click(await serverTab('环境'))
+    await userEvent.click(await serverTab('环境默认值'))
     const field = await screen.findByLabelText('心跳超时（毫秒）')
     await userEvent.clear(field)
     await userEvent.type(field, '99999999')
@@ -434,7 +439,7 @@ describe('SettingsPage server editor', () => {
     mocks.get.mockImplementation(backend.get)
     renderSettings()
 
-    await userEvent.click(await serverTab('环境'))
+    await userEvent.click(await serverTab('环境默认值'))
     const field = await screen.findByLabelText('心跳超时（毫秒）')
     await userEvent.clear(field)
 

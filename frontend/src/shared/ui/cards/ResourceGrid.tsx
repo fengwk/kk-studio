@@ -9,15 +9,16 @@ export interface ResourceGridProps {
    */
   className?: string
   ref?: Ref<HTMLDivElement>
+  columns?: 'two'
 }
 
 /**
  * 资源栅格：自适应列数、16px 间距；新建卡与资源卡共用同一栅格语言。
  * 窄窗口先减少列数，再让卡内内容自然换行，不缩小文字或挤掉操作。
  */
-export function ResourceGrid({ children, className, ref }: ResourceGridProps) {
+export function ResourceGrid({ children, className, ref, columns }: ResourceGridProps) {
   return (
-    <div ref={ref} className={['resource-grid', className].filter(Boolean).join(' ')}>
+    <div ref={ref} data-columns={columns} className={['resource-grid', className].filter(Boolean).join(' ')}>
       {children}
     </div>
   )
