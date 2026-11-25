@@ -79,6 +79,7 @@ HTML 和截图留在 `reports/`，不入库。构建后对两份 HTML 分别运�
 | --- | --- |
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
 | [Chat](modules/chat.md) | 对话集合如何持久化、分页，并持有与深删除 Harness Session？ |
+| [工作区持久化](modules/workspace.md) | 空间、目录和资源归属如何保持一致？ |
 
 | [IDE](modules/ide.md) | Chat 内同源 code-server 视图如何经 Daemon 命令通道、权威快照与复用数据连接打开、恢复和转发？ |
 

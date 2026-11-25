@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioUserLock;
 
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
@@ -21,9 +22,11 @@ import java.util.UUID;
 @Service
 public class ChatSpaceService {
   private final JdbcClient jdbc;
+  private final StudioUserLock userLock;
 
-  public ChatSpaceService(JdbcClient jdbc) {
+  public ChatSpaceService(JdbcClient jdbc, StudioUserLock userLock) {
     this.jdbc = jdbc;
+    this.userLock = userLock;
   }
 
   public record Space(
@@ -76,7 +79,7 @@ public class ChatSpaceService {
     UUID owner = actor.userId();
     UUID id = derivedId("space", owner, idempotencyKey);
     String hash = Sha256.hex(StrictJson.standard().write(request, "chat space creation"));
-    lockOwner(owner);
+    userLock.acquire(owner);
     var originalHash =
         jdbc.sql(
                 """
@@ -140,7 +143,7 @@ public class ChatSpaceService {
   @Transactional
   public Space patch(StudioPrincipal actor, UUID id, Patch patch) {
     if (patch.archived() != null) {
-      lockOwner(actor.userId());
+      userLock.acquire(actor.userId());
     }
     Space old = lock(actor, id);
     if (old.version() != patch.expectedVersion()) {
@@ -215,13 +218,6 @@ public class ChatSpaceService {
         .query(Space.class)
         .optional()
         .orElseThrow(() -> DomainException.notFound("workspace"));
-  }
-
-  private void lockOwner(UUID owner) {
-    jdbc.sql("select id from studio_user where id = :owner for update")
-        .param("owner", owner)
-        .query(UUID.class)
-        .single();
   }
 
   static String name(String value, String field) {

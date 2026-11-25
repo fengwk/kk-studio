@@ -20,9 +20,13 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
+import fun.fengwk.kkstudio.platform.account.StudioUserLock;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership;
 
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
@@ -174,6 +178,49 @@ class WorkspacePostgresIntegrationTest {
     }
   }
 
+  /** The batch port resolves the proper owner for each resource, including archived spaces. */
+  @Test
+  void batchOwnershipPreservesSpaceAndResourceKind() {
+    try (var context = serviceContext()) {
+      var spaces = context.getBean(ChatSpaceService.class);
+      var ownership = context.getBean(ResourceOwnership.class);
+      var jdbc = context.getBean(JdbcClient.class);
+      var first = testUser(context, "first-canvas-owner");
+      var second = testUser(context, "second-canvas-owner");
+      var archivedSpace = create(spaces, first, "Archived");
+      create(spaces, first, "Active");
+      spaces.patch(
+          first, archivedSpace.id(), new ChatSpaceService.Patch(0, null, true, null, null, null));
+      var otherSpace = create(spaces, second, "Other");
+      UUID a = placeCanvas(jdbc, archivedSpace.id());
+      UUID b = placeCanvas(jdbc, otherSpace.id());
+      assertEquals(
+          Map.of(
+              a,
+              new ResourceOwnership.Owner(archivedSpace.id(), "Archived", first.userId()),
+              b,
+              new ResourceOwnership.Owner(otherSpace.id(), "Other", second.userId())),
+          ownership.findOwners(ResourceOwnership.Kind.CANVAS, List.of(a, b, a, UUID.randomUUID())));
+      assertEquals(Map.of(), ownership.findOwners(ResourceOwnership.Kind.SESSION, List.of(a, b)));
+    }
+  }
+
+  private static UUID placeCanvas(JdbcClient jdbc, UUID space) {
+    UUID canvas = UUID.randomUUID();
+    jdbc.sql("insert into canvas_document (id, title) values (:id, 'Canvas')")
+        .param("id", canvas)
+        .update();
+    jdbc.sql(
+            """
+        insert into workspace_resource (id, workspace_id, folder_id, position, canvas_id)
+        select :canvas, workspace_id, id, 0, :canvas from workspace_folder where workspace_id = :space
+        """)
+        .param("canvas", canvas)
+        .param("space", space)
+        .update();
+    return canvas;
+  }
+
   private static String archive(
       ChatSpaceService service, StudioPrincipal owner, UUID id, CyclicBarrier barrier)
       throws Exception {
@@ -213,7 +260,8 @@ class WorkspacePostgresIntegrationTest {
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     var context = new AnnotationConfigApplicationContext();
-    context.register(TransactionConfig.class, ChatSpaceService.class, FolderService.class);
+    context.register(
+        TransactionConfig.class, WorkspaceAutoConfiguration.class, StudioUserLock.class);
     context.registerBean(JdbcClient.class, () -> JdbcClient.create(dataSource));
     context.registerBean(
         JdbcTransactionManager.class, () -> new JdbcTransactionManager(dataSource));
