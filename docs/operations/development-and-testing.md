@@ -370,6 +370,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也用 Go 1.27.4 构建并重启 Daemon |
 | `--real` | 启用真实 Provider case；默认同步并检查全部四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
 | `--real-model <idSuffix>` | 隐含 `--real`，只同步并检查所选模型对应的一组 credential pair，并将所选模型用于真实模型 case，包括 UI、stop、branch 与 Tool；可用值见「真实 Provider 与付费边界」。该选择不绕过 Tool、UI、存储等 capability 前置条件 |
+| `--results-only` | 隔离付费验收只保留固定 case ID、状态、耗时和计数；须与真实模式并用，可叠加 `--ui` |
 | `--with-tools` | 启用 Daemon/Tool case；`daemon.ready` 校验能力目录，包括 `find` 对应的 `fs.find-files` |
 | `--with-branch` | 启用 branch case，并自动打开 `--real`；与 `--real-model` 并用时 branch 使用所选模型 |
 | `--with-canvas-storage` | 允许依赖附件存储的真实模型、工具用例；默认 L1 的 Session/Canvas Blob 契约用例不需要此开关 |
@@ -436,6 +437,15 @@ mock 模型 Provider，不隐式分配环境），发送首条消息创建会话
 校验 `/settings/environments` 卡片与管理弹窗暴露完整 7 项环境动作；上述离线用例均不需要 `--real` 或 Daemon。
 
 ### 真实 Provider 与付费边界
+
+隔离的付费验收可给 `run.sh` 添加 `--results-only`。它不启用付费能力，也不改变 case 选择或退出状态。
+API 与 UI 报告（含 `latest`）只记录结果，不包含回包、异常正文、堆栈、日志或截图；凭据同步和就绪探测不回显响应。
+本次启动的 Studio 使用无 appender 的测试 Logback 配置，Studio、Vite 与 Daemon 的进程输出不写日志文件。
+未启用该参数时，免费和普通真实运行保留原有诊断。
+
+只在本地临时栈中使用，并单独指定本次的 `E2E_WORK_DIR` 与 `E2E_REPORT_ROOT`，不要与其他运行共享。
+该模式约束 runner 的输出，不清除旧诊断，不阻止 Studio 在临时数据库或对象存储中处理和保留业务数据，
+也不保护外部 Provider、代理、浏览器临时数据或工具自己的存储。不要给验收进程附加外部录制或调试设施。
 
 E2E 矩阵只有真实模式会读取并同步宿主凭据。单独使用 `--real` 时默认要求并同步全部四组完整 pair；`--real-model <idSuffix>` 则只要求、同步并检查所选模型对应的 pair，缺失或只给一半都会在启动前失败。四组变量为：
 

@@ -69,6 +69,14 @@ export KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET"
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+runtime_log_target() {
+  if [ "${RESULTS_ONLY:-false}" = "true" ]; then
+    printf '/dev/null\n'
+  else
+    printf '%s/%s.log\n' "$WORK_DIR" "$1"
+  fi
+}
+
 source "$SCRIPT_DIR/lib/studio-auth.sh"
 E2E_STUDIO_COOKIE=''
 
@@ -216,7 +224,17 @@ start_backend() {
     die "backend port $BACKEND_PORT is already in use; refusing to stop an unrelated process"
   fi
   reset_e2e_database
-  : >"$WORK_DIR/backend.log"
+  local log_file
+  log_file=$(runtime_log_target backend)
+  : >"$log_file"
+  local -a jvm_logging_args=() spring_logging_args=()
+  if [ "${RESULTS_ONLY:-false}" = "true" ]; then
+    # Cover Logback's early auto-init and Boot's subsequent logging initialization.
+    local config="$SCRIPT_DIR/logback-results-only.xml"
+    [ -r "$config" ] || die "Missing results-only Logback configuration"
+    jvm_logging_args=("-Dlogback.configurationFile=$config")
+    spring_logging_args=("--logging.config=file:$config" --server.tomcat.accesslog.enabled=false)
+  fi
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
   # Backend always connects to the dedicated E2E database and bucket; scrub every TEST_* input.
   local -a test_env_unsets=()
@@ -234,11 +252,12 @@ start_backend() {
     KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET" \
     KK_STUDIO_STORAGE_S3_ACCESS_KEY="$STORAGE_S3_ACCESS_KEY" \
     KK_STUDIO_STORAGE_S3_SECRET_KEY="$STORAGE_S3_SECRET_KEY" \
-    "$java_home/bin/java" -jar "$BACKEND_JAR" \
+    "$java_home/bin/java" "${jvm_logging_args[@]}" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT" \
-    >"$WORK_DIR/backend.log" 2>&1 &
+    "${spring_logging_args[@]}" \
+    >"$log_file" 2>&1 &
   local pid=$!
   OWNED_BACKEND_PID=$pid
   echo "$pid" >"$WORK_DIR/backend.pid"
@@ -246,7 +265,7 @@ start_backend() {
     "$BACKEND_URL/actuator/health" \
     backend \
     "$pid" \
-    "$WORK_DIR/backend.log" \
+    "$log_file" \
     120
   E2E_STUDIO_COOKIE=$(e2e_studio_login "$BACKEND_URL")
 }
@@ -256,7 +275,9 @@ start_frontend() {
   if lsof -nP -iTCP:"$FRONTEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     die "frontend port $FRONTEND_PORT is already in use; refusing to stop an unrelated process"
   fi
-  : >"$WORK_DIR/frontend.log"
+  local log_file
+  log_file=$(runtime_log_target frontend)
+  : >"$log_file"
   step "Starting frontend $FRONTEND_URL proxy->$BACKEND_URL"
   (
     cd "$REPO_ROOT/frontend"
@@ -268,13 +289,13 @@ start_frontend() {
       --host "$FRONTEND_HOST" \
       --port "$FRONTEND_PORT" \
       --strictPort \
-      >"$WORK_DIR/frontend.log" 2>&1 &
+      >"$log_file" 2>&1 &
     echo $! >"$WORK_DIR/frontend.pid"
   )
   local pid
   pid=$(cat "$WORK_DIR/frontend.pid")
   OWNED_FRONTEND_PID=$pid
-  wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
+  wait_http_process "$FRONTEND_URL/" frontend "$pid" "$log_file"
   # 额外确认代理已打到当前 backend 契约（结构化 config）
   e2e_studio_get "$E2E_STUDIO_COOKIE" "$FRONTEND_URL/api/platform/models" \
     | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-print
@@ -283,7 +304,9 @@ start_frontend() {
 start_daemon() {
   mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
   package_daemon
-  : >"$WORK_DIR/daemon.log"
+  local log_file
+  log_file=$(runtime_log_target daemon)
+  : >"$log_file"
   step "Starting daemon env=$DAEMON_ENV_NAME"
   if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
     die "DAEMON_REGISTRATION_TOKEN is required to start the daemon"
@@ -305,7 +328,7 @@ start_daemon() {
     "${environment_selector[@]}" \
     DAEMON_BINARY="$DAEMON_BINARY" \
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
-    >"$WORK_DIR/daemon.log" 2>&1 <<<"$E2E_STUDIO_COOKIE" &
+    >"$log_file" 2>&1 <<<"$E2E_STUDIO_COOKIE" &
   OWNED_DAEMON_PID=$!
   echo "$OWNED_DAEMON_PID" >"$WORK_DIR/daemon.pid"
   local _ env_status=""
@@ -327,6 +350,13 @@ ensure_stack() {
   local rebuild=${1:-false}
   local with_daemon=${2:-false}
   local java_home
+  if [ "${RESULTS_ONLY:-false}" = "true" ]; then
+    [[ "$BACKEND_HOST" == 127.0.0.1 && "$FRONTEND_HOST" == 127.0.0.1 \
+      && "$BACKEND_PORT" =~ ^[0-9]+$ && "$FRONTEND_PORT" =~ ^[0-9]+$ \
+      && "$BACKEND_URL" == "http://127.0.0.1:$BACKEND_PORT" \
+      && "$FRONTEND_URL" == "http://127.0.0.1:$FRONTEND_PORT" ]] \
+      || die "Results-only mode requires owned loopback endpoints"
+  fi
   require_cmd curl
   require_cmd node
   require_cmd lsof

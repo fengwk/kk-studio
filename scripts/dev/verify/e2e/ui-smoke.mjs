@@ -57,6 +57,7 @@ export function parseArgs(argv) {
     else if (a === '--report-dir') args.reportDir = path.resolve(argv[++i])
     else if (a === '--daemon-env') args.daemonEnv = argv[++i]
     else if (a === '--headed') args.headed = true
+    else if (a === '--results-only') args.resultsOnly = true
     else if (a === '--real') args.real = true
     else if (a === '--real-model') {
       if (args.realModel) throw new Error('--real-model may only be specified once')
@@ -68,6 +69,7 @@ export function parseArgs(argv) {
     else if (a === '-h' || a === '--help') args.help = true
     else throw new Error(`unknown arg: ${a}`)
   }
+  if (args.resultsOnly && !args.real) throw new Error('--results-only requires real mode')
   if (args.real) args.realModel ??= MINIMAX_ANTHROPIC_M3
   return args
 }
@@ -352,7 +354,7 @@ async function main(argv) {
   if (args.help) {
     console.log(
       'Usage: node scripts/dev/verify/e2e/ui-smoke.mjs --base-url URL --report-dir DIR'
-        + ' [--headed] [--real] [--real-model ID] [--with-tools] [--with-canvas-function] [--daemon-env NAME] [--only CASE_ID]...',
+        + ' [--headed] [--real] [--real-model ID] [--results-only] [--with-tools] [--with-canvas-function] [--daemon-env NAME] [--only CASE_ID]...',
     )
     return 0
   }
@@ -364,7 +366,7 @@ async function main(argv) {
   const reportDir = args.reportDir
   const artRoot = path.join(reportDir, 'artifacts')
   mkdirSync(path.join(reportDir, 'cases'), { recursive: true })
-  mkdirSync(artRoot, { recursive: true })
+  if (!args.resultsOnly) mkdirSync(artRoot, { recursive: true })
   const apiCtx = {
     call: (method, requestPath, body, headers) =>
       apiJson(args.backendUrl, method, requestPath, body, headers),
@@ -429,6 +431,7 @@ async function main(argv) {
   }
 
   async function shot(caseArt, name) {
+    if (args.resultsOnly) return
     const file = path.join(caseArt, `${name}.png`)
     await page.screenshot({ path: file, fullPage: true })
   }
@@ -534,24 +537,33 @@ async function main(argv) {
     consoleErrors.length = 0
     const elapsed = createDurationTimer()
     const caseArt = path.join(artRoot, id.replaceAll('.', '_'))
-    mkdirSync(caseArt, { recursive: true })
-    console.log(`\n==> [L5] ${id}: ${title}`)
-    try {
-      await fn(caseArt)
-      const result = {
-        id,
-        level: 'L5',
-        title,
-        status: 'pass',
-        durationMs: elapsed(),
-        error: null,
-        traceback: null,
-        artifactPaths: listArtifacts(caseArt, reportDir),
-      }
+    if (!args.resultsOnly) {
+      mkdirSync(caseArt, { recursive: true })
+      console.log(`\n==> [L5] ${id}: ${title}`)
+    }
+    const record = (result) => {
       results.push(result)
       writeReportArtifact(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
+    }
+    try {
+      await fn(caseArt)
+      const result = { id, level: 'L5', status: 'pass', durationMs: elapsed() }
+      if (!args.resultsOnly) {
+        Object.assign(result, {
+          title,
+          error: null,
+          traceback: null,
+          artifactPaths: listArtifacts(caseArt, reportDir),
+        })
+      }
+      record(result)
       console.log(`PASS ${id}`)
     } catch (err) {
+      if (args.resultsOnly) {
+        record({ id, level: 'L5', status: 'fail', durationMs: elapsed() })
+        console.error(`FAIL ${id}`)
+        return
+      }
       try {
         await page.screenshot({
           path: path.join(caseArt, 'failure.png'),
@@ -584,8 +596,7 @@ async function main(argv) {
         traceback: redactSecrets(err?.stack || null),
         artifactPaths: listArtifacts(caseArt, reportDir),
       }
-      results.push(result)
-      writeReportArtifact(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
+      record(result)
       console.error(`FAIL ${id}: ${result.error}`)
     }
   }
@@ -951,7 +962,7 @@ async function main(argv) {
   const failed = results.filter((r) => r.status === 'fail')
   const summary = {
     layer: 'L5-ui',
-    baseUrl: args.baseUrl,
+    ...(args.resultsOnly ? {} : { baseUrl: args.baseUrl }),
     totals: {
       total: results.length,
       pass: results.length - failed.length,
@@ -964,32 +975,34 @@ async function main(argv) {
   const lines = [
     '# UI E2E Results',
     '',
-    `- Base: \`${args.baseUrl}\``,
+    ...(args.resultsOnly ? [] : [`- Base: \`${args.baseUrl}\``]),
     `- Totals: total=${summary.totals.total} pass=${summary.totals.pass} fail=${summary.totals.fail}`,
     `- Result: **${failed.length ? 'FAIL' : 'PASS'}**`,
     '',
-    '| Status | Case | Duration | Error |',
-    '| --- | --- | ---: | --- |',
+    ...(args.resultsOnly
+      ? ['| Status | Case | Duration |', '| --- | --- | ---: |']
+      : ['| Status | Case | Duration | Error |', '| --- | --- | ---: | --- |']),
     ...results.map((r) => {
+      if (args.resultsOnly) return `| ${r.status.toUpperCase()} | \`${r.id}\` | ${r.durationMs}ms |`
       let err = (r.error || '').replaceAll('|', '\\|').replaceAll('\n', ' ')
       if (err.length > 100) err = `${err.slice(0, 97)}...`
       return `| ${r.status.toUpperCase()} | \`${r.id}\` | ${r.durationMs}ms | ${err || '-'} |`
     }),
     '',
-    'Screenshots: `artifacts/ui_*/`',
-    '',
+    ...(args.resultsOnly ? [] : ['Screenshots: `artifacts/ui_*/`', '']),
   ]
   writeReportArtifact(path.join(reportDir, 'ui-report.md'), `${lines.join('\n')}\n`)
-  console.log(`\nUI report: ${path.join(reportDir, 'ui-report.md')}`)
+  if (!args.resultsOnly) console.log(`\nUI report: ${path.join(reportDir, 'ui-report.md')}`)
   console.log(`total=${results.length} pass=${summary.totals.pass} fail=${summary.totals.fail}`)
   return failed.length ? 1 : 0
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main(process.argv.slice(2)).then(
+  const argv = process.argv.slice(2)
+  main(argv).then(
     (code) => process.exit(code),
     (err) => {
-      console.error(redactSecrets(err?.stack || String(err)))
+      console.error(argv.includes('--results-only') ? 'E2E UI could not complete' : redactSecrets(err?.stack || String(err)))
       process.exit(2)
     },
   )

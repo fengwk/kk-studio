@@ -38,6 +38,7 @@ WITH_BRANCH=false
 WITH_CANVAS_STORAGE=false
 WITH_CANVAS_FUNCTION=false
 REAL=false
+RESULTS_ONLY=false
 REAL_MODEL_ARGS=()
 WITH_UI=false
 DISTRIBUTED=false
@@ -56,6 +57,7 @@ Options:
   --rebuild         Force clean package backend + restart backend/frontend (and the daemon with --with-tools)
   --real            Enable all real providers unless --real-model is set
   --real-model ID   Enable real cases for one declared model idSuffix (implies --real)
+  --results-only    Keep only case results and timings for an isolated real run
   --with-tools      Enable daemon/tool cases (starts and cleans up an owned daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable storage-dependent real model and tool cases (default L1 Blob cases run without this flag)
@@ -78,6 +80,7 @@ Env:
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
+  E2E_REPORT_ROOT=...     # use a dedicated directory for results-only (default: $REPO_ROOT/reports/e2e)
   DAEMON_ENV_ROOT=...     # optional tool-case work directory; default: $E2E_WORK_DIR/environment
   DAEMON_ENV_NAME=tool-e2e  # card name passed as --daemon-env to the matrix
   DAEMON_ENVIRONMENT_NAME=...  # card selector for the started Daemon; default: $DAEMON_ENV_NAME
@@ -89,6 +92,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --rebuild) REBUILD=true; shift ;;
     --real) REAL=true; shift ;;
+    --results-only) RESULTS_ONLY=true; shift ;;
     --real-model)
       [ $# -ge 2 ] && [[ "$2" != -* && -n "$2" ]] || die "--real-model requires a model idSuffix"
       [ ${#REAL_MODEL_ARGS[@]} -eq 0 ] || die "--real-model may only be specified once"
@@ -193,6 +197,15 @@ if [ "$DISTRIBUTED" = "true" ]; then
   trap cleanup_distributed EXIT
 fi
 
+RESULTS_ARGS=()
+if [ "$RESULTS_ONLY" = "true" ]; then
+  [ "$REAL" = "true" ] || die "--results-only requires real mode"
+  RESULTS_ARGS=(--results-only)
+  # Never trace credential expansion or inherited HTTP/Playwright debug output.
+  set +x
+  unset NODE_DEBUG NODE_DEBUG_NATIVE DEBUG PWDEBUG
+fi
+
 # Gate real provider credentials before any process startup or HTTP request
 if [ "$REAL" = "true" ]; then
   if [ ${#REAL_MODEL_ARGS[@]} -eq 0 ]; then
@@ -214,17 +227,39 @@ fi
 # 1) ensure stack（--distributed 时栈即 deploy/distributed，跳过宿主单实例栈）
 if [ "$DISTRIBUTED" != "true" ]; then
   trap cleanup_owned_stack EXIT
-  ensure_stack "$REBUILD" "$WITH_TOOLS"
+  if [ "$RESULTS_ONLY" = "true" ]; then
+    step "Starting isolated results-only stack"
+    ensure_stack "$REBUILD" "$WITH_TOOLS" >/dev/null 2>&1
+  else
+    ensure_stack "$REBUILD" "$WITH_TOOLS"
+  fi
 fi
 
 # 2) synchronize provider credentials; --real uses seeded providers
 if [ "$REAL" = "true" ]; then
-  sync_e2e_provider_credentials "${REAL_MODEL_ARGS[@]}"
+  if [ "$RESULTS_ONLY" = "true" ]; then
+    step "Synchronizing provider credentials (results only)"
+    sync_e2e_provider_credentials "${REAL_MODEL_ARGS[@]}" >/dev/null 2>&1
+  else
+    sync_e2e_provider_credentials "${REAL_MODEL_ARGS[@]}"
+  fi
   unset "${REAL_CREDENTIAL_VARS[@]}"
-  providers_ready=$(e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/providers" \
-    | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready "${REAL_MODEL_ARGS[@]:1}")
-  if [ "$providers_ready" != "ok" ]; then
-    die "All target providers must be configured for --real ($providers_ready)"
+  probe_providers() {
+    e2e_studio_get "$E2E_STUDIO_COOKIE" "$BACKEND_URL/api/platform/providers" \
+      | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready "${REAL_MODEL_ARGS[@]:1}"
+  }
+  if [ "$RESULTS_ONLY" = "true" ]; then
+    providers_ready=$(probe_providers 2>/dev/null) || {
+      status=$?
+      echo "ERROR: Provider readiness check failed" >&2
+      exit "$status"
+    }
+    [ "$providers_ready" = "ok" ] || die "Provider readiness check failed"
+  else
+    providers_ready=$(probe_providers)
+    if [ "$providers_ready" != "ok" ]; then
+      die "All target providers must be configured for --real ($providers_ready)"
+    fi
   fi
 fi
 
@@ -244,7 +279,7 @@ if [ "$WITH_TOOLS" = "true" ]; then MATRIX_ARGS+=(--with-tools); fi
 if [ "$WITH_BRANCH" = "true" ]; then MATRIX_ARGS+=(--with-branch); fi
 if [ "$WITH_CANVAS_STORAGE" = "true" ]; then MATRIX_ARGS+=(--with-canvas-storage); fi
 if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then MATRIX_ARGS+=(--with-canvas-function); fi
-MATRIX_ARGS+=("${ONLY_ARGS[@]}")
+MATRIX_ARGS+=("${RESULTS_ARGS[@]}" "${ONLY_ARGS[@]}")
 MATRIX_ARGS+=("${LEVEL_ARGS[@]}")
 if [ ${#UI_ONLY_ARGS[@]} -gt 0 ] && [ "$API_ONLY_COUNT" -eq 0 ]; then
   # 仍由 API runner 建立本次报告，但不能把空的 API 选择误当作未知 API case。
@@ -262,13 +297,15 @@ if [ "$MATRIX_RC" -eq 2 ]; then
   exit "$MATRIX_RC"
 fi
 
-# UI E2E 复用 latest 报告目录，把截图并入同一 run
+REPORT_ROOT="$REPO_ROOT/reports/e2e"
+if [ "$RESULTS_ONLY" = "true" ]; then REPORT_ROOT=${E2E_REPORT_ROOT:-"$REPORT_ROOT"}; fi
+# UI E2E 复用 latest 报告目录
 if [ "$WITH_UI" = "true" ] && { [ ${#ONLY_ARGS[@]} -eq 0 ] || [ ${#UI_ONLY_ARGS[@]} -gt 0 ]; }; then
-  LATEST_DIR="$REPO_ROOT/reports/e2e/latest"
+  LATEST_DIR="$REPORT_ROOT/latest"
   if [ ! -d "$LATEST_DIR" ]; then
     die "matrix report latest dir missing; cannot attach UI artifacts"
   fi
-  step "Running UI E2E into $LATEST_DIR"
+  if [ "$RESULTS_ONLY" = "true" ]; then step "Running UI E2E"; else step "Running UI E2E into $LATEST_DIR"; fi
   set +e
   UI_ARGS=(
     --base-url "$FRONTEND_URL"
@@ -284,7 +321,7 @@ if [ "$WITH_UI" = "true" ] && { [ ${#ONLY_ARGS[@]} -eq 0 ] || [ ${#UI_ONLY_ARGS[
   if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then
     UI_ARGS+=(--with-canvas-function)
   fi
-  UI_ARGS+=("${UI_ONLY_ARGS[@]}")
+  UI_ARGS+=("${RESULTS_ARGS[@]}" "${UI_ONLY_ARGS[@]}")
   node "$SCRIPT_DIR/ui-smoke.mjs" "${UI_ARGS[@]}"
   UI_RC=$?
   set -e
@@ -298,8 +335,8 @@ if [ "$WITH_UI" = "true" ] && { [ ${#ONLY_ARGS[@]} -eq 0 ] || [ ${#UI_ONLY_ARGS[
     } >> "$LATEST_DIR/report.md"
   fi
   # 同步回 timestamped run 目录（latest 是 copy）
-  if [ -f "$REPO_ROOT/reports/e2e/LATEST_RUN.txt" ]; then
-    RUN_DIR=$(head -n1 "$REPO_ROOT/reports/e2e/LATEST_RUN.txt")
+  if [ -f "$REPORT_ROOT/LATEST_RUN.txt" ]; then
+    RUN_DIR=$(head -n1 "$REPORT_ROOT/LATEST_RUN.txt")
     if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ] && [ "$RUN_DIR" != "$LATEST_DIR" ]; then
       cp -a "$LATEST_DIR/." "$RUN_DIR/" 2>/dev/null || true
     fi
@@ -308,7 +345,7 @@ else
   UI_RC=0
 fi
 
-echo "Read report: reports/e2e/latest/report.md"
+if [ "$RESULTS_ONLY" != "true" ]; then echo "Read report: reports/e2e/latest/report.md"; fi
 if [ "$MATRIX_RC" -ne 0 ] || [ "$UI_RC" -ne 0 ]; then
   exit 1
 fi

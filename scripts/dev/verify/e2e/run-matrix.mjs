@@ -84,6 +84,7 @@ class CaseContext {
     withCanvasStorage,
     withCanvasFunction,
     reportDir,
+    resultsOnly,
     client,
   }) {
     this.baseUrl = baseUrl
@@ -98,6 +99,7 @@ class CaseContext {
     this.withCanvasStorage = withCanvasStorage
     this.withCanvasFunction = withCanvasFunction
     this.reportDir = reportDir
+    this.resultsOnly = resultsOnly
     this.caseId = null
     this.vars = {}
     // distributed capability：只在同时给出两个节点 URL 时可用。
@@ -116,6 +118,7 @@ class CaseContext {
   }
 
   writeArtifact(name, content) {
+    if (this.resultsOnly) return
     const file = path.join(this.artifactsDir(), name)
     writeReportArtifact(file, content)
     return file
@@ -148,12 +151,14 @@ function defaultReportRoot() {
   return path.join(REPO_ROOT, 'reports', 'e2e')
 }
 
-function createRunDir(reportRoot) {
+function createRunDir(reportRoot, resultsOnly) {
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').slice(0, 19)}-${randomUUID().slice(0, 8)}`
   const runDir = path.join(reportRoot, runId)
   mkdirSync(path.join(runDir, 'cases'), { recursive: true })
-  mkdirSync(path.join(runDir, 'artifacts'), { recursive: true })
-  mkdirSync(path.join(runDir, 'logs'), { recursive: true })
+  if (!resultsOnly) {
+    mkdirSync(path.join(runDir, 'artifacts'), { recursive: true })
+    mkdirSync(path.join(runDir, 'logs'), { recursive: true })
+  }
   return { runId, runDir }
 }
 
@@ -214,6 +219,19 @@ function countResults(results) {
 export function buildSummary(runId, args, results, startedAt, finishedAt, durationMs) {
   const totals = countResults(results)
   const failed = results.filter((r) => r.status === 'fail')
+  if (args.resultsOnly) {
+    const lines = [
+      '# E2E Results',
+      '',
+      `- Totals: total=${totals.total} pass=${totals.pass} fail=${totals.fail} skip=${totals.skip}`,
+      '',
+      '| Status | Case | Duration |',
+      '| --- | --- | ---: |',
+      ...results.map((r) => `| ${r.status.toUpperCase()} | \`${r.id}\` | ${r.durationMs}ms |`),
+      '',
+    ]
+    return { summary: { runId, durationMs, totals, results }, report: lines.join('\n') }
+  }
   const summary = {
     runId,
     startedAt,
@@ -409,6 +427,9 @@ export function parseArgs(argv) {
       case '--daemon-env':
         args.daemonEnv = next()
         break
+      case '--results-only':
+        args.resultsOnly = true
+        break
       case '--real':
         args.real = true
         break
@@ -462,6 +483,9 @@ export function parseArgs(argv) {
       default:
         throw new Error(`unknown arg: ${a}`)
     }
+  }
+  if (args.resultsOnly && (!args.real || args.distributed || args.noReport)) {
+    throw new Error('--results-only requires a real, single-stack run with reports enabled')
   }
   // distributed 是正交 capability：显式开关 + 双 URL 缺一不可。
   if (args.distributed && args.realModel) {
@@ -518,6 +542,7 @@ async function main(argv) {
   --daemon-env NAME   Daemon environment name for tool cases
   --report-root DIR   Report directory (default: reports/e2e)
   --no-report         Run cases without writing a report
+  --results-only      Keep only case results and timings (requires real mode)
   --list              List registered cases with level, id and requirements
   --docs              List registered cases with each case's docs
   -h, --help          Show this help`)
@@ -563,8 +588,8 @@ async function main(argv) {
   let runDir = null
   if (!args.noReport) {
     mkdirSync(args.reportRoot, { recursive: true })
-    ;({ runId, runDir } = createRunDir(args.reportRoot))
-    console.log(`Report dir: ${runDir}`)
+    ;({ runId, runDir } = createRunDir(args.reportRoot, args.resultsOnly))
+    if (!args.resultsOnly) console.log(`Report dir: ${runDir}`)
   }
 
   const ctx = new CaseContext({
@@ -578,52 +603,52 @@ async function main(argv) {
     withCanvasStorage: args.withCanvasStorage,
     withCanvasFunction: args.withCanvasFunction,
     reportDir: runDir,
+    resultsOnly: args.resultsOnly,
   })
   if (args.frontendUrl) ctx.vars.frontendUrl = args.frontendUrl.replace(/\/$/, '')
 
-  console.log(
-    `Running ${selected.length}/${ALL_CASES.length} cases against ${args.baseUrl}` +
-      (args.distributed ? ` and ${args.baseUrlB} (distributed)` : ''),
-  )
+  if (!args.resultsOnly) {
+    console.log(
+      `Running ${selected.length}/${ALL_CASES.length} cases against ${args.baseUrl}` +
+        (args.distributed ? ` and ${args.baseUrlB} (distributed)` : ''),
+    )
+  }
   const results = []
   for (const c of selected) {
-    console.log(`\n==> [${c.level}] ${c.id}: ${c.title}`)
+    if (!args.resultsOnly) console.log(`\n==> [${c.level}] ${c.id}: ${c.title}`)
     ctx.caseId = c.id
     const elapsed = createDurationTimer()
     try {
       await c.run(ctx)
-      const result = {
-        id: c.id,
-        level: c.level,
-        title: c.title,
-        status: 'pass',
-        durationMs: elapsed(),
-        error: null,
-        traceback: null,
-        artifactPaths: runDir ? collectArtifactPaths(runDir, c.id) : [],
+      const result = { id: c.id, level: c.level, status: 'pass', durationMs: elapsed() }
+      if (!args.resultsOnly) {
+        Object.assign(result, {
+          title: c.title,
+          error: null,
+          traceback: null,
+          artifactPaths: runDir ? collectArtifactPaths(runDir, c.id) : [],
+        })
       }
       results.push(result)
       if (runDir) writeCaseResult(runDir, result)
       console.log(`PASS ${c.id}`)
     } catch (err) {
-      const tb = redactSecrets(err?.stack || String(err))
-      const result = {
-        id: c.id,
-        level: c.level,
-        title: c.title,
-        status: 'fail',
-        durationMs: elapsed(),
-        error: redactSecrets(String(err?.message || err)),
-        traceback: tb,
-        artifactPaths: [],
+      const result = { id: c.id, level: c.level, status: 'fail', durationMs: elapsed() }
+      if (!args.resultsOnly) {
+        Object.assign(result, {
+          title: c.title,
+          error: redactSecrets(String(err?.message || err)),
+          traceback: redactSecrets(err?.stack || String(err)),
+          artifactPaths: [],
+        })
+        if (runDir) {
+          ctx.writeArtifact('error.txt', `${result.error}\n\n${result.traceback}`)
+          result.artifactPaths = collectArtifactPaths(runDir, c.id)
+        }
       }
-      if (runDir) {
-        ctx.writeArtifact('error.txt', `${result.error}\n\n${tb}`)
-        result.artifactPaths = collectArtifactPaths(runDir, c.id)
-        writeCaseResult(runDir, result)
-      }
+      if (runDir) writeCaseResult(runDir, result)
       results.push(result)
-      console.error(`FAIL ${c.id}: ${result.error}`)
+      console.error(args.resultsOnly ? `FAIL ${c.id}` : `FAIL ${c.id}: ${result.error}`)
     }
   }
 
@@ -638,7 +663,7 @@ async function main(argv) {
   if (failed.length) console.log(`failed: ${failed.join(', ')}`)
 
   if (runDir) {
-    maybeCopyRuntimeLogs(runDir)
+    if (!args.resultsOnly) maybeCopyRuntimeLogs(runDir)
     if (args.distributed) maybeCopyDistributedContainerLogs(runDir)
     const reportPath = writeSummaryAndReport(
       runDir,
@@ -656,9 +681,11 @@ async function main(argv) {
       `${runDir}\n${path.join(latest, 'report.md')}\n`,
       'utf8',
     )
-    console.log(`Report: ${reportPath}`)
-    console.log(`Summary: ${path.join(runDir, 'summary.json')}`)
-    console.log(`Latest: ${path.join(latest, 'report.md')}`)
+    if (!args.resultsOnly) {
+      console.log(`Report: ${reportPath}`)
+      console.log(`Summary: ${path.join(runDir, 'summary.json')}`)
+      console.log(`Latest: ${path.join(latest, 'report.md')}`)
+    }
   }
   return failed.length ? 1 : 0
 }
@@ -666,12 +693,13 @@ async function main(argv) {
 // 只设置 exitCode 并交回事件循环自然退出：process.exit 会丢弃管道上尚未 drain 的异步
 // stdout/stderr 写入（--docs 等大输出会被截断），自然退出会等待 pending 写入完成后按 exitCode 结束。
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main(process.argv.slice(2)).then(
+  const argv = process.argv.slice(2)
+  main(argv).then(
     (code) => {
       process.exitCode = code
     },
     (err) => {
-      console.error(redactSecrets(err?.stack || String(err)))
+      console.error(argv.includes('--results-only') ? 'E2E matrix could not complete' : redactSecrets(err?.stack || String(err)))
       process.exitCode = 2
     },
   )
