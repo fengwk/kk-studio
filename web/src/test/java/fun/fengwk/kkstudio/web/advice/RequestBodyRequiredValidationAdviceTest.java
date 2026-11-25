@@ -447,7 +447,7 @@ class RequestBodyRequiredValidationAdviceTest {
         Map.of(
                 "{\"type\":\"KEEP\"}", "resourceId",
                 "{\"type\":\"TEXT\",\"name\":\"n\"}", "textContent",
-                "{\"type\":\"BLOB\",\"name\":\"n\"}", "blobId")
+                "{\"type\":\"BLOB\",\"name\":\"n\"}", "uploadId")
             .entrySet()) {
       MvcResult result =
           mockMvc

@@ -58,7 +58,7 @@ class ToolCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals("Built-in", readEntry.path("provider").path("name").asText());
   }
 
-  /** 目录上每个条目都带 provider；完整上下文中四类 kind 至少覆盖 BUILTIN 与 APP。 */
+  /** 目录上每个条目都带 provider；当前目录至少覆盖 BUILTIN 与 PLUGIN。 */
   @Test
   void everyEntryCarriesAProvider() throws Exception {
     MvcResult result =
@@ -75,6 +75,6 @@ class ToolCatalogControllerTest extends WebPostgresTestSupport {
       kinds.add(provider.path("kind").asText());
     }
     assertTrue(kinds.contains("BUILTIN"), "builtin tools must be present: " + kinds);
-    assertTrue(kinds.contains("APP"), "host app tools must be present: " + kinds);
+    assertTrue(kinds.contains("PLUGIN"), "plugin tools must be present: " + kinds);
   }
 }

@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.server.PathContainer.PathSegment;
@@ -24,6 +25,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 @Component
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class StudioAccountFilter extends OncePerRequestFilter {
   private static final Pattern DAEMON_SCRIPT =
