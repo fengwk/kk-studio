@@ -14,6 +14,7 @@ export type PaneLayoutProps<T> = {
   describePane: (paneId: string, binding: T | undefined) => { title: string; content: ReactNode; actions?: ReactNode }
   picker?: PanePickerActions
   onClosePane?: (paneId: string) => void
+  activeHeaderLeading?: ReactNode
   onSizeChange?: (bounds: Rect) => void
 }
 
@@ -51,7 +52,7 @@ function Divider({ view, onResize }: { view: SplitView; onResize: (ratio: number
     }} />
 }
 
-export function PaneLayout<T>({ state, setState, fullscreen, onFullscreenChange, describePane, picker, onClosePane, onSizeChange }: PaneLayoutProps<T>) {
+export function PaneLayout<T>({ state, setState, fullscreen, onFullscreenChange, describePane, picker, onClosePane, onSizeChange, activeHeaderLeading }: PaneLayoutProps<T>) {
   const { t } = useI18n()
   const stage = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef(false)
@@ -121,7 +122,7 @@ export function PaneLayout<T>({ state, setState, fullscreen, onFullscreenChange,
       return <section key={id} className="ws-pane-host" data-pane-id={id} data-pane-active={active || undefined} hidden={!rect} style={position(rect)}>
         <div onFocus={event => { if ((event.target as HTMLElement).hasAttribute('data-pane-header')) focus(id) }}>
           <PaneHeader pane={pane} choices={descriptions} active={active} narrow={narrow} fullscreen={fullscreen}
-            splitBlocked={splitBlocked} actions={pane.actions}
+            splitBlocked={splitBlocked} actions={pane.actions} leading={active ? activeHeaderLeading : undefined}
             onSplit={axis => { pendingFocus.current = true; setState(previous => splitPane(previous, id, axis)) }}
             onSwitch={next => { if (next !== id) { pendingFocus.current = true; focus(next) } }}
             onFullscreenChange={next => { if (next) focus(id); onFullscreenChange(next) }}

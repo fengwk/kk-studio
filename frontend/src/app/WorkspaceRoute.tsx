@@ -82,6 +82,7 @@ export function WorkspaceRoute() {
   }
   return <WorkspacePage key={`${user.id}:${current.id}`} userId={user.id} space={current} spaces={spaces.data}
     selectSpace={id => { void navigate(pathToSpace(id)) }}
+    openInteraction={(id, threadId) => { void navigate({ pathname: pathToSpace(id), search: new URLSearchParams({ thread: threadId }).toString() }) }}
     goToSettings={() => { void navigate('/settings/preferences', { state: { from: `${location.pathname}${location.search}${location.hash}` } }) }}
     link={{ search: location.search, consume: () => { void navigate({ pathname: location.pathname, hash: location.hash }, { replace: true }) } }} />
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { AlertCircle, ChevronRight, Clock, Folder, LoaderCircle, MessageCircle, MoreHorizontal, Plus, Square } from 'lucide-react'
+import { createUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { TextInput } from '@/shared/ui/controls/TextInput'
@@ -37,13 +38,14 @@ export function WorkspaceStatus({ index, open }: { index: ReadonlyMap<string, Tr
   })}</div>
 }
 
-export function WorkspaceTree({ roots, index, expanded, toggle, open, create, rename, remove, move }: {
+export function WorkspaceTree({ roots, index, expanded, toggle, open, create, createDirectory, rename, remove, move }: {
   roots: TreeRow[]
   index: ReadonlyMap<string, TreeRow>
   expanded: ReadonlySet<string>
   toggle: (id: string, force?: boolean) => void
   open: (row: TreeRow, anchor: HTMLElement) => void
-  create: (kind: 'folder' | 'session' | 'canvas', parentId?: string) => void
+  create: (kind: 'session' | 'canvas', parentId: string) => void
+  createDirectory: (name: string, idempotencyKey: string, parentId?: string) => Promise<string>
   rename: (row: TreeRow, name: string) => Promise<void>
   remove: (row: TreeRow) => void
   move: (row: TreeRow, drop: TreeDrop) => void
@@ -52,9 +54,16 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, re
   const [filter, setFilter] = useState('')
   const [selection, select] = useState('')
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement }>()
-  const [editing, setEditing] = useState<{ id: string; value: string; error?: string; pending?: boolean }>()
+  const [editing, setEditing] = useState<{ id: string; value: string; error?: string; pending?: boolean; newFolder?: { parentId?: string } }>()
   const list = useRef<HTMLDivElement>(null)
   const rows = visibleRows(roots, expanded, filter)
+  if (editing?.newFolder) {
+    const parentId = editing.newFolder.parentId ?? null
+    const parent = parentId ? index.get(parentId) : undefined
+    let at = parent ? rows.findIndex(row => row.id === parent.id) + 1 : rows.length
+    if (parent) while (at < rows.length && rows[at]!.level > parent.level) at++
+    rows.splice(at, 0, { kind: 'folder', id: editing.id, name: t('workspace.newFolder'), parentId, level: parent ? parent.level + 1 : 1, children: [] })
+  }
   const selected = rows.find(row => row.id === selection) ?? rows[0]
   useEffect(() => {
     const element = list.current
@@ -80,6 +89,11 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, re
   function activate(row: TreeRow, anchor: HTMLElement) {
     if (row.kind === 'folder' || row.kind === 'session') toggle(row.id)
     else open(row, anchor)
+  }
+  function startCreate(parentId?: string) {
+    setFilter('')
+    if (parentId) toggle(parentId, true)
+    setEditing({ id: createUuid(), value: '', newFolder: { parentId } })
   }
   function startRename(row: TreeRow) { setEditing({ id: row.id, value: row.name }) }
   function keys(event: KeyboardEvent<HTMLDivElement>, row: TreeRow) {
@@ -117,7 +131,7 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, re
   function menuItems(row: TreeRow): MenuItem[] {
     return [
       ...(row.kind === 'folder' ? ([['session', 'pane.newSession'], ['canvas', 'workspace.newCanvas'], ['folder', 'workspace.newFolder']] as const)
-        .map(([kind, label]) => ({ label: t(label), onSelect: () => { setFilter(''); create(kind, row.id) } })) : []),
+        .map(([kind, label]) => ({ label: t(label), onSelect: () => { if (kind === 'folder') startCreate(row.id); else { setFilter(''); create(kind, row.id) } } })) : []),
       { label: t('workspace.rename'), onSelect: () => startRename(row) },
       { label: t('workspace.delete'), onSelect: () => remove(row) },
     ]
@@ -126,7 +140,7 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, re
   return <>
     <div className="workspace-tree-tools">
       <TextInput type="search" aria-label={t('workspace.filter')} placeholder={t('workspace.filter')} value={filter} onChange={event => setFilter(event.target.value)} />
-      <IconButton className="workspace-touch" label={t('workspace.newFolder')} onClick={() => { setFilter(''); create('folder') }}><Plus /></IconButton>
+      <IconButton className="workspace-touch" label={t('workspace.newFolder')} onClick={() => startCreate()}><Plus /></IconButton>
     </div>
     <div className="workspace-tree" role="tree" aria-label={t('workspace.directory')} ref={list}>
       {rows.map((row, i) => {
@@ -143,17 +157,19 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, re
           <RowIcon row={row} />
           {editor ? <form className="workspace-inline-name" onSubmit={event => {
             event.preventDefault()
+            if (editor.pending) return
             const name = editor.value.trim()
             if (!name) { setEditing({ ...editor, error: t('controls.nameRequired') }); return }
             setEditing({ ...editor, pending: true })
-            void rename(row, name).then(() => { setEditing(undefined); focus(row.id) })
+            const saved = editor.newFolder ? createDirectory(name, editor.id, editor.newFolder.parentId) : rename(row, name).then(() => row.id)
+            void saved.then(id => { setEditing(undefined); requestAnimationFrame(() => focus(id)) })
               .catch((error: Error) => setEditing({ ...editor, error: error.message }))
           }}>
-            <TextInput autoFocus value={editor.value} aria-label={t('workspace.renameItem', { name: row.name })}
+            <TextInput autoFocus value={editor.value} aria-label={editor.newFolder ? t('workspace.newFolder') : t('workspace.renameItem', { name: row.name })}
               invalid={Boolean(editor.error)} aria-describedby={editor.error ? `workspace-error-${row.id}` : undefined}
               readOnly={editor.pending} onFocus={event => event.currentTarget.select()}
               onKeyDown={event => {
-                if (event.key === 'Escape' && !editor.pending) { event.stopPropagation(); setEditing(undefined); focus(row.id) }
+                if (event.key === 'Escape' && !editor.pending) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); requestAnimationFrame(() => { if (!editor.newFolder) focus(row.id); else if (row.parentId) focus(row.parentId); else list.current?.previousElementSibling?.querySelector('button')?.focus() }) }
               }} onChange={event => setEditing({ ...editor, value: event.target.value, error: undefined })} />
             {editor.error && <span role="alert" className="workspace-field-error" id={`workspace-error-${row.id}`}>{editor.error}</span>}
           </form> : <span className="workspace-row-label" title={row.name}>{row.name}</span>}

@@ -19,6 +19,7 @@ import { SpaceDefaults } from './SpaceDefaults'
 import { SpaceMenu } from './SpaceMenu'
 import { useWorkspaceRealtime } from './useWorkspaceRealtime'
 import { useWorkspacePanes, type OpenTarget } from './useWorkspacePanes'
+import { WorkspaceInbox } from './WorkspaceInbox'
 import { WorkspaceStatus, WorkspaceTree } from './WorkspaceTree'
 import { createCanvas, createFolder, createSpace, deleteTreeRow, getSpaceTree, getThreadPlacement, moveTreeRow, patchSpace, readCanvasRevision, renameTreeRow, type TreeDeletion } from './workspace-api'
 import './workspace-shell.css'
@@ -36,6 +37,7 @@ export type WorkspaceShellProps = {
   space: ChatSpaceDTO
   spaces: ChatSpaceDTO[]
   selectSpace: (id: string) => void
+  openInteraction: (spaceId: string, threadId: string) => void
   goToSettings: () => void
   renderers: Partial<PaneRenderers>
   account: (unsent: boolean) => ReactNode
@@ -63,7 +65,7 @@ function loadSidebar(key: string): { width: number; expanded?: string[] } {
   return { width: 264 }
 }
 
-function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings, renderers, account, environments: Environments,
+function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteraction, goToSettings, renderers, account, environments: Environments,
   closeView, wrapPanes, link }: WorkspaceShellProps & { tree: WorkspaceTreeDTO }) {
   const { t } = useI18n()
   const query = useQueryClient()
@@ -77,7 +79,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings,
   const [drawer, setDrawer] = useState(false)
   const [tab, setTab] = useState('directory')
   const [notice, report] = useState('')
-  const [creation, setCreation] = useState<{ kind: 'folder' | 'canvas' | 'space'; parentId?: string; key: string }>()
+  const [creation, setCreation] = useState<{ kind: 'canvas' | 'space'; parentId?: string; key: string }>()
   const [deletion, setDeletion] = useState<{ row: TreeRow; request: TreeDeletion; busy?: boolean; error?: string }>()
   const [defaults, setDefaults] = useState(false)
   const resize = useRef<{ x: number; width: number }>(undefined)
@@ -145,7 +147,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings,
     else next.delete(id)
     return next
   }), [])
-  function create(kind: 'folder' | 'canvas' | 'session' | 'space', parentId?: string) {
+  function create(kind: 'canvas' | 'session' | 'space', parentId?: string) {
     if (kind === 'session') { if (parentId) toggle(parentId, true); open(newDraft(parentId)); return }
     setCreation({ kind, parentId, key: createUuid() })
   }
@@ -174,7 +176,6 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings,
   return <div className="workspace-shell" data-fullscreen={fullscreen || undefined} data-drawer={drawer || undefined}
     onKeyDown={event => { if (event.key === 'Escape' && drawer && !event.defaultPrevented) { event.stopPropagation(); closeDrawer() } }}>
     {!fullscreen && <>
-      <div className="workspace-mobile-bar"><IconButton ref={narrowTrigger} className="workspace-touch" label={t('workspace.expandSidebar')} onClick={() => setDrawer(true)}><PanelLeftOpen /></IconButton></div>
       {drawer && <button type="button" className="workspace-drawer-backdrop" tabIndex={-1} aria-label={t('workspace.collapseSidebar')} onClick={closeDrawer} />}
       <aside className="workspace-sidebar" data-collapsed={collapsed || undefined} style={{ width }}>
         <div className="workspace-sidebar-head">
@@ -185,6 +186,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings,
                 if (!archived) selectSpace(item.id)
                 else { const next = spaces.find(candidate => !candidate.archivedAt && candidate.id !== item.id); if (next) selectSpace(next.id) }
               }).catch((error: Error) => report(error.message))} />
+          <WorkspaceInbox userId={userId} onOpen={(spaceId, threadId) => { if (drawer) closeDrawer(); openInteraction(spaceId, threadId) }} />
           <IconButton className="workspace-desktop-collapse" label={t('workspace.collapseSidebar')} onClick={() => setCollapsed(true)}><PanelLeftClose /></IconButton>
           <IconButton ref={drawerClose} className="workspace-mobile-close workspace-touch" label={t('workspace.collapseSidebar')} onClick={closeDrawer}><PanelLeftClose /></IconButton>
         </div>
@@ -193,6 +195,10 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings,
           { id: 'status', label: <span className="workspace-status-tab">{t('workspace.status')}{[...index.values()].some(row => row.kind === 'thread' && row.thread.state === 'NEEDS_YOU') && <i />}</span> },
         ]} activeId={tab} onChange={setTab} ariaLabel={t('workspace.sidebar')} className="workspace-tabs" panelClassName="workspace-tab-panel">
           {tab === 'directory' ? <WorkspaceTree roots={roots} index={index} expanded={expanded} toggle={toggle} open={openRow} create={create}
+            createDirectory={async (name, idempotencyKey, parentId) => {
+              const result = await write(() => createFolder(space.id, { parentId, name, expectedTreeVersion: tree.treeVersion }, idempotencyKey))
+              return result.id
+            }}
             rename={async (row, name) => { await write<unknown>(() => renameTreeRow(space.id, row, name)) }} remove={remove} move={move} />
             : <WorkspaceStatus index={index} open={openRow} />}
         </Tabs>
@@ -206,25 +212,26 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, goToSettings,
           onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setSidebarWidth(width + (event.key === 'ArrowLeft' ? -16 : 16)) } }} />
       </aside>
       {collapsed && <aside className="workspace-rail">
-        <IconButton label={t('workspace.expandSidebar')} onClick={() => setCollapsed(false)}><PanelLeftOpen /></IconButton>
+        <div className="workspace-rail-top">
+          <IconButton label={t('workspace.expandSidebar')} onClick={() => setCollapsed(false)}><PanelLeftOpen /></IconButton>
+          <WorkspaceInbox userId={userId} onOpen={(spaceId, threadId) => { if (drawer) closeDrawer(); openInteraction(spaceId, threadId) }} />
+        </div>
         {footer(true)}
       </aside>}
     </>}
     <main className="workspace-main" inert={drawer || undefined}>
-      {wrapPanes(<PaneLayout {...panes.layoutProps} />, panes.removeView)}
+      {wrapPanes(<PaneLayout {...panes.layoutProps} activeHeaderLeading={!fullscreen && <div className="workspace-mobile-bar">
+        <IconButton ref={narrowTrigger} className="workspace-touch" label={t('workspace.expandSidebar')} onClick={() => setDrawer(true)}><PanelLeftOpen /></IconButton>
+      </div>} />, panes.removeView)}
     </main>
     {panes.confirmation}
     {notice && <ConfirmActionModal pending={false} modal={{ title: notice, description: '', onConfirm: () => report('') }} onClose={() => report('')} />}
-    {creation && <NameDialog title={t(creation.kind === 'space' ? 'workspace.newSpace' : creation.kind === 'folder' ? 'workspace.newFolder' : 'workspace.newCanvas')}
+    {creation && <NameDialog title={t(creation.kind === 'space' ? 'workspace.newSpace' : 'workspace.newCanvas')}
       onCancel={() => setCreation(undefined)} onConfirm={async name => {
         if (creation.kind === 'space') {
           const next = await write(() => createSpace({ title: name, rootFolderName: t('workspace.defaultFolder'),
             defaultAgentName: space.defaultAgentName, defaultEnvironmentId: space.defaultEnvironmentId, defaultYoloEnabled: space.defaultYoloEnabled }, creation.key), true)
           setCreation(undefined); selectSpace(next.id)
-        } else if (creation.kind === 'folder') {
-          await write(() => createFolder(space.id, { parentId: creation.parentId, name, expectedTreeVersion: tree.treeVersion }, creation.key))
-          if (creation.parentId) toggle(creation.parentId, true)
-          setCreation(undefined)
         } else if (creation.parentId) {
           const folderId = creation.parentId
           const canvas = await write(() => createCanvas(space.id, { folderId, title: name, expectedTreeVersion: tree.treeVersion }, creation.key))
