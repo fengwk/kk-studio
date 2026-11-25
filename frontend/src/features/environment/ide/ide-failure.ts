@@ -12,6 +12,7 @@ const IDE_FAILURE_REASONS = [
   'IDE_OUTCOME_UNKNOWN',
   'IDE_CONTROL_UNAVAILABLE',
   'IDE_CLEANUP_FAILED',
+  'IDE_CLOSE_CANCELLED',
 ] as const
 
 export type IdeFailureReason = (typeof IDE_FAILURE_REASONS)[number]

@@ -186,6 +186,14 @@ export const environmentCatalog = {
     'en-US': 'Failed to create terminal',
     'zh-CN': '创建终端失败',
   },
+  'ai.environment.ide.listLabel': {
+    'en-US': 'Environments',
+    'zh-CN': '环境列表',
+  },
+  'ai.environment.ide.open': {
+    'en-US': 'Open VS Code in {{name}}',
+    'zh-CN': '在 {{name}} 打开 VS Code',
+  },
   'ai.environment.status.ready': {
     'en-US': 'Ready',
     'zh-CN': '就绪',

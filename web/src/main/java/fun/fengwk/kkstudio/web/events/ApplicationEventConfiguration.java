@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -28,6 +29,8 @@ import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationBind
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -37,11 +40,13 @@ import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
+import fun.fengwk.kkstudio.workspace.WorkspaceNotifications;
 
 import javax.sql.DataSource;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -86,7 +91,9 @@ public class ApplicationEventConfiguration {
       EnvironmentChangeNotifications environmentChangeNotifications,
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
       SystemSettingsSnapshot systemSettingsSnapshot,
-      ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
+      ObjectProvider<EnvironmentDaemonServer> daemonServerProvider,
+      WorkspaceNotifications workspace,
+      ResourceAccess access) {
     HarnessNotificationBinding threadVersions = harnessNotifications.threadVersionsNotification();
     HarnessNotificationBinding threadSnapshots = harnessNotifications.threadSnapshotsNotification();
     HarnessNotificationBinding executionTree = harnessNotifications.executionTreeNotification();
@@ -112,8 +119,16 @@ public class ApplicationEventConfiguration {
                 threadVersions.onResync()),
             new PostgresqlNotificationHandler(
                 threadSnapshots.channel(),
-                threadSnapshots.onNotification(),
-                threadSnapshots.onResync()),
+                payload -> {
+                  threadSnapshots.onNotification().accept(payload);
+                  workspaceThreadChanged(workspace, access, payload);
+                },
+                () -> {
+                  threadSnapshots.onResync().run();
+                  workspace.resync();
+                }),
+            new PostgresqlNotificationHandler(
+                WorkspaceNotifications.CHANNEL, workspace::onNotification, workspace::resync),
             // 画布版本失效：Canvas 拥有 canvas_revision 通道、payload 协议与 revision fan-out；Web 只建立 LISTEN
             // 并把信号转发给浏览器事件通道以触发图谱更新
             new PostgresqlNotificationHandler(
@@ -221,7 +236,8 @@ public class ApplicationEventConfiguration {
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
       ThreadSnapshotPublisher threadSnapshotPublisher,
       HarnessThreadService threadService,
-      HarnessRuntime runtime) {
+      HarnessRuntime runtime,
+      WorkspaceNotifications workspace) {
     return new ApplicationEventHub(
         harnessChanges,
         realtimeSource,
@@ -241,7 +257,23 @@ public class ApplicationEventConfiguration {
             }
             throw new IllegalArgumentException(e.getMessage(), e);
           }
-        });
+        },
+        workspace);
+  }
+
+  private static void workspaceThreadChanged(
+      WorkspaceNotifications workspace, ResourceAccess access, String payload) {
+    UUID thread;
+    try {
+      thread = Uuids.parseCanonical(payload, "threadId");
+    } catch (IllegalArgumentException ex) {
+      workspace.resync();
+      return;
+    }
+    access
+        .rootSession(thread)
+        .flatMap(session -> access.owner(Kind.SESSION, session))
+        .ifPresent(owner -> workspace.threads(owner.spaceId()));
   }
 
   @Bean(name = "applicationEventTreeExecutor", destroyMethod = "shutdownNow")

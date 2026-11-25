@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 public record SessionCreateDTO(
-    UUID folderId,
+    @Nullable UUID folderId,
     List<HarnessUserMessageContentDTO> message,
     @Nullable HarnessModelSelectionDTO modelSelection,
     @Nullable UUID environmentId,

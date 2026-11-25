@@ -181,8 +181,9 @@ public class ChatSpaceService {
     boolean yolo =
         patch.defaultYoloEnabled() == null ? old.defaultYoloEnabled() : patch.defaultYoloEnabled();
     try {
-      return jdbc.sql(
-              """
+      Space updated =
+          jdbc.sql(
+                  """
           update chat_space set title = :title, title_key = :key, archived_at = :archived,
               default_agent_name = :agent, default_environment_id = :environment,
               default_yolo_enabled = :yolo, version = version + 1
@@ -190,20 +191,31 @@ public class ChatSpaceService {
           returning id, title, archived_at, version, tree_version, default_agent_name,
                     default_environment_id, default_yolo_enabled
           """)
-          .param("title", title)
-          .param("key", nameKey(title))
-          .param("archived", archivedAt)
-          .param("agent", agent)
-          .param("environment", environment)
-          .param("yolo", yolo)
-          .param("id", id)
-          .query(Space.class)
-          .single();
+              .param("title", title)
+              .param("key", nameKey(title))
+              .param("archived", archivedAt)
+              .param("agent", agent)
+              .param("environment", environment)
+              .param("yolo", yolo)
+              .param("id", id)
+              .query(Space.class)
+              .single();
+      WorkspaceNotifications.notify(jdbc, id, "space", updated.version());
+      return updated;
     } catch (DuplicateKeyException ex) {
       throw titleExists();
     } catch (DataIntegrityViolationException ex) {
       throw invalidDefaults();
     }
+  }
+
+  public boolean allows(StudioPrincipal actor, UUID id) {
+    return jdbc.sql(
+            "select exists(select 1 from chat_space where id = :id and owner_user_id = :owner)")
+        .param("id", id)
+        .param("owner", actor.userId())
+        .query(Boolean.class)
+        .single();
   }
 
   Space get(StudioPrincipal actor, UUID id) {
@@ -231,11 +243,18 @@ public class ChatSpaceService {
   }
 
   long advance(UUID spaceId) {
-    return jdbc.sql(
-            "update chat_space set tree_version = tree_version + 1 where id = :id returning tree_version")
-        .param("id", spaceId)
-        .query(Long.class)
-        .single();
+    long version =
+        jdbc.sql(
+                "update chat_space set tree_version = tree_version + 1 where id = :id returning tree_version")
+            .param("id", spaceId)
+            .query(Long.class)
+            .single();
+    return treeChanged(spaceId, version);
+  }
+
+  long treeChanged(UUID spaceId, long version) {
+    WorkspaceNotifications.notify(jdbc, spaceId, "tree", version);
+    return version;
   }
 
   static void requireTreeVersion(Space space, long expected) {

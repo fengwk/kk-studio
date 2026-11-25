@@ -85,7 +85,9 @@ public class WorkspaceSessions {
           replay.get().initialCommandId(),
           replay.get().createdTreeVersion().toString());
     }
-    placements.requireFolder(spaceId, request.folderId());
+    UUID folderId =
+        request.folderId() == null ? placements.firstRootFolder(spaceId) : request.folderId();
+    placements.requireFolder(spaceId, folderId);
     if (request.message() == null || request.message().isEmpty()) {
       throw WorkspaceInput.invalid("Message is required");
     }
@@ -114,7 +116,7 @@ public class WorkspaceSessions {
     UUID command = accepted.acceptedCommands().getFirst().idempotencyKey();
     placements.insert(
         spaceId,
-        request.folderId(),
+        folderId,
         session,
         Kind.SESSION,
         branch.agentName(),
@@ -186,7 +188,7 @@ public class WorkspaceSessions {
   @Transactional(isolation = Isolation.REPEATABLE_READ)
   public WorkspaceThreadPlacementDTO rename(
       StudioPrincipal actor, UUID space, UUID id, ThreadRenameDTO request) {
-    spaces.lock(actor, space);
+    var current = spaces.lock(actor, space);
     requireThread(space, id);
     try {
       runtime
@@ -197,6 +199,7 @@ public class WorkspaceSessions {
     } catch (DomainException ex) {
       throw creationConflict(ex);
     }
+    spaces.treeChanged(space, current.treeVersion());
     return tree.threadPlacement(space, id);
   }
 

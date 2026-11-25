@@ -3,9 +3,8 @@ import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/pro
 import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-browser-session'
 import {
   saveIdeSession,
-  type IdePresentation,
-  type IdeTabStorage,
-} from '@/features/environment/ide/ide-tab-state'
+  type IdeSessionStorage,
+} from '@/features/environment/ide/ide-session-state'
 import { buildUsageViews, recoveryFromViews, type IdeViewState } from '@/features/environment/ide/ide-view-state'
 
 /** 使用证明里对单个 view 的临时覆盖：本次证明以这个 claim 声明该 view。 */
@@ -16,17 +15,11 @@ export interface IdeUsageOverride {
   bindingEpoch?: string
 }
 
-interface IdePresentationView {
-  openedEnvironmentIds: string[]
-  viewIdsByEnvironment: Record<string, string[]>
-}
-
 export interface IdeSessionWriterOptions {
-  storage?: IdeTabStorage
+  storage?: IdeSessionStorage
   sessionRef: RefObject<IdeBrowserSessionState>
   viewsRef: RefObject<Record<string, IdeViewState>>
   mountedRef: RefObject<boolean>
-  getPresentation: () => IdePresentation
   preserveSession: boolean
   onStorageStatusChange: (unavailable: boolean) => void
 }
@@ -37,7 +30,6 @@ export function useIdeSessionWriter({
   sessionRef,
   viewsRef,
   mountedRef,
-  getPresentation,
   preserveSession,
   onStorageStatusChange,
 }: IdeSessionWriterOptions) {
@@ -45,10 +37,8 @@ export function useIdeSessionWriter({
     if (preserveSession) {
       return false
     }
-    const presentation = getPresentation()
     const saved = saveIdeSession(
       sessionRef.current.browserSessionId,
-      presentation,
       recoveryFromViews(viewsRef.current),
       storage,
     )
@@ -65,7 +55,6 @@ export interface IdeUsageProofOptions {
   identityRef: RefObject<ApplicationEventConnectionIdentity | null>
   sessionRef: RefObject<IdeBrowserSessionState>
   viewsRef: RefObject<Record<string, IdeViewState>>
-  getPresentation: () => IdePresentationView
   sessionReady: () => boolean
   isPageSuspended: () => boolean
   setPageSuspended: (suspended: boolean) => void
@@ -86,7 +75,6 @@ export function useIdeUsageProof({
   identityRef,
   sessionRef,
   viewsRef,
-  getPresentation,
   sessionReady,
   isPageSuspended,
   setPageSuspended,
@@ -114,19 +102,10 @@ export function useIdeUsageProof({
     if (currentIdentity == null || !sessionReady() || isPageSuspended()) {
       return Promise.reject(new Error('application event connection is not ready'))
     }
-    const opened = getPresentation().openedEnvironmentIds
-    const environmentIds = override != null && !opened.includes(override.environmentId)
-      ? [...opened, override.environmentId]
-      : opened
     return registerUsage({
       browserSessionId,
       revision: nextRevision(),
-      views: buildUsageViews(
-        viewsRef.current,
-        environmentIds,
-        getPresentation().viewIdsByEnvironment,
-        override,
-      ),
+      views: buildUsageViews(viewsRef.current, override),
     })
   }
 

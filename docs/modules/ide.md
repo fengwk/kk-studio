@@ -8,7 +8,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 | 身份 | 生命周期与作用 |
 | --- | --- |
-| `browserSessionId` | 一个浏览器 tab 的 Chat IDE 会话；存 sessionStorage，刷新不变，复制 tab 时隔离。它不是绕过认证的授权凭据。 |
+| `browserSessionId` | 一个浏览器 tab 的 IDE 恢复会话身份；仅用于该 tab 的恢复线索，不是绕过认证的授权凭据。 |
 | `eventNodeId` / `connectionId` | 当前 app-events WS；重连或刷新会变，用于证明当前页面连接的使用意图。 |
 | `viewId` | 同一 Daemon 进程内的 workspace 资源；刷新复用，不因路由切换重建。 |
 | `claimId` | 一次冻结的绑定操作，用于幂等与结果对账，不承担会话所有权。 |
@@ -153,7 +153,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。�
 
 - 新增或调整 IDE 动作：同时修改 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto)、[`ControlProtocolValidator`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolValidator.java)、Daemon 的 [`internal/protocol`](../../daemon/internal/protocol/) 与 [`internal/ide/service.go`](../../daemon/internal/ide/service.go)，并更新 Java/Go golden 与协议测试。协议变化属于 Daemon 发布，见 [Environment Daemon](../operations/environment-daemon.md)。
 - 视图服务与快照：[`EnvironmentIdeServiceImpl.java`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImpl.java)、[`IdeViewSnapshotStore.java`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewSnapshotStore.java)；数据面与授权在 [`gateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/)，跨节点在 [`cluster`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/) 包。
-- 浏览器 Chat 宿主、sessionStorage/Web Locks 与对账状态机在 [`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide)；IDE 只挂载在 `/chats/:chatId`，离开 Chat 隐藏并保活同一 iframe，非 Chat 页面不显示 IDE。
+- 浏览器侧栏环境列表、VS Code 窗格与按标签页隔离的恢复状态机位于 [`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide)。普通打开复用既有视图，原生 New Window 始终分配独立的 `viewId`。关闭遵循原生保存 / 不保存 / 取消确认。
 - 测试入口：Java [`ControlProtocolCodecTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodecTest.java) 与 Go `daemon/internal/protocol` golden 测试守护 wire 格式；`daemon/internal/ide` 的 Go 测试覆盖视图生命周期；扩展宿主测试位于 [`daemon/ide-extension/extension.test.cjs`](../../daemon/ide-extension/extension.test.cjs)。[`IdeViewSnapshotStoreTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/IdeViewSnapshotStoreTest.java)、[`EnvironmentIdeServiceImplTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImplTest.java) 与 [`EnvironmentIdeControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/ide/EnvironmentIdeControllerTest.java) 覆盖快照接受、纯读、reason 映射与 Problem 传递。
 - 真实 code-server 链路从 [`IdeProductionChainAcceptanceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java) 的显式验收命令运行，参数与浏览器入口见[开发与测试](../operations/development-and-testing.md#真实-ide-与-daemon-验收)。该入口需要显式 Node 24、code-server 发行目录与 Playwright 模块；未实际运行的结果或固定用例数不能作为验收结论。
 

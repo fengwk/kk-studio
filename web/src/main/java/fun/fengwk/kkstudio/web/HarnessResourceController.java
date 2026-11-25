@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -36,17 +35,14 @@ public class HarnessResourceController {
 
   private static final Duration READ_TIMEOUT = Duration.ofMinutes(5);
 
-  private final HarnessOwnerQueryService ownerQueryService;
   private final SessionBlobRefManager refManager;
   private final StorageBlobRepository blobRepository;
   private final StorageBlobContentService contentService;
 
   public HarnessResourceController(
-      HarnessOwnerQueryService ownerQueryService,
       SessionBlobRefManager refManager,
       StorageBlobRepository blobRepository,
       StorageBlobContentService contentService) {
-    this.ownerQueryService = Objects.requireNonNull(ownerQueryService, "ownerQueryService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
     this.contentService = Objects.requireNonNull(contentService, "contentService");
@@ -58,7 +54,6 @@ public class HarnessResourceController {
       @PathVariable UUID sessionId,
       @PathVariable UUID resourceId,
       @RequestParam(defaultValue = "false") boolean download) {
-    ownerQueryService.requireOwnedSession(sessionId);
     if (!refManager.contains(sessionId, resourceId)) {
       throw DomainException.notFound("resource");
     }

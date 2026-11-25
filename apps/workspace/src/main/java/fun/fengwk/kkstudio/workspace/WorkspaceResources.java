@@ -72,7 +72,7 @@ public class WorkspaceResources {
       } else {
         canvases.renameCanvas(id, title);
       }
-      return space.treeVersion();
+      return spaces.treeChanged(spaceId, space.treeVersion());
     }
     ChatSpaceService.requireTreeVersion(
         space, WorkspaceInput.version(request.expectedTreeVersion()));
