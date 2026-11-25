@@ -2,21 +2,16 @@ import { createServer } from 'node:http'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { baseModelConfig, encodePathTail, environmentCreateBody } from '../lib/fixtures.mjs'
+import { baseModelConfig, environmentCreateBody } from '../lib/fixtures.mjs'
 import {
   acceptCommandBatch,
   assertRootYoloEnabled,
-  branchSettingsOf,
-  chatOwner,
-  createChat,
-  createNewSession,
   createWorkspaceSession,
   createWorkspaceSpace,
   getThreadSnapshot,
   listEnvironments,
   setEnvironmentCommand,
   setExecutionCommand,
-  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
   waitForQuiescentThread,
@@ -43,9 +38,8 @@ function escapeRegExp(value) {
 export async function runWorkspaceContractMatrix(ui) {
   const {
     apiCtx,
-    bindThreadComposer,
     consoleErrors,
-    createDurableHistoryFixture,
+    createWorkspaceDurableHistoryFixture,
     createWorkspaceHoldingQueueFixture,
     daemonEnv,
     ensureSignedIn,
@@ -56,7 +50,6 @@ export async function runWorkspaceContractMatrix(ui) {
     run,
     shot,
     stamp,
-    withUiFixture,
   } = ui
 
   await run(
@@ -514,21 +507,22 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 
   await run(
-    'ui.chat.task_status.async_thread_approval',
+    'ui.workspace.task_status.async_thread_approval',
     'Task 回执链接子 Thread；根控制区汇聚并向子 Thread 提交审批',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
         () => createActiveTaskFixture(apiCtx, stamp),
         async (fixture) => {
-          await bindThreadComposer(page, goto, fixture)
+          await bindWorkspaceThreadComposer(page, goto, fixture)
           await fixture.start()
 
           const taskCard = page.locator('.thread-tool-surface').filter({
             has: page.locator('.thread-tool-name', { hasText: 'task' }),
           }).last()
           await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
-          const link = taskCard.locator('.task-tool-thread-link')
+          const link = taskCard.locator('.thread-tool-thread-link')
           await link.waitFor({ state: 'visible', timeout: 10_000 })
           const href = await link.getAttribute('href')
           const childThreadId = href?.split('/').at(-1)
@@ -538,12 +532,12 @@ export async function runWorkspaceContractMatrix(ui) {
             `unexpected thread link href: ${href}`,
           )
           await link.click()
-          const childView = page.locator('.chat-pane-layer:not([hidden]) .bound-thread-view')
+          const childView = page.locator('[data-pane-active] .bound-thread-view')
           await childView.waitFor({ state: 'visible', timeout: 15_000 })
           assert(
-            new URL(page.url()).pathname === `/chats/${fixture.chat.id}`
+            new URL(page.url()).pathname === `/chat-spaces/${fixture.space.id}`
               && await childView.locator('.composer-editor').count() === 0,
-            'child thread must open as a read-only pane without changing the Chat route',
+            'child thread must open as a read-only pane without changing the Workspace route',
           )
 
           let resolveApproval
@@ -566,7 +560,12 @@ export async function runWorkspaceContractMatrix(ui) {
                   threadId: childThreadId,
                   rootThreadId: fixture.threadId,
                   sessionId: fixture.sessionId,
-                  owner: { kind: 'CHAT', id: fixture.chat.id, title: fixture.chat.title, link: `/chats/${fixture.chat.id}` },
+                  owner: {
+                    kind: 'CHAT_SPACE',
+                    id: fixture.space.id,
+                    title: fixture.space.title,
+                    link: `/chat-spaces/${fixture.space.id}`,
+                  },
                   toolCallId: 'call-bash-1',
                   toolName: 'bash',
                   argumentsJson: '{"command":"echo approval"}',
@@ -608,12 +607,12 @@ export async function runWorkspaceContractMatrix(ui) {
             const approval = page.locator('.interaction-approval-card')
             await approval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
-              await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
-              && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              await approval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).count() === 1
+              && await approval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).count() === 1,
               'root control area did not expose child approval controls',
             )
 
-            await approval.getByRole('button', { name: '允许', exact: true }).click()
+            await approval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).click()
             const { target: approvalTarget, body: approvalBody } = await Promise.race([
               approvalPromise,
               sleep(10_000).then(() => {
@@ -644,19 +643,20 @@ export async function runWorkspaceContractMatrix(ui) {
     'ui.settings.notifications_single_entry',
     '浏览器通知只在 Settings 暴露唯一开关',
     async (caseArt) => {
-      await goto('/settings')
-      const switches = page.getByRole('switch', { name: '浏览器通知' })
+      await ensureSignedIn?.()
+      await goto('/settings/preferences')
+      const switches = page.getByRole('switch', { name: UI_LABELS.notificationSwitch })
       await switches.waitFor({ state: 'visible', timeout: 10_000 })
       assert(await switches.count() === 1, 'Settings must expose exactly one notification switch')
 
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-notification-entry-${stamp}`,
           messages: [`notification entry baseline ${stamp}`],
         }),
         async (fixture) => {
-          await bindThreadComposer(page, goto, fixture)
+          await bindWorkspaceThreadComposer(page, goto, fixture)
           const panel = page.locator('.thread-panel')
           assert(await panel.getByRole('switch').count() === 0, 'Thread panel exposed a notification switch')
           assert(
@@ -675,6 +675,7 @@ export async function runWorkspaceContractMatrix(ui) {
     'ui.settings.system_contract_cas',
     'Settings server tab 与 /api/platform/settings 契约：完整聚合 CAS、冲突确认后刷新，并在收尾恢复全局状态',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const readSettings = async () => (await apiCtx.call('GET', '/api/platform/settings')).json
       const before = await readSettings()
       const original = before.aiRuntime.retryBaseDelayMillis
@@ -686,9 +687,8 @@ export async function runWorkspaceContractMatrix(ui) {
       // 确定性可逆的新值：与原始值不同的正整数字符串。
       const changed = original === '2501' ? '2502' : '2501'
       try {
-        await goto('/settings')
-        await page.getByRole('tab', { name: 'AI 运行时' }).click()
-        const base = page.getByLabel('基础延迟（毫秒）')
+        await goto('/settings/aiRuntime')
+        const base = page.getByLabel(UI_LABELS.settingsBaseDelayLabel)
         await base.waitFor({ state: 'visible', timeout: 10_000 })
         // GET hydration：draft 与权威聚合一致。
         assert(
@@ -696,8 +696,8 @@ export async function runWorkspaceContractMatrix(ui) {
           `hydration mismatch: ${await base.inputValue()} !== ${original}`,
         )
         await base.fill(changed)
-        await page.getByRole('button', { name: '保存', exact: true }).click()
-        await page.getByText('所有更改已保存').waitFor({ state: 'visible', timeout: 15_000 })
+        await page.getByRole('button', { name: UI_LABELS.settingsSave, exact: true }).click()
+        await page.getByText(UI_LABELS.settingsAllSaved).waitFor({ state: 'visible', timeout: 15_000 })
         await shot(caseArt, 'settings-system-contract-cas')
 
         const after = await readSettings()
@@ -725,9 +725,9 @@ export async function runWorkspaceContractMatrix(ui) {
         const externalRes = await apiCtx.call('PUT', '/api/platform/settings', externalUpdate)
         assert(externalRes.status === 200, `external settings update failed: ${externalRes.status}`)
         await base.fill(staleDraft)
-        await page.getByRole('button', { name: '保存', exact: true }).click()
+        await page.getByRole('button', { name: UI_LABELS.settingsSave, exact: true }).click()
         const conflictDialog = page.getByRole('alertdialog', {
-          name: '数据已发生变化',
+          name: UI_LABELS.settingsConflictDialog,
         })
         await conflictDialog.waitFor({ state: 'visible', timeout: 15_000 })
         assert(
@@ -737,10 +737,9 @@ export async function runWorkspaceContractMatrix(ui) {
         await shot(caseArt, 'settings-system-conflict-dialog')
         await Promise.all([
           page.waitForEvent('load'),
-          conflictDialog.getByRole('button', { name: '刷新' }).click(),
+          conflictDialog.getByRole('button', { name: UI_LABELS.settingsReloadLatest }).click(),
         ])
-        await page.getByRole('tab', { name: 'AI 运行时' }).click()
-        const refreshedBase = page.getByLabel('基础延迟（毫秒）')
+        const refreshedBase = page.getByLabel(UI_LABELS.settingsBaseDelayLabel)
         await refreshedBase.waitFor({ state: 'visible', timeout: 10_000 })
         assert(
           (await refreshedBase.inputValue()) === externallyChanged,
@@ -993,7 +992,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
   const state = {
     apiCtx,
     childAgent: null,
-    chat: null,
+    space: null,
     mock,
     model: null,
     parentAgent: null,
@@ -1058,31 +1057,23 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(parentResponse.status === 201, `create task parent: ${JSON.stringify(parentResponse)}`)
     state.parentAgent = parentResponse.json
 
-    state.chat = await createChat(apiCtx, {
+    state.space = await createWorkspaceSpace(apiCtx, {
       title: `e2e-ui-task-${stamp}-${suffix}`,
-      agentName: state.parentAgent.name,
-      yoloEnabled: true,
+      defaultAgentName: state.parentAgent.name,
+      defaultYoloEnabled: true,
     })
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
     // 先用不可用的模型创建空闲 Thread，避免 bootstrap 消费 mock；浏览器绑定后再启动任务。
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(
-        state.parentAgent,
-        {
-          modelName: `${state.model.name}-missing`,
-          variant: 'default',
-        },
-      ),
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: `task materialize ${suffix}` }],
+      modelSelection: {
+        modelName: `${state.model.name}-missing`,
+        variant: 'default',
+      },
       yoloEnabled: true,
-      commands: [userMessageCommand(`task materialize ${suffix}`, cid())],
     })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
     return {
       ...state,
       // 浏览器先绑定 Thread，再显式启动 task。
@@ -1092,7 +1083,6 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           intervalMs: 100,
         })
         await acceptCommandBatch(apiCtx, {
-          owner,
           target: threadTarget({
             threadId: state.threadId,
             expectedHeadEntryId: idle.headEntryId,
@@ -1105,10 +1095,10 @@ async function createActiveTaskFixture(apiCtx, stamp) {
         })
         await mock.waitForChildRequest()
       },
-      dispose: () => cleanupActiveTaskFixture(state),
+      dispose: () => cleanupWorkspaceFixtureState(state),
     }
   } catch (error) {
-    await cleanupActiveTaskFixture(state).catch(() => undefined)
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
   }
 }
@@ -1260,63 +1250,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     await rm(state.fixtureDir, { recursive: true, force: true }).catch(() => undefined)
     await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
-  }
-}
-
-async function cleanupActiveTaskFixture(state) {
-  const errors = []
-  await cleanup('stop parent task thread', errors, async () => {
-    if (!state.threadId) return
-    await stopThreadForCleanup(state.apiCtx, state.threadId)
-  })
-  await cleanup('task mock', errors, () => state.mock.close())
-  await cleanup('task chat', errors, async () => {
-    if (state.chat?.id) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
-      )
-    }
-  })
-  for (const [label, agent] of [
-    ['task parent', state.parentAgent],
-    ['task child', state.childAgent],
-  ]) {
-    await cleanup(label, errors, async () => {
-      if (agent?.name) {
-        await state.apiCtx.call(
-          'DELETE',
-          `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
-        )
-      }
-    })
-  }
-  await cleanup('task model', errors, async () => {
-    if (state.model?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
-      )
-    }
-  })
-  await cleanup('task provider', errors, async () => {
-    if (state.provider?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
-      )
-    }
-  })
-  if (errors.length > 0) {
-    throw new Error(`Task fixture cleanup failed: ${errors.join('; ')}`)
-  }
-}
-
-async function cleanup(label, errors, action) {
-  try {
-    await action()
-  } catch (error) {
-    errors.push(`${label}: ${error?.message || String(error)}`)
   }
 }
 
