@@ -13,8 +13,8 @@ Git 或编译工具。发行归档另含 code-server 及其 Node 运行时，供
 ## 前置条件与平台
 
 主机需要 **Bash** 与对应平台的服务管理工具。安装器与 Daemon 都不自动安装语言服务器或包管理器；
-LSP client 已内嵌在 Daemon 发行中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
-用户与 Agent 才应取得 Environment 的宿主权限。
+LSP client 已内嵌在 Daemon 发行中。只有可信的用户与 Agent 才应取得 Environment 的宿主权限；
+Studio 对外入口的 TLS 与访问控制见[部署与运行](deployment.md)。
 
 | 平台 | 额外条件 | 每张卡片的常驻方式 |
 | --- | --- | --- |

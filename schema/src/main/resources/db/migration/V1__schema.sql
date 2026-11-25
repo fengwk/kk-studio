@@ -202,10 +202,6 @@ comment on column login_session.created_at is 'Session creation time (timestampt
 comment on column login_session.expires_at is 'Session expiration time.';
 comment on index idx_login_session_user is 'Lookup sessions by owning account.';
 
--- Precomputed Spring Security PBKDF2 hash for the built-in kkstudio bootstrap credential.
-insert into studio_user(id, username, password_hash, role)
-values ('00000000-0000-0000-0000-000000000001', 'kkstudio', '{pbkdf2}473d0449576a25f739f57765f5b5d4ddd346ec503ad602aeab8da49810d4c61f460d54a08e070b1552a60ccab0285830', 'ADMIN');
-
 create table environment (
     id                  uuid          primary key,
     name                varchar(64)   not null,

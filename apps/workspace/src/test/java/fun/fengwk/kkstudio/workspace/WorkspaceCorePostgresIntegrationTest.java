@@ -244,7 +244,7 @@ class WorkspaceCorePostgresIntegrationTest {
     jdbc.sql(
             """
             insert into studio_user (id, username, role, password_hash)
-            select :id, :username, 'USER', password_hash from studio_user where username = 'kkstudio'
+            values (:id, :username, 'USER', '{noop}workspace-test-password')
             """)
         .param("id", id)
         .param("username", username)

@@ -106,6 +106,7 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjecti
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
+import fun.fengwk.kkstudio.web.WebAccountTestFixture;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.workspace.ChatSpaceService;
 
@@ -260,7 +261,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   /** HTTP lists and WebSocket hints share user visibility, including archived spaces. */
   @Test
   void interactionListsAndHintsAreIsolatedByUser() throws Exception {
-    var admin = accounts.login("kkstudio", "kkstudio");
+    var admin =
+        accounts.login(WebAccountTestFixture.ADMIN_USERNAME, WebAccountTestFixture.ADMIN_PASSWORD);
     accounts.create("interaction-viewer", "workspace-interaction-test", StudioRole.USER);
     var viewer = accounts.login("interaction-viewer", "workspace-interaction-test");
     var own = seedStandaloneRoot(false, "{}", true, true, false);

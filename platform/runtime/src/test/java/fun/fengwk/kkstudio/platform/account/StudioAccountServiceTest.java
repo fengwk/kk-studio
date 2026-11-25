@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -124,6 +126,46 @@ class StudioAccountServiceTest {
 
     verify(repository).save(eq(USER_ID), eq("alice"), anyString(), eq(StudioRole.USER), eq(true));
     verify(repository).deleteSessionsExcept(eq(USER_ID), any(byte[].class));
+  }
+
+  @Test
+  void bootstrapChecksStateUnderTheLockAndPersistsOnlyTheHash() {
+    // The account state must not be read before acquiring the same lock as account edits.
+    String password = "approved-bootstrap-password";
+    service.bootstrapAdmin(password);
+
+    var ordered = inOrder(repository);
+    ordered.verify(repository).lockAdminMutations();
+    ordered.verify(repository).countEnabledAdmins();
+    ordered.verify(repository).hasUsers();
+    ordered
+        .verify(repository)
+        .create(
+            any(),
+            eq("kkstudio"),
+            argThat(hash -> hasher.matches(password, hash)),
+            eq(StudioRole.ADMIN));
+  }
+
+  @Test
+  void bootstrapRejectsMissingAndInvalidPasswordsWithoutWriting() {
+    // The normal password bounds also apply to the operator-supplied bootstrap value.
+    assertThrows(IllegalStateException.class, () -> service.bootstrapAdmin(null));
+    for (String password : List.of("short", " ".repeat(8), "a".repeat(129), "kkstudio")) {
+      assertThrows(IllegalStateException.class, () -> service.bootstrapAdmin(password));
+    }
+    verify(repository, never()).create(any(), anyString(), anyString(), any());
+  }
+
+  @Test
+  void bootstrapNeverModifiesAnExistingAccountStore() {
+    // A nonempty store without an enabled admin is not a fresh installation.
+    when(repository.hasUsers()).thenReturn(true);
+    assertThrows(IllegalStateException.class, () -> service.bootstrapAdmin("unused-password"));
+    when(repository.countEnabledAdmins()).thenReturn(1L);
+    service.bootstrapAdmin("unused-password");
+    verify(repository, never()).create(any(), anyString(), anyString(), any());
+    verify(repository, never()).save(any(), anyString(), anyString(), any(), any());
   }
 
   @Test

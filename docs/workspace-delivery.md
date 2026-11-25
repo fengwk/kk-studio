@@ -86,4 +86,4 @@
 2. **执行与资源。** 在同一授权边界内补物理事务锁序、统一树查询、批量执行事实、切点分支、深删除和回收。验收 Stop 并发、压缩切点、共享历史、复制附件及旧 Worker 失权；在工作区投影前确认运行中与等待并存时的显示优先级。
 3. **接入窗格。** 将 Thread、Canvas、IDE 接入新壳。验证 1440、1024、390、320px 下的布局、统一打开、草稿和焦点，目检关键截图。新入口通过验收后，删除旧路由、旧壳、对应契约及专用组件。
 4. **定时与回归。** 在隔离 PostgreSQL 验证双 Worker、过期跳过、夏令时、幂等、账号禁用竞态及执行记录分页。启用账号后任务保持暂停；删 Thread 不删执行记录。Project 用例退役；其余用例按新工作区契约更新，[HTTP 助手](../scripts/dev/verify/e2e/lib/http.mjs)与 WebSocket 带相应 Cookie 和 Origin。
-5. **交付。** 更新[生成契约](../scripts/dev/verify/generated-contracts/write.sh)、[导航](README.md)及受影响的模块和[部署文档](operations/deployment.md)。从隔离新卷初始化，保留旧库备份并复核配置导入；首次部署在修改初始密码后再开放。正式开发使用独占 worktree，按授权集成。Daemon 核对与项目版本匹配的 CI、发行件和校验文件。
+5. **交付。** 更新[生成契约](../scripts/dev/verify/generated-contracts/write.sh)、[导航](README.md)及受影响的模块和[部署文档](operations/deployment.md)。从隔离新卷初始化，保留旧库备份并复核配置导入；生产首次启动通过 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD` 创建管理员，完成 TLS 与访问控制验收后再对外开放。正式开发使用独占 worktree，按授权集成。Daemon 核对与项目版本匹配的 CI、发行件和校验文件。

@@ -1,10 +1,13 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -20,6 +23,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,42 +35,95 @@ import java.util.stream.Collectors;
 
 /** 只走生产入口：一次性 PostgreSQL 17 与私有 MinIO，不发起任何上游调用。 */
 class WebApplicationStartupSubprocessTest {
+  private static final String PASSWORD_ENV = "KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD";
+
   @TempDir Path temp;
 
   @Test
-  void currentEmptyDatabaseStartsAndServesCatalog() throws Exception {
-    try (PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+  void bootstrapPasswordIsRequiredAndSharedAcrossConcurrentStartsWithoutOverwriting()
+      throws Exception {
+    try (PostgreSQLContainer postgres =
+            new PostgreSQLContainer("postgres:17-alpine")
+                .withPassword(UUID.randomUUID().toString());
         StartupMinioFixture minio = StartupMinioFixture.start()) {
       postgres.start();
-      try (Entry entry = start(postgres, minio)) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
-        boolean ready = false;
-        while (System.nanoTime() < deadline) {
-          assertTrue(entry.process.isAlive(), "production entry exited before readiness");
-          try {
-            var response = entry.get("/actuator/health");
-            ready = response.statusCode() == 200 && response.body().contains("\"status\":\"UP\"");
-            if (ready) {
-              break;
-            }
-          } catch (IOException notReady) {
-            // Connection refusal before the server binds is expected.
-          }
-          Thread.sleep(500);
-        }
-        assertTrue(ready, "production entry readiness timed out");
-        // 用空库 V1 自带的管理员登录，验证迁移、会话签发和受保护的目录读取。
-        assertEquals(401, entry.get("/api/platform/models").statusCode());
-        String cookie = entry.loginAsBootstrapAdmin();
-        var models =
-            entry.send(entry.request("/api/platform/models").header("Cookie", cookie).GET());
-        assertEquals(200, models.statusCode());
-        assertTrue(JsonMapper.builder().build().readTree(models.body()).isArray());
+      try (Entry mixed = start(postgres, minio, "prod,dev", null)) {
+        mixed.awaitRejection("The prod profile cannot be combined");
+      }
+      assertRejected(postgres, minio, null);
+      assertRejected(postgres, minio, "kkstudio");
+      assertEquals(0, adminCount(postgres));
+
+      String approvedPassword = "test-bootstrap-" + UUID.randomUUID();
+      // Start both nodes before waiting for readiness against the same empty account table.
+      try (Entry first = start(postgres, minio, approvedPassword);
+          Entry second = start(postgres, minio, approvedPassword)) {
+        first.awaitReady();
+        second.awaitReady();
+        assertEquals(401, first.get("/api/platform/models").statusCode());
+        first.loginAsBootstrapAdmin(approvedPassword);
+        second.loginAsBootstrapAdmin(approvedPassword);
+        assertEquals(1, adminCount(postgres));
+        assertFalse(first.startupOutput().contains(approvedPassword));
+        assertFalse(second.startupOutput().contains(approvedPassword));
+      }
+
+      try (Entry restarted = start(postgres, minio, null)) {
+        restarted.awaitReady();
+        restarted.loginAsBootstrapAdmin(approvedPassword);
+        assertEquals(1, adminCount(postgres));
       }
     }
   }
 
-  private Entry start(PostgreSQLContainer postgres, StartupMinioFixture minio) throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"dev", "e2e", "dev,canvas-test"})
+  void disposableProfilesKeepTheirExplicitLoginFixture(String profiles) throws Exception {
+    try (PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+        StartupMinioFixture minio = StartupMinioFixture.start()) {
+      postgres.start();
+      try (Entry entry = start(postgres, minio, profiles, null)) {
+        entry.awaitReady();
+        entry.loginAsBootstrapAdmin("kkstudio");
+      }
+    }
+  }
+
+  private void assertRejected(
+      PostgreSQLContainer postgres, StartupMinioFixture minio, String password) throws Exception {
+    try (Entry entry = start(postgres, minio, password)) {
+      String output = entry.awaitRejection(PASSWORD_ENV);
+      assertFalse(
+          output.contains(postgres.getPassword()),
+          "startup output must not expose database credentials");
+      assertTrue(
+          output.contains(
+              password == null
+                  ? "initialize the first Studio administrator"
+                  : "disposable test password"));
+    }
+  }
+
+  private long adminCount(PostgreSQLContainer postgres) throws Exception {
+    try (var connection =
+            DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        var statement = connection.createStatement();
+        var result =
+            statement.executeQuery("select count(*) from studio_user where role = 'ADMIN'")) {
+      assertTrue(result.next());
+      return result.getLong(1);
+    }
+  }
+
+  private Entry start(PostgreSQLContainer postgres, StartupMinioFixture minio, String password)
+      throws Exception {
+    return start(postgres, minio, "prod", password);
+  }
+
+  private Entry start(
+      PostgreSQLContainer postgres, StartupMinioFixture minio, String profiles, String password)
+      throws Exception {
     Path work = Files.createDirectory(temp.resolve(UUID.randomUUID().toString()));
     int port;
     try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
@@ -75,13 +132,14 @@ class WebApplicationStartupSubprocessTest {
     ProcessBuilder builder =
         new ProcessBuilder(
             command(
-                "--spring.profiles.active=prod",
+                "--spring.profiles.active=" + profiles,
                 "--server.address=127.0.0.1",
                 "--server.port=" + port,
                 "--kk-studio.harness.runtime.workers-enabled=false",
                 "--kk-studio.storage.maintenance.poll-delay=1h",
                 "--kk-studio.plugins.refresh.poll-delay=1h"));
-    cleanEnvironment(builder);
+    // Never pass through operator or test-runner secrets into the production subprocess.
+    builder.environment().clear();
     var env = builder.environment();
     env.put("KK_STUDIO_DB_URL", postgres.getJdbcUrl());
     env.put("KK_STUDIO_DB_USER", postgres.getUsername());
@@ -91,6 +149,9 @@ class WebApplicationStartupSubprocessTest {
     env.put("KK_STUDIO_STORAGE_S3_BUCKET", minio.bucket());
     env.put("KK_STUDIO_STORAGE_S3_ACCESS_KEY", minio.accessKey());
     env.put("KK_STUDIO_STORAGE_S3_SECRET_KEY", minio.secretKey());
+    if (password != null) {
+      env.put(PASSWORD_ENV, password);
+    }
     Path log = work.resolve("startup.log");
     Process process =
         builder
@@ -138,12 +199,6 @@ class WebApplicationStartupSubprocessTest {
     return command;
   }
 
-  private static void cleanEnvironment(ProcessBuilder builder) {
-    for (String name : List.of("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS")) {
-      builder.environment().remove(name);
-    }
-  }
-
   private static void stop(Process process) {
     if (process.isAlive()) {
       process.destroyForcibly();
@@ -179,7 +234,38 @@ class WebApplicationStartupSubprocessTest {
       this.log = log;
     }
 
-    String loginAsBootstrapAdmin() throws Exception {
+    void awaitReady() throws Exception {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+      while (System.nanoTime() < deadline) {
+        assertTrue(process.isAlive(), "production entry exited before readiness");
+        try {
+          var response = get("/actuator/health");
+          if (response.statusCode() == 200 && response.body().contains("\"status\":\"UP\"")) {
+            return;
+          }
+        } catch (IOException notReady) {
+          // Connection refusal before the server binds is expected.
+        }
+        Thread.sleep(500);
+      }
+      throw new AssertionError("production entry readiness timed out");
+    }
+
+    String awaitRejection(String expectedDiagnostic) throws Exception {
+      assertTrue(process.waitFor(45, TimeUnit.SECONDS), "invalid startup configuration must exit");
+      assertFalse(process.exitValue() == 0, "invalid startup configuration must be rejected");
+      String output = startupOutput();
+      assertTrue(output.contains(expectedDiagnostic), "expected diagnostic: " + expectedDiagnostic);
+      return output;
+    }
+
+    String startupOutput() throws IOException {
+      Path applicationLog = log.resolveSibling("logs").resolve("kk-studio-all.log");
+      return Files.readString(log)
+          + (Files.exists(applicationLog) ? Files.readString(applicationLog) : "");
+    }
+
+    void loginAsBootstrapAdmin(String password) throws Exception {
       var login =
           send(
               request("/api/auth/login")
@@ -187,13 +273,17 @@ class WebApplicationStartupSubprocessTest {
                   .header("Content-Type", "application/json")
                   .POST(
                       HttpRequest.BodyPublishers.ofString(
-                          "{\"username\":\"kkstudio\",\"password\":\"kkstudio\"}")));
+                          "{\"username\":\"kkstudio\",\"password\":\"" + password + "\"}")));
       assertEquals(200, login.statusCode());
-      return login.headers().allValues("Set-Cookie").stream()
-          .map(value -> value.split(";", 2)[0])
-          .filter(value -> value.startsWith(StudioBrowserSession.COOKIE + "="))
-          .findFirst()
-          .orElseThrow();
+      String cookie =
+          login.headers().allValues("Set-Cookie").stream()
+              .map(value -> value.split(";", 2)[0])
+              .filter(value -> value.startsWith(StudioBrowserSession.COOKIE + "="))
+              .findFirst()
+              .orElseThrow();
+      var models = send(request("/api/platform/models").header("Cookie", cookie).GET());
+      assertEquals(200, models.statusCode());
+      assertTrue(JsonMapper.builder().build().readTree(models.body()).isArray());
     }
 
     String origin() {
@@ -212,6 +302,7 @@ class WebApplicationStartupSubprocessTest {
       return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
+    @Override
     public void close() throws Exception {
       try {
         http.shutdownNow();
