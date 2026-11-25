@@ -25,6 +25,7 @@ interface SelectProps {
   compact?: boolean
   touch?: boolean
   className?: string
+  title?: string
   'aria-label'?: string
   'aria-describedby'?: string
   'aria-invalid'?: boolean
@@ -49,6 +50,7 @@ export function Select({
   compact = false,
   touch = false,
   className,
+  title,
   'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy,
   'aria-invalid': ariaInvalid,
@@ -67,8 +69,9 @@ export function Select({
     options.findIndex((option) => option.value === value && !option.disabled),
   )
   const selected = options.find((option) => option.value === value)
+  const fullLabel = selected?.label ?? placeholder ?? t('shared.selectPlaceholder')
   const triggerText =
-    selected?.triggerLabel ?? selected?.label ?? placeholder ?? t('shared.selectPlaceholder')
+    selected?.triggerLabel ?? fullLabel
 
   const { open, activeIndex, modalTouchOptions, setActiveIndex, closeListbox, openListbox, selectValue, moveActive } =
     useSelectListbox({
@@ -161,6 +164,7 @@ export function Select({
         data-ui-focus="control"
         data-touch={touch || undefined}
         disabled={disabled}
+        title={title ?? fullLabel}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
         aria-haspopup="listbox"

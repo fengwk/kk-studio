@@ -21,6 +21,7 @@ import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 const OPTIONS = [
   { value: 'alpha', label: '选项 A' },
   { value: 'beta', label: '选项 B' },
+  { value: 'long', label: '这是一个用于验证共享下拉触发器单行省略号截断行为的非常长的选项文本 Alpha Bravo Charlie Delta' },
 ]
 
 /** 复刻真实表单的 .form-group 包裹（label + 控件），验证共享控件的样式隔离。 */
