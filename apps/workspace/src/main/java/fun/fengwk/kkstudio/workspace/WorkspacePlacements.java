@@ -81,6 +81,17 @@ class WorkspacePlacements {
             });
   }
 
+  UUID firstRootFolder(UUID space) {
+    return jdbc.sql(
+            """
+        select id from workspace_folder where workspace_id = :space and parent_id is null
+        order by position limit 1
+        """)
+        .param("space", space)
+        .query(UUID.class)
+        .single();
+  }
+
   void requireFolder(UUID space, UUID folder) {
     if (folder == null
         || jdbc.sql("select id from workspace_folder where workspace_id = :space and id = :folder")
