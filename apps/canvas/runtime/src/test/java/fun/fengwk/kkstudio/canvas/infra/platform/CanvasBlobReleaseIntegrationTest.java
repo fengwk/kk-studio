@@ -3,7 +3,11 @@ package fun.fengwk.kkstudio.canvas.infra.platform;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -23,6 +27,7 @@ import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
@@ -52,12 +57,22 @@ import java.util.UUID;
 class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
 
   private static final CanvasTransform TRANSFORM = new CanvasTransform(10, 20, 100, 80);
+  private static final UUID USER_ID = UUID.randomUUID();
 
   @Autowired private CanvasCommandService commandService;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ApplicationContext context;
   @Autowired private TransactionalCanvasCaller transactionalCaller;
   @MockitoBean private StorageMaintenance storageBlobSweeper;
+  @MockitoBean private CanvasUploadOwnership uploadOwnership;
+
+  @BeforeEach
+  void configureReadyUploadFixture() {
+    when(uploadOwnership.lockReady(any(UUID.class), eq(USER_ID)))
+        .thenAnswer(
+            invocation ->
+                new CanvasUploadOwnership.ReadyUpload(invocation.getArgument(0), "stored.png"));
+  }
 
   @MockitoBean(name = "canvasFunctionDispatcher")
   private BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher;
@@ -292,7 +307,8 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   /** 创建和删除必须被接受；若返回冲突，类型断言立即失败。 */
   private long apply(CanvasDocument canvas, CanvasCommand... commands) {
     CanvasCommandResult result =
-        commandService.applyCommands(canvas.id(), UUID.randomUUID(), List.of(commands));
+        commandService.applyCommandsFromUploads(
+            canvas.id(), UUID.randomUUID(), List.of(commands), USER_ID);
     return assertInstanceOf(CanvasCommandResult.Accepted.class, result).patch().revision();
   }
 

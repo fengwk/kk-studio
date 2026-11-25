@@ -152,16 +152,6 @@ public class CanvasCommandService {
     canvasStore.deleteDocument(canvasId);
   }
 
-  @Transactional
-  public CanvasCommandResult applyCommands(
-      UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands) {
-    Objects.requireNonNull(canvasId, "canvasId");
-    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-    Objects.requireNonNull(commands, "commands");
-    return applyCommandsWithHash(
-        canvasId, idempotencyKey, commands, CanvasCommandHash.of(commands), null);
-  }
-
   private CanvasCommandResult applyCommandsWithHash(
       UUID canvasId,
       UUID idempotencyKey,

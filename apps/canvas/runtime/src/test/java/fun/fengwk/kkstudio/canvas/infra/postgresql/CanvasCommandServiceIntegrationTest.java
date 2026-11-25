@@ -8,9 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
@@ -26,6 +31,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -41,9 +47,19 @@ import java.util.UUID;
 class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
 
   private static final CanvasTransform TRANSFORM = new CanvasTransform(0, 0, 10, 10);
+  private static final UUID USER_ID = UUID.randomUUID();
 
   @Autowired private CanvasCommandService commandService;
   @Autowired private CanvasQueryService queryService;
+  @MockitoBean private CanvasUploadOwnership uploadOwnership;
+
+  @BeforeEach
+  void configureReadyUploadFixture() {
+    when(uploadOwnership.lockReady(any(UUID.class), eq(USER_ID)))
+        .thenAnswer(
+            invocation ->
+                new CanvasUploadOwnership.ReadyUpload(invocation.getArgument(0), "image.png"));
+  }
 
   /** 画布创建只接受可显示标题，revision 从 0 开始。 */
   @Test
@@ -158,10 +174,12 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
     UUID idempotencyKey = UUID.randomUUID();
     Accepted first =
         assertInstanceOf(
-            Accepted.class, commandService.applyCommands(canvasId, idempotencyKey, commands));
+            Accepted.class,
+            commandService.applyCommandsFromUploads(canvasId, idempotencyKey, commands, USER_ID));
     Accepted replay =
         assertInstanceOf(
-            Accepted.class, commandService.applyCommands(canvasId, idempotencyKey, commands));
+            Accepted.class,
+            commandService.applyCommandsFromUploads(canvasId, idempotencyKey, commands, USER_ID));
     assertEquals(first.patch(), replay.patch());
     assertEquals(0L, replay.patch().revision());
     assertTrue(replay.patch().isEmpty());
@@ -409,12 +427,13 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   }
 
   private CanvasCommandResult apply(UUID canvasId, List<CanvasCommand> commands) {
-    return commandService.applyCommands(canvasId, UUID.randomUUID(), commands);
+    return commandService.applyCommandsFromUploads(
+        canvasId, UUID.randomUUID(), commands, USER_ID);
   }
 
   private CanvasCommandResult apply(
       UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands) {
-    return commandService.applyCommands(canvasId, idempotencyKey, commands);
+    return commandService.applyCommandsFromUploads(canvasId, idempotencyKey, commands, USER_ID);
   }
 
   private CanvasSnapshot findSnapshot(UUID canvasId) {

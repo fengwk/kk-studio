@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestSupport {
 
   private static final CanvasTransform TRANSFORM = new CanvasTransform(0, 0, 10, 10);
+  private static final UUID USER_ID = UUID.randomUUID();
 
   @Autowired private CanvasCommandService commandService;
 
@@ -132,7 +133,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
       UUID nodeId = UUID.randomUUID();
       assertInstanceOf(
           Accepted.class,
-          commandService.applyCommands(
+          commandService.applyCommandsFromUploads(
               canvasId,
               UUID.randomUUID(),
               List.of(
@@ -140,15 +141,17 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
                       nodeId,
                       "node",
                       TRANSFORM,
-                      List.of(new CanvasResourceInput.Text("text", "body"))))));
+                      List.of(new CanvasResourceInput.Text("text", "body")))),
+              USER_ID);
       assertRevisionNotification(listener, canvasId + ":1");
 
       assertInstanceOf(
           Accepted.class,
-          commandService.applyCommands(
+          commandService.applyCommandsFromUploads(
               canvasId,
               UUID.randomUUID(),
-              List.of(new CanvasCommand.RenameNode(nodeId, "node", "node"))));
+              List.of(new CanvasCommand.RenameNode(nodeId, "node", "node")),
+              USER_ID));
       assertNoNotification(listener);
     }
   }
