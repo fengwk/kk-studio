@@ -38,7 +38,7 @@ test('the Thread reload regression is registered once and needs only the free UI
   // Enumerate real registrations without running browser callbacks or duplicating the UI inventory.
   await runComposerMatrix({
     run(id, _title, _case, options) {
-      if (id === 'ui.chat.thread_snapshot_reload') registrations.push(options)
+      if (id === 'ui.workspace.thread.snapshot_reload') registrations.push(options)
     },
   })
   assert.equal(registrations.length, 1)
