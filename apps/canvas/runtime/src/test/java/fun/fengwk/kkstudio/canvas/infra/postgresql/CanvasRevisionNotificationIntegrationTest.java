@@ -125,7 +125,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   @Test
   void commandServiceNotifiesOnCreateAndRealRevisionChange() throws Exception {
     try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
-      CanvasDocument document = commandService.createCanvas("canvas");
+      CanvasDocument document = commandService.createCanvas(UUID.randomUUID(), "canvas");
       UUID canvasId = document.id();
       assertRevisionNotification(listener, canvasId + ":0");
 

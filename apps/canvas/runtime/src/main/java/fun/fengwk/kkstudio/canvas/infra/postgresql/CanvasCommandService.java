@@ -64,7 +64,17 @@ public class CanvasCommandService {
 
   /** 创建文档并返回初始 revision；加入调用方事务。 */
   @Transactional
-  public CanvasDocument createCanvas(String title) {
+  public CanvasDocument createCanvas(UUID canvasId, String title) {
+    return canvasStore.addDocument(
+        Objects.requireNonNull(canvasId, "canvasId"), validateTitle(title));
+  }
+
+  @Transactional
+  public void renameCanvas(UUID canvasId, String title) {
+    canvasStore.renameDocument(canvasId, validateTitle(title));
+  }
+
+  private static String validateTitle(String title) {
     if (title == null) {
       throw DomainException.validation("title", "title must not be null");
     }
@@ -81,7 +91,7 @@ public class CanvasCommandService {
         throw DomainException.validation("title", "title must not contain control characters");
       }
     }
-    return canvasStore.addDocument(UUID.randomUUID(), validated);
+    return validated;
   }
 
   /** 在调用方事务中深删画布；归属目录由调用方维护。 */

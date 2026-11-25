@@ -60,6 +60,7 @@ final class SessionDeletion {
   static void deleteThread(
       HarnessStore.Transaction tx,
       UUID rootId,
+      Long expectedVersion,
       EntryCleanup cleanup,
       DriverThreadDeletion driverDeletion) {
     DeletionScope scope = discoverTree(tx, rootId);
@@ -73,6 +74,21 @@ final class SessionDeletion {
           "harness execution tree changed while acquiring its deletion locks");
     }
     List<UUID> locked = lockSettledThreads(tx, confirmed.threads());
+    if (expectedVersion != null) {
+      ThreadState target = tx.threads().find(rootId).orElseThrow();
+      if (target.version() != expectedVersion) {
+        throw DomainException.versionConflict("thread", expectedVersion, target.version());
+      }
+      if (tx.threads().listBySession(target.sessionId()).stream()
+          .noneMatch(
+              t ->
+                  !rootId.equals(t.id())
+                      && t.kind() == ThreadKind.USER
+                      && t.parentThreadId() == null)) {
+        throw DomainException.conflict(
+            "RESOURCE_IN_USE", "Delete the session to delete its last public thread");
+      }
+    }
     deleteThreadsDeep(tx, locked, driverDeletion);
     for (UUID sessionId : confirmed.sessions()) {
       collectHistory(tx, sessionId, cleanup);

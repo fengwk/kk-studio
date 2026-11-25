@@ -79,6 +79,12 @@ public class DomainException extends RuntimeException {
         DomainErrorCode.NOT_FOUND, resource, null, resource + " not found", null, null, null, null);
   }
 
+  public static DomainException notFoundReason(String reason, String message) {
+    validateReason(reason);
+    return new DomainException(
+        DomainErrorCode.NOT_FOUND, null, reason, message, null, null, null, null);
+  }
+
   /** 引用的资源不存在，并携带自定义消息。 */
   public static DomainException notFound(String resource, String message) {
     return new DomainException(

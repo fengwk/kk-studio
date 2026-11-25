@@ -8,8 +8,10 @@ import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -48,9 +50,16 @@ public class PostgresqlCanvasStore {
     CanvasDocumentDO document = new CanvasDocumentDO();
     document.setId(canvasId);
     document.setTitle(title);
-    documentStore.insert(document);
-    CanvasDocumentDO persisted = documentStore.findById(canvasId).orElseThrow();
-    notifier.revisionChanged(canvasId, persisted.getRevision());
+    boolean inserted = documentStore.insert(document) == 1;
+    CanvasDocumentDO persisted =
+        documentStore.findById(canvasId).orElseThrow(() -> DomainException.notFound("canvas"));
+    if (!inserted && !title.equals(persisted.getTitle())) {
+      throw DomainException.conflict(
+          "IDEMPOTENCY_KEY_REUSED", "Canvas identity already has another title");
+    }
+    if (inserted) {
+      notifier.revisionChanged(canvasId, persisted.getRevision());
+    }
     return toDomain(persisted);
   }
 
@@ -76,6 +85,16 @@ public class PostgresqlCanvasStore {
         .findCanvasId(nodeId)
         .flatMap(this::lockDocument)
         .filter(document -> lockNode(document.id(), nodeId).isPresent());
+  }
+
+  public List<CanvasDocument> findDocuments(Collection<UUID> ids) {
+    return documentStore.findByIds(ids).stream().map(PostgresqlCanvasStore::toDomain).toList();
+  }
+
+  void renameDocument(UUID canvasId, String title) {
+    if (documentStore.rename(canvasId, title) == 0) {
+      throw DomainException.notFound("canvas");
+    }
   }
 
   public List<CanvasDocument> listDocuments() {

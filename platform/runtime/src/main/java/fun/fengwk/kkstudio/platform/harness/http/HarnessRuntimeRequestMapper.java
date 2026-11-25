@@ -290,7 +290,8 @@ public final class HarnessRuntimeRequestMapper {
         () ->
             switch (dto) {
               case HarnessCommandCreateDTO.UserMessageDTO command -> new UserMessageCommandPayload(
-                  new AgentMessage(AgentMessageRole.USER, toUserMessageContents(command)));
+                  new AgentMessage(
+                      AgentMessageRole.USER, toUserMessageContents(command.contents())));
               case HarnessCommandCreateDTO.SetExecutionDTO
               command -> new SetExecutionCommandPayload(
                   toExecutionSelection(requireNonNull(command.execution(), "command.execution")));
@@ -358,9 +359,9 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  private static List<AgentMessageContent> toUserMessageContents(
-      HarnessCommandCreateDTO.UserMessageDTO command) {
-    List<HarnessUserMessageContentDTO> required = requireList(command.contents(), "contents");
+  public static List<AgentMessageContent> toUserMessageContents(
+      List<HarnessUserMessageContentDTO> contents) {
+    List<HarnessUserMessageContentDTO> required = requireList(contents, "contents");
     if (required.isEmpty()) {
       throw DomainException.validation("request", "contents must not be empty");
     }

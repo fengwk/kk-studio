@@ -272,11 +272,15 @@ public final class HarnessRuntime {
 
   /** 深删一个已结算的执行根及其后代，并在同一事务回收不可达历史。 */
   public void deleteThread(UUID rootThreadId, EntryCleanup cleanup) {
+    deleteThread(rootThreadId, null, cleanup);
+  }
+
+  public void deleteThread(UUID rootThreadId, Long expectedVersion, EntryCleanup cleanup) {
     Objects.requireNonNull(rootThreadId, "rootThreadId");
     Objects.requireNonNull(cleanup, "cleanup");
     store.transaction(
         tx -> {
-          SessionDeletion.deleteThread(tx, rootThreadId, cleanup, driverRegistry);
+          SessionDeletion.deleteThread(tx, rootThreadId, expectedVersion, cleanup, driverRegistry);
           return null;
         });
   }
@@ -345,9 +349,22 @@ public final class HarnessRuntime {
    * HarnessStore.Transaction#updateThread} 的既有行迁移/校验路径。不接收 expectedVersion：并发重命名为 last-commit-wins。
    */
   public ThreadState renameThread(RenameThreadCommand command) {
+    return renameThread(command, null);
+  }
+
+  public ThreadState renameThread(RenameThreadCommand command, Long expectedVersion) {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          if (expectedVersion != null) {
+            var found =
+                tx.threads()
+                    .find(command.threadId())
+                    .orElseThrow(() -> DomainException.notFound("thread"));
+            tx.sessions()
+                .lockForUpdate(found.sessionId())
+                .orElseThrow(() -> DomainException.notFound("session"));
+          }
           ThreadState thread =
               tx.threads()
                   .lock(command.threadId())
@@ -355,6 +372,9 @@ public final class HarnessRuntime {
                       () ->
                           DomainException.notFound(
                               "thread", "thread " + command.threadId() + " does not exist"));
+          if (expectedVersion != null && thread.version() != expectedVersion) {
+            throw DomainException.versionConflict("thread", expectedVersion, thread.version());
+          }
           if (thread.name().equals(command.name())) {
             return thread;
           }

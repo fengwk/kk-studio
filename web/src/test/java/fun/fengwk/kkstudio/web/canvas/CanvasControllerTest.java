@@ -209,7 +209,7 @@ class CanvasControllerTest {
                             null)),
                     List.of(),
                     List.of())));
-    when(commandService.createCanvas(any())).thenReturn(document());
+    when(commandService.createCanvas(any(UUID.class), any())).thenReturn(document());
 
     mockMvc
         .perform(get("/api/canvas/canvases/" + CANVAS))
@@ -231,7 +231,7 @@ class CanvasControllerTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.revision").value("3"))
         .andExpect(jsonPath("$.id").value(CANVAS.toString()));
-    verify(commandService).createCanvas("board");
+    verify(commandService).createCanvas(any(UUID.class), eq("board"));
 
     // 边界只保证 title 必填；空白与超长标题是领域规则，由真实服务拒绝。
     mockMvc
@@ -243,7 +243,7 @@ class CanvasControllerTest {
     mockMvc
         .perform(post("/api/canvas/canvases").contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isBadRequest());
-    verify(commandService, times(1)).createCanvas("board");
+    verify(commandService, times(1)).createCanvas(any(UUID.class), eq("board"));
   }
 
   /** 测试意图：11 种 typed command 直映射为领域命令，前置条件是各语义组的编辑起点旧值。 */

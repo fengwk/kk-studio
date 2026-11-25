@@ -48,21 +48,21 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 画布创建只接受可显示标题，revision 从 0 开始。 */
   @Test
   void createCanvasValidatesAndNormalizesTitle() {
-    CanvasDocument document = commandService.createCanvas("  canvas  ");
+    CanvasDocument document = commandService.createCanvas(UUID.randomUUID(), "  canvas  ");
     assertEquals("canvas", document.title());
     assertEquals(0L, document.revision());
     assertEquals(document, canvasStore.findDocument(document.id()).orElseThrow());
 
-    assertValidation(() -> commandService.createCanvas(null));
-    assertValidation(() -> commandService.createCanvas("   "));
-    assertValidation(() -> commandService.createCanvas("bad\nname"));
-    assertValidation(() -> commandService.createCanvas("x".repeat(257)));
+    assertValidation(() -> commandService.createCanvas(UUID.randomUUID(), null));
+    assertValidation(() -> commandService.createCanvas(UUID.randomUUID(), "   "));
+    assertValidation(() -> commandService.createCanvas(UUID.randomUUID(), "bad\nname"));
+    assertValidation(() -> commandService.createCanvas(UUID.randomUUID(), "x".repeat(257)));
   }
 
   /** 多命令批要么整体提交、要么整体不提交：接受后所有行与 revision 同时可见，patch 携带完整变化集。 */
   @Test
   void acceptedBatchCommitsEveryRowAndAdvancesRevisionOnce() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     UUID nodeId = UUID.randomUUID();
     UUID groupId = UUID.randomUUID();
 
@@ -98,7 +98,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 不同节点、同节点不同语义组互不覆盖：两个基于同一编辑基线的批都成功；同语义组的过期批返回服务端权威值且不写入任何行。 */
   @Test
   void perGroupBaselinesRejectOnlyTheStaleGroup() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture first = addTextNode(canvasId, "first");
     NodeFixture second = addTextNode(canvasId, "second");
 
@@ -140,7 +140,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 无变化的批不推进 revision，但仍记录接受位置；相同请求重放只返回当时的接受位置。 */
   @Test
   void noOpBatchAndExactReplayReturnRecordedRevision() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture node = addTextNode(canvasId, "body");
     List<CanvasCommand> commands =
         List.of(
@@ -170,7 +170,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 相同幂等键绑定不同请求指纹时必须拒绝，且不写入任何行。 */
   @Test
   void idempotencyKeyBoundToAnotherRequestIsRejected() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture node = addTextNode(canvasId, "body");
     UUID idempotencyKey = UUID.randomUUID();
     apply(
@@ -218,7 +218,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 文本编辑创建新的不可变内容行：旧行删除、新行占据原槽位，之前的资源 id 不再可见。 */
   @Test
   void textEditReplacesResourceRow() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture node = addTextNode(canvasId, "before");
 
     Accepted accepted =
@@ -245,7 +245,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 媒体资源被替换时行与 Blob 引用一起回收：行删除与 ref_count 递减同事务。 */
   @Test
   void replacingBlobResourceReleasesBlobReference() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     UUID blobId = addBlob();
     UUID nodeId = UUID.randomUUID();
     Accepted created =
@@ -288,7 +288,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 仍被 Run pin 的历史资源只解除挂接：行与内容保留，供冻结输入继续读取。 */
   @Test
   void pinnedResourceIsDetachedInsteadOfDeleted() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture node = addTextNode(canvasId, "pinned");
     canvasStore.updateNode(node.record(function()));
     UUID requestId = addPinnedRun(canvasId, node.nodeId, node.resourceId);
@@ -318,7 +318,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 删除被引用节点必须先显式解除引用；同一原子批内解除后可删除，并清理 Run 行与 pin。 */
   @Test
   void referencedNodeDeletionRequiresExplicitRelease() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture source = addTextNode(canvasId, "images");
     canvasStore.updateNode(source.record(function()));
     addPinnedRun(canvasId, source.nodeId, source.resourceId);
@@ -380,7 +380,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   /** 分组命令保持成员一致，删除分组要求成员基线与当前一致。 */
   @Test
   void groupDeletionRequiresMemberBaseline() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
+    UUID canvasId = commandService.createCanvas(UUID.randomUUID(), "canvas").id();
     NodeFixture node = addTextNode(canvasId, "body");
     UUID groupId = UUID.randomUUID();
     apply(
