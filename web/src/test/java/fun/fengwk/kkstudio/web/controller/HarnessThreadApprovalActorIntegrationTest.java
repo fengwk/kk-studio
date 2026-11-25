@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,9 +15,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+
+import java.util.UUID;
 
 /**
  * 公开 Tool approval 入口在真实 Spring MVC 与生产 Jackson 配置下的身份边界。
@@ -31,6 +38,7 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
   private static final String DECISION_ID = "00000000-0000-0000-0000-0000000000d1";
 
   @Autowired private MockMvc mockMvc;
+  @MockitoSpyBean private ResourceAccess access;
   private Cookie session;
 
   @BeforeEach
@@ -51,6 +59,7 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
   /** 意图：携带 {@code actor} 的审批请求在真实反序列化阶段即被 400 拒绝，并给出未知字段细节。 */
   @Test
   void forgedActorFieldIsRejectedAtTheHttpBoundary() throws Exception {
+    doNothing().when(access).requireThread(any(), eq(UUID.fromString(THREAD)));
     mockMvc
         .perform(
             put(approvalPath())
@@ -70,12 +79,9 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.detail").value("actor is not allowed"));
   }
 
-  /**
-   * 意图：不携带身份字段的合法形状请求必须通过反序列化并进入领域判定——这里目标 Thread 不存在，根归属解析在进入 Runtime 之前就以 {@code DomainException}
-   * 的 not-found 作答（404，detail 精确指出缺失 Thread），而不是在 wire 层被 400 拒绝，也不是被当作业务冲突。
-   */
+  /** 合法形状也必须通过归属准入；不存在的 Thread 返回统一的 404，不回显目标 ID。 */
   @Test
-  void actorlessBodyReachesDomainDecision() throws Exception {
+  void actorlessBodyStillRequiresAnAccessibleThread() throws Exception {
     mockMvc
         .perform(
             put(approvalPath())
@@ -90,7 +96,7 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.type").value("about:blank"))
-        .andExpect(jsonPath("$.detail").value("thread " + THREAD + " does not exist"));
+        .andExpect(jsonPath("$.reason").value("RESOURCE_NOT_FOUND"));
   }
 
   private static String approvalPath() {

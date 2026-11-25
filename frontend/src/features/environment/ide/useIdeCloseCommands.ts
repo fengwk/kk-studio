@@ -4,7 +4,12 @@ import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-brow
 import { ideFailureReason, isUnknownIdeFailure, safeIdeError } from '@/features/environment/ide/ide-failure'
 import { closeIdeView } from '@/features/environment/ide/environment-ide-service'
 import { isSameBinding, type IdeViewState } from '@/features/environment/ide/ide-view-state'
-import type { IdeCloseResult } from '@/features/environment/ide/IdeOverlayPanel'
+
+export interface IdeCloseResult {
+  ok: boolean
+  requiresForceConfirmation: boolean
+  message?: string
+}
 
 interface IdeViewCommandsOptions {
   viewsRef: RefObject<Record<string, IdeViewState>>
@@ -41,6 +46,15 @@ export function useIdeCloseCommands({
   async function closeView(viewId: string, discard: boolean): Promise<IdeCloseResult> {
     const view = viewsRef.current[viewId]
     if (view == null) {
+      return { ok: true, requiresForceConfirmation: false }
+    }
+    if (view.status === 'detached' || view.status === 'gone' || (view.status === 'waiting-ready'
+      && view.daemonInstanceId == null && view.pending == null)) {
+      const next = { ...viewsRef.current }
+      delete next[viewId]
+      commitViews(next)
+      writeSession()
+      registerUsageQuiet()
       return { ok: true, requiresForceConfirmation: false }
     }
     if (
@@ -84,6 +98,10 @@ export function useIdeCloseCommands({
         return { ok: false, requiresForceConfirmation: false, message: 'binding-changed' }
       }
       const reason = ideFailureReason(error)
+      if (reason === 'IDE_CLOSE_CANCELLED') {
+        updateView(viewId, view.attempt, { closeInFlight: false })
+        return { ok: false, requiresForceConfirmation: false }
+      }
       const outcomeUnknown = isUnknownIdeFailure(error) || reason === 'IDE_OUTCOME_UNKNOWN'
       const controlUnavailable = reason === 'IDE_CONTROL_UNAVAILABLE'
       const requiresForceConfirmation = !discard && (outcomeUnknown || controlUnavailable)

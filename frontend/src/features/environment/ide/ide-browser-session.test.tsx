@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useIdeBrowserSession } from '@/features/environment/ide/ide-browser-session'
-import type { IdeTabLoadResult } from '@/features/environment/ide/ide-tab-state'
+import type { IdeSessionLoadResult } from '@/features/environment/ide/ide-session-state'
 
 const BROWSER_A = 'b1000000-0000-4000-8000-000000000001'
 
@@ -41,19 +41,11 @@ function availableLock(call: DeferredLockRequest): Lock {
   return { name: call.name } as Lock
 }
 
-function initial(sessionSaved = true): IdeTabLoadResult {
+function initial(sessionSaved = true): IdeSessionLoadResult {
   return {
     browserSessionId: BROWSER_A,
-    presentation: {
-      panelVisible: false,
-      selectedEnvironmentId: null,
-      openedEnvironmentIds: [],
-      viewIdsByEnvironment: {},
-      selectedViewIdsByEnvironment: {},
-    },
     recoveryByView: {},
     recoveryError: false,
-    source: 'session',
     sessionSaved,
   }
 }

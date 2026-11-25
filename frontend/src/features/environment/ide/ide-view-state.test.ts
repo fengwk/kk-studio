@@ -5,7 +5,7 @@ import {
   recoveryFromViews,
   type IdeViewState,
 } from '@/features/environment/ide/ide-view-state'
-import type { IdePresentation, IdeRecovery } from '@/features/environment/ide/ide-tab-state'
+import type { IdeRecovery } from '@/features/environment/ide/ide-session-state'
 
 const ENV = 'a1000000-0000-4000-8000-000000000001'
 const VIEW_A = 'c1000000-0000-4000-8000-000000000001'
@@ -14,14 +14,6 @@ const DAEMON_A = 'd1000000-0000-4000-8000-000000000001'
 const DAEMON_B = 'd2000000-0000-4000-8000-000000000002'
 const CLAIM_A = 'e1000000-0000-4000-8000-000000000001'
 const CLAIM_B = 'e2000000-0000-4000-8000-000000000002'
-
-const presentation: IdePresentation = {
-  panelVisible: true,
-  selectedEnvironmentId: ENV,
-  openedEnvironmentIds: [ENV],
-  viewIdsByEnvironment: { [ENV]: [VIEW_A, VIEW_B] },
-  selectedViewIdsByEnvironment: { [ENV]: VIEW_A },
-}
 
 function recovery(viewId: string, daemonInstanceId: string): IdeRecovery {
   return { environmentId: ENV, viewId, daemonInstanceId, bindingEpoch: '2' }
@@ -45,7 +37,7 @@ function view(viewId: string, claimId: string, daemonInstanceId: string): IdeVie
 
 describe('multi-view state', () => {
   it('restores and persists distinct identities for views grouped in one Environment', () => {
-    const restored = initialViews(presentation, {
+    const restored = initialViews({
       [VIEW_A]: recovery(VIEW_A, DAEMON_A),
       [VIEW_B]: recovery(VIEW_B, DAEMON_B),
     })
@@ -64,11 +56,11 @@ describe('multi-view state', () => {
       [VIEW_A]: view(VIEW_A, CLAIM_A, DAEMON_A),
       [VIEW_B]: view(VIEW_B, CLAIM_B, DAEMON_B),
     }
-    expect(buildUsageViews(views, [ENV], presentation.viewIdsByEnvironment)).toEqual([
+    expect(buildUsageViews(views)).toEqual([
       { environmentId: ENV, viewId: VIEW_A, claimId: CLAIM_A, bindingEpoch: '2' },
       { environmentId: ENV, viewId: VIEW_B, claimId: CLAIM_B, bindingEpoch: '2' },
     ])
-    expect(buildUsageViews(views, [ENV], presentation.viewIdsByEnvironment, {
+    expect(buildUsageViews(views, {
       environmentId: ENV,
       viewId: VIEW_B,
       claimId: 'e3000000-0000-4000-8000-000000000003',

@@ -21,6 +21,8 @@ import fun.fengwk.kkstudio.platform.account.StudioAccountService;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
@@ -29,6 +31,7 @@ import fun.fengwk.kkstudio.web.events.EventFrameCodec.ClientFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.IdeUseFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.RefreshFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.SubscriptionFrame;
+import fun.fengwk.kkstudio.workspace.ChatSpaceService;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -76,6 +79,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   private final LongSupplier nanoClock;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
   private final StudioAccountService accounts;
+  private final ResourceAccess access;
+  private final ChatSpaceService spaces;
   private final ScheduledFuture<?> heartbeatTask;
   private final ScheduledFuture<?> pingTask;
 
@@ -87,7 +92,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       @Qualifier("nodeInstanceId") UUID eventNodeId,
       IdeBrowserUseRegistry browserUseRegistry,
       @Qualifier("applicationEventHeartbeatScheduler") ScheduledExecutorService heartbeatScheduler,
-      StudioAccountService accounts) {
+      StudioAccountService accounts,
+      ResourceAccess access,
+      ChatSpaceService spaces) {
     this(
         hub,
         codec,
@@ -96,7 +103,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         browserUseRegistry,
         heartbeatScheduler,
         System::nanoTime,
-        accounts);
+        accounts,
+        access,
+        spaces);
   }
 
   ApplicationEventWebSocketHandler(
@@ -107,7 +116,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       IdeBrowserUseRegistry browserUseRegistry,
       ScheduledExecutorService heartbeatScheduler,
       LongSupplier nanoClock,
-      StudioAccountService accounts) {
+      StudioAccountService accounts,
+      ResourceAccess access,
+      ChatSpaceService spaces) {
     this.hub = Objects.requireNonNull(hub, "hub");
     this.codec = Objects.requireNonNull(codec, "codec");
     this.eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
@@ -115,6 +126,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     this.settingsProvider = Objects.requireNonNull(settingsProvider, "settingsProvider");
     this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
     this.accounts = Objects.requireNonNull(accounts, "accounts");
+    this.access = Objects.requireNonNull(access, "access");
+    this.spaces = Objects.requireNonNull(spaces, "spaces");
     this.heartbeatScheduler = Objects.requireNonNull(heartbeatScheduler, "heartbeatScheduler");
     this.heartbeatTask =
         heartbeatScheduler.scheduleAtFixedRate(
@@ -135,7 +148,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       IdeBrowserUseRegistry browserUseRegistry,
       ScheduledExecutorService heartbeatScheduler,
       LongSupplier nanoClock,
-      StudioAccountService accounts) {
+      StudioAccountService accounts,
+      ResourceAccess access,
+      ChatSpaceService spaces) {
     this(
         hub,
         codec,
@@ -144,7 +159,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         browserUseRegistry,
         heartbeatScheduler,
         nanoClock,
-        accounts);
+        accounts,
+        access,
+        spaces);
   }
 
   @Override
@@ -181,6 +198,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             token,
             principal,
             accounts,
+            access,
+            spaces,
             nanoClock.getAsLong());
     ConnectionState previous = connections.putIfAbsent(session.getId(), state);
     if (previous != null) {
@@ -294,6 +313,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final String token;
     private StudioPrincipal principal;
     private final StudioAccountService accounts;
+    private final ResourceAccess access;
+    private final ChatSpaceService spaces;
     private long lastAuthenticationCheckNanos;
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
 
@@ -319,6 +340,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         String token,
         StudioPrincipal principal,
         StudioAccountService accounts,
+        ResourceAccess access,
+        ChatSpaceService spaces,
         long nowNanos) {
       this.hub = hub;
       this.codec = codec;
@@ -330,6 +353,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       this.token = token;
       this.principal = principal;
       this.accounts = accounts;
+      this.access = access;
+      this.spaces = spaces;
       this.lastAuthenticationCheckNanos = nowNanos;
       this.lastPongNanos = nowNanos;
       this.lastHeartbeatNanos = nowNanos;
@@ -385,6 +410,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           return; // 连接已关闭：不再登记新订阅
         }
         if (!recheckAuthentication(nowNanos)) {
+          return;
+        }
+        if (!canRead(resource, principal)) {
+          enqueueResourceError("RESOURCE_NOT_FOUND", "Resource not found", resource);
           return;
         }
         if (principal.role() != StudioRole.ADMIN && adminOnly(resource.kind())) {
@@ -656,6 +685,15 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
+    private boolean canRead(ResourceKey resource, StudioPrincipal actor) {
+      return switch (resource.kind()) {
+        case THREAD, THREAD_TREE -> access.allowsThread(actor, resource.id());
+        case CANVAS -> access.allows(actor, Kind.CANVAS, resource.id());
+        case CHAT_SPACE -> spaces.allows(actor, resource.id());
+        case INTERACTIONS, ENVIRONMENTS -> true;
+      };
+    }
+
     private static boolean adminOnly(ResourceKind kind) {
       return kind == ResourceKind.INTERACTIONS;
     }
@@ -672,6 +710,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             .toList()
             .forEach(this::unsubscribe);
       }
+      subscriptions.keySet().stream()
+          .filter(resource -> !canRead(resource, current))
+          .toList()
+          .forEach(this::unsubscribe);
       principal = current;
       lastAuthenticationCheckNanos = nowNanos;
       return true;

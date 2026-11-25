@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.web.advice;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,12 +14,17 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+
+import java.util.UUID;
 
 /**
  * 真实 Spring MVC 下 Canvas Resource 直读边界的 problem 错误契约。
@@ -33,6 +40,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private CanvasCommandService commandService;
+  @MockitoSpyBean private ResourceAccess access;
 
   /** 测试意图：未知 canvas 的 404 保留 problem 类别和安全详情。 */
   @Test
@@ -48,7 +56,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.type").value("about:blank"))
-        .andExpect(jsonPath("$.detail").value("unknown canvas: " + CANVAS));
+        .andExpect(jsonPath("$.reason").value("RESOURCE_NOT_FOUND"));
   }
 
   /** 测试意图：非 canonical UUID 的 400 也必须走同一 problem 格式，且不回显不可信输入。 */
@@ -62,13 +70,14 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.type").value("about:blank"))
-        .andExpect(jsonPath("$.title").value("The canvasId parameter has an invalid value."))
-        .andExpect(jsonPath("$.detail").value("canvasId has an invalid value"));
+        .andExpect(jsonPath("$.reason").value("INVALID_ARGUMENT"))
+        .andExpect(jsonPath("$.detail").value("Expected a canonical resource ID"));
   }
 
   /** Canvas 写入准入的领域错误由组合根输出 problem。 */
   @Test
   void canvasCommandFailuresUseDomainAdvice() throws Exception {
+    doNothing().when(access).require(any(), eq(Kind.CANVAS), eq(UUID.fromString(CANVAS)));
     String request =
         "{\"idempotencyKey\":\""
             + RESOURCE
