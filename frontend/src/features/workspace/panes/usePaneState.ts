@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { initialPaneState, MAX_PANES, paneIds, type Layout, type PaneState } from './model'
 
@@ -52,7 +52,10 @@ export function usePaneState<T>(userId: string, spaceId: string, isTarget: (valu
     const raw = serializePaneState(current.state)
     try { localStorage.setItem(current.key, raw) } catch { /* Keep the layout in memory. */ }
   }, [current])
-  return [current.state, action => setStored(previous => previous.key !== key ? previous : {
-    key, state: typeof action === 'function' ? action(previous.state) : action,
-  })]
+  const setState = useCallback<Dispatch<SetStateAction<PaneState<T>>>>(action => setStored(previous => {
+    if (previous.key !== key) return previous
+    const state = typeof action === 'function' ? action(previous.state) : action
+    return state === previous.state ? previous : { key, state }
+  }), [key])
+  return [current.state, setState]
 }

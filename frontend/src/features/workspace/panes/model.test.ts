@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSplit, closePane, initialPaneState, minimumSize, paneIds, paneLetter, projectLayout, resizeSplit, splitPane, swapPanes, type Split } from './model'
+import { canSplit, closePane, initialPaneState, minimumSize, needsSinglePane, paneIds, paneLetter, projectLayout, resizeSplit, splitPane, swapPanes, type Split } from './model'
 import { deserializePaneState, serializePaneState } from './usePaneState'
 
 const isText = (value: unknown): value is string => typeof value === 'string'
@@ -36,13 +36,18 @@ describe('pane layout', () => {
   })
 
   it('uses recursive minima for projection and only writes clamped ratios on explicit resize', () => {
-    let state = initialPaneState(), a = state.focusedPaneId
+    let state = initialPaneState()
+    const a = state.focusedPaneId
     state = splitPane(state, a, 'X')
     state = splitPane(state, a, 'X')
     state = splitPane(state, a, 'Y')
     expect(minimumSize(state.layout)).toEqual({ width: 962, height: 481 })
     expect(canSplit(state.layout, 'X', box(640, 500))).toBe(false)
+    expect(canSplit(state.layout, 'Y', box(319, 481))).toBe(false)
     expect(canSplit(state.layout, 'Y', box(320, 481))).toBe(true)
+    expect(needsSinglePane(state.layout, box(961, 481))).toBe(true)
+    expect(needsSinglePane(state.layout, box(962, 480))).toBe(true)
+    expect(needsSinglePane(state.layout, box(962, 481))).toBe(false)
     const root = projectLayout(state.layout, box(1001, 501)).splits[0]!
     expect(root.line).toEqual({ x: 641, y: 0, width: 1, height: 501 })
     expect(root.ratio).toBe(0.641)

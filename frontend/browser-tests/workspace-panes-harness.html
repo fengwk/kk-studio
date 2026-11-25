@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workspace panes browser harness</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; }
+      .harness { display: flex; flex-direction: column; height: 100%; }
+      .harness nav { display: flex; gap: var(--space-1); padding: var(--space-2); border-bottom: 1px solid var(--border); }
+      .harness main { flex: 1; min-height: 0; }
+      .demo-view { position: relative; display: flex; flex-direction: column; width: 100%; }
+      .demo-view iframe { width: 100%; flex: 1; border: 0; }
+      .demo-view textarea { margin: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--fg); font: inherit; resize: none; }
+    </style>
+  </head>
+  <body><div id="root"></div><script type="module" src="./workspace-panes-harness.tsx"></script></body>
+</html>

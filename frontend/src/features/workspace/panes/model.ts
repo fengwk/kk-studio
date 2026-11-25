@@ -33,7 +33,13 @@ export function minimumSize(layout: Layout): { width: number; height: number } {
 
 export function canSplit(layout: Layout, axis: Axis, rect?: Rect): boolean {
   if (paneIds(layout).length >= MAX_PANES) return false
-  return !rect || (axis === 'X' ? rect.width >= MIN_PANE.width * 2 + DIVIDER : rect.height >= MIN_PANE.height * 2 + DIVIDER)
+  return !rect || (rect.width >= (axis === 'X' ? MIN_PANE.width * 2 + DIVIDER : MIN_PANE.width)
+    && rect.height >= (axis === 'Y' ? MIN_PANE.height * 2 + DIVIDER : MIN_PANE.height))
+}
+
+export function needsSinglePane(layout: Layout, rect: Pick<Rect, 'width' | 'height'>): boolean {
+  const min = minimumSize(layout)
+  return rect.width < Math.max(min.width, MIN_PANE.width * 2 + DIVIDER) || rect.height < min.height
 }
 
 function update(layout: Layout, transform: (node: Layout) => Layout): Layout {
@@ -89,7 +95,7 @@ export function projectLayout(layout: Layout, rect: Rect) {
     const maxPart = Math.max(firstMin, usable - secondMin)
     const min = firstMin / usable, max = maxPart / usable
     const ratio = clampRatio(node.ratio, min, max)
-    const part = clampRatio(usable * ratio, firstMin, maxPart)
+    const part = clampRatio(Math.round(usable * ratio), firstMin, maxPart)
     const offset = horizontal ? 'x' : 'y'
     const line = { ...box, [offset]: box[offset] + part, [dimension]: DIVIDER }
     splits.push({ splitId: node.splitId, axis: node.axis, rect: box, line, ratio, min, max })
