@@ -404,21 +404,35 @@ export async function runWorkspaceContractMatrix(ui) {
               `edit did not enter approval: ${await approval.innerText()}`,
             )
             const editDeny = approval.getByRole('button', { name: UI_LABELS.denyButton, exact: true })
-            const denyStyle = await editDeny.evaluate((element) => {
+            // The default danger secondary button uses a tinted background and red text, not an outline.
+            await page.mouse.move(0, 0)
+            const denyStyle = await editDeny.evaluate(async (element) => {
+              await new Promise(requestAnimationFrame)
+              await Promise.all(element.getAnimations().map((animation) => animation.finished))
               const probe = document.createElement('span')
-              probe.style.borderColor = 'var(--danger-strong)'
+              probe.style.backgroundColor = 'var(--danger-soft)'
+              probe.style.color = 'var(--danger)'
               element.parentElement.appendChild(probe)
+              const style = getComputedStyle(element)
+              const expected = getComputedStyle(probe)
               const result = {
-                borderColor: getComputedStyle(element).borderColor,
-                dangerBorder: getComputedStyle(probe).borderColor,
+                background: style.backgroundColor,
+                dangerBackground: expected.backgroundColor,
+                color: style.color,
+                dangerColor: expected.color,
+                borderWidths: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
                 danger: element.classList.contains('danger'),
+                hover: element.matches(':hover'),
               }
               probe.remove()
               return result
             })
             assert(
-              denyStyle.danger && denyStyle.borderColor === denyStyle.dangerBorder,
-              `deny button does not use the danger border: ${JSON.stringify(denyStyle)}`,
+              denyStyle.danger && !denyStyle.hover
+                && denyStyle.background === denyStyle.dangerBackground
+                && denyStyle.color === denyStyle.dangerColor
+                && denyStyle.borderWidths.every((width) => width === '0px'),
+              `deny button does not use the borderless danger secondary style: ${JSON.stringify(denyStyle)}`,
             )
             await editDeny.click()
             await waitForQuiescentThread(apiCtx, fixture.threadId, {
@@ -426,30 +440,6 @@ export async function runWorkspaceContractMatrix(ui) {
               intervalMs: 100,
             })
             await page.locator('.thread-working').waitFor({ state: 'hidden', timeout: 10_000 })
-
-            const output = card.locator('.thread-tool-output')
-            await output.waitFor({ state: 'visible', timeout: 15_000 })
-            const transcript = page.locator('.thread-dialogue')
-            await output.hover()
-            const before = await transcript.evaluate((element) => element.scrollTop)
-            assert(before > 0, `fixture did not overflow transcript: scrollTop=${before}`)
-            await page.mouse.wheel(0, -180)
-            await page.waitForFunction(
-              ({ selector, previous }) => {
-                const element = document.querySelector(selector)
-                return element instanceof HTMLElement && element.scrollTop < previous
-              },
-              { selector: '.thread-dialogue', previous: before },
-              { timeout: 5_000 },
-            )
-            const outputStyle = await output.evaluate((element) => ({
-              overflow: getComputedStyle(element).overflow,
-              tabIndex: element.getAttribute('tabindex'),
-            }))
-            assert(
-              outputStyle.overflow === 'auto' && outputStyle.tabIndex === '0',
-              `tool output is not a bounded keyboard-accessible viewport: ${JSON.stringify(outputStyle)}`,
-            )
 
             await fixture.start('write')
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
@@ -488,12 +478,43 @@ export async function runWorkspaceContractMatrix(ui) {
               && await bashApproval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).count() === 1,
               `bash did not enter approval: ${await bashCard.innerText()}`,
             )
-            await bashApproval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).click()
+            await bashApproval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).click()
             await waitForQuiescentThread(apiCtx, fixture.threadId, {
               timeoutMs: 30_000,
               intervalMs: 100,
             })
             await page.locator('.thread-working').waitFor({ state: 'hidden', timeout: 10_000 })
+
+            await bashCard.locator('.thread-disclosure-toggle').click()
+            const output = bashCard.locator('.thread-tool-details')
+            await output.waitFor({ state: 'visible', timeout: 15_000 })
+            const outputText = await output.textContent() ?? ''
+            assert(
+              outputText.includes('tool-card-bash-1\n') && outputText.includes('tool-card-bash-80'),
+              'expanded bash output did not retain the first and last fixture lines',
+            )
+            const outputStyle = await output.evaluate((element) => ({
+              overflow: getComputedStyle(element).overflow,
+              tabIndex: element.getAttribute('tabindex'),
+              scrollable: element.scrollHeight > element.clientHeight,
+            }))
+            assert(
+              outputStyle.overflow === 'auto' && outputStyle.tabIndex === '0' && outputStyle.scrollable,
+              `tool output is not a bounded keyboard-accessible viewport: ${JSON.stringify(outputStyle)}`,
+            )
+            const transcript = page.locator('.thread-dialogue')
+            await output.hover()
+            const before = await transcript.evaluate((element) => element.scrollTop)
+            assert(before > 0, `fixture did not overflow transcript: scrollTop=${before}`)
+            await page.mouse.wheel(0, -180)
+            await page.waitForFunction(
+              ({ selector, previous }) => {
+                const element = document.querySelector(selector)
+                return element instanceof HTMLElement && element.scrollTop < previous
+              },
+              { selector: '.thread-dialogue', previous: before },
+              { timeout: 5_000 },
+            )
 
             await shot(caseArt, 'tool-card-streaming-layout-scroll')
             expectNoFatal(pageErrors, consoleErrors)
@@ -1359,7 +1380,7 @@ class ToolCardOpenAiMock {
       bash: {
         marker: markers.bash,
         argumentsJson: JSON.stringify({
-          command: 'printf "tool-card-bash-approval\\n"',
+          command: 'printf "tool-card-bash-%s\\n" {1..80}',
           workdir,
         }),
       },

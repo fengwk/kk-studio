@@ -373,7 +373,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--with-tools` | 启用 Daemon/Tool case；`daemon.ready` 校验能力目录，包括 `find` 对应的 `fs.find-files` |
 | `--with-branch` | 启用 branch case，并自动打开 `--real`；与 `--real-model` 并用时 branch 使用所选模型 |
 | `--with-canvas-storage` | 允许依赖附件存储的真实模型、工具用例；默认 L1 的 Session/Canvas Blob 契约用例不需要此开关 |
-| `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用工作区 Canvas fake 链路 UI 用例，该用例只绑定 `fake-image`，不会提交付费 Function |
+| `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用工作区 Canvas fake 链路 UI 用例，该用例在 UI 添加 `fake-image` 节点、编辑提示词并运行，验证保存与生成图片，不会提交付费 Function |
 | `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-*` 组合 |
 | `--ui` | 在 API 矩阵后执行 Playwright Workspace UI 矩阵，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 API 或 UI case，可重复；UI case 需同时传 `--ui`，可混选 API 与 UI |

@@ -28,6 +28,7 @@ import { cid, httpJson, HttpError, loginStudio } from './lib/http.mjs'
 import { ENVIRONMENT_CARD_ACTIONS } from './ui/environment-actions.mjs'
 import { waitForSettledAssistantText } from './ui/assertions.mjs'
 import { runComposerMatrix } from './ui/composer-matrix.mjs'
+import { UI_LABELS } from './ui/workspace-helpers.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
 
 // Playwright 安装在 frontend/node_modules，直接 import 会找不到包。
@@ -816,6 +817,10 @@ async function main(argv) {
         fakeImage?.available === true,
         `fake-image Canvas Function must be available (run with --with-canvas-function): ${JSON.stringify(catalog.json?.map((f) => [f.name, f.available]))}`,
       )
+      // The add menu binds the first available Function with an IMAGE output.
+      const defaultImage = catalog.json.find((item) =>
+        item.available !== false && item.outputs?.some((output) => output.kind === 'IMAGE'))
+      assert(defaultImage?.name === fakeImage.name, `refusing to run non-fake image Function: ${defaultImage?.name}`)
       await goto('/')
       await signInViaForm()
       const { spaceId } = await landInWorkspaceSpace(`E2E Canvas ${stamp}`)
@@ -826,11 +831,45 @@ async function main(argv) {
         folderId: rootFolderId,
         title: `E2E Canvas ${stamp}`,
         expectedTreeVersion: tree.treeVersion,
-      })
+      }, { 'Idempotency-Key': cid() })
       assert(createdCanvas.status === 200 || createdCanvas.status === 201, JSON.stringify(createdCanvas))
-      const canvasId = createdCanvas.json.canvasId
-      await goto(`/chat-spaces/${spaceId}?canvas=${canvasId}`)
-      await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+      const canvasId = createdCanvas.json.id
+      assert(canvasId && createdCanvas.json.kind === 'CANVAS', JSON.stringify(createdCanvas))
+      await goto(`/chat-spaces/${spaceId}`)
+      await page.getByRole('treeitem', { name: `E2E Canvas ${stamp}`, exact: true }).click({ timeout: 15_000 })
+      const stage = page.locator('#canvasStage')
+      await stage.waitFor({ state: 'visible', timeout: 15_000 })
+      await stage.locator('.canvas-tool-rail .dock-add').click()
+      await stage.getByRole('menuitem').and(stage.locator('[data-add-action="image-function"]')).click()
+
+      const node = stage.locator('.react-flow__node')
+      await node.click()
+      const prompt = page.getByRole('textbox', { name: /^(?:Prompt|提示词)$/ })
+      const editedPrompt = `Free deterministic image ${stamp}`
+      await prompt.fill(editedPrompt)
+      await node.click({ button: 'right' })
+      await page.getByRole('menuitem', { name: /^(?:Run|运行)$/ }).click()
+
+      const image = node.locator('.canvas-resource-media img')
+      await image.waitFor({ state: 'visible', timeout: 30_000 })
+      await page.waitForFunction(
+        (element) => element.complete && element.naturalWidth > 0,
+        await image.elementHandle(),
+        { timeout: 15_000 },
+      )
+      const snapshot = await apiJson(args.backendUrl, 'GET', `/api/canvas/canvases/${encodeURIComponent(canvasId)}`)
+      assert(snapshot.status === 200, JSON.stringify(snapshot))
+      const published = snapshot.json.nodes[0]
+      assert(
+        snapshot.json.nodes.length === 1
+          && published.function?.name === fakeImage.name
+          && published.function.args?.prompt === editedPrompt
+          && published.run?.status === 'SUCCEEDED'
+          && published.resources.length === 1
+          && published.resources[0].kind === 'IMAGE'
+          && published.resources[0].blobId,
+        `fake-image run did not persist the edited prompt and publish one image: ${JSON.stringify(snapshot.json.nodes)}`,
+      )
       await shot(caseArt, 'workspace-canvas')
       expectNoFatal(pageErrors, consoleErrors)
     },
@@ -864,7 +903,7 @@ async function main(argv) {
         await composer.waitFor({ state: 'visible', timeout: 15_000 })
         await composer.fill(promptText)
         await page.getByRole('button', { name: /^(?:Send message|发送消息)$/ }).click()
-        await page.getByRole('button', { name: /^(?:Model & Variant|Model 与 Variant)$/ })
+        await page.getByRole('button', { name: UI_LABELS.modelButton })
           .filter({ hasText: `${args.realModel.modelName} (${args.realModel.variant})` })
           .waitFor({ state: 'visible', timeout: 30_000 })
         await shot(caseArt, 'first-send-user')
