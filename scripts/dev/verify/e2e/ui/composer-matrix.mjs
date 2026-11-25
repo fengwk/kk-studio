@@ -15,16 +15,21 @@ import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import { runWorkspaceContractMatrix, waitForThreadSnapshot } from './workspace-contracts.mjs'
 export { expectStorage } from './workspace-helpers.mjs'
 import {
+  activeOptionText,
   bindBlankComposer as bindWorkspaceBlankComposer,
   bindThreadComposer as bindWorkspaceThreadComposer,
+  caretOffset,
   cleanupWorkspaceFixtureState,
+  composerMetrics,
   expectComposerText as expectWorkspaceComposerText,
   expectStorage as expectWorkspaceStorage,
   previewDialogLabel,
   resolveCatalogTarget as resolveWorkspaceCatalogTarget,
+  setCaretOffset,
   UI_LABELS,
   waitForActiveModel as waitForWorkspaceActiveModel,
   waitForComposer as waitForWorkspaceComposer,
+  waitForPlaceholder as waitForWorkspacePlaceholder,
   waitForQueuedMessages as waitForWorkspaceQueuedMessages,
   withUiFixture as withWorkspaceUiFixture,
 } from './workspace-helpers.mjs'
@@ -413,7 +418,10 @@ export async function runComposerMatrix(ui) {
           await composer.fill(draft)
           await expectWorkspaceStorage(page, draftKey, draft)
 
-          const transcriptMessage = page.getByText(historicalMessage, { exact: true }).first()
+          const transcriptMessage = page
+            .locator('[data-pane-active] .thread-dialogue')
+            .getByText(historicalMessage, { exact: true })
+            .first()
           await transcriptMessage.waitFor({ state: 'visible', timeout: 10_000 })
           const selectedText = await transcriptMessage.evaluate((element) => {
             const active = element.ownerDocument.activeElement
@@ -811,11 +819,12 @@ export async function runComposerMatrix(ui) {
               scrollHeight: element.scrollHeight,
               clientHeight: element.clientHeight,
             }))
-          // headless Chromium 的 mouse.wheel 是 no-op：用真实 DOM 属性向上滚动
-          // 600px，并派发原生 scroll 事件让自动贴底的 stick 状态跟随。
+          // headless Chromium 的 mouse.wheel 是 no-op：先派发负向 wheel 意图，
+          // 再修改 DOM scrollTop 并派发原生 scroll 事件，满足自动贴底的用户滚动意图契约。
           const scrollAwayFromBottom = (selector) =>
             page.locator(selector).evaluate((element) => {
               const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+              element.dispatchEvent(new WheelEvent('wheel', { deltaY: -260, bubbles: true }))
               element.scrollTop = Math.max(1, maxScrollTop - 260)
               element.dispatchEvent(new Event('scroll', { bubbles: false }))
               return {

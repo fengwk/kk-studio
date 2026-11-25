@@ -310,7 +310,7 @@ export async function runWorkspaceContractMatrix(ui) {
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
             await fixture.stream()
 
-            const card = page.locator('.thread-tool-surface').filter({
+            const card = page.locator('.thread-block-tool').filter({
               has: page.locator('.thread-tool-name', { hasText: 'edit' }),
             }).last()
             const streamingPreview = card.locator('.thread-tool-preview-body.is-input-new')
@@ -321,17 +321,17 @@ export async function runWorkspaceContractMatrix(ui) {
               { timeout: 15_000 },
             )
             await page.waitForFunction(
-              (expected) => [...document.querySelectorAll('.thread-tool-surface')]
+              (expected) => [...document.querySelectorAll('.thread-block-tool')]
                 .some((surface) => surface.querySelector('.thread-tool-name')?.textContent === 'edit'
                   && surface.querySelector('.thread-tool-summary-detail')?.textContent === expected),
               fixture.path,
               { timeout: 15_000 },
             )
             const streaming = await card.evaluate((surface) => {
-              const header = surface.querySelector('.thread-tool-header')
+              const header = surface.querySelector('.thread-disclosure-header')
               const summary = surface.querySelector('.thread-tool-summary')
               const detail = surface.querySelector('.thread-tool-summary-detail')
-              const toggle = surface.querySelector('.thread-tool-toggle')
+              const toggle = surface.querySelector('.thread-disclosure-toggle')
               const preview = surface.querySelector('.thread-tool-preview-body.is-input-new')
               if (
                 !(header instanceof HTMLElement)
@@ -454,7 +454,7 @@ export async function runWorkspaceContractMatrix(ui) {
             await fixture.start('write')
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
             await fixture.stream()
-            const writeCard = page.locator('.thread-tool-surface').filter({
+            const writeCard = page.locator('.thread-block-tool').filter({
               has: page.locator('.thread-tool-name', { hasText: 'write' }),
             }).last()
             await fixture.finish()
@@ -476,7 +476,7 @@ export async function runWorkspaceContractMatrix(ui) {
             await fixture.start('bash')
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
             await fixture.stream()
-            const bashCard = page.locator('.thread-tool-surface').filter({
+            const bashCard = page.locator('.thread-block-tool').filter({
               has: page.locator('.thread-tool-name', { hasText: 'bash' }),
             }).last()
             await fixture.finish()
@@ -518,7 +518,7 @@ export async function runWorkspaceContractMatrix(ui) {
           await bindWorkspaceThreadComposer(page, goto, fixture)
           await fixture.start()
 
-          const taskCard = page.locator('.thread-tool-surface').filter({
+          const taskCard = page.locator('.thread-block-tool').filter({
             has: page.locator('.thread-tool-name', { hasText: 'task' }),
           }).last()
           await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
