@@ -138,6 +138,7 @@
   font-family: var(--font);
   color: var(--fg);
   background: var(--bg);
+  color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
