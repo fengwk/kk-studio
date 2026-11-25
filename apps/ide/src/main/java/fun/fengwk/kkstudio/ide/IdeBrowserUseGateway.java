@@ -28,7 +28,7 @@ public class IdeBrowserUseGateway {
     this.client = Objects.requireNonNull(client, "client");
   }
 
-  /** 该物理连接/browser session 是否仍存活且登记了完全相同的打开/恢复意图。 */
+  /** 无用户身份时不能验证意图，固定失败关闭；调用方必须使用带 userId 的重载。 */
   public boolean findExactIntent(
       UUID eventNodeId,
       UUID connectionId,
@@ -36,11 +36,10 @@ public class IdeBrowserUseGateway {
       EnvironmentId environmentId,
       UUID viewId,
       UUID claimId) {
-    return findExactIntent(
-        eventNodeId, connectionId, browserSessionId, environmentId, viewId, claimId, null);
+    return false;
   }
 
-  /** Exact intent additionally requires the user authenticated on the event WebSocket. */
+  /** Exact intent requires the user authenticated on the event WebSocket. */
   public boolean findExactIntent(
       UUID eventNodeId,
       UUID connectionId,
@@ -73,10 +72,10 @@ public class IdeBrowserUseGateway {
     }
   }
 
-  /** 该连接/browser session 当前仍可续租的已绑定持有项；空表示没有证明。 */
+  /** 无用户身份时不能验证续租证明，固定失败关闭；调用方必须使用带 userId 的重载。 */
   public Optional<Proofs> activeBoundProofs(
       UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
-    return activeBoundProofs(eventNodeId, connectionId, browserSessionId, null);
+    return Optional.empty();
   }
 
   /** Returns active proofs only for the user authenticated by the event WebSocket. */

@@ -78,6 +78,8 @@ class IdeBrowserUseGatewayTest {
                 new IdeBrowserUseView(ENV, UNBOUND_VIEW, UNBOUND_CLAIM, null))));
 
     assertTrue(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, USER));
+    assertFalse(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
+    assertTrue(gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT).isEmpty());
     assertFalse(
         gateway.findExactIntent(
             LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, UUID.randomUUID()));
