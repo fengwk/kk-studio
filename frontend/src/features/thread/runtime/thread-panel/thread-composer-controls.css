@@ -194,8 +194,16 @@
 
 @container (max-width: 520px) {
   /* 模型名较长，先多让出一些空间，避免环境名缩成一两个字符。 */
+  .thread-composer-controls-left {
+    flex: 0 1 auto;
+  }
+
+  .thread-composer-environment-control {
+    min-width: calc(var(--space-8) + var(--space-4));
+  }
+
   .thread-composer-controls-right {
-    flex-shrink: 4;
+    flex: 1 1 80px;
   }
 
   .thread-composer-model-control {

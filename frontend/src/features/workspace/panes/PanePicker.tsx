@@ -45,6 +45,12 @@ export function PanePicker({ choices, layout, focusedPaneId, bounds, anchor, ove
     onClick={event => { if (event.target === event.currentTarget) onCancel() }}
     onKeyDown={event => {
       if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!event.repeat) onCancel()
+        return
+      }
       const match = event.key === 'Enter' ? focusedPaneId : choices.find(choice => choice.letter.toLowerCase() === event.key.toLowerCase())?.id
       if (!match) return
       event.preventDefault()
