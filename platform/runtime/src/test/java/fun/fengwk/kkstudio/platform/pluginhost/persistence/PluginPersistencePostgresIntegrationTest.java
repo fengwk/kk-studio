@@ -12,7 +12,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +21,6 @@ import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
-import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
@@ -181,27 +179,17 @@ class PluginPersistencePostgresIntegrationTest {
             .payloadJson());
   }
 
-  /** 真实 V3→V4 升级只给存量行分配代号，配置、载荷与版本仍可读取。 */
+  /** 在 V1 基线上联合读取配置与最新的凭据。 */
   @Test
-  void generationMigrationPreservesExistingRows() throws SQLException {
-    try (Connection conn = PostgresSchemaSupport.newConnection()) {
-      PostgresSchemaSupport.resetDatabase(conn);
-      Flyway.configure()
-          .dataSource(new SingleConnectionDataSource(conn, true))
-          .locations("classpath:db/migration")
-          .target("3")
-          .load()
-          .migrate();
-      configurations.insertIfMissing(PLUGIN, "{\"enabled\":true}");
-      credentials.upsertConnected(PLUGIN, "{\"key\":\"before\"}", null, null, null);
-      credentials.upsertConnected(PLUGIN, "{\"key\":\"replacement\"}", null, null, null);
-      PostgresSchemaSupport.applyBaseline(conn);
-    }
-    var migrated = credentials.findConfigured(PLUGIN).orElseThrow();
-    assertEquals("{\"enabled\":true}", migrated.valuesJson());
-    assertEquals("{\"key\":\"replacement\"}", migrated.credential().payloadJson());
-    assertEquals(PluginCredentialStatus.CONNECTED, migrated.credential().status());
-    assertEquals(1L, migrated.credential().version());
+  void findsConfigurationWithLatestCredentialOnBaseline() {
+    credentials.upsertConnected(PLUGIN, "{\"key\":\"before\"}", null, null, null);
+    credentials.upsertConnected(PLUGIN, "{\"key\":\"replacement\"}", null, null, null);
+
+    var configured = credentials.findConfigured(PLUGIN).orElseThrow();
+    assertEquals("{\"enabled\":true}", configured.valuesJson());
+    assertEquals("{\"key\":\"replacement\"}", configured.credential().payloadJson());
+    assertEquals(PluginCredentialStatus.CONNECTED, configured.credential().status());
+    assertEquals(1L, configured.credential().version());
   }
 
   /** 复用初始版本的重建行不受旧调用的迟到拒绝影响。 */
