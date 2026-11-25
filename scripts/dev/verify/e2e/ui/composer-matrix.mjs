@@ -945,6 +945,8 @@ export async function runComposerMatrix(ui) {
     createBranchedHistoryFixture,
     createDurableHistoryFixture,
     createHoldingQueueFixture,
+    createWorkspaceDurableHistoryFixture,
+    createWorkspaceHoldingQueueFixture,
     withUiFixture,
   })
 }
