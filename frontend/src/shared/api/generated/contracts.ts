@@ -523,38 +523,6 @@ export interface CanvasTransformDTO {
   height: number
 }
 
-/** Java：fun.fengwk.kkstudio.chat.dto.ChatCreateDTO */
-export interface ChatCreateDTO {
-  title: string
-  agentName: string
-  environmentName?: string | null
-  yoloEnabled?: boolean | null
-}
-
-/** Java：fun.fengwk.kkstudio.chat.dto.ChatDTO */
-export interface ChatDTO {
-  id: string
-  title: string
-  agentName: string
-  environmentName: string | null
-  yoloEnabled: boolean
-  version: string
-  createdAt: number
-  updatedAt: number
-}
-
-/** Java：fun.fengwk.kkstudio.chat.dto.ChatPageDTO */
-export interface ChatPageDTO {
-  items: ChatDTO[]
-  nextCursor: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO */
-export interface ChatSessionPageDTO {
-  items: HarnessSessionSummaryDTO[]
-  nextCursor: string | null
-}
-
 /** Java：fun.fengwk.kkstudio.workspace.dto.ChatSpaceCreateDTO */
 export interface ChatSpaceCreateDTO {
   title: string
@@ -583,20 +551,6 @@ export interface ChatSpacePatchDTO {
   defaultYoloEnabled?: boolean | null
   defaultAgentName?: string | null
   defaultEnvironmentId?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO */
-export interface ChatUpdateDTO {
-  title: string
-  agentName: string
-  environmentName?: string | null
-  expectedVersion: string
-}
-
-/** Java：fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO */
-export interface ChatYoloUpdateDTO {
-  yoloEnabled: boolean
-  expectedVersion: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncExportDTO */
@@ -680,11 +634,6 @@ export interface ConfigSyncSkipped {
   kind?: ConfigSyncKind | null
   name: string
   reason: string
-}
-
-/** Java：fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO */
-export interface CreateCanvasRequestDTO {
-  title: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.account.dto.CreateStudioUserRequestDTO */
@@ -1133,13 +1082,6 @@ export interface HarnessCancelledInputDTO {
   payload: unknown
 }
 
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO */
-export interface HarnessCommandBatchDTO {
-  owner: HarnessCommandOwnerDTO
-  target: HarnessCommandTargetDTO
-  commands: HarnessCommandCreateDTO[]
-}
-
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.UserMessageDTO */
 export interface HarnessCommandCreateUserMessageDTO {
   type: 'USER_MESSAGE'
@@ -1166,47 +1108,6 @@ export type HarnessCommandCreateDTO =
   | HarnessCommandCreateUserMessageDTO
   | HarnessCommandCreateSetExecutionDTO
   | HarnessCommandCreateSetEnvironmentDTO
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO */
-export interface HarnessCommandOwnerDTO {
-  kind: string
-  id: string
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewSessionDTO */
-export interface HarnessCommandTargetNewSessionDTO {
-  type: 'NEW_SESSION'
-  sessionId: string
-  threadId: string
-  rootSettings: HarnessBranchSettingsDTO
-  yoloEnabled: boolean
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewThreadDTO */
-export interface HarnessCommandTargetNewThreadDTO {
-  type: 'NEW_THREAD'
-  sessionId: string
-  startEntryId: string
-  threadId: string
-  threadName: string
-  yoloEnabled: boolean
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewForkedSessionDTO */
-export interface HarnessCommandTargetNewForkedSessionDTO {
-  type: 'NEW_FORKED_SESSION'
-  sourceThreadId: string
-  startEntryId: string
-  sessionId: string
-  threadId: string
-  yoloEnabled: boolean
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO */
-export type HarnessCommandTargetDTO =
-  | HarnessCommandTargetNewSessionDTO
-  | HarnessCommandTargetNewThreadDTO
-  | HarnessCommandTargetNewForkedSessionDTO
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO */
 export interface HarnessExecutionAbandonDTO {
@@ -1343,11 +1244,6 @@ export interface HarnessModelSelectionDTO {
   variant?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO */
-export interface HarnessNameUpdateDTO {
-  name: string
-}
-
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO */
 export interface HarnessProviderRequestPreviewDTO {
   kind: HarnessProviderRequestPreviewKind
@@ -1383,22 +1279,6 @@ export interface HarnessSessionEntryDTO {
   payload: unknown
   createdAt: number
   usageCost: HarnessUsageCostDTO | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionEntryPageDTO */
-export interface HarnessSessionEntryPageDTO {
-  items: HarnessSessionEntryDTO[]
-  nextCursor: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO */
-export interface HarnessSessionSummaryDTO {
-  sessionId: string
-  name: string
-  createdAt: number
-  lastActivityAt: number
-  firstMessagePreview: string | null
-  threadCount: number
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessStoppedThreadReceiptDTO */
@@ -1500,20 +1380,6 @@ export const HARNESS_THREAD_STOP_RESULT_STATUS_VALUES: readonly HarnessThreadSto
 export interface HarnessThreadStreamCatchupDTO {
   invocationId: string
   attempt: number
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO */
-export interface HarnessThreadSummaryDTO {
-  threadId: string
-  kind: ThreadKind
-  parentThreadId: string | null
-  name: string
-  createdAt: number
-  updatedAt: number
-  status: ThreadRuntimeStatus
-  executionControl: ThreadExecutionControl
-  execution: HarnessExecutionSelectionDTO
-  headMessagePreview: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO */
@@ -2993,11 +2859,6 @@ export interface ApiRoutes {
     query: { expectedTreeVersion: string; expectedVersion: string }
     response: WorkspaceTreeVersionDTO
   }
-  'DELETE /api/chat/chats/{chatId}': {
-    path: { chatId: string }
-    query: { expectedVersion: string }
-    response: void
-  }
   'DELETE /api/platform/agents/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
@@ -3043,9 +2904,6 @@ export interface ApiRoutes {
   'GET /api/auth/me': {
     response: StudioAccountDTO
   }
-  'GET /api/canvas/canvases': {
-    response: CanvasDocumentDTO[]
-  }
   'GET /api/canvas/canvases/{canvasId}': {
     path: { canvasId: string }
     response: CanvasSnapshotDTO
@@ -3068,23 +2926,6 @@ export interface ApiRoutes {
     path: { spaceId: string }
     response: WorkspaceTreeDTO
   }
-  'GET /api/chat/chats': {
-    query: { cursor?: string; limit?: number }
-    response: ChatPageDTO
-  }
-  'GET /api/chat/chats/{chatId}': {
-    path: { chatId: string }
-    response: ChatDTO
-  }
-  'GET /api/chat/chats/{chatId}/sessions': {
-    path: { chatId: string }
-    query: { cursor?: string; limit?: number }
-    response: ChatSessionPageDTO
-  }
-  'GET /api/chat/chats/{chatId}/sessions/{sessionId}': {
-    path: { chatId: string; sessionId: string }
-    response: HarnessSessionSummaryDTO
-  }
   'GET /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request': {
     path: { entryId: string; sessionId: string }
     response: HarnessProviderRequestPreviewDTO
@@ -3093,20 +2934,11 @@ export interface ApiRoutes {
     query: { cursor?: string; limit?: number; rootThreadId?: string }
     response: InteractionPageDTO
   }
-  'GET /api/harness/sessions/{sessionId}/entries': {
-    path: { sessionId: string }
-    query: { cursor?: string; limit?: number }
-    response: HarnessSessionEntryPageDTO
-  }
   'GET /api/harness/sessions/{sessionId}/resources/{resourceId}': {
     path: { resourceId: string; sessionId: string }
     query: { download?: boolean }
     response: Blob
     responseType: 'blob'
-  }
-  'GET /api/harness/sessions/{sessionId}/threads': {
-    path: { sessionId: string }
-    response: HarnessThreadSummaryDTO[]
   }
   'GET /api/harness/threads/{threadId}': {
     path: { threadId: string }
@@ -3255,10 +3087,6 @@ export interface ApiRoutes {
   'POST /api/auth/logout': {
     response: void
   }
-  'POST /api/canvas/canvases': {
-    body: CreateCanvasRequestDTO
-    response: CanvasDocumentDTO
-  }
   'POST /api/canvas/canvases/{canvasId}/commands': {
     path: { canvasId: string }
     body: ApplyCanvasCommandsRequestDTO
@@ -3316,10 +3144,6 @@ export interface ApiRoutes {
     body: TurnCutDTO
     response: ForkCreatedDTO
   }
-  'POST /api/chat/chats': {
-    body: ChatCreateDTO
-    response: ChatDTO
-  }
   'POST /api/harness/builtin/threads/{threadId}/model-request-debug': {
     path: { threadId: string }
     body: HarnessModelRequestDebugRequestDTO
@@ -3329,10 +3153,6 @@ export interface ApiRoutes {
     path: { threadId: string }
     body: HarnessThreadStreamCatchupDTO
     response: void
-  }
-  'POST /api/harness/command-batches': {
-    body: HarnessCommandBatchDTO
-    response: HarnessAcceptedCommandsDTO
   }
   'POST /api/harness/threads/{threadId}/command-batches': {
     path: { threadId: string }
@@ -3507,21 +3327,6 @@ export interface ApiRoutes {
   'PUT /api/auth/password': {
     body: StudioPasswordRequestDTO
     response: void
-  }
-  'PUT /api/chat/chats/{chatId}': {
-    path: { chatId: string }
-    body: ChatUpdateDTO
-    response: ChatDTO
-  }
-  'PUT /api/chat/chats/{chatId}/yolo': {
-    path: { chatId: string }
-    body: ChatYoloUpdateDTO
-    response: ChatDTO
-  }
-  'PUT /api/harness/sessions/{sessionId}/name': {
-    path: { sessionId: string }
-    body: HarnessNameUpdateDTO
-    response: HarnessSessionDTO
   }
   'PUT /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/approval': {
     path: { threadId: string; toolInvocationId: string }

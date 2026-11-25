@@ -802,6 +802,15 @@ class PostgresqlCompactionChildTest {
     TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, parentPath.head().payload());
     UUID childThreadId = start.compaction().childThreadId();
 
+    // Session deletion requires every execution root and compaction child to be quiescent.
+    processNext(childThreadId);
+    finishModel(childThreadId, "compacted summary");
+    processNext(childThreadId);
+    processNext(parentId);
+    processNext(parentId);
+    finishModel(parentId, "final answer");
+    processNext(parentId);
+
     runtime.deleteSessions(List.of(baseline.sessionId()), ids -> {}, ids -> {});
 
     assertTrue(store.transaction(tx -> tx.threads().find(parentId)).isEmpty());

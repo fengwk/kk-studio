@@ -214,7 +214,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   void subscribeExistingThreadAcknowledgesBeforeDurableCatchUp() throws Exception {
     // 走真实 HTTP 首载和 WS 续接，验证 ACK 先于权威 snapshot，而不是 Thread version 通知。
     HttpClient http = HttpClient.newHttpClient();
-    String threadId = createThread(http, "hello");
+    String threadId = createThread(http, createSpace(http), "hello");
     HttpResponse<String> initial =
         http.send(
             adminRequest(uri("/api/harness/threads/" + threadId)).GET().build(),
@@ -270,7 +270,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   @Test
   void oversizedThreadSnapshotBecomesSnapshotRefAndKeepsTheRealSocketHealthy() throws Exception {
     HttpClient http = HttpClient.newHttpClient();
-    String chatId = createChat(http);
+    String chatId = createSpace(http);
     String oversizedThread = createThread(http, chatId, "o".repeat(20_000));
     String healthyThread = createThread(http, chatId, "hello");
     JsonNode oversizedSnapshot = getThreadSnapshot(http, oversizedThread);
@@ -338,11 +338,14 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     return node.toString().getBytes(StandardCharsets.UTF_8).length;
   }
 
-  private String createChat(HttpClient http) throws Exception {
-    String body = "{\"title\":\"ws-oversize\",\"agentName\":\"default-assistant\"}";
+  private String createSpace(HttpClient http) throws Exception {
+    String body =
+        """
+        {"title":"ws-oversize","rootFolderName":"Root","defaultAgentName":"default-assistant"}
+        """;
     HttpResponse<String> response =
         http.send(
-            adminRequest(uri("/api/chat/chats"))
+            adminRequest(uri("/api/chat-spaces"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -353,45 +356,21 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   }
 
   private String createThread(HttpClient http, String chatId, String userText) throws Exception {
-    String threadId = UUID.randomUUID().toString();
     String createBody =
         """
-        {
-          "owner":{"kind":"CHAT","id":"%s"},
-          "target":{
-            "type":"NEW_SESSION",
-            "sessionId":"%s",
-            "threadId":"%s",
-            "rootSettings":{
-              "agentName":"default-assistant",
-              "execution":{
-                "driver":"builtin",
-                "settings":{"modelName":"acceptance-stub","variant":"default"}
-              },
-              "environmentName":null
-            },
-            "yoloEnabled":false
-          },
-          "commands":[{
-            "type":"USER_MESSAGE",
-            "idempotencyKey":"%s",
-            "contents":[{"type":"TEXT","text":"%s"}]
-          }]
-        }
-        """
-            .formatted(chatId, UUID.randomUUID(), threadId, UUID.randomUUID(), userText);
+        {"message":[{"type":"TEXT","text":"%s"}]}
+        """.formatted(userText);
     HttpResponse<String> response =
         http.send(
-            adminRequest(uri("/api/harness/command-batches"))
+            adminRequest(uri("/api/chat-spaces/" + chatId + "/sessions"))
                 .timeout(Duration.ofSeconds(20))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
                 .build(),
             HttpResponse.BodyHandlers.ofString());
-    assertEquals(202, response.statusCode(), response.body());
-    assertEquals(
-        threadId, MAPPER.readTree(response.body()).path("thread").path("threadId").asText());
-    return threadId;
+    assertEquals(200, response.statusCode(), response.body());
+    return MAPPER.readTree(response.body()).path("threadId").asText();
   }
 
   private JsonNode getThreadSnapshot(HttpClient http, String threadId) throws Exception {

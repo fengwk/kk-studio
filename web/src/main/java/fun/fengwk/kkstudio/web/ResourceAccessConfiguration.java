@@ -43,6 +43,7 @@ class ResourceAccessConfiguration implements WebMvcConfigurer {
             })
         .addPathPatterns(
             "/api/harness/**",
+            "/api/ide/environments/{environmentId}/views/{viewId}/attachments/{sessionId}/{resourceId}",
             "/api/canvas/canvases/{canvasId}",
             "/api/canvas/canvases/{canvasId}/**");
   }

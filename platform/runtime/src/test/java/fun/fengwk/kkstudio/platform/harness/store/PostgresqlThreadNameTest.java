@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinT
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,7 +67,6 @@ class PostgresqlThreadNameTest {
             () -> runtime.createIdleBranch(baseline.threadId(), cut, rejectedId, "renamed"));
     assertEquals(DomainErrorCode.CONFLICT, conflict.code());
     assertEquals(HarnessConflictReason.THREAD_NAME_CONFLICT.name(), conflict.reason());
-    assertNotNull(conflict.getCause());
     assertTrue(store.transaction(tx -> tx.threads().find(rejectedId)).isEmpty());
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, rejectedId)).isEmpty());
     assertTrue(

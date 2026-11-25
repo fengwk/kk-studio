@@ -86,10 +86,10 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 `acceptCommands` 接收一批有序命令与一个 sealed target：
 
-- `NEW_SESSION`：调用方预分配 Session/Thread ID，同一事务创建 Session、ROOT、Thread、Commands 与 THREAD Work；同一 `threadId` 携带相同创建哈希为精确重放，不同哈希为 `THREAD_ID_REUSED`。
-- `NEW_THREAD`：在同 Session 的合法切点（ROOT 或已闭合的 `TURN_END`）追加一个 `FORK` Entry 作为新 Thread 的 head，不复制前缀、不移动源 Thread；未闭合的 STOP 回合不可作为切点。
-- `NEW_FORKED_SESSION`：把执行根在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从切点处的生效快照推导，不复制 Join、命令或调用。
+- `NEW_ROOT_SESSION`：调用方预分配 Session/Thread ID，同一事务创建 Session、ROOT、Thread、Commands 与 THREAD Work；同一 `threadId` 携带相同创建哈希为精确重放，不同哈希为 `THREAD_ID_REUSED`。
 - `THREAD`：续写既有 Thread。精确的有序重放先于一切游标与 preflight 准入；单条纯 `USER_MESSAGE` 不带游标、按锁内邮箱尾部入队，其它批次必须携带 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 并精确匹配（不匹配为 `STALE_COMMAND_CURSOR`）。
+
+Workspace 使用 `createIdleBranch` 从已结算的回合切点派生同 Session 的分支，或使用 `createIdleFork` 将切点前的有效上下文复制到独立 Session。两个入口都不提交命令，也不移动源 Thread 的 head。
 
 命令类型包括人工输入 `USER_MESSAGE`、可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`）与系统通知 `NOTIFICATION`。配置命令 `SET_EXECUTION -> SET_ENVIRONMENT` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
 
@@ -222,7 +222,7 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 
 - **执行选择**：[`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/BranchSettings.java) 携带 [`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/ExecutionSelection.java)`(driver, settingsJson)`；接受根设置与 `SET_EXECUTION` 命令时，未注册的 driver 直接拒绝，已注册的由其 `validateSettings` 校验 settings。
 - **注册与路由**：[`DriverRegistry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/DriverRegistry.java) 收集组合根注册的全部 Driver，按 `driver` id 路由。已有 Thread 的 driver 未注册时由 [`UninstalledAgentDriver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/UninstalledAgentDriver.java) 承接：拒绝规划新回合，但 Thread 仍可读取与停止。两者都是 Runtime 内部实现，因此留在 `runtime.driver` 而不进入对外 SPI。
-- **能力**：[`DriverCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/DriverCapabilities.java)`(fork, manualCompaction)`。`fork=false` 时拒绝以该 Driver 的分支为源的 `NEW_THREAD` 与 `NEW_FORKED_SESSION`；`manualCompaction=false` 时手工压缩不可用。Thread 的 Driver 创建后不可变：fork 不能更换 Driver，更换 Driver 需要新建根会话。
+- **能力**：[`DriverCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/DriverCapabilities.java)`(fork, manualCompaction)`。`fork=false` 时拒绝以该 Driver 的 Thread 为源创建分支或复制会话；`manualCompaction=false` 时手工压缩不可用。Thread 的 Driver 创建后不可变：fork 不能更换 Driver，更换 Driver 需要新建根会话。
 
 ### 方法契约
 
