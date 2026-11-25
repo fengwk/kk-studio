@@ -5,12 +5,14 @@ import { getLocale, translate } from '@/shared/i18n'
 type JsonParser = (text: string) => unknown
 
 export interface RequestOptions {
+  idempotencyKey?: string
   signal?: AbortSignal
   timeoutMs?: number
   jsonParser?: JsonParser
 }
 
 interface FetchRequestConfig {
+  idempotencyKey?: string
   method?: string
   body?: unknown
   signal?: AbortSignal
@@ -196,6 +198,9 @@ export async function executeFetch<T = unknown>(
     'Accept-Language': getLocale(),
     Accept: 'application/json, text/plain, */*',
   }
+  if (config.idempotencyKey !== undefined) {
+    headers['Idempotency-Key'] = config.idempotencyKey
+  }
 
   let bodyPayload: BodyInit | undefined
   if (config.body !== undefined) {
@@ -363,6 +368,7 @@ export function request<R extends keyof ApiRoutes>(
     method,
     body: params.body,
     signal: options?.signal,
+    idempotencyKey: options?.idempotencyKey,
     timeoutMs: options?.timeoutMs,
     jsonParser: options?.jsonParser,
     responseType: API_RESPONSE_TYPES[route],

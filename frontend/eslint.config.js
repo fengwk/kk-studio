@@ -15,7 +15,7 @@ const featureDependencies = {
     'catalog/agent-capability-candidates',
   ],
   chat: ['thread/*', 'environment/ide/ide-panel-context', 'environment/environment-service'],
-  thread: ['catalog', 'environment/ide/ide-panel-context'],
+  thread: ['account/account-context', 'catalog', 'environment/ide/ide-panel-context', 'workspace/pane-target', 'workspace/queries'],
   catalog: ['environment/environment-service'],
 }
 

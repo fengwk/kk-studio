@@ -63,6 +63,7 @@ export function ThreadComposer({
   parts,
   pending,
   disabled,
+  sendDisabled,
   onPartsChange,
   onHistoryPartsChange = onPartsChange,
   onSubmit,
@@ -171,8 +172,8 @@ export function ThreadComposer({
 
   // 进行中的 HTTP 变更不能阻塞连续提交；附件未全部 ready 时也不能发送。
   const canSend = useMemo(
-    () => !disabled && slashQuery == null && canSubmitParts(parts, uploads),
-    [disabled, parts, slashQuery, uploads],
+    () => !disabled && !sendDisabled && slashQuery == null && canSubmitParts(parts, uploads),
+    [disabled, sendDisabled, parts, slashQuery, uploads],
   )
 
   // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。
