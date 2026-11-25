@@ -61,6 +61,12 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
@@ -84,12 +90,15 @@ class CanvasControllerTest {
   private static final UUID GROUP = new UUID(0L, 6L);
   private static final UUID COMMAND = new UUID(0L, 8L);
   private static final UUID REQUEST = new UUID(0L, 9L);
+  private static final StudioPrincipal PRINCIPAL =
+      new StudioPrincipal(new UUID(0L, 10L), "user", StudioRole.USER);
 
   private MockMvc mockMvc;
   private JsonMapper objectMapper;
   private CanvasQueryService queryService;
   private CanvasCommandService commandService;
   private StorageBlobManager blobManager;
+  private ResourceAccess resourceAccess;
   private CanvasController controller;
 
   @BeforeEach
@@ -100,6 +109,7 @@ class CanvasControllerTest {
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
     blobManager = mock(StorageBlobManager.class);
+    resourceAccess = mock(ResourceAccess.class);
     StorageBlob blob = new StorageBlob();
     blob.setId(BLOB_1);
     blob.setMediaType("image/png");
@@ -108,10 +118,14 @@ class CanvasControllerTest {
     blob.setHeight(480L);
     when(blobManager.getBlob(BLOB_1)).thenReturn(blob);
     controller =
-        new CanvasController(queryService, commandService, new CanvasDtoMapper(blobManager));
+        new CanvasController(
+            queryService, commandService, new CanvasDtoMapper(blobManager), resourceAccess);
     mockMvc =
         standaloneSetup(controller)
+            .defaultRequest(
+                get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
             .setControllerAdvice(
                 new RequestBodyRequiredValidationAdvice(objectMapper),
                 new ProblemAdvice(new MessageService()))
@@ -249,7 +263,8 @@ class CanvasControllerTest {
   /** 测试意图：11 种 typed command 直映射为领域命令，前置条件是各语义组的编辑起点旧值。 */
   @Test
   void typedCommandBatchMapsToDomainRecordsGroupByGroup() throws Exception {
-    when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
+    when(commandService.applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class)))
         .thenReturn(new CanvasCommandResult.Accepted(patch()));
     ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
     request.setIdempotencyKey(COMMAND);
@@ -290,7 +305,7 @@ class CanvasControllerTest {
         .andExpect(jsonPath("$.groups[0].group.id").value(GROUP.toString()));
 
     verify(commandService)
-        .applyCommands(
+        .applyCommandsFromUploads(
             eq(CANVAS),
             eq(COMMAND),
             eq(
@@ -317,13 +332,32 @@ class CanvasControllerTest {
                     new CanvasCommand.UpdateGroupTransform(
                         GROUP, new CanvasTransform(0, 0, 400, 200), null),
                     new CanvasCommand.DeleteGroup(GROUP, List.of(NODE_1)),
-                    new CanvasCommand.DeleteNode(NODE_2, List.of(), cropFunction()))));
+                    new CanvasCommand.DeleteNode(NODE_2, List.of(), cropFunction()))),
+            eq(PRINCIPAL.userId()));
+    verify(resourceAccess).require(PRINCIPAL, Kind.CANVAS, CANVAS);
+  }
+
+  /** Canvas ownership must be checked before the command service can create any resource edge. */
+  @Test
+  void rejectsCommandsForCanvasNotOwnedByPrincipal() {
+    ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
+    request.setIdempotencyKey(COMMAND);
+    request.setCommands(List.of());
+    doThrow(DomainException.notFound("canvas"))
+        .when(resourceAccess)
+        .require(PRINCIPAL, Kind.CANVAS, CANVAS);
+
+    assertThrows(
+        DomainException.class, () -> controller.applyCommands(CANVAS, request, PRINCIPAL));
+    verify(commandService, never())
+        .applyCommandsFromUploads(any(UUID.class), any(UUID.class), anyList(), any(UUID.class));
   }
 
   /** 测试意图：冲突整批不写入，409 载荷给出受影响对象、语义组与服务端权威值。 */
   @Test
   void conflictsReturn409WithAffectedTargetsAndServerValues() throws Exception {
-    when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
+    when(commandService.applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class)))
         .thenReturn(
             new CanvasCommandResult.Conflicted(
                 List.of(
@@ -359,11 +393,12 @@ class CanvasControllerTest {
     ApplyCanvasCommandsRequestDTO request =
         objectMapper.readValue(commandJson(""), ApplyCanvasCommandsRequestDTO.class);
     DomainException missing = DomainException.notFound("canvas");
-    when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
+    when(commandService.applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class)))
         .thenThrow(missing);
     assertSame(
         missing,
-        assertThrows(DomainException.class, () -> controller.applyCommands(CANVAS, request)));
+        assertThrows(DomainException.class, () -> controller.applyCommands(CANVAS, request, PRINCIPAL)));
     mockMvc
         .perform(
             post("/api/canvas/canvases/" + CANVAS + "/commands")
@@ -376,10 +411,11 @@ class CanvasControllerTest {
         DomainException.conflict("IDEMPOTENCY_CONFLICT", "different request");
     doThrow(conflict)
         .when(commandService)
-        .applyCommands(any(UUID.class), any(UUID.class), anyList());
+        .applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class));
     assertSame(
         conflict,
-        assertThrows(DomainException.class, () -> controller.applyCommands(CANVAS, request)));
+        assertThrows(DomainException.class, () -> controller.applyCommands(CANVAS, request, PRINCIPAL)));
     mockMvc
         .perform(
             post("/api/canvas/canvases/" + CANVAS + "/commands")
@@ -393,7 +429,8 @@ class CanvasControllerTest {
   /** 测试意图：精确重放只返回当时记录的接受位置与空变化集，不冒充新的执行状态。 */
   @Test
   void replayedAcceptanceReturnsRecordedRevisionOnly() throws Exception {
-    when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
+    when(commandService.applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class)))
         .thenReturn(new CanvasCommandResult.Accepted(CanvasPatch.receipt(2L)));
 
     mockMvc
@@ -518,7 +555,8 @@ class CanvasControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
 
-    verify(commandService, never()).applyCommands(any(UUID.class), any(UUID.class), anyList());
+    verify(commandService, never()).applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class));
   }
 
   /** 测试意图：Function args 是任意 JSON object，但仍受 Core 的 object、深度与长度上限约束。 */
@@ -555,7 +593,8 @@ class CanvasControllerTest {
                     setFunctionJson("{\"text\":\"" + "x".repeat(CanvasJson.MAX_LENGTH) + "\"}")))
         .andExpect(status().isBadRequest());
 
-    verify(commandService, never()).applyCommands(any(UUID.class), any(UUID.class), anyList());
+    verify(commandService, never()).applyCommandsFromUploads(
+        any(UUID.class), any(UUID.class), anyList(), any(UUID.class));
   }
 
   /** 不提供画布删除入口。 */

@@ -17,13 +17,19 @@ import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -46,6 +52,8 @@ public class CanvasCommandService {
   private final PostgresqlCanvasFunctionRunRepository runRepository;
   private final CanvasResourceLifecycle resourceLifecycle;
   private final CanvasCommandPlanner planner;
+  private final StorageUploadService uploadService;
+  private final StorageBlobManager blobManager;
 
   public CanvasCommandService(
       PostgresqlCanvasStore canvasStore,
@@ -53,13 +61,17 @@ public class CanvasCommandService {
       PostgresqlCanvasFunctionResourcePinRepository pinRepository,
       PostgresqlCanvasFunctionRunRepository runRepository,
       CanvasResourceLifecycle resourceLifecycle,
-      CanvasCommandPlanner planner) {
+      CanvasCommandPlanner planner,
+      StorageUploadService uploadService,
+      StorageBlobManager blobManager) {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.planner = Objects.requireNonNull(planner, "planner");
+    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
   /** 创建文档并返回初始 revision；加入调用方事务。 */
@@ -149,7 +161,12 @@ public class CanvasCommandService {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     Objects.requireNonNull(commands, "commands");
-    String requestHash = CanvasCommandHash.of(commands);
+    return applyCommandsWithHash(
+        canvasId, idempotencyKey, commands, CanvasCommandHash.of(commands));
+  }
+
+  private CanvasCommandResult applyCommandsWithHash(
+      UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands, String requestHash) {
     CanvasDocument document = requireLockedDocument(canvasId);
     CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (dedup != null) {
@@ -174,6 +191,95 @@ public class CanvasCommandService {
     canvasStore.addCommandDedup(
         new CommandDedup(canvasId, idempotencyKey, requestHash, acceptedRevision));
     return new Accepted(plan.toPatch(acceptedRevision));
+  }
+
+  /**
+   * User command path: consume only READY uploads owned by that principal, in this Canvas
+   * transaction.
+   */
+  @Transactional
+  public CanvasCommandResult applyCommandsFromUploads(
+      UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands, UUID userId) {
+    Objects.requireNonNull(userId, "userId");
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+    Objects.requireNonNull(commands, "commands");
+    requireLockedDocument(canvasId);
+    String requestHash = CanvasCommandHash.of(commands);
+    CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
+    if (dedup != null) {
+      if (!dedup.requestHash().equals(requestHash)) {
+        throw DomainException.conflict(
+            "IDEMPOTENCY_CONFLICT", "idempotency key is bound to a different request");
+      }
+      return new Accepted(CanvasPatch.receipt(dedup.acceptedRevision()));
+    }
+    List<CanvasCommand> resolved = new ArrayList<>(commands.size());
+    Map<UUID, StorageUploadService.ReadyUpload> uploads = new LinkedHashMap<>();
+    for (CanvasCommand command : commands) {
+      resolved.add(resolveUploads(command, userId, uploads));
+    }
+    CanvasCommandResult result =
+        applyCommandsWithHash(canvasId, idempotencyKey, resolved, requestHash);
+    if (result instanceof Accepted accepted && !accepted.patch().isEmpty() && !uploads.isEmpty()) {
+      for (CanvasCommand command : resolved) {
+        for (CanvasResourceInput input : resourceInputs(command)) {
+          if (input instanceof CanvasResourceInput.Blob blob) {
+            blobManager.retain(blob.blobId());
+          }
+        }
+      }
+      for (UUID uploadId : uploads.keySet()) {
+        uploadService.delete(uploadId, userId);
+      }
+    }
+    return result;
+  }
+
+  private CanvasCommand resolveUploads(
+      CanvasCommand command,
+      UUID userId,
+      Map<UUID, StorageUploadService.ReadyUpload> uploads) {
+    if (command instanceof CanvasCommand.CreateNode create) {
+      return new CanvasCommand.CreateNode(
+          create.nodeId(),
+          create.name(),
+          create.transform(),
+          resolveInputs(create.resources(), userId, uploads));
+    }
+    if (command instanceof CanvasCommand.SetNodeResources set) {
+      return new CanvasCommand.SetNodeResources(
+          set.nodeId(), set.expectedResourceIds(), resolveInputs(set.resources(), userId, uploads));
+    }
+    return command;
+  }
+
+  private List<CanvasResourceInput> resolveInputs(
+      List<CanvasResourceInput> inputs,
+      UUID userId,
+      Map<UUID, StorageUploadService.ReadyUpload> uploads) {
+    List<CanvasResourceInput> resolved = new ArrayList<>(inputs.size());
+    for (CanvasResourceInput input : inputs) {
+      if (input instanceof CanvasResourceInput.Blob blob) {
+        StorageUploadService.ReadyUpload ready =
+            uploads.computeIfAbsent(
+                blob.blobId(), uploadId -> uploadService.lockReady(uploadId, userId));
+        resolved.add(new CanvasResourceInput.Blob(ready.filename(), ready.blobId()));
+      } else {
+        resolved.add(input);
+      }
+    }
+    return List.copyOf(resolved);
+  }
+
+  private static List<CanvasResourceInput> resourceInputs(CanvasCommand command) {
+    if (command instanceof CanvasCommand.CreateNode create) {
+      return create.resources();
+    }
+    if (command instanceof CanvasCommand.SetNodeResources set) {
+      return set.resources();
+    }
+    return List.of();
   }
 
   private CanvasDocument requireLockedDocument(UUID canvasId) {
