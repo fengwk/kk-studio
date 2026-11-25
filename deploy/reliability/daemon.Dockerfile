@@ -113,6 +113,7 @@ COPY --from=builder --chown=kkdaemon:kkdaemon /distribution /opt/kk-studio/daemo
 COPY --from=builder --chown=root:root /npm-payload /usr/local/lib/node_modules/npm
 COPY deploy/reliability/daemon-entrypoint.sh /usr/local/bin/kk-studio-daemon-entrypoint
 COPY deploy/reliability/daemon-config-cache.mjs /usr/local/bin/daemon-config-cache.mjs
+COPY deploy/reliability/e2e-studio-login.mjs /usr/local/bin/e2e-studio-login.mjs
 
 RUN set -eux; \
     chmod 0755 /usr/local/bin/kk-studio-daemon-entrypoint; \

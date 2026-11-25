@@ -83,7 +83,8 @@ if [ -n "$environment_id" ]; then
 else
   selector_args+=(--environment-name "$environment_name")
 fi
-(umask 077 && "$node_bin" "$config_helper" "${selector_args[@]}")
+# 本入口仅用于可靠性和分布式测试栈；使用 e2e profile 预置的 Studio 管理员。
+(umask 077 && "$node_bin" "$config_helper" --fixture-login "${selector_args[@]}")
 chmod 600 "$config_file"
 unset studio_url environment_id environment_name selector_args
 

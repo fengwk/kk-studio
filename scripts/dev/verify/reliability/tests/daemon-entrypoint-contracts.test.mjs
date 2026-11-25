@@ -2,11 +2,12 @@
 
 import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { CARD_ID, runProcess, startCardServer } from '../../tests/support/card-server.mjs'
+import { CARD_ID, FIXTURE_COOKIE, runProcess, startCardServer } from '../../tests/support/card-server.mjs'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
@@ -49,7 +50,8 @@ function writeDaemonDist(temporary) {
   const daemon = path.join(dist, 'kk-studio-daemon')
   const argvFile = path.join(temporary, 'argv.txt')
   const environFile = path.join(temporary, 'environ.txt')
-  writeFileSync(runtime, `#!/bin/bash\nexec '${process.execPath}' "$@"\n`)
+  const helperArgv = path.join(temporary, 'helper-argv.txt')
+  writeFileSync(runtime, `#!/bin/bash\nprintf '%s\\n' "$@" >'${helperArgv}'\nexec '${process.execPath}' "$@"\n`)
   writeFileSync(
     daemon,
     '#!/bin/bash\n' +
@@ -58,7 +60,7 @@ function writeDaemonDist(temporary) {
   )
   chmodSync(runtime, 0o755)
   chmodSync(daemon, 0o755)
-  return { dist, argvFile, environFile }
+  return { dist, argvFile, environFile, helperArgv }
 }
 
 function runEntrypoint(env, { args = [RELIABILITY_ENTRYPOINT] } = {}) {
@@ -102,6 +104,7 @@ test('test intent: the daemon image runs the Daemon executable with the bundled 
     '配置 helper 只能被 COPY 一次',
   )
   assert.ok(dockerfile.includes('/usr/local/bin/daemon-config-cache.mjs'))
+  assert.ok(dockerfile.includes('/usr/local/bin/e2e-studio-login.mjs'))
   // The distribution is produced by the shared archive builder and contains the daemon directly.
   assert.ok(dockerfile.includes('scripts/daemon/prepare-release.sh'))
   assert.ok(dockerfile.includes('/distribution/kk-studio-daemon'))
@@ -132,7 +135,7 @@ test('test intent: the entrypoint launches the Daemon executable with --config o
   const server = await startCardServer({ name: 'docker-reliability', version: '0', daemonConfig: DAEMON_CONFIG })
   try {
     await withTempDir(async (temporary) => {
-      const { dist, argvFile, environFile } = writeDaemonDist(temporary)
+      const { dist, argvFile, environFile, helperArgv } = writeDaemonDist(temporary)
       const root = path.join(temporary, 'daemon-root')
       const secret = 'probe-secret-token'
 
@@ -153,11 +156,14 @@ test('test intent: the entrypoint launches the Daemon executable with --config o
       assert.deepEqual(argv, ['--config', configPath])
       assert.ok(path.isAbsolute(configPath))
       assert.equal(configPath, path.join(root, 'daemon.json'))
-      assert.ok(!argv.includes(secret))
-      assert.ok(!text(environFile).includes(secret))
-      assert.ok(!(result.stderr + result.stdout).includes(secret))
-      // 凭证从不进入配置 JSON。
-      assert.ok(!text(configPath).includes(secret))
+      for (const credential of [secret, FIXTURE_COOKIE, 'kkstudio']) {
+        assert.ok(!argv.join('\n').includes(credential))
+        assert.ok(!text(helperArgv).includes(credential))
+        assert.ok(!text(environFile).includes(credential))
+        assert.ok(!(result.stderr + result.stdout).includes(credential))
+        assert.ok(!text(configPath).includes(credential))
+      }
+      assert.equal(server.logins, 1)
       assert.ok(!JSON.stringify(server.calls).includes(secret))
 
       const config = JSON.parse(text(configPath))
@@ -191,13 +197,46 @@ test('test intent: the entrypoint launches the Daemon executable with --config o
   }
 })
 
+test('test intent: login does not resend fixture credentials across a 307 redirect', async (t) => {
+  let redirectRequests = 0
+  const sink = createServer((request, response) => {
+    redirectRequests += 1
+    request.resume()
+    response.writeHead(204).end()
+  })
+  await new Promise((resolve) => sink.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => sink.close(resolve)))
+  const server = await startCardServer({
+    redirect: { path: '/api/auth/login', location: `http://127.0.0.1:${sink.address().port}/login` },
+  })
+  t.after(() => server.close())
+  await withTempDir(async (temporary) => {
+    const { dist } = writeDaemonDist(temporary)
+    const result = await runEntrypoint(baseEnv({
+      KK_STUDIO_DAEMON_DIST: dist,
+      KK_STUDIO_DAEMON_ROOT: path.join(temporary, 'daemon-root'),
+      KK_STUDIO_DAEMON_STUDIO_URL: server.url,
+      KK_STUDIO_DAEMON_ENVIRONMENT_ID: CARD_ID,
+      KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
+    }))
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /Studio login failed \(HTTP 307\)/)
+    for (const credential of [FIXTURE_COOKIE, 'kkstudio', 'probe-secret-token']) {
+      assert.ok(!(result.stderr + result.stdout).includes(credential))
+    }
+    assert.equal(server.logins, 1)
+    assert.equal(redirectRequests, 0)
+    assert.deepEqual(server.calls, [])
+  })
+})
+
 test('test intent: the entrypoint does not rewrite an already reachable card', async () => {
   const server = await startCardServer({ id: CARD_ID, name: 'docker-reliability', version: '2', daemonConfig: DAEMON_CONFIG })
   try {
     const reachable = { ...DAEMON_CONFIG, studioUrl: server.url }
     const updated = await fetch(`${server.url}/api/platform/environments/${CARD_ID}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', Cookie: FIXTURE_COOKIE, Origin: server.url },
       body: JSON.stringify({ expectedVersion: '2', note: null, daemonConfig: reachable }),
     })
     assert.equal(updated.status, 200)

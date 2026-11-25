@@ -7,13 +7,16 @@
  * PUT 响应中的新 version 写缓存。卡片备注不进入 daemon.json，注册 token 也由调用方独立写入
  * daemon.token，绝不经过本脚本的参数、日志或 JSON。
  *
- * <p>参数只包含非机密值：--config、--studio-url，以及 --environment-id/--environment-name 二选一。
+ * <p>参数只包含非机密值。默认从 stdin 读取现有 Studio 会话；测试容器通过 --fixture-login
+ * 登录一次性 e2e 栈的预置管理员。
  * 输出文件固定为 {environmentId, version:string, daemonConfig:{studioUrl,bashExecutable,lsp,proxyUrl}}，
  * 写入同目录临时文件后原子 rename，显式 mode 0600。
  */
 
 import { isAbsolute } from 'node:path'
-import { renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+
+import { isStudioSessionCookie, loginE2eStudio } from './e2e-studio-login.mjs'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const VERSION_PATTERN = /^(0|[1-9][0-9]*)$/
@@ -160,11 +163,13 @@ function parseArguments(argv) {
   return parsed
 }
 
-async function request(base, path, options = {}) {
+async function request(base, cookie, path, options = {}) {
   let response
   try {
     response = await fetch(`${base}${path}`, {
       ...options,
+      headers: { ...options.headers, Cookie: cookie, Origin: base },
+      redirect: 'manual',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLIS),
     })
   } catch {
@@ -180,14 +185,14 @@ async function request(base, path, options = {}) {
   }
 }
 
-async function loadCard(base, { environmentId, environmentName }) {
+async function loadCard(base, cookie, { environmentId, environmentName }) {
   if (environmentId !== '') {
     return requireCard(
-      await request(base, `/api/platform/environments/${environmentId}`),
+      await request(base, cookie, `/api/platform/environments/${environmentId}`),
       { expectedId: environmentId },
     )
   }
-  const cards = await request(base, '/api/platform/environments')
+  const cards = await request(base, cookie, '/api/platform/environments')
   if (!Array.isArray(cards)) {
     fail('environment list response must be an array')
   }
@@ -198,11 +203,17 @@ async function loadCard(base, { environmentId, environmentName }) {
   return requireCard(matches[0], { expectedName: environmentName })
 }
 
-async function materialize({ config, studioUrl, environmentId, environmentName }) {
+async function materialize({ config, studioUrl, environmentId, environmentName }, fixtureLogin) {
   const base = origin(studioUrl, '--studio-url')
-  let card = await loadCard(base, { environmentId, environmentName })
+  const cookie = fixtureLogin
+    ? await loginE2eStudio(base, REQUEST_TIMEOUT_MILLIS).catch((error) => fail(error.message))
+    : readFileSync(0, 'utf8').trim()
+  if (!isStudioSessionCookie(cookie)) {
+    fail('a Studio session cookie on stdin is required')
+  }
+  let card = await loadCard(base, cookie, { environmentId, environmentName })
   if (card.daemonConfig.studioUrl !== base) {
-    const updated = await request(base, `/api/platform/environments/${card.id}`, {
+    const updated = await request(base, cookie, `/api/platform/environments/${card.id}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -239,7 +250,9 @@ async function materialize({ config, studioUrl, environmentId, environmentName }
 
 async function main() {
   try {
-    await materialize(parseArguments(process.argv.slice(2)))
+    const args = process.argv.slice(2)
+    const fixtureLogin = args[0] === '--fixture-login'
+    await materialize(parseArguments(fixtureLogin ? args.slice(1) : args), fixtureLogin)
   } catch (error) {
     const message = error instanceof CacheError
       ? error.message

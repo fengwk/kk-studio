@@ -69,7 +69,9 @@ if [ -n "$environment_id" ]; then
 else
   selector_args+=(--environment-name "$environment_name")
 fi
+# stdin 只供缓存 helper 读取现有 Studio 会话；Daemon 不继承该输入。
 (umask 077 && "$node_bin" "$config_helper" "${selector_args[@]}")
+exec </dev/null
 chmod 600 "$config_file"
 unset environment_id environment_name studio_url
 unset selector_args

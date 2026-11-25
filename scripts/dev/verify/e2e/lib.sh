@@ -301,11 +301,11 @@ start_daemon() {
   DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env \
     "${test_env_unsets[@]}" \
     DAEMON_ROOT="$DAEMON_ROOT" \
-    DAEMON_STUDIO_URL="http://$BACKEND_HOST:$BACKEND_PORT" \
+    DAEMON_STUDIO_URL="$BACKEND_URL" \
     "${environment_selector[@]}" \
     DAEMON_BINARY="$DAEMON_BINARY" \
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
-    >"$WORK_DIR/daemon.log" 2>&1 &
+    >"$WORK_DIR/daemon.log" 2>&1 <<<"$E2E_STUDIO_COOKIE" &
   OWNED_DAEMON_PID=$!
   echo "$OWNED_DAEMON_PID" >"$WORK_DIR/daemon.pid"
   local _ env_status=""

@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 
 import { daemonConfigFixture } from '../../e2e/lib/fixtures.mjs'
 
+export const FIXTURE_COOKIE = 'studio_session=probe-fixture-session'
 export const CARD_ID = '11111111-1111-1111-1111-111111111111'
 
 /**
@@ -19,6 +20,7 @@ export async function startCardServer({
   note = null,
   version = '0',
   daemonConfig = daemonConfigFixture(),
+  redirect,
 } = {}) {
   let card = {
     id,
@@ -28,6 +30,7 @@ export async function startCardServer({
     version,
   }
   const calls = []
+  let logins = 0
   const server = createServer(async (request, response) => {
     let raw = ''
     for await (const chunk of request) {
@@ -42,13 +45,40 @@ export async function startCardServer({
       return
     }
     const url = new URL(request.url, 'http://card.test')
-    calls.push({ method: request.method, path: url.pathname, body })
-
     const json = (status, payload) => {
       response.writeHead(status, { 'content-type': 'application/json' })
       response.end(JSON.stringify(payload))
     }
 
+    const expectedOrigin = `http://${request.headers.host}`
+    const login = request.method === 'POST' && url.pathname === '/api/auth/login'
+    if ((login || request.method === 'PUT') && request.headers.origin !== expectedOrigin) {
+      json(403, { code: 'origin_not_allowed' })
+      return
+    }
+    if (login) {
+      if (body?.username !== 'kkstudio' || body?.password !== 'kkstudio') {
+        json(401, { code: 'invalid_credentials' })
+        return
+      }
+      logins += 1
+    } else {
+      if (request.headers.cookie !== FIXTURE_COOKIE) {
+        json(401, { code: 'authentication_required' })
+        return
+      }
+      calls.push({ method: request.method, path: url.pathname, body })
+    }
+    if (redirect?.path === url.pathname) {
+      response.writeHead(307, { Location: redirect.location })
+      response.end(`${FIXTURE_COOKIE} kkstudio`)
+      return
+    }
+    if (login) {
+      response.setHeader('Set-Cookie', `${FIXTURE_COOKIE}; Path=/; HttpOnly`)
+      json(200, { role: 'ADMIN' })
+      return
+    }
     if (request.method === 'GET' && url.pathname === '/api/platform/environments') {
       json(200, [card])
       return
@@ -82,6 +112,9 @@ export async function startCardServer({
   return {
     url: `http://127.0.0.1:${address.port}`,
     calls,
+    get logins() {
+      return logins
+    },
     get card() {
       return card
     },
@@ -92,9 +125,13 @@ export async function startCardServer({
 }
 
 /** Run a child process asynchronously so an in-process HTTP fixture can answer it. */
-export function runProcess(command, args, { cwd, env, timeoutMillis = 30_000 } = {}) {
+export function runProcess(command, args, { cwd, env, input, timeoutMillis = 30_000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env })
+    child.stdin.on('error', (error) => {
+      if (error.code !== 'EPIPE') reject(error)
+    })
+    child.stdin.end(input)
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => {

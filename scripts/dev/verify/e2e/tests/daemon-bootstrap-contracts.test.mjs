@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { CARD_ID, runProcess, startCardServer } from '../../tests/support/card-server.mjs'
+import { CARD_ID, FIXTURE_COOKIE, runProcess, startCardServer } from '../../tests/support/card-server.mjs'
 import { daemonConfigFixture } from '../lib/fixtures.mjs'
 import { REPOSITORY_ROOT, readText } from '../../../tests/support/shell.mjs'
 
@@ -69,7 +69,7 @@ function cleanEnv(overrides = {}) {
 }
 
 function runBootstrap(env) {
-  return runProcess('bash', [BOOTSTRAP], { env, timeoutMillis: 30_000 })
+  return runProcess('bash', [BOOTSTRAP], { env, input: FIXTURE_COOKIE })
 }
 
 test('test intent: the E2E seed pre-seeds exactly five disposable Environments and stays re-runnable', () => {
@@ -126,14 +126,19 @@ test('test intent: bootstrap materializes the card cache and launches the Daemon
       const { daemonBinary, argvFile, environFile } = recorderDaemon(temporary)
       const root = path.join(temporary, 'daemon')
       const secret = 'e2e-token-host-tool'
+      const helperArgv = path.join(temporary, 'helper-argv.txt')
+      const nodeProbe = path.join(temporary, 'node-probe')
+      writeFileSync(nodeProbe, '#!/bin/bash\nprintf "%s\\n" "$@" >"$PROBE_HELPER_ARGV"\nexec "$PROBE_NODE" "$@"\n', { mode: 0o700 })
       const result = await runBootstrap(cleanEnv({
         PROBE_ARGV: argvFile,
         PROBE_ENVIRON: environFile,
+        PROBE_HELPER_ARGV: helperArgv,
+        PROBE_NODE: process.execPath,
         DAEMON_ROOT: root,
         DAEMON_STUDIO_URL: server.url,
         DAEMON_ENVIRONMENT_NAME: 'tool-e2e',
         DAEMON_BINARY: daemonBinary,
-        DAEMON_NODE: process.execPath,
+        DAEMON_NODE: nodeProbe,
         DAEMON_REGISTRATION_TOKEN: secret,
       }))
       assert.equal(result.status, 0, result.stderr)
@@ -143,10 +148,14 @@ test('test intent: bootstrap materializes the card cache and launches the Daemon
       const configPath = argv[argv.indexOf('--config') + 1]
       assert.ok(path.isAbsolute(configPath))
       assert.equal(configPath, path.join(root, 'daemon.json'))
-      assert.ok(!argv.includes(secret))
-      assert.ok(!readFileSync(environFile, 'utf8').includes(secret))
-      assert.ok(!(result.stdout + result.stderr).includes(secret))
-      assert.ok(!readFileSync(configPath, 'utf8').includes(secret))
+      for (const credential of [secret, FIXTURE_COOKIE]) {
+        assert.ok(!argv.join('\n').includes(credential))
+        assert.ok(!readFileSync(helperArgv, 'utf8').includes(credential))
+        assert.ok(!readFileSync(environFile, 'utf8').includes(credential))
+        assert.ok(!(result.stdout + result.stderr).includes(credential))
+        assert.ok(!readFileSync(configPath, 'utf8').includes(credential))
+      }
+      assert.equal(server.logins, 0, 'host bootstrap must reuse its session')
       assert.ok(!JSON.stringify(server.calls).includes(secret))
 
       const config = JSON.parse(readFileSync(configPath, 'utf8'))
@@ -188,7 +197,7 @@ test('test intent: bootstrap selects a card by UUID and does not rewrite an alre
     const reachable = daemonConfigFixture({ studioUrl: server.url })
     const updated = await fetch(`${server.url}/api/platform/environments/${CARD_ID}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', Cookie: FIXTURE_COOKIE, Origin: server.url },
       body: JSON.stringify({ expectedVersion: '3', note: 'reachable', daemonConfig: reachable }),
     })
     assert.equal(updated.status, 200)
@@ -292,6 +301,29 @@ test('test intent: bootstrap does not start the daemon when the card cannot be r
   }
 })
 
+test('test intent: card redirects never forward the Studio session, even on the same origin', async (t) => {
+  const cardPath = `/api/platform/environments/${CARD_ID}`
+  const server = await startCardServer({ redirect: { path: cardPath, location: '/unexpected' } })
+  t.after(() => server.close())
+  await withTempDir(async (temporary) => {
+    const { daemonBinary } = daemonFixture(temporary)
+    const root = path.join(temporary, 'daemon')
+    const result = await runBootstrap(cleanEnv({
+      DAEMON_ROOT: root,
+      DAEMON_STUDIO_URL: server.url,
+      DAEMON_ENVIRONMENT_ID: CARD_ID,
+      DAEMON_BINARY: daemonBinary,
+      DAEMON_NODE: process.execPath,
+      DAEMON_REGISTRATION_TOKEN: 'e2e-token-host-tool',
+    }))
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /HTTP 307/)
+    assert.ok(!(result.stdout + result.stderr).includes(FIXTURE_COOKIE))
+    assert.deepEqual(server.calls.map(({ path }) => path), [cardPath])
+    assert.ok(!existsSync(path.join(root, 'daemon.json')))
+  })
+})
+
 test('test intent: bootstrap creates its files owner-only without relying on chmod', async () => {
   const server = await startCardServer({ name: 'tool-e2e' })
   try {
@@ -305,6 +337,7 @@ test('test intent: bootstrap creates its files owner-only without relying on chm
 
       const root = path.join(temporary, 'daemon')
       const result = await runProcess('bash', ['-c', `umask 000; exec bash '${BOOTSTRAP}'`], {
+        input: FIXTURE_COOKIE,
         env: cleanEnv({
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
           DAEMON_ROOT: root,
