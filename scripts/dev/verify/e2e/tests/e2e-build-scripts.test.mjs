@@ -155,14 +155,9 @@ test('test intent: the free Canvas Function rebuild loads the disposable account
   assert.ok(script.includes('SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-'))
 })
 
-test('test intent: provider credentials are synchronized only for real mode', () => {
-  // Free stack setup must never consume host real-provider credentials.
-  const script = readText(E2E_ENTRY)
+test('test intent: host stack setup does not synchronize provider credentials', () => {
+  // The shared setup is used by free runs; only-selection exercises both entry modes separately.
   const ensureStack = functionBody(E2E_LIB, 'ensure_stack')
-  const syncCalls = script.match(/^\s*sync_e2e_provider_credentials(?:\s+.*)?$/gm) ?? []
-
-  assert.equal(syncCalls.length, 1)
-  assert.match(script, /if \[ "\$REAL" = "true" \]; then\n {2}sync_e2e_provider_credentials "\$\{REAL_MODEL_ARGS\[@\]\}"\n {2}unset "\$\{REAL_CREDENTIAL_VARS\[@\]\}"/)
   assert.ok(!ensureStack.includes('sync_e2e_provider_credentials'))
 })
 

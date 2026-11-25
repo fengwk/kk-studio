@@ -24,7 +24,7 @@ ensure_stack() { :; }
 cleanup_owned_stack() { :; }
 load_e2e_credential_names() { REAL_CREDENTIAL_VARS=(FIXTURE_CREDENTIAL); }
 sync_e2e_provider_credentials() {
-  printf '%s\\n' "$@" > "$STUB_ROOT/sync-args"
+  printf '%s\\n' "$@" >> "$STUB_ROOT/sync-args"
   printf 'arbitrary sync result\\n'
   printf 'arbitrary sync error\\n' >&2
   return "$STUB_SYNC_EXIT"
@@ -36,6 +36,10 @@ node() {
   shift
   case "$script" in
     */run-matrix.mjs)
+      if [[ " $* " == *' --real '* && -v FIXTURE_CREDENTIAL ]]; then
+        echo 'credential reached the matrix' >&2
+        return 2
+      fi
       printf '%s\\n' "$@" > "$STUB_ROOT/api-args"
       mkdir -p "$STUB_ROOT/reports/e2e/latest"
       printf 'API report\\n' > "$STUB_ROOT/reports/e2e/latest/report.md"
@@ -119,6 +123,7 @@ test('results-only forwards both modes and suppresses the synchronizer without s
   const run = runEntry(args)
   assert.equal(run.status, 0)
   assert.ok(run.api.includes('--results-only') && run.ui.includes('--results-only'))
+  assert.deepEqual(run.sync, ['--real-model', 'openai_responses'])
   assert.doesNotMatch(run.stdout + run.stderr, /arbitrary sync/)
   const failed = runEntry(args, 0, 37)
   assert.equal(failed.status, 37)
