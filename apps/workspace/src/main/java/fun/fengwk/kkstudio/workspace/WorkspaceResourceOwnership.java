@@ -45,6 +45,7 @@ class WorkspaceResourceOwnership implements ResourceOwnership {
                         rs.getObject("space_id", UUID.class),
                         rs.getString("title"),
                         rs.getObject("owner_user_id", UUID.class))))
+        .list()
         .stream()
         .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
   }
