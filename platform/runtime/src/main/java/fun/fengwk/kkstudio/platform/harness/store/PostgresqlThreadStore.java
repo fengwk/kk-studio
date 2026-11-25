@@ -224,7 +224,10 @@ final class PostgresqlThreadStore implements ThreadStore {
         ), facts as (
             select t.root_thread_id,
                    exists (select 1 from tools i where i.root_thread_id = t.root_thread_id
-                       and i.status in ('WAITING_APPROVAL', 'WAITING_INPUT')) as waiting_human,
+                       and i.status in ('WAITING_APPROVAL', 'WAITING_INPUT'))
+                       or exists (select 1 from tree member join harness_execution_exit x on x.thread_id = member.id
+                           where member.root_thread_id = t.root_thread_id
+                               and member.execution_control = 'STOPPED' and x.state = 'UNCONFIRMED') as waiting_human,
                    coalesce(w.runnable, false)
                        or exists (select 1 from tools i where i.root_thread_id = t.root_thread_id and i.status = 'RUNNING')
                        or exists (select 1 from active_driver_work d where d.root_thread_id = t.root_thread_id and d.running) as has_work,

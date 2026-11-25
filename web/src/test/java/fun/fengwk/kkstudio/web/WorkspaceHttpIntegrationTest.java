@@ -22,22 +22,44 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.account.StudioAccountService;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -307,6 +329,158 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
                 .param("expectedVersion", placement.get("version").asText()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.treeVersion").value("3"));
+  }
+
+  /** Exit evidence, not the tool's terminal result, determines whether a user can act. */
+  @Test
+  void projectsActionableExitAndIgnoresHistoricalUnknownTool() throws Exception {
+    String space = createSpace();
+    var created =
+        json(
+            mvc.perform(
+                    write(
+                        post(space + "/sessions"),
+                        UUID.randomUUID().toString(),
+                        "{\"message\":[{\"type\":\"TEXT\",\"text\":\"Interrupted tool\"}]}"))
+                .andExpect(status().isOk())
+                .andReturn());
+    UUID session = UUID.fromString(created.get("sessionId").asText());
+    UUID thread = UUID.fromString(created.get("threadId").asText());
+    UUID invocation = seedHistoricalUnknownTool(session, thread);
+    UUID confirmed = seedToolExit(thread, invocation);
+    jdbc.update(
+        "update harness_execution_exit set state = 'OWNER_EXITED', confirmed_at = now() where execution_id = ?",
+        confirmed);
+    assertWorkspaceThreadState(space, thread, "RUNNING");
+
+    UUID pending = seedToolExit(thread, invocation);
+    assertWorkspaceThreadState(space, thread, "RUNNING");
+    jdbc.update("delete from durable_work where target_type = 'THREAD' and target_id = ?", thread);
+    String runnableVersion =
+        assertWorkspaceThreadState(space, thread, "WAITING").get("version").asText();
+
+    mvc.perform(
+            write(
+                post("/api/harness/threads/" + thread + "/stop"),
+                UUID.randomUUID().toString(),
+                "{\"stopRequestId\":\"%s\",\"expectedVersion\":\"%s\"}"
+                    .formatted(UUID.randomUUID(), runnableVersion)))
+        .andExpect(status().isAccepted());
+    String version = assertWorkspaceThreadState(space, thread, "NEEDS_YOU").get("version").asText();
+    mvc.perform(
+            write(
+                post("/api/harness/threads/" + thread + "/executions/" + pending + "/abandon"),
+                UUID.randomUUID().toString(),
+                "{\"expectedVersion\":\"%s\"}".formatted(version)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.unconfirmedExecutions").isEmpty());
+    assertEquals(
+        "STOPPED", assertWorkspaceThreadState(space, thread, "IDLE").get("reason").asText());
+    assertEquals(
+        "UNKNOWN",
+        jdbc.queryForObject(
+            "select status from harness_tool_invocation where id = ?", String.class, invocation));
+  }
+
+  private UUID seedHistoricalUnknownTool(UUID session, UUID thread) {
+    UUID head =
+        jdbc.queryForObject(
+            "select head_entry_id from harness_thread where id = ?", UUID.class, thread);
+    var settings =
+        new BranchSettings(
+            "default-assistant",
+            BuiltinExecution.of(ModelSelection.model("acceptance-stub", "default")),
+            null);
+    UUID start =
+        insertEntry(session, head, new TurnStartPayload(TurnStartReason.INPUT, settings, thread));
+    UUID input =
+        insertEntry(
+            session,
+            start,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.USER, List.of(new TextMessageContent("Interrupted tool"))),
+                null,
+                null));
+    UUID assistant =
+        insertEntry(
+            session,
+            input,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "probe", "probe", "{}"))),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(0, 0, 0, 0, Map.of(), null, null),
+                    null,
+                    ModelSelection.model("acceptance-stub", "default"),
+                    Instant.EPOCH,
+                    null),
+                null));
+    UUID end =
+        insertEntry(
+            session,
+            assistant,
+            new TurnEndPayload(
+                start, TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null));
+    jdbc.update("update harness_thread set head_entry_id = ? where id = ?", end, thread);
+    UUID invocation = UUID.randomUUID();
+    var binding =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new ToolDescriptor(
+                    "probe",
+                    "Check status",
+                    "probe",
+                    new InputSchema("arguments", Map.of(), Set.of(), false),
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "probe"),
+            EnvironmentSupport.NONE,
+            null,
+            null);
+    jdbc.update(
+        """
+        insert into harness_tool_invocation
+            (id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding,
+             status, attempt, error, created_at, updated_at)
+        values (?, ?, ?, ?, 0, '{"id":"call-1","toolName":"probe","argumentsJson":"{}"}'::jsonb,
+                ?::jsonb, 'UNKNOWN', 1, '{"kind":"LEASE_EXPIRED","message":"Result unknown"}'::jsonb,
+                now(), now())
+        """,
+        invocation,
+        thread,
+        start,
+        assistant,
+        new ToolBindingJsonCodec().encode(binding));
+    return invocation;
+  }
+
+  private UUID seedToolExit(UUID thread, UUID invocation) {
+    UUID execution = UUID.randomUUID();
+    jdbc.update(
+        """
+        insert into harness_execution_exit
+            (execution_id, thread_id, invocation_id, attempt, owner_lease_token, kind, state, registered_at)
+        values (?, ?, ?, 1, ?, 'TOOL', 'UNCONFIRMED', now())
+        """,
+        execution,
+        thread,
+        invocation,
+        UUID.randomUUID());
+    return execution;
+  }
+
+  private JsonNode assertWorkspaceThreadState(String space, UUID thread, String expected)
+      throws Exception {
+    assertEquals(expected, tree(space).at("/folders/0/resources/0/threads/0/state").asText());
+    return json(
+        mvc.perform(get(space + "/threads/" + thread).cookie(login))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.state").value(expected))
+            .andReturn());
   }
 
   private UUID insertEntry(UUID session, UUID parent, EntryPayload payload) {
