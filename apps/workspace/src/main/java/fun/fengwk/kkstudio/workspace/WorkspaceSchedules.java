@@ -28,7 +28,6 @@ import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -101,9 +100,8 @@ public class WorkspaceSchedules implements AccountScheduleSuspension {
             value(patch.timeZone(), old.timeZone()), value(patch.target(), old.target()));
     var schedule = configure(actor, space, id, old.version() + 1, draft, old);
     repository.update(space, schedule);
-    if (!Objects.equals(schedule.nextDueAt(), old.nextDueAt())) {
-      refreshWork(schedule);
-    }
+    // Replacing the mailbox fences claims acquired under the previous configuration version.
+    refreshWork(schedule);
     WorkspaceNotifications.schedules(jdbc, space, id);
     return schedule;
   }

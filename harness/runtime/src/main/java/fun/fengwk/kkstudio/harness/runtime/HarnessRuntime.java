@@ -309,23 +309,19 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           tx.threads().lockTree(root);
-          var state = tx.threads().find(root);
-          if (state.isEmpty()) {
-            return !requireRunnable;
-          }
-          if (requireRunnable && state.get().executionControl().isStopped()) {
-            return false;
-          }
-          for (UUID id : tx.threads().listThreadIdsByRoots(List.of(root))) {
-            var thread = tx.threads().find(id).orElseThrow();
-            if (!ThreadLifecycleCoordinator.isQuiescent(tx, thread)
-                || !tx.commands().loadQueued(id).isEmpty()
-                || ThreadInputDemand.hasUnconsumedNotification(tx, thread)
-                || !tx.joins().loadIncomplete(id).isEmpty()) {
-              return false;
-            }
-          }
-          return true;
+          var roots = List.of(root);
+          var members = tx.threads().listThreadIdsByRoots(roots);
+          var facts =
+              tx.threads().findExecutionFacts(roots, driverRegistry.readActiveWork(tx, members));
+          return facts.stream()
+              .findFirst()
+              .map(
+                  fact ->
+                      !fact.hasWork()
+                          && !fact.waitingForHuman()
+                          && !fact.blocked()
+                          && (!requireRunnable || !fact.stopped()))
+              .orElse(!requireRunnable);
         });
   }
 
