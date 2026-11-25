@@ -205,6 +205,128 @@ class WorkspacePostgresIntegrationTest {
     }
   }
 
+  /** Placement writes keep ordered edges and enforce resource-kind and replay boundaries. */
+  @Test
+  void placementsMoveAndDeleteOrderedResources() {
+    try (var context = serviceContext()) {
+      var spaces = context.getBean(ChatSpaceService.class);
+      var folders = context.getBean(FolderService.class);
+      var placements = context.getBean(WorkspacePlacements.class);
+      var owner = testUser(context, "placement-owner");
+      var space = create(spaces, owner, "Placement").id();
+      var jdbc = context.getBean(JdbcClient.class);
+      UUID root =
+          jdbc.sql("select id from workspace_folder where workspace_id = :space")
+              .param("space", space)
+              .query(UUID.class)
+              .single();
+      var destination =
+          folders.create(
+              owner, space, UUID.randomUUID(), new FolderService.Create(null, "Destination", 0));
+      UUID first = UUID.randomUUID();
+      UUID second = UUID.randomUUID();
+      jdbc.sql("insert into canvas_document (id, title) values (:id, 'First')")
+          .param("id", first)
+          .update();
+      jdbc.sql("insert into canvas_document (id, title) values (:id, 'Second')")
+          .param("id", second)
+          .update();
+      String firstHash = WorkspacePlacements.fingerprint("first");
+      placements.insert(
+          space, root, first, ResourceOwnership.Kind.CANVAS, null, firstHash, 1, null);
+      placements.insert(
+          space,
+          root,
+          second,
+          ResourceOwnership.Kind.CANVAS,
+          null,
+          WorkspacePlacements.fingerprint("second"),
+          2,
+          null);
+
+      assertEquals(
+          List.of(second, first),
+          placements.list(space).stream().map(WorkspacePlacements.Edge::id).toList());
+      assertEquals(first, placements.require(space, first, ResourceOwnership.Kind.CANVAS).id());
+      assertEquals(
+          "RESOURCE_NOT_FOUND",
+          assertThrows(
+                  DomainException.class,
+                  () -> placements.require(space, first, ResourceOwnership.Kind.SESSION))
+              .reason());
+      assertEquals(first, placements.replay(space, first, firstHash).orElseThrow().id());
+      assertEquals(
+          "IDEMPOTENCY_KEY_REUSED",
+          assertThrows(DomainException.class, () -> placements.replay(space, first, "different"))
+              .reason());
+
+      placements.move(
+          space,
+          placements.require(space, first, ResourceOwnership.Kind.CANVAS),
+          destination.id(),
+          null);
+      assertEquals(destination.id(), placements.find(space, first).orElseThrow().folderId());
+      placements.delete(space, placements.require(space, second, ResourceOwnership.Kind.CANVAS));
+      assertEquals(
+          List.of(first),
+          placements.list(space).stream().map(WorkspacePlacements.Edge::id).toList());
+      assertThrows(DomainException.class, () -> placements.requireFolder(space, UUID.randomUUID()));
+    }
+  }
+
+  /** Space updates preserve owner scope, normalize names, and protect the final active space. */
+  @Test
+  void spacePatchChecksOwnershipAndKeepsAnActiveSpace() {
+    try (var context = serviceContext()) {
+      var service = context.getBean(ChatSpaceService.class);
+      var owner = testUser(context, "space-patch-owner");
+      var outsider = testUser(context, "space-patch-outsider");
+      var first = create(service, owner, "First");
+      var second = create(service, owner, "Second");
+
+      var renamed =
+          service.patch(
+              owner,
+              first.id(),
+              new ChatSpaceService.Patch(0, "  Renamed  ", null, null, null, true));
+      assertEquals("Renamed", renamed.title());
+      assertEquals(1, renamed.version());
+      assertEquals(true, renamed.defaultYoloEnabled());
+      assertEquals(false, service.allows(outsider, first.id()));
+      assertEquals(
+          DomainErrorCode.NOT_FOUND,
+          assertThrows(
+                  DomainException.class,
+                  () ->
+                      service.patch(
+                          outsider,
+                          first.id(),
+                          new ChatSpaceService.Patch(1, null, null, null, null, null)))
+              .code());
+
+      var archived =
+          service.patch(
+              owner, first.id(), new ChatSpaceService.Patch(1, null, true, null, null, null));
+      assertEquals(2, archived.version());
+      assertEquals(first.id(), service.list(owner).get(1).id());
+      assertEquals(
+          "LAST_ACTIVE_CHAT_SPACE",
+          assertThrows(
+                  DomainException.class,
+                  () ->
+                      service.patch(
+                          owner,
+                          second.id(),
+                          new ChatSpaceService.Patch(0, null, true, null, null, null)))
+              .reason());
+      var restored =
+          service.patch(
+              owner, first.id(), new ChatSpaceService.Patch(2, null, false, null, null, null));
+      assertEquals(null, restored.archivedAt());
+      assertEquals(3, restored.version());
+    }
+  }
+
   private static UUID placeCanvas(JdbcClient jdbc, UUID space) {
     UUID canvas = UUID.randomUUID();
     jdbc.sql("insert into canvas_document (id, title) values (:id, 'Canvas')")
@@ -265,6 +387,7 @@ class WorkspacePostgresIntegrationTest {
         ChatSpaceService.class,
         FolderService.class,
         WorkspaceResourceOwnership.class,
+        WorkspacePlacements.class,
         StudioUserLock.class);
     context.registerBean(JdbcClient.class, () -> JdbcClient.create(dataSource));
     context.registerBean(
