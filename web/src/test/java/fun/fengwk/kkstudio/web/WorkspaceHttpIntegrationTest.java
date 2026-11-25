@@ -390,7 +390,8 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
             new String[][] {
               {"thread", session.get("threadId").asText()},
               {"thread-tree", session.get("threadId").asText()},
-              {"canvas", canvas.get("id").asText()}
+              {"canvas", canvas.get("id").asText()},
+              {"chat-space", space.substring(space.lastIndexOf('/') + 1)}
             }) {
           String subscribe =
               "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"%s\",\"id\":\"%s\"}}"
@@ -400,6 +401,23 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
           assertEquals(resource[0], ownerFrames.next("subscribed").at("/resource/kind").asText());
           assertEquals("RESOURCE_NOT_FOUND", outsiderFrames.next("error").get("code").asText());
         }
+        String key = UUID.randomUUID().toString();
+        mvc.perform(
+                write(
+                    patch(space), key, "{\"expectedVersion\":\"0\",\"title\":\"New space title\"}"))
+            .andExpect(status().isOk());
+        assertEquals("1", ownerFrames.next("event", "space").at("/data/version").asText());
+        mvc.perform(
+                write(patch(space + "/folders/" + folder), key, "{\"name\":\"New folder title\"}"))
+            .andExpect(status().isOk());
+        assertEquals("2", ownerFrames.next("event", "tree").at("/data/treeVersion").asText());
+        mvc.perform(
+                write(
+                    post(space + "/sessions"),
+                    UUID.randomUUID().toString(),
+                    "{\"message\":[{\"type\":\"TEXT\",\"text\":\"Trigger thread hint\"}]}"))
+            .andExpect(status().isOk());
+        assertEquals(0, ownerFrames.next("event", "threads").get("data").size());
       } finally {
         ownerSocket.abort();
         outsiderSocket.abort();
@@ -432,10 +450,16 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
     }
 
     JsonNode next(String type) throws InterruptedException {
+      return next(type, null);
+    }
+
+    JsonNode next(String type, String name) throws InterruptedException {
       long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
       while (System.nanoTime() < deadline) {
         var frame = frames.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
-        if (frame != null && type.equals(frame.get("type").asText())) {
+        if (frame != null
+            && type.equals(frame.get("type").asText())
+            && (name == null || name.equals(frame.path("name").asText()))) {
           return frame;
         }
       }

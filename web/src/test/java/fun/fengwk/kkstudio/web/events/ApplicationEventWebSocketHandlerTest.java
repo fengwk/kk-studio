@@ -55,6 +55,7 @@ import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
+import fun.fengwk.kkstudio.workspace.ChatSpaceService;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -196,7 +197,8 @@ class ApplicationEventWebSocketHandlerTest {
             heartbeatScheduler,
             nowNanos::get,
             accounts,
-            access);
+            access,
+            mock(ChatSpaceService.class));
     recorder = new SentRecorder();
     Session jettySession = mock(Session.class);
     doAnswer(

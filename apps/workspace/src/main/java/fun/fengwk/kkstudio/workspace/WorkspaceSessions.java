@@ -188,7 +188,7 @@ public class WorkspaceSessions {
   @Transactional(isolation = Isolation.REPEATABLE_READ)
   public WorkspaceThreadPlacementDTO rename(
       StudioPrincipal actor, UUID space, UUID id, ThreadRenameDTO request) {
-    spaces.lock(actor, space);
+    var current = spaces.lock(actor, space);
     requireThread(space, id);
     try {
       runtime
@@ -199,6 +199,7 @@ public class WorkspaceSessions {
     } catch (DomainException ex) {
       throw creationConflict(ex);
     }
+    spaces.treeChanged(space, current.treeVersion());
     return tree.threadPlacement(space, id);
   }
 
