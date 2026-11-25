@@ -81,9 +81,9 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、compact、yolo、stop、tool approval |
 | Builtin | `/api/harness/builtin/...` | Model Request Debug、历史 Provider 请求重建与活动模型请求追帧 |
 | Interaction | `/api/harness/interactions`、`/api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input` | 等待分页（条目是 `INPUT`/`APPROVAL`/`ENVIRONMENT_WAIT` 判别联合，`total` 是同一过滤条件下真实可见的待处理计数）与问卷回答/拒答提交 |
-| Canvas | `/api/canvas/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
+| Canvas | `/api/canvas/canvases`、`/api/canvas/canvases/{canvasId}/blobs/{blobId}/{download-url,preview-url}` | 创建、列表、Snapshot、commands、经画布归属及 Blob 持有边授权的 POST 下载/预览 URL、节点 Function Run |
 | Function catalog | `/api/canvas/functions` | 函数 schema、输出计划、可用性 |
-| Storage | `/api/platform/storage/uploads`、`/api/platform/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
+| Storage | `/api/platform/storage/uploads` | 登录用户 reserve/complete/delete 自己的上传；不提供通用 Blob ID 下载或预览 URL |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/uninstall-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/{id}/events` | 创建、读取与整体替换（`note` + `daemonConfig`）、当前 owner 运行快照、注册令牌轮换、一次性安装码与按卡片安装/卸载脚本、受管二进制在线更新、运维事件；创建和轮换响应及安装脚本含凭据 |
@@ -96,7 +96,7 @@ Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platfo
 
 `POST /api/chat/chats`、`PUT /api/chat/chats/{chatId}` 与 `PUT /api/chat/chats/{chatId}/yolo` 的字段语义见 [Chat](chat.md)。
 
-`GET /api/harness/sessions/{sessionId}/resources/{resourceId}?download=false` 流式返回 Session 持有的资源用于预览；`download=true` 强制作为附件下载。接口仅允许 `session_blob_ref` 中存在该资源引用且 Blob 处于 ACTIVE 状态的 Session，其他情况返回 404；响应使用 Blob 的媒体类型，不返回对象存储地址，并设置禁止缓存与内容嗅探的安全头。
+`POST /api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `preview-url` 分别签发短期预签名 GET URL，必须通过当前用户的 Session 归属授权和 `session_blob_ref` 持有检查，任一不满足返回 404。旧的 `GET /api/harness/sessions/{sessionId}/resources/{resourceId}?download=false` 代理流继续可用；`download=true` 强制作为附件下载。它同样检查 Session 授权、持有边与 ACTIVE Blob，其他情况返回 404；响应使用 Blob 的媒体类型，不返回对象存储地址，并设置禁止缓存与内容嗅探的安全头。Canvas 的 POST 取址在 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url|preview-url`，按 Canvas 归属和持有边授权。
 
 Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 
@@ -157,7 +157,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 
 规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
-Canvas commands 返回 patch，Function start 返回 202；资源读模型按 `type` 分为 `TEXT`（内联文本）与 `BLOB`（blob 引用）。
+Canvas commands 返回 patch，Function start 返回 202；资源读模型按 `type` 分为 `TEXT`（内联文本）与 `BLOB`（blob 引用）。写入 BLOB 资源的请求字段是当前用户拥有的 READY `uploadId`，不是 `blobId`；服务端以该上传记录的权威文件事实登记 Canvas 持有边。
 Canvas Function 的 UNKNOWN resolve 要求 resolution 与非空 verification。Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
 ## 同源 IDE 网关

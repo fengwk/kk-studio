@@ -510,10 +510,8 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 `StorageBlobPreviewService` 把预览生成交给媒体实现，`StorageLockConnections` 把上传操作锁的专用物理连接交给组合根提供。
 
 HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/http/StorageController.java)，
-挂在 `/api/platform/storage`：`POST /uploads` 返回 201，`POST /uploads/{uploadId}/complete` 与两个 blob URL 端点返回 200，
-`DELETE /uploads/{uploadId}` 返回 204；`{uploadId}`、`{blobId}` 是类型化 UUID。上传响应是 `type` 判别的 PENDING/READY
-联合：PENDING 携带 `presignedPut`，READY 携带 `blobId`；两者都回显可空图片事实与响应时刻的 `expiresAt`（Instant）。
-blob URL 只暴露 `method`、`url`、必须回传的 `headers`、`expiresAt`、权威 `mediaType`/`sizeBytes`，不含 bucket 或对象 key。
+挂在 `/api/platform/storage`：登录用户 `POST /uploads` 预约并记录当前用户 ID，`POST /uploads/{uploadId}/complete` 与 `DELETE /uploads/{uploadId}` 仅允许该上传者完成或取消；分别返回 201、200、204。`{uploadId}` 是类型化 UUID。上传响应是 `type` 判别的 PENDING/READY
+联合：PENDING 携带 `presignedPut`，READY 携带 `blobId`；两者都回显可空图片事实与响应时刻的 `expiresAt`（Instant）。浏览器上传 URL 只提供 PUT 预约；Blob 取址通过持有该 Blob 的 Session 或 Canvas 接口完成，不提供通用 Blob ID 取址。服务端受信 staging 可创建 owner 为 null 的暂存上传；只有受信内部调用以 null owner 锁定/读取它，用户 API 始终使用登录用户 ID。
 DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/dto/)。
 
 浏览器上传使用 reserve → PUT → complete。图片 reserve 的 `format` 是已存储字节的 MIME subtype；`originalWidth` / `originalHeight` 是缩放前尺寸，`storedWidth` / `storedHeight` 是 PUT 字节的实际尺寸。四类图片事实一起持久化并在 PENDING/READY 响应中原样返回；reserve 对图片要求全部这些事实，complete 信任它们，不再探测或缩放用户上传的图片；非图片不发送这些字段。服务端 stage 使用独立路径，并可为其图片内容生成媒体事实。
@@ -549,11 +547,11 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 
 全局资源以 `resource://files/<uuid>` 标识；技能内容使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`。路径段按 UTF-8 百分号编码，解析时也接受未编码的路径段。URI 不含对象存储键、预签名地址或内部网络位置。
 
-`read` 的 URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。`resource://files/<uuid>` 必须是 ACTIVE Blob，读取时登记为当前 Session 的持有。技能 URI 先校验包的当前版本与技能存在，把归档 Blob 登记为当前 Session 的持有，再只下载归档索引中目标条目的压缩范围并解压，解压后的大小与 CRC32 必须与索引一致；文本沿用 `TextReadWindow` 的窗口契约，`.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` 以二进制内容返回。
+`read` 的 URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。`resource://files/<uuid>` 必须是 ACTIVE Blob，且在消费前已由当前 Session 持有；任意 Blob ID 不会凭读取自动建立持有边。可信的 Session 创建/分叉、消息附件或工具结果物化，在各自授权事务内登记持有边。技能 URI 先校验包的当前版本与技能存在，把归档 Blob 登记为当前 Session 的持有，再只下载归档索引中目标条目的压缩范围并解压，解压后的大小与 CRC32 必须与索引一致；文本沿用 `TextReadWindow` 的窗口契约，`.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` 以二进制内容返回。
 
-`session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：资源在 `read`、用户消息或工具输出传递时登记到当前 Session，图片和其他媒体结果仍保留原始 `resource://` URI；重复登记幂等，Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
+`session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：读取 `resource://files/<uuid>` 前要求当前 Session 已持有；用户消息只能使用当前用户持有的 READY 上传，工具结果登记须通过其获准来源；这些获准写入在接受/物化事务内登记引用。图片和其他媒体结果仍保留原始 `resource://` URI；重复登记幂等，Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
 
-前端使用 Session 持有关系调用鉴权的预览／下载接口，接口不返回预签名 URL；资源 URI 被前端拦截，不能作为浏览器导航地址。读取及持有生命周期测试见 platform storage、Harness command acceptance 与 Session deletion 集成测试。
+Session 资源取址由 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `/preview-url` 的 POST 完成；两者先校验当前 principal 对 Session 的访问权，再校验 `session_blob_ref` 持有边，任一不满足均按 404。Canvas 对应接口为 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url` 与 `/preview-url`，验证画布归属及其持有的 Blob。接口返回现有格式的短期 S3 预签名 GET URL；不提供按 Blob ID 通用取址，已签发 URL 在有效期内仍可用。旧的 Session 代理流 `GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 继续保留，也须验证 Session 授权、持有边及 ACTIVE Blob。资源 URI 被前端拦截，不能作为浏览器导航地址。
 
 ## Environment
 

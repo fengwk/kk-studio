@@ -599,7 +599,7 @@ HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstu
 | `PUT …/tool-invocations/{toolInvocationId}/approval` | 路径前缀 `/threads/{threadId}`；`{decisionId, decision, reason?}` → 工具调用投影。 |
 | `POST …/tool-invocations/{toolInvocationId}/input` | 同上路径前缀；`{type, submissionId, answers?}`，`ANSWER` 或 `DECLINE` → 接受回执。 |
 | `GET /interactions` | 可选 `rootThreadId`、`cursor`、`limit` → 分页 `APPROVAL / INPUT / ENVIRONMENT_WAIT`；原始调用和执行根坐标同时返回。 |
-| `GET /sessions/{sessionId}/resources/{resourceId}` | `download` 默认为 false；校验 Session 持有边和 Blob 后返回字节流。 |
+| `GET /sessions/{sessionId}/resources/{resourceId}` | `download` 默认为 false；旧代理流保留，Web 边界校验当前 principal 对 Session 的访问权、Session 持有边和 ACTIVE Blob 后返回字节流。 |
 
 创建请求的 `target.type` 决定必需字段（[Target DTO](../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessCommandTargetDTO.java)）：
 
