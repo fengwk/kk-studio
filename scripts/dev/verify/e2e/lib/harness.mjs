@@ -511,6 +511,40 @@ export async function deleteWorkspaceSession(ctx, spaceId, sessionId) {
   }
 }
 
+/** Read a Chat Space resource tree for workspace verification and cleanup. */
+export async function getWorkspaceTree(ctx, spaceId) {
+  canonicalUuid(spaceId, 'spaceId')
+  const response = await ctx.call('GET', `/api/chat-spaces/${encodeURIComponent(spaceId)}/tree`)
+  assert(response.status === 200, `get workspace tree failed: HTTP ${response.status}`)
+  const tree = response.json ?? response
+  assert(tree && Array.isArray(tree.folders), `expected workspace tree: ${JSON.stringify(tree)}`)
+  return tree
+}
+
+/** Release temporary defaults and archive a test Chat Space when another active space exists. */
+export async function archiveWorkspaceSpace(ctx, spaceId) {
+  canonicalUuid(spaceId, 'spaceId')
+  const spaces = (await ctx.call('GET', '/api/chat-spaces')).json
+  assert(Array.isArray(spaces), `expected Chat Space list: ${JSON.stringify(spaces)}`)
+  const activeSpaces = spaces.filter((item) => !item.archivedAt)
+  let space = activeSpaces.find((item) => item.id === spaceId)
+  if (!space) return
+  if (space.defaultAgentName != null || space.defaultEnvironmentId != null) {
+    const patched = await ctx.call('PATCH', `/api/chat-spaces/${encodeURIComponent(spaceId)}`, {
+      expectedVersion: space.version,
+      defaultAgentName: null,
+      defaultEnvironmentId: null,
+    })
+    space = patched.json ?? { ...space, version: String(BigInt(space.version) + 1n) }
+  }
+  if (activeSpaces.length > 1) {
+    await ctx.call('PATCH', `/api/chat-spaces/${encodeURIComponent(spaceId)}`, {
+      expectedVersion: space.version,
+      archived: true,
+    })
+  }
+}
+
 /** Create a same-Session branch at a completed turn boundary. */
 export async function createWorkspaceBranch(ctx, spaceId, sessionId, {
   idempotencyKey,

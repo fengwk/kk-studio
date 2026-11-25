@@ -106,12 +106,16 @@ function createSettingsPage(world) {
     }
   }
 
+  function matchesName(expected, actual) {
+    if (expected instanceof RegExp) {
+      return expected.test(actual)
+    }
+    return expected === actual
+  }
+
   const page = {
     getByRole(role, options = {}) {
-      if (role === 'tab') {
-        return { async click() {} }
-      }
-      if (role === 'button' && options.name === '保存') {
+      if (role === 'button' && matchesName(options.name, '保存')) {
         return {
           async click() {
             const response = world.put(draftBody())
@@ -127,7 +131,7 @@ function createSettingsPage(world) {
           },
         }
       }
-      if (role === 'alertdialog' && options.name === '数据已发生变化') {
+      if (role === 'alertdialog' && matchesName(options.name, '数据已发生变化')) {
         return {
           async waitFor() {
             assert.equal(view.conflictVisible, true, 'conflict dialog must be visible')
@@ -135,7 +139,7 @@ function createSettingsPage(world) {
           getByRole(innerRole, innerOptions = {}) {
             return {
               async click() {
-                if (innerRole === 'button' && innerOptions.name === '刷新') {
+                if (innerRole === 'button' && matchesName(innerOptions.name, '刷新')) {
                   hydrate()
                   view.conflictVisible = false
                   resolveLoad()
@@ -148,7 +152,7 @@ function createSettingsPage(world) {
       throw new Error(`unexpected role locator: ${role} ${JSON.stringify(options)}`)
     },
     getByLabel(label) {
-      assert.equal(label, '基础延迟（毫秒）')
+      assert.ok(matchesName(label, '基础延迟（毫秒）'), `unexpected label: ${label}`)
       return {
         async waitFor() {
           assert.notEqual(view.draft, null, 'base delay input must be hydrated')
@@ -162,7 +166,7 @@ function createSettingsPage(world) {
       }
     },
     getByText(text) {
-      assert.equal(text, '所有更改已保存')
+      assert.ok(matchesName(text, '所有更改已保存'), `unexpected text: ${text}`)
       return {
         async waitFor() {
           assert.equal(view.latestVisible, true, '"所有更改已保存" must be visible')
@@ -193,7 +197,7 @@ function createHarness(world) {
       assert.deepEqual(logs, [])
     },
     goto: async (requestPath) => {
-      assert.equal(requestPath, '/settings')
+      assert.equal(requestPath, '/settings/aiRuntime')
       hydrate()
     },
     page,

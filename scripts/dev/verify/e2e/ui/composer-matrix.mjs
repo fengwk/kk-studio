@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
+import { baseModelConfig } from '../lib/fixtures.mjs'
 import {
   assert,
   assertDecimalVersion,
@@ -12,26 +12,38 @@ import {
   sleep,
 } from '../lib/http.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
-import { assertReadOnlyZeroFooter } from './assertions.mjs'
-import { clearChatPaneState } from './chat-pane-storage.mjs'
 import { runWorkspaceContractMatrix, waitForThreadSnapshot } from './workspace-contracts.mjs'
+export { expectStorage } from './workspace-helpers.mjs'
+import {
+  activeOptionText,
+  bindBlankComposer as bindWorkspaceBlankComposer,
+  bindThreadComposer as bindWorkspaceThreadComposer,
+  caretOffset,
+  cleanupWorkspaceFixtureState,
+  composerMetrics,
+  expectComposerText as expectWorkspaceComposerText,
+  expectStorage as expectWorkspaceStorage,
+  previewDialogLabel,
+  resolveCatalogTarget as resolveWorkspaceCatalogTarget,
+  setCaretOffset,
+  UI_LABELS,
+  waitForActiveModel as waitForWorkspaceActiveModel,
+  waitForComposer as waitForWorkspaceComposer,
+  waitForPlaceholder as waitForWorkspacePlaceholder,
+  waitForQueuedMessages as waitForWorkspaceQueuedMessages,
+  withUiFixture as withWorkspaceUiFixture,
+} from './workspace-helpers.mjs'
 import {
   acceptCommandBatch,
-  branchSettingsOf,
-  chatOwner,
-  createChat,
+  createWorkspaceSession,
+  createWorkspaceSpace,
   getThreadSnapshot,
-  createNewThread,
-  createNewSession,
   setExecutionCommand,
-  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
-  waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 
-const COMPOSER_DRAFT_STORAGE_PREFIX = 'kk-studio.composer-draft:'
 const TINY_IMAGE = readFileSync(
   path.join(
     REPO_ROOT,
@@ -63,6 +75,7 @@ export async function runComposerMatrix(ui) {
   const {
     apiCtx,
     consoleErrors,
+    ensureSignedIn,
     expectNoFatal,
     goto,
     page,
@@ -73,22 +86,23 @@ export async function runComposerMatrix(ui) {
   } = ui
 
   await run(
-    'ui.chat.composer.history_order_boundaries',
+    'ui.workspace.composer.history_order_boundaries',
     'Composer 按 durable、queued、草稿顺序导航且两端不循环',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
-        () => createHoldingQueueFixture(apiCtx, {
+        () => createWorkspaceHoldingQueueFixture(apiCtx, {
           title: `e2e-ui-composer-order-${stamp}`,
           historicalMessage: `durable history ${stamp}`,
           queuedMessages: [`queued 1 ${stamp}`, `queued 2 ${stamp}`],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `local draft ${stamp}`
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
 
           for (const expected of [
             `queued 2 ${stamp}`,
@@ -98,8 +112,8 @@ export async function runComposerMatrix(ui) {
             fixture.bootstrapMessage,
           ]) {
             await composer.press('ArrowUp')
-            await expectComposerText(page, expected)
-            await expectStorage(page, draftKey, draft)
+            await expectWorkspaceComposerText(page, expected)
+            await expectWorkspaceStorage(page, draftKey, draft)
           }
           for (const expected of [
             `durable history ${stamp}`,
@@ -109,8 +123,8 @@ export async function runComposerMatrix(ui) {
             draft,
           ]) {
             await composer.press('ArrowDown')
-            await expectComposerText(page, expected)
-            await expectStorage(page, draftKey, draft)
+            await expectWorkspaceComposerText(page, expected)
+            await expectWorkspaceStorage(page, draftKey, draft)
           }
 
           await shot(caseArt, 'composer-history-order-boundaries')
@@ -121,30 +135,31 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.duplicate_entries',
+    'ui.workspace.composer.duplicate_entries',
     'Composer 对相同文本的 durable/queued 条目仍保持独立游标',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const duplicate = `duplicate message ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createHoldingQueueFixture(apiCtx, {
+        () => createWorkspaceHoldingQueueFixture(apiCtx, {
           title: `e2e-ui-composer-duplicate-${stamp}`,
           historicalMessage: duplicate,
           queuedMessages: [duplicate],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `duplicate scratch ${stamp}`
           await composer.fill(draft)
 
           await composer.press('ArrowUp')
-          await expectComposerText(page, duplicate)
+          await expectWorkspaceComposerText(page, duplicate)
           await composer.press('ArrowUp')
-          await expectComposerText(page, duplicate)
+          await expectWorkspaceComposerText(page, duplicate)
           await composer.press('ArrowDown')
-          await expectComposerText(page, duplicate)
+          await expectWorkspaceComposerText(page, duplicate)
           await composer.press('ArrowDown')
-          await expectComposerText(page, draft)
+          await expectWorkspaceComposerText(page, draft)
 
           await shot(caseArt, 'composer-history-duplicate-entries')
           expectNoFatal(pageErrors, consoleErrors)
@@ -154,26 +169,27 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.multiline_scroll',
+    'ui.workspace.composer.multiline_scroll',
     'Composer 召回溢出多行历史后光标与内部滚动同步到末尾',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const currentDraft = `current composer draft ${stamp}`
       const historicalMessage = Array.from(
         { length: 24 },
         (_, index) =>
           `UI-E2E-COMPOSER-HISTORY-${stamp}-${String(index + 1).padStart(2, '0')}`,
       ).join('\n')
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-scroll-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           await composer.fill(currentDraft)
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
 
           const metrics = await composerMetrics(composer)
           assert(
@@ -191,7 +207,7 @@ export async function runComposerMatrix(ui) {
           await shot(caseArt, 'composer-history-multiline-bottom')
 
           await composer.press('ArrowDown')
-          await expectComposerText(page, currentDraft)
+          await expectWorkspaceComposerText(page, currentDraft)
           expectNoFatal(pageErrors, consoleErrors)
         },
       )
@@ -199,24 +215,25 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.multiline_caret_boundaries',
+    'ui.workspace.composer.multiline_caret_boundaries',
     'Composer 多行中间位置保留原生方向键，仅首行边界召回历史',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `caret boundary history ${stamp}`
       const currentDraft = 'line 1\nline 2\nline 3'
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-caret-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           await composer.fill(currentDraft)
 
           await setCaretOffset(composer, currentDraft.length)
           await composer.press('ArrowUp')
-          await expectComposerText(page, currentDraft)
+          await expectWorkspaceComposerText(page, currentDraft)
           const afterNativeUp = await caretOffset(composer)
           assert(
             afterNativeUp > 0 && afterNativeUp < currentDraft.length,
@@ -225,7 +242,7 @@ export async function runComposerMatrix(ui) {
 
           await setCaretOffset(composer, 0)
           await composer.press('ArrowDown')
-          await expectComposerText(page, currentDraft)
+          await expectWorkspaceComposerText(page, currentDraft)
           const afterNativeDown = await caretOffset(composer)
           assert(
             afterNativeDown > 0 && afterNativeDown < currentDraft.length,
@@ -234,7 +251,7 @@ export async function runComposerMatrix(ui) {
 
           await setCaretOffset(composer, 0)
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
           await shot(caseArt, 'composer-history-multiline-caret-boundary')
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -243,37 +260,38 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.edit_recalled',
+    'ui.workspace.composer.edit_recalled',
     '编辑召回消息后提升为新草稿并可刷新恢复',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `editable history ${stamp}`
       const originalDraft = `original scratch ${stamp}`
       const editedDraft = `${historicalMessage} edited`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-edit-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          let composer = await bindThreadComposer(page, goto, fixture)
+          let composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(originalDraft)
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
           await page.keyboard.type(' edited')
-          await expectComposerText(page, editedDraft)
-          await expectStorage(page, draftKey, editedDraft)
+          await expectWorkspaceComposerText(page, editedDraft)
+          await expectWorkspaceStorage(page, draftKey, editedDraft)
 
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
           await composer.press('ArrowDown')
-          await expectComposerText(page, editedDraft)
+          await expectWorkspaceComposerText(page, editedDraft)
 
           await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
-          composer = await waitForComposer(page)
-          await expectStorage(page, draftKey, editedDraft)
-          await expectComposerText(page, editedDraft)
+          composer = await waitForWorkspaceComposer(page)
+          await expectWorkspaceStorage(page, draftKey, editedDraft)
+          await expectWorkspaceComposerText(page, editedDraft)
           await shot(caseArt, 'composer-history-edited-recalled')
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -282,42 +300,40 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.draft_persistence_boundaries',
+    'ui.workspace.composer.draft_persistence_boundaries',
     '空 Pane 草稿精确刷新恢复，空白内容清存储且无历史时上键不变',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
-        () => createBlankChatFixture(apiCtx, {
+        () => createBlankWorkspaceFixture(apiCtx, {
           title: `e2e-ui-composer-persistence-${stamp}`,
         }),
         async (fixture) => {
-          let composer = await bindBlankComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
+          let { composer, draftKey } = await bindWorkspaceBlankComposer(page, goto, fixture)
           const exactDraft = '  first line\nsecond line  '
 
           await composer.fill(`no history ${stamp}`)
           await composer.press('ArrowUp')
-          await expectComposerText(page, `no history ${stamp}`)
+          await expectWorkspaceComposerText(page, `no history ${stamp}`)
 
           await composer.fill('  first line')
           await composer.press('Shift+Enter')
           await page.keyboard.type('second line  ')
-          await expectStorage(page, draftKey, exactDraft)
+          await expectWorkspaceStorage(page, draftKey, exactDraft)
           await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
-          composer = await waitForComposer(page)
-          await expectComposerText(page, exactDraft)
-          await expectStorage(page, draftKey, exactDraft)
+          composer = await waitForWorkspaceComposer(page)
+          await expectWorkspaceComposerText(page, exactDraft)
+          await expectWorkspaceStorage(page, draftKey, exactDraft)
 
           await composer.fill(' ')
           await composer.press('Shift+Enter')
           await page.keyboard.type(' ')
-          await expectStorage(page, draftKey, null)
-          await waitForPlaceholder(composer, true)
+          await expectWorkspaceStorage(page, draftKey, null)
+          await waitForWorkspacePlaceholder(composer, true)
           await composer.fill('')
-          await expectStorage(page, draftKey, null)
-          await waitForPlaceholder(composer, true)
+          await expectWorkspaceStorage(page, draftKey, null)
+          await waitForWorkspacePlaceholder(composer, true)
 
           await shot(caseArt, 'composer-draft-persistence-boundaries')
           expectNoFatal(pageErrors, consoleErrors)
@@ -327,23 +343,24 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.palette_precedence',
+    'ui.workspace.composer.palette_precedence',
     '命令菜单打开时方向键只导航命令，不召回消息或覆盖草稿',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `palette history ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-palette-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `palette scratch ${stamp}`
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          const palette = page.getByRole('listbox', { name: '命令表' })
+          await page.getByRole('button', { name: UI_LABELS.openCommandsButton }).click()
+          const palette = page.getByRole('listbox', { name: UI_LABELS.commandPalette })
           await palette.waitFor({ state: 'visible', timeout: 10_000 })
           const activeBefore = await activeOptionText(palette)
           await composer.focus()
@@ -353,13 +370,13 @@ export async function runComposerMatrix(ui) {
             activeBefore !== activeAfter,
             `ArrowDown did not move the active command: ${activeBefore}`,
           )
-          await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceComposerText(page, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
           await composer.press('ArrowUp')
-          await expectComposerText(page, draft)
+          await expectWorkspaceComposerText(page, draft)
           await composer.press('Escape')
           await palette.waitFor({ state: 'hidden', timeout: 10_000 })
-          await expectComposerText(page, draft)
+          await expectWorkspaceComposerText(page, draft)
 
           await composer.fill('/sto')
           await palette.waitFor({ state: 'visible', timeout: 10_000 })
@@ -369,11 +386,11 @@ export async function runComposerMatrix(ui) {
           )
           await shot(caseArt, 'composer-command-palette-without-duplicate-search')
           await composer.press('ArrowUp')
-          await expectComposerText(page, '/sto')
+          await expectWorkspaceComposerText(page, '/sto')
           await composer.press('Escape')
           await palette.waitFor({ state: 'hidden', timeout: 10_000 })
-          await expectComposerText(page, '/sto')
-          await expectStorage(page, draftKey, '/sto')
+          await expectWorkspaceComposerText(page, '/sto')
+          await expectWorkspaceStorage(page, draftKey, '/sto')
 
           await shot(caseArt, 'composer-command-palette-precedence')
           expectNoFatal(pageErrors, consoleErrors)
@@ -383,272 +400,28 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.selection_panel.keyboard_mode',
-    '轻量交互面板与 Composer 互斥，并支持 Session 内搜索、方向键和 Esc 返回',
-    async (caseArt) => {
-      const draft = `selection panel draft ${stamp}`
-      await withUiFixture(
-        page,
-        () => createBranchedHistoryFixture(apiCtx, {
-          title: `e2e-ui-selection-panel-${stamp}`,
-          trunkMessage: `selection baseline ${stamp}`,
-          originalMessages: [
-            `selection original branch ${stamp}`,
-            `selection original descendant ${stamp}`,
-          ],
-          alternateMessage: `selection alternate branch ${stamp}`,
-        }),
-        async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = { threadId: fixture.threadId }
-          await composer.fill(draft)
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^thread/ }).click()
-
-          const panel = await openFixtureThreadPanel(page, fixture)
-          assert(
-            await page.locator('.modal-backdrop').count() === 0,
-            'selection panel unexpectedly rendered a modal backdrop',
-          )
-          assert(
-            await page.locator('.thread-composer').getAttribute('hidden') !== null,
-            'Composer remained visible while the selection panel was active',
-          )
-          await assertReadOnlyZeroFooter(page, 'selection panel Footer')
-
-          const search = panel.getByRole('searchbox', { name: '搜索' })
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await search.elementHandle(),
-            { timeout: 10_000 },
-          )
-
-          const siblingThreadId = fixture.sessionThreadIds.find(
-            (threadId) => threadId !== fixture.threadId,
-          )
-          assert(siblingThreadId, 'selection fixture did not create a sibling Thread')
-          await search.fill(siblingThreadId)
-          const filteredOptions = panel.getByRole('option')
-          await page.waitForFunction(
-            ({ panelLabel, expectedId }) => {
-              const region = [...document.querySelectorAll('[role="region"]')]
-                .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const options = region?.querySelectorAll('[role="option"]') ?? []
-              return options.length === 1 && options[0]?.textContent?.includes(expectedId)
-            },
-            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
-            { timeout: 10_000 },
-          )
-          assert(await filteredOptions.count() === 1, 'Thread search did not narrow to one option')
-
-          await search.fill('')
-          await page.waitForFunction(
-            (panelLabel) => {
-              const region = [...document.querySelectorAll('[role="region"]')]
-                .find((element) => element.getAttribute('aria-label') === panelLabel)
-              return region?.querySelectorAll('[role="option"]').length === 2
-            },
-            '选择 Thread',
-            { timeout: 10_000 },
-          )
-          const activeBefore = await activeOptionText(panel)
-          await search.press('ArrowDown')
-          await page.waitForFunction(
-            ({ panelLabel, previous }) => {
-              const region = [...document.querySelectorAll('[role="region"]')]
-                .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const active = region?.querySelector('[role="option"][aria-selected="true"]')
-              return active?.textContent?.trim() !== previous
-            },
-            { panelLabel: '选择 Thread', previous: activeBefore },
-            { timeout: 10_000 },
-          )
-          const activeAfter = await activeOptionText(panel)
-          assert(
-            activeBefore !== activeAfter,
-            `ArrowDown did not move the Thread selection: ${activeBefore}`,
-          )
-          await shot(caseArt, 'selection-panel-keyboard-mode')
-
-          // 两级 picker 按层退栈：Thread -> Session -> Composer；草稿与持久值保持。
-          await search.press('Escape')
-          await panel.waitFor({ state: 'hidden', timeout: 10_000 })
-          const sessionPanel = page.getByRole('region', { name: '选择 Session' })
-          await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
-          const sessionSearch = sessionPanel.getByRole('searchbox')
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await sessionSearch.elementHandle(),
-            { timeout: 10_000 },
-          )
-          await sessionSearch.press('Escape')
-          await sessionPanel.waitFor({ state: 'hidden', timeout: 10_000 })
-          await page.waitForFunction(
-            () => document.activeElement?.classList.contains('composer-editor') === true,
-            undefined,
-            { timeout: 10_000 },
-          )
-          await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
-
-          // 再次打开 Thread picker，Enter 直接切换到同 Session sibling；旧 Thread
-          // 草稿按 per-thread scope 保留，不使用 discard modal。
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^thread/ }).click()
-          const switchPanel = await openFixtureThreadPanel(page, fixture)
-          const switchSearch = switchPanel.getByRole('searchbox')
-          await switchSearch.fill(siblingThreadId)
-          // 面板可见后 option 列表仍可能处于加载中：此时 Enter 会被 activeId 为空的 selectActive
-          // 忽略而面板不关闭。先等待过滤收敛到唯一 sibling 且它成为 active，再断言 Enter 的真实语义。
-          await page.waitForFunction(
-            ({ panelLabel, expectedId }) => {
-              const region = [...document.querySelectorAll('[role="region"]')]
-                .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const options = region?.querySelectorAll('[role="option"]') ?? []
-              return options.length === 1 && options[0]?.textContent?.includes(expectedId)
-            },
-            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
-            { timeout: 10_000 },
-          )
-          await page.waitForFunction(
-            ({ panelLabel, expectedId }) => {
-              const region = [...document.querySelectorAll('[role="region"]')]
-                .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const active = region?.querySelector('[role="option"][aria-selected="true"]')
-              return active?.textContent?.includes(expectedId)
-            },
-            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
-            { timeout: 10_000 },
-          )
-          await switchSearch.press('Enter')
-          await switchPanel.waitFor({ state: 'hidden', timeout: 10_000 })
-          await page.getByText(`selection original descendant ${stamp}`, { exact: true })
-            .waitFor({ state: 'visible', timeout: 10_000 })
-          assert(
-            await page.getByRole('alertdialog').count() === 0,
-            'Thread selection unexpectedly opened a discard dialog',
-          )
-          await expectStorage(page, draftKey, draft)
-
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^history/ }).click()
-          const historyPanel = page.getByRole('region', { name: '历史树' })
-          await historyPanel.waitFor({ state: 'visible', timeout: 10_000 })
-          assert(
-            await page.locator('.modal-backdrop').count() === 0,
-            'history panel unexpectedly rendered a modal backdrop',
-          )
-          assert(
-            await page.locator('.thread-composer').getAttribute('hidden') !== null,
-            'Composer remained visible while the history panel was active',
-          )
-          const historySearch = historyPanel.getByRole('searchbox', { name: '搜索记录' })
-          const historyBox = await historyPanel.boundingBox()
-          const viewport = page.viewportSize()
-          assert(
-            historyBox
-            && viewport
-            && historyBox.width >= viewport.width - 40,
-            `history panel no longer fills the inline pane width: ${JSON.stringify({
-              historyBox,
-              viewport,
-            })}`,
-          )
-          const selectedHistoryRow = historyPanel.locator('.history-tree-entry[aria-pressed="true"]')
-          const selectedPrefix = await selectedHistoryRow.evaluate((element) => ({
-            classes: [...element.children].slice(0, 3).map((child) => child.className),
-            path: element.querySelector('.history-tree-entry-path')?.textContent ?? '',
-            cursor: element.querySelector('.history-tree-entry-cursor')?.textContent ?? '',
-          }))
-          assert(
-            selectedPrefix.classes[0] === 'history-tree-entry-cursor'
-            && selectedPrefix.classes.includes('history-tree-entry-lane')
-            && selectedPrefix.classes.includes('history-tree-entry-path')
-            && selectedPrefix.path === '•'
-            && selectedPrefix.cursor === '›',
-            `history row does not expose its cursor, lane and active path: ${JSON.stringify(selectedPrefix)}`,
-          )
-          const treeRows = historyPanel.locator('.history-tree-entry')
-          assert(await treeRows.count() >= 4, `branched history row count: ${await treeRows.count()}`)
-          const originalBranchRow = historyPanel.getByRole('button', {
-            name: new RegExp(`selection original branch ${stamp}`),
-          })
-          const originalDescendantRow = historyPanel.getByRole('button', {
-            name: new RegExp(`selection original descendant ${stamp}`),
-          })
-          const alternateBranchRow = historyPanel.getByRole('button', {
-            name: new RegExp(`selection alternate branch ${stamp}`),
-          })
-          assert(await originalBranchRow.count() === 1 && await originalDescendantRow.count() === 1
-            && await alternateBranchRow.count() === 1, 'history tree omitted a branch message')
-          assert(await historyPanel.locator('.history-tree-entry[data-fork="true"]').count() > 0,
-            'branched history lacks a fork marker')
-          assert(
-            await originalBranchRow.getAttribute('data-lane') === await originalDescendantRow.getAttribute('data-lane')
-              && await originalBranchRow.getAttribute('data-lane') !== await alternateBranchRow.getAttribute('data-lane'),
-            'history tree did not preserve branch lanes',
-          )
-          const selectedBeforeTreeMove = await selectedHistoryRow.getAttribute('aria-label')
-          const previousRow = await selectedHistoryRow.evaluate((selected) => {
-            const rows = [...selected.closest('.history-tree-list').querySelectorAll('.history-tree-entry')]
-            return rows[rows.indexOf(selected) - 1]?.getAttribute('aria-label') ?? null
-          })
-          assert(previousRow != null, 'history head has no previous row')
-          await historySearch.press('ArrowUp')
-          await page.waitForFunction(
-            ({ panelLabel, previous }) => {
-              const region = [...document.querySelectorAll('[role="region"]')]
-                .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const selected = region?.querySelector('.history-tree-entry[aria-pressed="true"]')
-              return selected?.getAttribute('aria-label') !== previous
-            },
-            { panelLabel: '历史树', previous: selectedBeforeTreeMove },
-            { timeout: 10_000 },
-          )
-          assert(
-            await selectedHistoryRow.getAttribute('aria-label') === previousRow,
-            'ArrowUp did not select the immediately preceding history entry',
-          )
-          await shot(caseArt, 'history-panel-keyboard-mode')
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await historySearch.elementHandle(),
-            { timeout: 10_000 },
-          )
-          await historySearch.press('Escape')
-          await historyPanel.waitFor({ state: 'hidden', timeout: 10_000 })
-          await page.waitForFunction(
-            () => document.activeElement?.classList.contains('composer-editor') === true,
-            undefined,
-            { timeout: 10_000 },
-          )
-          await expectComposerText(page, '')
-          await expectStorage(page, draftKey, draft)
-          expectNoFatal(pageErrors, consoleErrors)
-        },
-      )
-    },
-  )
-
-  await run(
-    'ui.chat.composer.escape_refocus',
+    'ui.workspace.composer.escape_refocus',
     'Esc 从 transcript 文字选区回到当前 Pane Composer，并保留草稿',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `escape refocus history ${stamp}`
       const draft = `escape refocus draft ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-escape-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
 
-          const transcriptMessage = page.getByText(historicalMessage, { exact: true }).first()
+          const transcriptMessage = page
+            .locator('[data-pane-active] .thread-dialogue')
+            .getByText(historicalMessage, { exact: true })
+            .first()
           await transcriptMessage.waitFor({ state: 'visible', timeout: 10_000 })
           const selectedText = await transcriptMessage.evaluate((element) => {
             const active = element.ownerDocument.activeElement
@@ -673,8 +446,8 @@ export async function runComposerMatrix(ui) {
             undefined,
             { timeout: 10_000 },
           )
-          await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceComposerText(page, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
           const metrics = await composerMetrics(composer)
           assert(
             metrics.focused && metrics.selectionCollapsed && metrics.selectionAtEnd,
@@ -689,25 +462,26 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.submit_clears_draft',
+    'ui.workspace.composer.submit_clears_draft',
     '提交后清除 Composer 与 Thread 持久草稿，并在 timeline 中保留用户消息',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const submitted = `submitted composer message ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-submit-${stamp}`,
           messages: [`submit baseline ${stamp}`],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(submitted)
-          await expectStorage(page, draftKey, submitted)
-          await page.getByRole('button', { name: '发送消息' }).click()
+          await expectWorkspaceStorage(page, draftKey, submitted)
+          await page.getByRole('button', { name: UI_LABELS.sendButton }).click()
 
-          await expectComposerText(page, '')
-          await expectStorage(page, draftKey, null)
+          await expectWorkspaceComposerText(page, '')
+          await expectWorkspaceStorage(page, draftKey, null)
           await page.getByText(submitted, { exact: true }).first().waitFor({
             state: 'visible',
             timeout: 15_000,
@@ -721,15 +495,16 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.thread_snapshot_reload',
+    'ui.workspace.thread.snapshot_reload',
     '生成期间重载已绑定的 Thread，浏览器通过真实 WebSocket 快照恢复并完成对话',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const baseline = `reload baseline ${stamp}`
       const submitted = `reload input ${stamp}`
       const reply = `Reload reply ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createHoldingQueueFixture(apiCtx, {
+        () => createWorkspaceHoldingQueueFixture(apiCtx, {
           title: `e2e-ui-thread-reload-${stamp}`,
           historicalMessage: baseline,
         }),
@@ -737,11 +512,11 @@ export async function runComposerMatrix(ui) {
           const { mock, threadId } = fixture
           mock.release(await mock.waitForRequest(baseline), 'Ready to reload.')
           await waitForQuiescentThread(apiCtx, threadId)
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const dialogue = page.locator('.thread-dialogue')
           const working = page.locator('.thread-working')
           await composer.fill(submitted)
-          await page.getByRole('button', { name: '发送消息' }).click()
+          await page.getByRole('button', { name: UI_LABELS.sendButton }).click()
           const held = await mock.waitForRequest(submitted)
           await working.waitFor({ state: 'visible', timeout: 15_000 })
 
@@ -798,20 +573,21 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.attachment_previews',
+    'ui.workspace.composer.attachment_previews',
     'Composer 附件只显示文件名，并按图片、视频和通用文件类型展示缩略图或图标',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const uploadRoute = createReadyUploadRoute()
       await page.route('**/api/platform/storage/uploads**', uploadRoute)
       try {
-        await withUiFixture(
+        await withWorkspaceUiFixture(
           page,
-          () => createDurableHistoryFixture(apiCtx, {
+          () => createWorkspaceDurableHistoryFixture(apiCtx, {
             title: `e2e-ui-composer-attachments-${stamp}`,
             messages: [`attachment baseline ${stamp}`],
           }),
           async (fixture) => {
-            await bindThreadComposer(page, goto, fixture)
+            await bindWorkspaceThreadComposer(page, goto, fixture)
             // 图片名必须长到超出 200px 固定卡片的名字区，才能验证省略号截断而不是刚好放得下。
             const imageName = `scene-${stamp}-wide-establishing-shot-of-the-skyline.png`
             const videoName = `clip-${stamp}.mp4`
@@ -826,7 +602,7 @@ export async function runComposerMatrix(ui) {
               },
             ])
 
-            const strip = page.getByRole('list', { name: '附件' })
+            const strip = page.getByRole('list', { name: UI_LABELS.attachmentStrip })
             await strip.waitFor({ state: 'visible', timeout: 10_000 })
             await page.waitForFunction(
               () => document.querySelectorAll('.attachment-reference').length === 3,
@@ -874,7 +650,7 @@ export async function runComposerMatrix(ui) {
 
             await shot(caseArt, 'composer-attachment-previews')
             await imageItem.locator('button.attachment-reference-preview').click()
-            const lightbox = page.getByRole('dialog', { name: `预览 ${imageName}` })
+            const lightbox = page.getByRole('dialog', { name: previewDialogLabel(imageName) })
             await lightbox.waitFor({ state: 'visible', timeout: 5_000 })
             assert(
               await lightbox.locator('.media-lightbox-content img').count() === 1,
@@ -893,27 +669,28 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.debug.conversation_switch',
+    'ui.workspace.debug.conversation_switch',
     'Debug 独占工作区、只读详情与单顶栏关闭不丢草稿',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `debug baseline ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-debug-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `debug draft ${stamp}`
           const draftKey = { threadId: fixture.threadId }
 
           // plus 命令保留已写草稿；Debug 中 Composer 挂载但完全失活。
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
-          await page.getByRole('button', { name: '打开命令表' }).click()
+          await expectWorkspaceStorage(page, draftKey, draft)
+          await page.getByRole('button', { name: UI_LABELS.openCommandsButton }).click()
           await page.getByRole('option', { name: /^debug/ }).click()
-          const listbox = page.getByRole('listbox', { name: '事件' })
+          const listbox = page.getByRole('listbox', { name: UI_LABELS.eventsTab })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           assert(
             (await page.locator('.thread-dialogue').count()) === 0,
@@ -924,14 +701,13 @@ export async function runComposerMatrix(ui) {
 
           const hiddenComposer = page.locator('.composer-editor')
           assert((await hiddenComposer.count()) === 1 && !(await hiddenComposer.isVisible()), 'debug composer is not mounted and hidden')
-          await page.locator('#chat-layout-select').waitFor({ state: 'hidden', timeout: 10_000 })
-          assert((await page.getByRole('button', { name: '关闭 Debug', exact: true }).count()) === 1, 'debug must have one header exit')
-          await expectStorage(page, draftKey, draft)
+          assert((await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).count()) === 1, 'debug must have one header exit')
+          await expectWorkspaceStorage(page, draftKey, draft)
 
           // 点击 USER 消息事件：只读 detail widget 展示原始 payload JSON。
           const userOption = listbox.getByRole('option').filter({ hasText: historicalMessage }).first()
           await userOption.click()
-          const detail = page.getByLabel('事件详情', { exact: true })
+          const detail = page.getByLabel(UI_LABELS.eventDetailsHeading, { exact: true })
           await detail.waitFor({ state: 'visible', timeout: 10_000 })
           const payload = await page.locator('.thread-event-detail-payload').innerText()
           assert(payload.includes('"role"'), `payload lacks role: ${payload.slice(0, 200)}`)
@@ -940,14 +716,14 @@ export async function runComposerMatrix(ui) {
             `payload lacks message text: ${payload.slice(0, 200)}`,
           )
           // 单顶栏关闭：debug 视图卸载，原布局、草稿与存储保持。
-          await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+          await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             (await page.locator('.thread-events').count()) === 0,
             'debug view stayed mounted while the conversation is open',
           )
-          await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceComposerText(page, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
 
           await shot(caseArt, 'debug-detail-and-switch')
           expectNoFatal(pageErrors, consoleErrors)
@@ -957,22 +733,23 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.debug.keyboard_nav',
+    'ui.workspace.debug.keyboard_nav',
     'Debug 列表点击选中、上下切换与 Esc 取消选中',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `debug keyboard ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-debug-keyboard-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           await composer.pressSequentially('/debug')
-          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
+          await page.getByRole('listbox', { name: UI_LABELS.commandPalette }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
-          const listbox = page.getByRole('listbox', { name: '事件' })
+          const listbox = page.getByRole('listbox', { name: UI_LABELS.eventsTab })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           const optionCount = await listbox.getByRole('option').count()
           assert(optionCount > 1, `too few debug events: ${optionCount}`)
@@ -990,7 +767,7 @@ export async function runComposerMatrix(ui) {
           const secondOption = listbox.getByRole('option').nth(1)
           await firstOption.click()
           const firstText = await selectedText()
-          const detail = page.getByLabel('事件详情', { exact: true })
+          const detail = page.getByLabel(UI_LABELS.eventDetailsHeading, { exact: true })
           await detail.waitFor({ state: 'visible', timeout: 10_000 })
 
           await secondOption.hover()
@@ -1004,7 +781,7 @@ export async function runComposerMatrix(ui) {
           await listbox.press('Escape')
           await detail.waitFor({ state: 'hidden', timeout: 10_000 })
           assert((await selectedOption().count()) === 0, 'Escape did not clear the selection')
-          assert(await page.getByRole('button', { name: '关闭 Debug', exact: true }).isVisible(), 'inner Escape also exited Debug')
+          assert(await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).isVisible(), 'inner Escape also exited Debug')
           await listbox.press('Escape')
           await composer.waitFor({ state: 'visible', timeout: 10_000 })
           await page.waitForFunction(() => document.activeElement?.classList.contains('composer-editor'))
@@ -1017,63 +794,22 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.shortcuts.escape_restores_focus',
-    '/shortcuts 只读面板打开后 Esc 关闭并恢复 Composer 焦点与草稿',
-    async (caseArt) => {
-      const draft = `shortcuts draft ${stamp}`
-      await withUiFixture(
-        page,
-        () => createBlankChatFixture(apiCtx, {
-          title: `e2e-ui-shortcuts-${stamp}`,
-        }),
-        async (fixture) => {
-          const composer = await bindBlankComposer(page, goto, fixture)
-          const blankDraftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
-          await composer.fill(draft)
-          await expectStorage(page, blankDraftKey, draft)
-
-          // 非空草稿下通过 + 菜单打开只读快捷键面板。
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^shortcuts/ }).click()
-          const panel = page.getByRole('region', { name: '键盘快捷键' })
-          await panel.waitFor({ state: 'visible', timeout: 10_000 })
-
-          // Esc 关闭面板并恢复 Composer 焦点；草稿与存储保持。
-          await page.keyboard.press('Escape')
-          await page.waitForFunction(
-            () => document.activeElement?.classList.contains('composer-editor') === true,
-            undefined,
-            { timeout: 10_000 },
-          )
-          await panel.waitFor({ state: 'hidden', timeout: 10_000 })
-          await expectComposerText(page, draft)
-          await expectStorage(page, blankDraftKey, draft)
-
-          await shot(caseArt, 'shortcuts-escape-restores-focus')
-          expectNoFatal(pageErrors, consoleErrors)
-        },
-      )
-    },
-  )
-
-  await run(
-    'ui.chat.debug.scroll_restore',
+    'ui.workspace.debug.scroll_restore',
     'Conversation/Debug 主视图各自恢复 scrollTop（重绑清零由单元测试覆盖）',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const messages = Array.from({ length: 30 }, (_, index) => `scroll msg ${index} ${stamp}`)
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-debug-scroll-${stamp}`,
           messages,
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
 
           const openMenuOption = async (id) => {
-            await page.getByRole('button', { name: '打开命令表' }).click()
+            await page.getByRole('button', { name: UI_LABELS.openCommandsButton }).click()
             await page.getByRole('option', { name: new RegExp(`^${id}`) }).click()
           }
           const scrollTopOf = (selector) =>
@@ -1083,11 +819,12 @@ export async function runComposerMatrix(ui) {
               scrollHeight: element.scrollHeight,
               clientHeight: element.clientHeight,
             }))
-          // headless Chromium 的 mouse.wheel 是 no-op：用真实 DOM 属性向上滚动
-          // 600px，并派发原生 scroll 事件让自动贴底的 stick 状态跟随。
+          // headless Chromium 的 mouse.wheel 是 no-op：先派发负向 wheel 意图，
+          // 再修改 DOM scrollTop 并派发原生 scroll 事件，满足自动贴底的用户滚动意图契约。
           const scrollAwayFromBottom = (selector) =>
             page.locator(selector).evaluate((element) => {
               const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+              element.dispatchEvent(new WheelEvent('wheel', { deltaY: -260, bubbles: true }))
               element.scrollTop = Math.max(1, maxScrollTop - 260)
               element.dispatchEvent(new Event('scroll', { bubbles: false }))
               return {
@@ -1099,9 +836,9 @@ export async function runComposerMatrix(ui) {
 
           // /debug：真实溢出后向上滚动到非底部位置。
           await composer.pressSequentially('/debug')
-          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
+          await page.getByRole('listbox', { name: UI_LABELS.commandPalette }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
-          const listbox = page.getByRole('listbox', { name: '事件' })
+          const listbox = page.getByRole('listbox', { name: UI_LABELS.eventsTab })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           const eventsMetrics = await overflow('.thread-events')
           assert(
@@ -1116,7 +853,7 @@ export async function runComposerMatrix(ui) {
           const eventsScrollTop = eventsScroll.scrollTop
 
           // 切到 conversation：真实溢出后向上滚动。
-          await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+          await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           const dialogueMetrics = await overflow('.thread-dialogue')
           assert(
@@ -1155,7 +892,7 @@ export async function runComposerMatrix(ui) {
           )
 
           // 切回 conversation：恢复 transcript 的 scrollTop。
-          await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+          await page.getByRole('button', { name: UI_LABELS.closeDebugButton, exact: true }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           // transcript 重新 mount 时 initialScrollTop 可能在内容完全渲染前被 clamp：
           // 等 aria-busy 结束且 scrollHeight 稳定（内容加载完）后再断言恢复值。
@@ -1199,221 +936,12 @@ export async function runComposerMatrix(ui) {
 
   await runWorkspaceContractMatrix({
     ...ui,
-    bindThreadComposer,
-    createBranchedHistoryFixture,
-    createDurableHistoryFixture,
-    createHoldingQueueFixture,
-    withUiFixture,
+    createWorkspaceDurableHistoryFixture,
+    createWorkspaceHoldingQueueFixture,
   })
 }
 
-async function createBlankChatFixture(apiCtx, { title }) {
-  const target = await resolveCatalogTarget(apiCtx)
-  const state = {
-    apiCtx,
-    chat: null,
-    threadId: null,
-  }
-  try {
-    state.chat = await createChat(apiCtx, {
-      title,
-      agentName: target.agent.name,
-      yoloEnabled: false,
-    })
-    return fixtureOf(state)
-  } catch (error) {
-    await cleanupFixture(state).catch(() => undefined)
-    throw error
-  }
-}
-
-async function createDurableHistoryFixture(
-  apiCtx,
-  { title, messages },
-) {
-  assert(
-    Array.isArray(messages) && messages.length > 0,
-    'durable history messages required',
-  )
-  const target = await resolveCatalogTarget(apiCtx)
-  const state = {
-    apiCtx,
-    chat: null,
-    sessionId: null,
-    threadId: null,
-  }
-  try {
-    state.chat = await createChat(apiCtx, {
-      title,
-      agentName: target.agent.name,
-      yoloEnabled: false,
-    })
-    // 主 Thread：NEW_SESSION 创建有效 Agent 的 Thread（第一条消息随创建批入队），
-    // 后续 messages 每条一个 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(target.agent, target.model),
-      yoloEnabled: false,
-      commands: [userMessageCommand(messages[0], cid())],
-    })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
-    for (const message of messages.slice(1)) {
-      // 每条 THREAD batch 前等待上一 turn 收敛，
-      // 再读最新 snapshot；仅 EXIT_UNCONFIRMED 冲突短暂等待后重试（最多 5 次兜底）。
-      let accepted
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (attempt > 0) await sleep(80)
-        await waitForQuiescentThread(apiCtx, state.threadId, {
-          timeoutMs: 30_000,
-          intervalMs: 50,
-        }).catch(() => {})
-        try {
-          accepted = await acceptCommandBatch(apiCtx, {
-            owner,
-            target: threadTarget({
-              threadId: state.threadId,
-            }),
-            commands: [userMessageCommand(message, cid())],
-          })
-          break
-        } catch (error) {
-          if (!isExitUnconfirmedConflict(error)) throw error
-        }
-      }
-      if (!accepted) {
-        throw new Error(`THREAD batch did not stabilize after 5 attempts for message: ${message}`)
-      }
-    }
-    await waitForQuiescentThread(apiCtx, state.threadId, {
-      timeoutMs: 60_000,
-      intervalMs: 100,
-    })
-    return fixtureOf(state)
-  } catch (error) {
-    await cleanupFixture(state).catch(() => undefined)
-    throw error
-  }
-}
-
-async function createBranchedHistoryFixture(
-  apiCtx,
-  {
-    title,
-    trunkMessage,
-    originalMessages,
-    alternateMessage,
-  },
-) {
-  assert(typeof trunkMessage === 'string' && trunkMessage, 'tree trunk message required')
-  assert(
-    Array.isArray(originalMessages) && originalMessages.length > 0,
-    'original tree branch messages required',
-  )
-  assert(typeof alternateMessage === 'string' && alternateMessage, 'alternate tree branch message required')
-  const target = await resolveCatalogTarget(apiCtx)
-  const state = {
-    apiCtx,
-    chat: null,
-    sessionId: null,
-    sessionThreadIds: [],
-    threadId: null,
-  }
-  try {
-    state.chat = await createChat(apiCtx, {
-      title,
-      agentName: target.agent.name,
-      yoloEnabled: false,
-    })
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(target.agent, target.model),
-      yoloEnabled: false,
-      commands: [userMessageCommand(trunkMessage, cid())],
-    })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
-    state.sessionThreadIds.push(String(threadId))
-
-    const { snapshot: trunk } = await waitForDurableMessages(
-      apiCtx,
-      state.threadId,
-      [trunkMessage],
-    )
-    const branchPointEntryId = trunk.thread.headEntryId
-
-    // 原分支：originalMessages 逐条 THREAD batch。
-    for (const message of originalMessages) {
-      // 每条 batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
-      // 再读最新 snapshot；仅 EXIT_UNCONFIRMED 冲突短暂等待后重试（最多 5 次兜底）。
-      let accepted
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (attempt > 0) await sleep(80)
-        await waitForQuiescentThread(apiCtx, state.threadId, {
-          timeoutMs: 30_000,
-          intervalMs: 50,
-        }).catch(() => {})
-        try {
-          accepted = await acceptCommandBatch(apiCtx, {
-            owner,
-            target: threadTarget({
-              threadId: state.threadId,
-            }),
-            commands: [userMessageCommand(message, cid())],
-          })
-          break
-        } catch (error) {
-          if (!isExitUnconfirmedConflict(error)) throw error
-        }
-      }
-      if (!accepted) {
-        throw new Error(
-          `THREAD batch did not stabilize after 5 attempts for original message: ${message}`,
-        )
-      }
-    }
-    await waitForDurableMessages(
-      apiCtx,
-      state.threadId,
-      [trunkMessage, ...originalMessages],
-    )
-
-    // 分支：NEW_THREAD 在同 Session branchPoint（已闭合 TURN_END）下开新 Thread，写 alternateMessage。
-    const alternateThreadId = cid()
-    const branched = await createNewThread(apiCtx, {
-      owner,
-      sessionId,
-      startEntryId: branchPointEntryId,
-      threadId: alternateThreadId,
-      threadName: `alternate ${cid().slice(0, 8)}`,
-      yoloEnabled: false,
-      commands: [userMessageCommand(alternateMessage, cid())],
-    })
-    state.threadId = String(branched.thread.threadId)
-    state.sessionThreadIds.push(String(branched.thread.threadId))
-    await waitForDurableMessages(
-      apiCtx,
-      state.threadId,
-      [trunkMessage, ...originalMessages, alternateMessage],
-    )
-    return fixtureOf(state)
-  } catch (error) {
-    await cleanupFixture(state).catch(() => undefined)
-    throw error
-  }
-}
-
-async function createHoldingQueueFixture(
+async function createWorkspaceHoldingQueueFixture(
   apiCtx,
   { title, historicalMessage, queuedMessages = [] },
 ) {
@@ -1423,7 +951,7 @@ async function createHoldingQueueFixture(
     apiCtx,
     agent: null,
     bootstrapMessage: `hold materialize ${suffix}`,
-    chat: null,
+    space: null,
     mock,
     model: null,
     provider: null,
@@ -1494,471 +1022,146 @@ async function createHoldingQueueFixture(
     )
     state.agent = agentResponse.json
 
-    state.chat = await createChat(apiCtx, {
+    state.space = await createWorkspaceSpace(apiCtx, {
       title,
-      agentName: state.agent.name,
+      defaultAgentName: state.agent.name,
+    })
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: state.bootstrapMessage }],
+      modelSelection: {
+        modelName: `${state.model.name}-missing`,
+        variant: 'default',
+      },
       yoloEnabled: false,
     })
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
-    // 先绑定 hold Agent 和不可用的模型，后续通过 THREAD batch 启动 hold turn。
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(
-        state.agent,
-        {
-          modelName: `${state.model.name}-missing`,
-          variant: 'default',
-        },
-      ),
-      yoloEnabled: false,
-      commands: [userMessageCommand(state.bootstrapMessage, cid())],
-    })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
     const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
     })
     await acceptCommandBatch(apiCtx, {
-      owner,
       target: threadTarget({
         threadId: state.threadId,
         expectedHeadEntryId: idle.headEntryId,
         expectedNextCommandSequence: idle.nextCommandSequence,
       }),
       commands: [
-        setExecutionCommand(
-          state.agent.execution.settings,
-          cid(),
-        ),
+        setExecutionCommand(state.agent.execution.settings, cid()),
         userMessageCommand(historicalMessage, cid()),
       ],
     })
     await mock.waitForRequest(historicalMessage)
 
-    if (queuedMessages.length === 0) return fixtureOf(state)
-    const active = await waitForActiveModel(apiCtx, state.threadId)
-    // queuedMessages 逐条 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
-    let cursor = active.thread
-    for (const message of queuedMessages) {
-      const accepted = await acceptCommandBatch(apiCtx, {
-        owner,
-        target: threadTarget({
-          threadId: state.threadId,
-        }),
-        commands: [userMessageCommand(message, cid())],
-      })
-      cursor = accepted.thread
+    if (queuedMessages.length > 0) {
+      await waitForWorkspaceActiveModel(apiCtx, state.threadId)
+      for (const message of queuedMessages) {
+        await acceptCommandBatch(apiCtx, {
+          target: threadTarget({ threadId: state.threadId }),
+          commands: [userMessageCommand(message, cid())],
+        })
+      }
+      await waitForWorkspaceQueuedMessages(apiCtx, state.threadId, queuedMessages.length)
     }
-    await waitForQueuedMessages(apiCtx, state.threadId, queuedMessages.length)
-    return fixtureOf(state)
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
+    }
   } catch (error) {
-    await cleanupFixture(state).catch(() => undefined)
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
   }
 }
 
-function fixtureOf(state) {
-  return {
-    ...state,
-    dispose: () => cleanupFixture(state),
+async function createBlankWorkspaceFixture(apiCtx, { title }) {
+  const target = await resolveWorkspaceCatalogTarget(apiCtx)
+  const state = {
+    apiCtx,
+    space: null,
+    threadId: null,
   }
-}
-
-async function withUiFixture(page, createFixture, test) {
-  let fixture = null
-  let primaryError = null
   try {
-    fixture = await createFixture()
-    await test(fixture)
-  } catch (error) {
-    primaryError = error
-  } finally {
-    if (fixture) {
-      try {
-        try {
-          if (page.url() !== 'about:blank') await clearBrowserFixtureState(page, fixture)
-        } finally {
-          await fixture.dispose()
-        }
-      } catch (cleanupError) {
-        if (primaryError == null) {
-          primaryError = cleanupError
-        } else {
-          primaryError.message =
-            `${primaryError.message} | cleanup: ${cleanupError?.message || cleanupError}`
-        }
-      }
-    }
-  }
-  if (primaryError) throw primaryError
-}
-
-async function cleanupFixture(state) {
-  const errors = []
-  await cleanupStep(errors, 'stop thread', async () => {
-    if (!state.threadId) return
-    await stopThreadForCleanup(state.apiCtx, state.threadId)
-  })
-  await cleanupStep(errors, 'hold provider', async () => state.mock?.close())
-  await cleanupStep(errors, 'chat', async () => deleteChat(state.apiCtx, state.chat))
-  await cleanupStep(errors, 'agent', async () => {
-    if (!state.agent) return
-    await deleteCatalogResource(
-      state.apiCtx,
-      `/api/platform/agents/${encodeURIComponent(state.agent.name)}`
-        + `?expectedVersion=${encodeURIComponent(state.agent.version)}`,
-    )
-  })
-  await cleanupStep(errors, 'model', async () => {
-    if (!state.model) return
-    await deleteCatalogResource(
-      state.apiCtx,
-      `/api/platform/models/${encodePathTail(state.model.name)}`
-        + `?expectedVersion=${encodeURIComponent(state.model.version)}`,
-    )
-  })
-  await cleanupStep(errors, 'provider', async () => {
-    if (!state.provider) return
-    await deleteCatalogResource(
-      state.apiCtx,
-      `/api/platform/providers/${encodeURIComponent(state.provider.name)}`
-        + `?expectedVersion=${encodeURIComponent(state.provider.version)}`,
-    )
-  })
-  if (errors.length > 0) {
-    throw new Error(`composer fixture cleanup failed: ${errors.join(' | ')}`)
-  }
-}
-
-async function cleanupStep(errors, label, action) {
-  try {
-    await action()
-  } catch (error) {
-    errors.push(`${label}: ${error?.message || error}`)
-  }
-}
-
-async function deleteChat(apiCtx, chat) {
-  if (!chat?.id) return
-  const currentResponse = await apiCtx.call(
-    'GET',
-    `/api/chat/chats/${encodeURIComponent(chat.id)}`,
-  )
-  if (currentResponse.status === 404) {
-    assert(
-      currentResponse.json?.code === 'not_found',
-      `read Chat for cleanup: ${JSON.stringify(currentResponse)}`,
-    )
-    return
-  }
-  assert(
-    currentResponse.status === 200,
-    `read Chat for cleanup: ${JSON.stringify(currentResponse)}`,
-  )
-  const current = currentResponse.json
-  const response = await apiCtx.call(
-    'DELETE',
-    `/api/chat/chats/${encodeURIComponent(chat.id)}`
-      + `?expectedVersion=${encodeURIComponent(current.version)}`,
-  )
-  assert(
-    response.status === 200 || response.status === 204,
-    `delete Chat: ${JSON.stringify(response)}`,
-  )
-}
-
-async function deleteCatalogResource(apiCtx, requestPath) {
-  const response = await apiCtx.call('DELETE', requestPath)
-  if (response.status === 404) {
-    assert(
-      response.json?.code === 'not_found',
-      `delete catalog resource: ${JSON.stringify(response)}`,
-    )
-    return
-  }
-  assert(
-    response.status === 200 || response.status === 204,
-    `delete catalog resource: ${JSON.stringify(response)}`,
-  )
-}
-
-async function clearBrowserFixtureState(page, fixture) {
-  if (!fixture.chat?.id) return
-  await clearChatPaneState(page, fixture.chat.id)
-  await page.evaluate(
-    (draftKey) => localStorage.removeItem(draftKey),
-    chatPaneDraftKey(fixture),
-  ).catch(() => undefined)
-}
-
-async function resolveCatalogTarget(apiCtx) {
-  const agentsResponse = await apiCtx.call(
-    'GET',
-    '/api/platform/agents',
-  )
-  const modelsResponse = await apiCtx.call(
-    'GET',
-    '/api/platform/models',
-  )
-  assert(
-    agentsResponse.status === 200 && modelsResponse.status === 200,
-    `catalog lookup failed: ${JSON.stringify({
-      agents: agentsResponse,
-      models: modelsResponse,
-    })}`,
-  )
-  const agents = Array.isArray(agentsResponse.json) ? agentsResponse.json : []
-  const models = Array.isArray(modelsResponse.json) ? modelsResponse.json : []
-  for (const agent of agents) {
-    if (agent.execution?.driver !== 'builtin') continue
-    const { modelName, variant } = agent.execution.settings || {}
-    if (!modelName || (variant !== null && typeof variant !== 'string')) continue
-    const model = models.find((candidate) => candidate.name === modelName)
-    if (model) {
-      return {
-        agent,
-        model: { modelName, variant },
-      }
-    }
-  }
-  throw new Error(
-    `no resolvable Agent/Model in current Catalog: ${JSON.stringify({ agents, models })}`,
-  )
-}
-
-/**
- * 通过 UI Thread picker 绑定 pane 到目标 Thread。
- *
- * ChatWorkspacePage 的 save effect 会用首帧 stale state 覆盖 localStorage 中的
- * pane 绑定（chatId 就绪前 default state 抢先写回），因此预写 localStorage 不可靠；
- * 这里走真实 UI 路径：/thread 命令 -> 选择 Session 面板 -> 选择 Thread 面板。
- * 两层面板分别用 fixture.sessionId / fixture.threadId 精确搜索并点击唯一 option。
- */
-async function bindThreadComposer(page, goto, fixture) {
-  assert(fixture.sessionId, `fixture lacks sessionId for ${fixture.chat?.id}`)
-  await goto(`/chats/${encodeURIComponent(fixture.chat.id)}`)
-  await waitForComposer(page)
-  await page.locator('.composer-editor').click()
-  await page.locator('.composer-editor').pressSequentially('/thread', { delay: 20 })
-  await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
-  await page.getByRole('option', { name: /^thread/ }).first().click()
-
-  const threadPanel = await openFixtureThreadPanel(page, fixture)
-  const threadSearch = threadPanel.getByRole('searchbox')
-  await threadSearch.fill(String(fixture.threadId))
-  const threadOptions = threadPanel.getByRole('option')
-  await page.waitForFunction(
-    ({ panelLabel, expectedId }) => {
-      const region = [...document.querySelectorAll('[role="region"]')]
-        .find((element) => element.getAttribute('aria-label') === panelLabel)
-      const options = region?.querySelectorAll('[role="option"]') ?? []
-      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
-    },
-    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
-    { timeout: 10_000 },
-  )
-  assert(
-    await threadOptions.count() === 1,
-    `Thread search did not narrow to one option for ${fixture.threadId}`,
-  )
-  await page.waitForFunction(
-    ({ panelLabel, expectedId }) => {
-      const region = [...document.querySelectorAll('[role="region"]')]
-        .find((element) => element.getAttribute('aria-label') === panelLabel)
-      const active = region?.querySelector('[role="option"][aria-selected="true"]')
-      return active?.textContent?.includes(expectedId)
-    },
-    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
-    { timeout: 10_000 },
-  )
-  await threadSearch.press('Enter')
-
-  await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
-  return waitForComposer(page)
-}
-
-async function openFixtureThreadPanel(page, fixture) {
-  assert(fixture.sessionId, `fixture lacks sessionId for ${fixture.chat?.id}`)
-  const sessionPanel = page.getByRole('region', { name: '选择 Session' })
-  await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
-  const sessionSearch = sessionPanel.getByRole('searchbox')
-  await sessionSearch.waitFor({ state: 'visible', timeout: 10_000 })
-  await sessionSearch.fill(String(fixture.sessionId))
-  const sessionOptions = sessionPanel.getByRole('option')
-  await page.waitForFunction(
-    ({ panelLabel, expectedId }) => {
-      const region = [...document.querySelectorAll('[role="region"]')]
-        .find((element) => element.getAttribute('aria-label') === panelLabel)
-      const options = region?.querySelectorAll('[role="option"]') ?? []
-      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
-    },
-    { panelLabel: '选择 Session', expectedId: String(fixture.sessionId) },
-    { timeout: 10_000 },
-  )
-  assert(
-    await sessionOptions.count() === 1,
-    `Session search did not narrow to one option for ${fixture.sessionId}`,
-  )
-  await page.waitForFunction(
-    ({ panelLabel, expectedId }) => {
-      const region = [...document.querySelectorAll('[role="region"]')]
-        .find((element) => element.getAttribute('aria-label') === panelLabel)
-      const active = region?.querySelector('[role="option"][aria-selected="true"]')
-      return active?.textContent?.includes(expectedId)
-    },
-    { panelLabel: '选择 Session', expectedId: String(fixture.sessionId) },
-    { timeout: 10_000 },
-  )
-  await sessionSearch.press('Enter')
-
-  const threadPanel = page.getByRole('region', { name: '选择 Thread' })
-  await threadPanel.waitFor({ state: 'visible', timeout: 10_000 })
-  return threadPanel
-}
-
-async function bindBlankComposer(page, goto, fixture) {
-  await goto('/chats')
-  await clearChatPaneState(page, fixture.chat.id)
-  await goto(`/chats/${encodeURIComponent(fixture.chat.id)}`)
-  return waitForComposer(page)
-}
-
-async function waitForComposer(page) {
-  const composer = page.getByRole('textbox', { name: '给 AI 发送消息' })
-  await composer.waitFor({ state: 'visible', timeout: 15_000 })
-  await page.waitForFunction(
-    () =>
-      document.querySelector('.composer-editor')
-        ?.getAttribute('contenteditable') === 'true',
-    undefined,
-    { timeout: 15_000 },
-  )
-  return composer
-}
-
-async function expectComposerText(page, expected) {
-  try {
-    await page.waitForFunction(
-      (text) =>
-        document.querySelector('.composer-editor')?.textContent === text,
-      expected,
-      { timeout: 10_000 },
-    )
-  } catch {
-    // 超时只说明等到的那一帧不匹配：把当时的编辑区 HTML 与编辑器数量带回报告，
-    // 才能区分恢复延迟、不可见字符与多编辑器选错节点。
-    const actual = await page.evaluate(() => {
-      const editors = Array.from(document.querySelectorAll('.composer-editor'))
-      return editors.map((editor) => ({
-        text: editor.textContent,
-        html: editor.innerHTML,
-      }))
+    state.space = await createWorkspaceSpace(apiCtx, {
+      title,
+      defaultAgentName: target.agent.name,
+      defaultYoloEnabled: false,
     })
-    throw new Error(
-      `composer text mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    )
-  }
-}
-
-export async function expectStorage(page, key, expected) {
-  if (typeof key === 'object') {
-    await expectThreadDraft(page, key.threadId, expected)
-    return
-  }
-  let actual = null
-  try {
-    if (expected === null) {
-      await page.waitForFunction(
-        (storageKey) => localStorage.getItem(storageKey) === null,
-        key,
-        { timeout: 10_000 },
-      )
-      return
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
     }
-    // localStorage 草稿格式：exact keys parts、恰一个 text part。
-    await page.waitForFunction(
-      ({ storageKey, text }) => {
-        const raw = localStorage.getItem(storageKey)
-        if (raw == null) return false
-        let parsed
-        try {
-          parsed = JSON.parse(raw)
-        } catch {
-          return false
-        }
-        if (
-          parsed == null
-          || typeof parsed !== 'object'
-          || Array.isArray(parsed)
-          || JSON.stringify(Object.keys(parsed).sort()) !== '["parts"]'
-          || !Array.isArray(parsed.parts)
-          || parsed.parts.length !== 1
-        ) {
-          return false
-        }
-        const part = parsed.parts[0]
-        return (
-          part != null
-          && typeof part === 'object'
-          && !Array.isArray(part)
-          && JSON.stringify(Object.keys(part).sort()) === '["text","type"]'
-          && part.type === 'text'
-          && part.text === text
-        )
-      },
-      { storageKey: key, text: expected },
-      { timeout: 10_000 },
-    )
-  } catch {
-    actual = await page.evaluate(
-      (storageKey) => localStorage.getItem(storageKey),
-      key,
-    )
-    throw new Error(
-      `localStorage mismatch for ${key}: expected ${JSON.stringify(expected)},`
-        + ` got ${JSON.stringify(actual)}`,
-    )
+  } catch (error) {
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
+    throw error
   }
 }
 
-async function expectThreadDraft(page, threadId, expected) {
-  // 已绑定 Thread 的草稿与 Stop 回执原子保存在 IndexedDB，而非空 pane 的 localStorage。
-  // waitForFunction 按同步返回值的 truthiness 轮询；Promise 本身为真，不能传异步谓词。
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    const persisted = await page.evaluate(async ({ id, text }) => {
-      const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open('kk-studio.thread-drafts', 1)
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-      })
-      try {
-        const record = await new Promise((resolve, reject) => {
-          const request = db.transaction('threadDrafts', 'readonly').objectStore('threadDrafts').get(id)
-          request.onsuccess = () => resolve(request.result)
-          request.onerror = () => reject(request.error)
-        })
-        if (!record || record.threadId !== id || !Array.isArray(record.parts)
-          || !Array.isArray(record.appliedStopRequestIds)) return false
-        if (text === null) return record.parts.length === 0
-        return record.parts.length === 1
-          && record.parts[0].type === 'text'
-          && typeof record.parts[0].partId === 'string'
-          && Object.keys(record.parts[0]).sort().join(',') === 'partId,text,type'
-          && record.parts[0].text === text
-      } finally {
-        db.close()
-      }
-    }, { id: threadId, text: expected })
-    if (persisted) return
-    await sleep(50)
+async function createWorkspaceDurableHistoryFixture(
+  apiCtx,
+  { title, messages },
+) {
+  assert(
+    Array.isArray(messages) && messages.length > 0,
+    'durable history messages required',
+  )
+  const target = await resolveWorkspaceCatalogTarget(apiCtx)
+  const state = {
+    apiCtx,
+    space: null,
+    sessionId: null,
+    threadId: null,
   }
-  throw new Error(`Thread ${threadId} draft was not persisted within 10000ms`)
+  try {
+    state.space = await createWorkspaceSpace(apiCtx, {
+      title,
+      defaultAgentName: target.agent.name,
+      defaultYoloEnabled: false,
+    })
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: messages[0] }],
+      modelSelection: target.model,
+      yoloEnabled: false,
+    })
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
+    for (const message of messages.slice(1)) {
+      let accepted
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt > 0) await sleep(80)
+        await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 30_000,
+          intervalMs: 50,
+        }).catch(() => {})
+        try {
+          accepted = await acceptCommandBatch(apiCtx, {
+            target: threadTarget({
+              threadId: state.threadId,
+            }),
+            commands: [userMessageCommand(message, cid())],
+          })
+          break
+        } catch (error) {
+          if (!isExitUnconfirmedConflict(error)) throw error
+        }
+      }
+      if (!accepted) {
+        throw new Error(`THREAD batch did not stabilize after 5 attempts for message: ${message}`)
+      }
+    }
+    await waitForQuiescentThread(apiCtx, state.threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
+    }
+  } catch (error) {
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
+    throw error
+  }
 }
 
 function createReadyUploadRoute() {
@@ -2006,131 +1209,6 @@ function createReadyUploadRoute() {
 /** READY 上传是按 `type` 判别的 sealed wire：只携带 id、blobId 与清理截止快照。 */
 function readyUploadBody(id, blobId) {
   return { type: 'READY', id, blobId, expiresAt: Date.now() + 300_000 }
-}
-
-async function waitForPlaceholder(composer, visible) {
-  await composer.page().waitForFunction(
-    ({ selector, expected }) =>
-      document.querySelector(selector)
-        ?.getAttribute('data-placeholder-visible') === String(expected),
-    { selector: '.composer-editor', expected: visible },
-    { timeout: 10_000 },
-  )
-}
-
-function composerDraftStorageKey(scope) {
-  return `${COMPOSER_DRAFT_STORAGE_PREFIX}${scope}`
-}
-
-function chatPaneDraftKey(fixture) {
-  return composerDraftStorageKey(`agent-pane:CHAT:${fixture.chat.id}:pane-1`)
-}
-
-async function setCaretOffset(composer, targetOffset) {
-  const placed = await composer.evaluate((root, requestedOffset) => {
-    const document = root.ownerDocument
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    let remaining = requestedOffset
-    let node = walker.nextNode()
-    while (node) {
-      const length = node.textContent?.length ?? 0
-      if (remaining <= length) {
-        const range = document.createRange()
-        range.setStart(node, remaining)
-        range.collapse(true)
-        const selection = document.getSelection()
-        selection?.removeAllRanges()
-        selection?.addRange(range)
-        root.focus({ preventScroll: true })
-        return true
-      }
-      remaining -= length
-      node = walker.nextNode()
-    }
-    return false
-  }, targetOffset)
-  assert(placed, `could not place composer caret at ${targetOffset}`)
-}
-
-async function caretOffset(composer) {
-  return composer.evaluate((root) => {
-    const selection = root.ownerDocument.getSelection()
-    if (!selection || selection.rangeCount === 0) return -1
-    const caret = selection.getRangeAt(0)
-    if (!caret.collapsed || !root.contains(caret.startContainer)) return -1
-    const prefix = root.ownerDocument.createRange()
-    prefix.selectNodeContents(root)
-    prefix.setEnd(caret.startContainer, caret.startOffset)
-    return prefix.toString().length
-  })
-}
-
-async function composerMetrics(composer) {
-  return composer.evaluate((root) => {
-    const selection = root.ownerDocument.getSelection()
-    const range =
-      selection && selection.rangeCount > 0
-        ? selection.getRangeAt(0)
-        : null
-    let selectionAtEnd = false
-    if (
-      range
-      && range.collapsed
-      && root.contains(range.commonAncestorContainer)
-    ) {
-      const trailing = root.ownerDocument.createRange()
-      trailing.selectNodeContents(root)
-      trailing.setStart(range.endContainer, range.endOffset)
-      selectionAtEnd = trailing.toString().length === 0
-    }
-    return {
-      focused: root.ownerDocument.activeElement === root,
-      scrollTop: root.scrollTop,
-      scrollHeight: root.scrollHeight,
-      clientHeight: root.clientHeight,
-      bottomGap: root.scrollHeight - root.clientHeight - root.scrollTop,
-      selectionCollapsed: range?.collapsed ?? false,
-      selectionAtEnd,
-    }
-  })
-}
-
-async function activeOptionText(palette) {
-  const option = palette.locator('[role="option"][aria-selected="true"]')
-  await option.waitFor({ state: 'visible', timeout: 10_000 })
-  return (await option.innerText()).trim()
-}
-
-async function waitForActiveModel(apiCtx, threadId, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs
-  let last = null
-  while (Date.now() <= deadline) {
-    last = await getThreadSnapshot(apiCtx, threadId)
-    if (last.activeAssistantOutput != null) return last
-    await sleep(50)
-  }
-  throw new Error(`model invocation did not become active: ${JSON.stringify(last)}`)
-}
-
-async function waitForQueuedMessages(
-  apiCtx,
-  threadId,
-  expectedCount,
-  timeoutMs = 10_000,
-) {
-  const deadline = Date.now() + timeoutMs
-  let last = null
-  while (Date.now() <= deadline) {
-    last = await getThreadSnapshot(apiCtx, threadId)
-    if (
-      last.queuedCommands.length === expectedCount
-      && last.queuedCommands.every((command) => command.state === 'QUEUED')
-    ) {
-      return last
-    }
-    await sleep(50)
-  }
-  throw new Error(`queued messages did not stabilize: ${JSON.stringify(last)}`)
 }
 
 class HoldingOpenAiMock {

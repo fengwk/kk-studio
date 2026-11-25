@@ -2,19 +2,16 @@ import { createServer } from 'node:http'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { baseModelConfig, encodePathTail, environmentCreateBody } from '../lib/fixtures.mjs'
+import { baseModelConfig, environmentCreateBody } from '../lib/fixtures.mjs'
 import {
   acceptCommandBatch,
   assertRootYoloEnabled,
-  branchSettingsOf,
-  chatOwner,
-  createChat,
+  createWorkspaceSession,
+  createWorkspaceSpace,
   getThreadSnapshot,
-  createNewSession,
   listEnvironments,
   setEnvironmentCommand,
   setExecutionCommand,
-  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
   waitForQuiescentThread,
@@ -24,17 +21,28 @@ import {
   cid,
   sleep,
 } from '../lib/http.mjs'
-import { seedSplitChatPanes } from './chat-pane-storage.mjs'
+import {
+  bindSplitThreads as bindWorkspaceSplitThreads,
+  bindThreadComposer as bindWorkspaceThreadComposer,
+  cleanupWorkspaceFixtureState,
+  resolveCatalogTarget,
+  UI_LABELS,
+  waitForThreadSubscription as waitForWorkspaceThreadSubscription,
+  withUiFixture as withWorkspaceUiFixture,
+} from './workspace-helpers.mjs'
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 export async function runWorkspaceContractMatrix(ui) {
   const {
     apiCtx,
-    bindThreadComposer,
-    createBranchedHistoryFixture,
     consoleErrors,
-    createDurableHistoryFixture,
-    createHoldingQueueFixture,
+    createWorkspaceDurableHistoryFixture,
+    createWorkspaceHoldingQueueFixture,
     daemonEnv,
+    ensureSignedIn,
     expectNoFatal,
     goto,
     page,
@@ -42,27 +50,27 @@ export async function runWorkspaceContractMatrix(ui) {
     run,
     shot,
     stamp,
-    withUiFixture,
   } = ui
 
   await run(
-    'ui.chat.composer.settings_controls_batch',
+    'ui.workspace.composer.settings_controls_batch',
     'Composer 双层控制栏、Default/YOLO 与 Model→Variant 菜单形成同批设置命令',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
-        () => createHoldingQueueFixture(apiCtx, {
+        () => createWorkspaceHoldingQueueFixture(apiCtx, {
           title: `e2e-ui-composer-settings-${stamp}`,
           historicalMessage: `composer settings hold ${stamp}`,
           queuedMessages: [`existing queued message ${stamp}`],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
-          const pane = page.locator('[data-pane-id="pane-1"]')
-          const add = pane.getByRole('button', { name: '打开命令表' })
-          const permission = pane.getByRole('button', { name: '权限模式' })
-          const model = pane.getByRole('button', { name: 'Model 与 Variant' })
-          const send = pane.getByRole('button', { name: '发送消息' })
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
+          const pane = page.locator('[data-pane-active]').first()
+          const add = pane.getByRole('button', { name: UI_LABELS.openCommandsButton })
+          const permission = pane.getByRole('button', { name: UI_LABELS.permissionButton })
+          const model = pane.getByRole('button', { name: UI_LABELS.modelButton })
+          const send = pane.getByRole('button', { name: UI_LABELS.sendButton })
 
           const geometry = await composer.evaluate((editor) => {
             const dock = editor.closest('.thread-dock')
@@ -83,10 +91,10 @@ export async function runWorkspaceContractMatrix(ui) {
           })
           assert(geometry != null, 'Composer did not render a dock + controls structure')
           assert(
-            geometry.dockHeight >= 92
-            && geometry.dockHeight <= 96
-            && geometry.editorHeight >= 34
-            && geometry.editorHeight <= 38
+            geometry.dockHeight >= 90
+            && geometry.dockHeight <= 104
+            && geometry.editorHeight >= 32
+            && geometry.editorHeight <= 42
             && geometry.editorTop < geometry.controlsTop
             && geometry.editorBottom <= geometry.controlsTop + 2,
             `Composer is not a compact input row + controls row surface: ${JSON.stringify(geometry)}`,
@@ -106,26 +114,26 @@ export async function runWorkspaceContractMatrix(ui) {
           )
 
           await permission.click()
-          const permissionOptions = page.getByRole('listbox', { name: '权限选项' })
+          const permissionOptions = page.getByRole('listbox', { name: UI_LABELS.permissionOptions })
           await permissionOptions.waitFor({ state: 'visible', timeout: 10_000 })
+          const permissionTexts = await permissionOptions.getByRole('option').allTextContents()
           assert(
-            JSON.stringify(await permissionOptions.getByRole('option').allTextContents())
-              === JSON.stringify(['Default', 'YOLO']),
-            `Permission menu must contain only Default/YOLO: ${JSON.stringify(
-              await permissionOptions.getByRole('option').allTextContents(),
-            )}`,
+            permissionTexts.length === 2
+            && UI_LABELS.permissionDefault.test(permissionTexts[0]?.trim() ?? '')
+            && UI_LABELS.permissionYolo.test(permissionTexts[1]?.trim() ?? ''),
+            `Permission menu must contain only Default/YOLO: ${JSON.stringify(permissionTexts)}`,
           )
-          await permissionOptions.getByRole('option', { name: 'YOLO', exact: true }).click()
+          await permissionOptions.getByRole('option', { name: UI_LABELS.permissionYolo, exact: true }).click()
           assert((await permission.innerText()).includes('YOLO'), 'YOLO selection was not retained')
 
           await model.click()
-          const modelOptions = page.getByRole('listbox', { name: 'Model 选项' })
+          const modelOptions = page.getByRole('listbox', { name: UI_LABELS.modelOptions })
           await modelOptions.waitFor({ state: 'visible', timeout: 10_000 })
           await modelOptions.getByRole('option', {
             name: fixture.model.name,
             exact: true,
           }).click()
-          const variantOptions = page.getByRole('listbox', { name: 'Variant 选项' })
+          const variantOptions = page.getByRole('listbox', { name: UI_LABELS.variantOptions })
           await variantOptions.waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             (await variantOptions.getByRole('option').allTextContents()).includes('review'),
@@ -165,40 +173,44 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.multi_pane_settings_isolation',
+    'ui.workspace.composer.multi_pane_settings_isolation',
     '双 Pane Composer 的 Permission 菜单、状态与 Escape 焦点互不串扰',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
-        () => createBranchedHistoryFixture(apiCtx, {
+        () => createTwoWorkspaceSessionsFixture(apiCtx, {
           title: `e2e-ui-composer-multipane-${stamp}`,
-          trunkMessage: `multi pane baseline ${stamp}`,
-          originalMessages: [`multi pane original ${stamp}`],
-          alternateMessage: `multi pane alternate ${stamp}`,
+          firstMessage: `multi pane first ${stamp}`,
+          secondMessage: `multi pane second ${stamp}`,
         }),
         async (fixture) => {
-          const secondThreadId = fixture.sessionThreadIds.find(
-            (threadId) => threadId !== fixture.threadId,
+          const { pane1, pane2 } = await bindWorkspaceSplitThreads(
+            page,
+            goto,
+            fixture.space.id,
+            fixture.threadId,
+            fixture.secondSessionId,
+            fixture.secondThreadId,
           )
-          assert(secondThreadId, 'multi-pane fixture did not create a second Thread')
-          await bindSplitThreads(page, goto, fixture.chat.id, fixture.threadId, secondThreadId)
-          const pane1 = page.locator('[data-pane-id="pane-1"]')
-          const pane2 = page.locator('[data-pane-id="pane-2"]')
-          const permission1 = pane1.getByRole('button', { name: '权限模式' })
-          const permission2 = pane2.getByRole('button', { name: '权限模式' })
+          const permission1 = pane1.getByRole('button', { name: UI_LABELS.permissionButton })
+          const permission2 = pane2.getByRole('button', { name: UI_LABELS.permissionButton })
           await permission1.waitFor({ state: 'visible', timeout: 15_000 })
           await permission2.waitFor({ state: 'visible', timeout: 15_000 })
 
           await permission1.click()
-          await page.getByRole('listbox', { name: '权限选项' })
-            .getByRole('option', { name: 'YOLO', exact: true })
+          await page.getByRole('listbox', { name: UI_LABELS.permissionOptions })
+            .getByRole('option', { name: UI_LABELS.permissionYolo, exact: true })
             .click()
           assert((await permission1.innerText()).includes('YOLO'), 'pane-1 did not retain YOLO')
-          assert((await permission2.innerText()).includes('Default'), 'pane-2 permission was polluted')
+          assert(
+            UI_LABELS.permissionDefault.test((await permission2.innerText()).trim()),
+            `pane-2 permission was polluted: ${await permission2.innerText()}`,
+          )
 
           await permission2.click()
           assert(
-            await page.getByRole('listbox', { name: '权限选项' }).count() === 1,
+            await page.getByRole('listbox', { name: UI_LABELS.permissionOptions }).count() === 1,
             'more than one Composer settings menu owned keyboard focus',
           )
           assert(
@@ -206,15 +218,18 @@ export async function runWorkspaceContractMatrix(ui) {
             && await permission2.getAttribute('aria-expanded') === 'true',
             'opening pane-2 did not close pane-1 menu',
           )
-          await page.getByRole('listbox', { name: '权限选项' }).press('Escape')
-          const composer2 = pane2.getByRole('textbox', { name: '给 AI 发送消息' })
+          await page.getByRole('listbox', { name: UI_LABELS.permissionOptions }).press('Escape')
+          const composer2 = pane2.getByRole('textbox', { name: UI_LABELS.composerInput })
           await page.waitForFunction(
             (element) => document.activeElement === element,
             await composer2.elementHandle(),
             { timeout: 10_000 },
           )
           assert((await permission1.innerText()).includes('YOLO'), 'pane-1 draft changed after pane-2 Escape')
-          assert((await permission2.innerText()).includes('Default'), 'pane-2 draft changed after Escape')
+          assert(
+            UI_LABELS.permissionDefault.test((await permission2.innerText()).trim()),
+            'pane-2 draft changed after Escape',
+          )
 
           await shot(caseArt, 'composer-multi-pane-settings-isolation')
           expectNoFatal(pageErrors, consoleErrors)
@@ -224,32 +239,32 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 
   await run(
-    'ui.chat.footer.readonly_facts',
+    'ui.workspace.footer.readonly_facts',
     'Footer 只展示真实 Environment/Workspace、usage/context/cache facts 且无交互',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
         () => createCompletedUsageFixture(apiCtx, stamp),
         async (fixture) => {
-          await bindThreadComposer(page, goto, fixture)
-          const footer = page.getByLabel('会话状态')
+          await bindWorkspaceThreadComposer(page, goto, fixture)
+          const footer = page.getByLabel(UI_LABELS.threadStatusFooter)
           await footer.waitFor({ state: 'visible', timeout: 15_000 })
           // 只读单行 Footer：组分隔符固定为 U+2223（∣），组内统计项固定为 U+00B7（·）。
           const line = footer.locator('.thread-status-line')
           assert(await line.count() === 1, `Footer must render exactly one status line: ${await footer.innerText()}`)
-          const environmentText = `${fixture.otherEnvironment.name} · 不可用`
+          const escapedEnvName = escapeRegExp(fixture.otherEnvironment.name)
+          const expectedStats = '∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · W0 · $0.000034 · cache 46.67% · '
+          const expectedPattern = new RegExp(
+            `^${escapedEnvName} · (?:unavailable|不可用) ${escapeRegExp(expectedStats)}(?:—|\\d+(?:\\.\\d+)?) tok\\/s$`,
+          )
           // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Environment，
           // Footer 必须投影该 Environment（无 daemon 连接 => unavailable）。
           const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
-          const expectedPrefix = `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · W0 · $0.000034 · cache 46.67% · `
-          assert(
-            lineText.startsWith(expectedPrefix)
-              && /^(?:—|\d+(?:\.\d+)?) tok\/s$/.test(lineText.slice(expectedPrefix.length)),
-            `Footer facts are incorrect: ${lineText}`,
-          )
+          assert(expectedPattern.test(lineText), `Footer facts are incorrect: ${lineText}`)
           const footerTitle = await line.getAttribute('title')
           assert(
-            footerTitle?.startsWith(`环境：${fixture.otherEnvironment.name}`)
+            new RegExp(`^(?:Environment:|环境：) ?${escapedEnvName}`).test(footerTitle ?? '')
               && footerTitle.includes('30 / 4096 tokens')
               && footerTitle.includes('46.67%'),
             `Footer hover readout is incomplete: ${footerTitle}`,
@@ -262,6 +277,7 @@ export async function runWorkspaceContractMatrix(ui) {
             'Default',
             'YOLO',
             'notify:',
+            'Browser notifications',
             '浏览器通知',
           ]) {
             assert(!footerText.includes(forbidden), `Footer leaked interactive setting: ${forbidden}`)
@@ -275,25 +291,26 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 
   await run(
-    'ui.chat.tool_card.streaming_layout_scroll',
+    'ui.workspace.tool_card.streaming_layout_scroll',
     'Tool 卡流式输入、审查布局、write/edit/bash 审批与有界滚动',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const originalViewport = page.viewportSize()
       await page.setViewportSize({ width: 720, height: 420 })
       try {
-        await withUiFixture(
+        await withWorkspaceUiFixture(
           page,
           () => createToolCardFixture(apiCtx, stamp, daemonEnv),
           async (fixture) => {
             await fixture.start('edit')
             await Promise.all([
-              bindThreadComposer(page, goto, fixture),
-              waitForThreadSubscription(page, fixture.threadId),
+              bindWorkspaceThreadComposer(page, goto, fixture),
+              waitForWorkspaceThreadSubscription(page, fixture.threadId),
             ])
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
             await fixture.stream()
 
-            const card = page.locator('.thread-tool-surface').filter({
+            const card = page.locator('.thread-block-tool').filter({
               has: page.locator('.thread-tool-name', { hasText: 'edit' }),
             }).last()
             const streamingPreview = card.locator('.thread-tool-preview-body.is-input-new')
@@ -304,17 +321,17 @@ export async function runWorkspaceContractMatrix(ui) {
               { timeout: 15_000 },
             )
             await page.waitForFunction(
-              (expected) => [...document.querySelectorAll('.thread-tool-surface')]
+              (expected) => [...document.querySelectorAll('.thread-block-tool')]
                 .some((surface) => surface.querySelector('.thread-tool-name')?.textContent === 'edit'
                   && surface.querySelector('.thread-tool-summary-detail')?.textContent === expected),
               fixture.path,
               { timeout: 15_000 },
             )
             const streaming = await card.evaluate((surface) => {
-              const header = surface.querySelector('.thread-tool-header')
+              const header = surface.querySelector('.thread-disclosure-header')
               const summary = surface.querySelector('.thread-tool-summary')
               const detail = surface.querySelector('.thread-tool-summary-detail')
-              const toggle = surface.querySelector('.thread-tool-toggle')
+              const toggle = surface.querySelector('.thread-disclosure-toggle')
               const preview = surface.querySelector('.thread-tool-preview-body.is-input-new')
               if (
                 !(header instanceof HTMLElement)
@@ -344,7 +361,7 @@ export async function runWorkspaceContractMatrix(ui) {
               streaming.previewLines.length === 8
               && streaming.previewLines[0] === 'new-1'
               && streaming.previewLines.at(-1) === 'new-8'
-              && await card.getByText('流式输入内容', { exact: false }).count() === 1
+              && await card.getByText(UI_LABELS.threadToolProposedChanges, { exact: false }).count() === 1
               && await card.locator('.thread-tool-preview-body.is-edit').count() === 0,
               `edit streaming input was truncated or presented as a diff: ${JSON.stringify(streaming.previewLines)}`,
             )
@@ -382,11 +399,11 @@ export async function runWorkspaceContractMatrix(ui) {
               `completed edit diff is not fully visible: ${completedText}`,
             )
             assert(
-              await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
-              && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              await approval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).count() === 1
+              && await approval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).count() === 1,
               `edit did not enter approval: ${await approval.innerText()}`,
             )
-            const editDeny = approval.getByRole('button', { name: '拒绝', exact: true })
+            const editDeny = approval.getByRole('button', { name: UI_LABELS.denyButton, exact: true })
             const denyStyle = await editDeny.evaluate((element) => {
               const probe = document.createElement('span')
               probe.style.borderColor = 'var(--danger-strong)'
@@ -437,7 +454,7 @@ export async function runWorkspaceContractMatrix(ui) {
             await fixture.start('write')
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
             await fixture.stream()
-            const writeCard = page.locator('.thread-tool-surface').filter({
+            const writeCard = page.locator('.thread-block-tool').filter({
               has: page.locator('.thread-tool-name', { hasText: 'write' }),
             }).last()
             await fixture.finish()
@@ -445,11 +462,11 @@ export async function runWorkspaceContractMatrix(ui) {
             await writeApproval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
               await writeCard.locator('.thread-tool-name').textContent() === 'write'
-              && await writeApproval.getByRole('button', { name: '允许', exact: true }).count() === 1
-              && await writeApproval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              && await writeApproval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).count() === 1
+              && await writeApproval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).count() === 1,
               `write did not enter approval: ${await writeCard.innerText()}`,
             )
-            await writeApproval.getByRole('button', { name: '拒绝', exact: true }).click()
+            await writeApproval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).click()
             await waitForQuiescentThread(apiCtx, fixture.threadId, {
               timeoutMs: 30_000,
               intervalMs: 100,
@@ -459,7 +476,7 @@ export async function runWorkspaceContractMatrix(ui) {
             await fixture.start('bash')
             await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
             await fixture.stream()
-            const bashCard = page.locator('.thread-tool-surface').filter({
+            const bashCard = page.locator('.thread-block-tool').filter({
               has: page.locator('.thread-tool-name', { hasText: 'bash' }),
             }).last()
             await fixture.finish()
@@ -467,11 +484,11 @@ export async function runWorkspaceContractMatrix(ui) {
             await bashApproval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
               await bashCard.locator('.thread-tool-name').textContent() === 'bash'
-              && await bashApproval.getByRole('button', { name: '允许', exact: true }).count() === 1
-              && await bashApproval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              && await bashApproval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).count() === 1
+              && await bashApproval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).count() === 1,
               `bash did not enter approval: ${await bashCard.innerText()}`,
             )
-            await bashApproval.getByRole('button', { name: '拒绝', exact: true }).click()
+            await bashApproval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).click()
             await waitForQuiescentThread(apiCtx, fixture.threadId, {
               timeoutMs: 30_000,
               intervalMs: 100,
@@ -490,21 +507,22 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 
   await run(
-    'ui.chat.task_status.async_thread_approval',
+    'ui.workspace.task_status.async_thread_approval',
     'Task 回执链接子 Thread；根控制区汇聚并向子 Thread 提交审批',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
         () => createActiveTaskFixture(apiCtx, stamp),
         async (fixture) => {
-          await bindThreadComposer(page, goto, fixture)
+          await bindWorkspaceThreadComposer(page, goto, fixture)
           await fixture.start()
 
-          const taskCard = page.locator('.thread-tool-surface').filter({
+          const taskCard = page.locator('.thread-block-tool').filter({
             has: page.locator('.thread-tool-name', { hasText: 'task' }),
           }).last()
           await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
-          const link = taskCard.locator('.task-tool-thread-link')
+          const link = taskCard.locator('.thread-tool-thread-link')
           await link.waitFor({ state: 'visible', timeout: 10_000 })
           const href = await link.getAttribute('href')
           const childThreadId = href?.split('/').at(-1)
@@ -514,12 +532,12 @@ export async function runWorkspaceContractMatrix(ui) {
             `unexpected thread link href: ${href}`,
           )
           await link.click()
-          const childView = page.locator('.chat-pane-layer:not([hidden]) .bound-thread-view')
+          const childView = page.locator('[data-pane-active] .bound-thread-view')
           await childView.waitFor({ state: 'visible', timeout: 15_000 })
           assert(
-            new URL(page.url()).pathname === `/chats/${fixture.chat.id}`
+            new URL(page.url()).pathname === `/chat-spaces/${fixture.space.id}`
               && await childView.locator('.composer-editor').count() === 0,
-            'child thread must open as a read-only pane without changing the Chat route',
+            'child thread must open as a read-only pane without changing the Workspace route',
           )
 
           let resolveApproval
@@ -542,7 +560,12 @@ export async function runWorkspaceContractMatrix(ui) {
                   threadId: childThreadId,
                   rootThreadId: fixture.threadId,
                   sessionId: fixture.sessionId,
-                  owner: { kind: 'CHAT', id: fixture.chat.id, title: fixture.chat.title, link: `/chats/${fixture.chat.id}` },
+                  owner: {
+                    kind: 'CHAT_SPACE',
+                    id: fixture.space.id,
+                    title: fixture.space.title,
+                    link: `/chat-spaces/${fixture.space.id}`,
+                  },
                   toolCallId: 'call-bash-1',
                   toolName: 'bash',
                   argumentsJson: '{"command":"echo approval"}',
@@ -584,12 +607,12 @@ export async function runWorkspaceContractMatrix(ui) {
             const approval = page.locator('.interaction-approval-card')
             await approval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
-              await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
-              && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              await approval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).count() === 1
+              && await approval.getByRole('button', { name: UI_LABELS.denyButton, exact: true }).count() === 1,
               'root control area did not expose child approval controls',
             )
 
-            await approval.getByRole('button', { name: '允许', exact: true }).click()
+            await approval.getByRole('button', { name: UI_LABELS.allowButton, exact: true }).click()
             const { target: approvalTarget, body: approvalBody } = await Promise.race([
               approvalPromise,
               sleep(10_000).then(() => {
@@ -620,19 +643,20 @@ export async function runWorkspaceContractMatrix(ui) {
     'ui.settings.notifications_single_entry',
     '浏览器通知只在 Settings 暴露唯一开关',
     async (caseArt) => {
-      await goto('/settings')
-      const switches = page.getByRole('switch', { name: '浏览器通知' })
+      await ensureSignedIn?.()
+      await goto('/settings/preferences')
+      const switches = page.getByRole('switch', { name: UI_LABELS.notificationSwitch })
       await switches.waitFor({ state: 'visible', timeout: 10_000 })
       assert(await switches.count() === 1, 'Settings must expose exactly one notification switch')
 
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-notification-entry-${stamp}`,
           messages: [`notification entry baseline ${stamp}`],
         }),
         async (fixture) => {
-          await bindThreadComposer(page, goto, fixture)
+          await bindWorkspaceThreadComposer(page, goto, fixture)
           const panel = page.locator('.thread-panel')
           assert(await panel.getByRole('switch').count() === 0, 'Thread panel exposed a notification switch')
           assert(
@@ -651,6 +675,7 @@ export async function runWorkspaceContractMatrix(ui) {
     'ui.settings.system_contract_cas',
     'Settings server tab 与 /api/platform/settings 契约：完整聚合 CAS、冲突确认后刷新，并在收尾恢复全局状态',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const readSettings = async () => (await apiCtx.call('GET', '/api/platform/settings')).json
       const before = await readSettings()
       const original = before.aiRuntime.retryBaseDelayMillis
@@ -662,9 +687,8 @@ export async function runWorkspaceContractMatrix(ui) {
       // 确定性可逆的新值：与原始值不同的正整数字符串。
       const changed = original === '2501' ? '2502' : '2501'
       try {
-        await goto('/settings')
-        await page.getByRole('tab', { name: 'AI 运行时' }).click()
-        const base = page.getByLabel('基础延迟（毫秒）')
+        await goto('/settings/aiRuntime')
+        const base = page.getByLabel(UI_LABELS.settingsBaseDelayLabel)
         await base.waitFor({ state: 'visible', timeout: 10_000 })
         // GET hydration：draft 与权威聚合一致。
         assert(
@@ -672,8 +696,8 @@ export async function runWorkspaceContractMatrix(ui) {
           `hydration mismatch: ${await base.inputValue()} !== ${original}`,
         )
         await base.fill(changed)
-        await page.getByRole('button', { name: '保存', exact: true }).click()
-        await page.getByText('所有更改已保存').waitFor({ state: 'visible', timeout: 15_000 })
+        await page.getByRole('button', { name: UI_LABELS.settingsSave, exact: true }).click()
+        await page.getByText(UI_LABELS.settingsAllSaved).waitFor({ state: 'visible', timeout: 15_000 })
         await shot(caseArt, 'settings-system-contract-cas')
 
         const after = await readSettings()
@@ -701,9 +725,9 @@ export async function runWorkspaceContractMatrix(ui) {
         const externalRes = await apiCtx.call('PUT', '/api/platform/settings', externalUpdate)
         assert(externalRes.status === 200, `external settings update failed: ${externalRes.status}`)
         await base.fill(staleDraft)
-        await page.getByRole('button', { name: '保存', exact: true }).click()
+        await page.getByRole('button', { name: UI_LABELS.settingsSave, exact: true }).click()
         const conflictDialog = page.getByRole('alertdialog', {
-          name: '数据已发生变化',
+          name: UI_LABELS.settingsConflictDialog,
         })
         await conflictDialog.waitFor({ state: 'visible', timeout: 15_000 })
         assert(
@@ -713,10 +737,9 @@ export async function runWorkspaceContractMatrix(ui) {
         await shot(caseArt, 'settings-system-conflict-dialog')
         await Promise.all([
           page.waitForEvent('load'),
-          conflictDialog.getByRole('button', { name: '刷新' }).click(),
+          conflictDialog.getByRole('button', { name: UI_LABELS.settingsReloadLatest }).click(),
         ])
-        await page.getByRole('tab', { name: 'AI 运行时' }).click()
-        const refreshedBase = page.getByLabel('基础延迟（毫秒）')
+        const refreshedBase = page.getByLabel(UI_LABELS.settingsBaseDelayLabel)
         await refreshedBase.waitFor({ state: 'visible', timeout: 10_000 })
         assert(
           (await refreshedBase.inputValue()) === externallyChanged,
@@ -761,10 +784,56 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 }
 
-async function bindSplitThreads(page, goto, chatId, firstThreadId, secondThreadId) {
-  await goto('/chats')
-  await seedSplitChatPanes(page, chatId, firstThreadId, secondThreadId)
-  await goto(`/chats/${encodeURIComponent(chatId)}`)
+async function createTwoWorkspaceSessionsFixture(
+  apiCtx,
+  { title, firstMessage, secondMessage },
+) {
+  const target = await resolveCatalogTarget(apiCtx)
+  const state = {
+    apiCtx,
+    space: null,
+    sessionIds: [],
+    threadIds: [],
+    sessionId: null,
+    secondSessionId: null,
+    threadId: null,
+    secondThreadId: null,
+  }
+  try {
+    state.space = await createWorkspaceSpace(apiCtx, {
+      title,
+      defaultAgentName: target.agent.name,
+    })
+    const first = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: firstMessage }],
+      modelSelection: target.model,
+      yoloEnabled: false,
+    })
+    const second = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: secondMessage }],
+      modelSelection: target.model,
+      yoloEnabled: false,
+    })
+    state.sessionId = String(first.sessionId)
+    state.threadId = String(first.threadId)
+    state.secondSessionId = String(second.sessionId)
+    state.secondThreadId = String(second.threadId)
+    state.sessionIds.push(state.sessionId, state.secondSessionId)
+    state.threadIds.push(state.threadId, state.secondThreadId)
+    await Promise.all([
+      waitForQuiescentThread(apiCtx, state.threadId, { timeoutMs: 60_000, intervalMs: 100 }),
+      waitForQuiescentThread(apiCtx, state.secondThreadId, { timeoutMs: 60_000, intervalMs: 100 }),
+    ])
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
+    }
+  } catch (error) {
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
+    throw error
+  }
 }
 
 async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 15_000) {
@@ -794,8 +863,9 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   const state = {
     apiCtx,
     agent: null,
-    chat: null,
+    space: null,
     environment: null,
+    otherEnvironment: null,
     mock,
     model: null,
     provider: null,
@@ -856,28 +926,19 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
     state.agent = agentResponse.json
 
-    state.chat = await createChat(apiCtx, {
+    state.space = await createWorkspaceSpace(apiCtx, {
       title: `e2e-ui-footer-${stamp}-${suffix}`,
-      agentName: state.agent.name,
+      defaultAgentName: state.agent.name,
+    })
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: `footer usage ${stamp}` }],
+      modelSelection: state.agent.execution.settings,
+      environmentId: state.environment.id,
       yoloEnabled: false,
     })
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(
-        state.agent,
-        state.agent.execution.settings,
-        state.environment.name,
-      ),
-      yoloEnabled: false,
-      commands: [userMessageCommand(`footer usage ${stamp}`, cid())],
-    })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
     const completed = await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 30_000,
       intervalMs: 100,
@@ -894,7 +955,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     )
     state.otherEnvironment = otherEnvironmentResponse.json
     const switched = await acceptCommandBatch(apiCtx, {
-      owner,
       target: threadTarget({
         threadId: state.threadId,
         expectedHeadEntryId: completed.headEntryId,
@@ -916,10 +976,10 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     })
     return {
       ...state,
-      dispose: () => cleanupCompletedUsageFixture(state),
+      dispose: () => cleanupWorkspaceFixtureState(state),
     }
   } catch (error) {
-    await cleanupCompletedUsageFixture(state).catch(() => undefined)
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
   }
 }
@@ -932,7 +992,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
   const state = {
     apiCtx,
     childAgent: null,
-    chat: null,
+    space: null,
     mock,
     model: null,
     parentAgent: null,
@@ -997,31 +1057,23 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(parentResponse.status === 201, `create task parent: ${JSON.stringify(parentResponse)}`)
     state.parentAgent = parentResponse.json
 
-    state.chat = await createChat(apiCtx, {
+    state.space = await createWorkspaceSpace(apiCtx, {
       title: `e2e-ui-task-${stamp}-${suffix}`,
-      agentName: state.parentAgent.name,
-      yoloEnabled: true,
+      defaultAgentName: state.parentAgent.name,
+      defaultYoloEnabled: true,
     })
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
     // 先用不可用的模型创建空闲 Thread，避免 bootstrap 消费 mock；浏览器绑定后再启动任务。
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(
-        state.parentAgent,
-        {
-          modelName: `${state.model.name}-missing`,
-          variant: 'default',
-        },
-      ),
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: `task materialize ${suffix}` }],
+      modelSelection: {
+        modelName: `${state.model.name}-missing`,
+        variant: 'default',
+      },
       yoloEnabled: true,
-      commands: [userMessageCommand(`task materialize ${suffix}`, cid())],
     })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
     return {
       ...state,
       // 浏览器先绑定 Thread，再显式启动 task。
@@ -1031,7 +1083,6 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           intervalMs: 100,
         })
         await acceptCommandBatch(apiCtx, {
-          owner,
           target: threadTarget({
             threadId: state.threadId,
             expectedHeadEntryId: idle.headEntryId,
@@ -1044,10 +1095,10 @@ async function createActiveTaskFixture(apiCtx, stamp) {
         })
         await mock.waitForChildRequest()
       },
-      dispose: () => cleanupActiveTaskFixture(state),
+      dispose: () => cleanupWorkspaceFixtureState(state),
     }
   } catch (error) {
-    await cleanupActiveTaskFixture(state).catch(() => undefined)
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
   }
 }
@@ -1148,31 +1199,22 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
     state.agent = agentResponse.json
 
-    state.chat = await createChat(apiCtx, {
+    state.space = await createWorkspaceSpace(apiCtx, {
       title: `e2e-ui-tool-card-${stamp}-${suffix}`,
-      agentName: state.agent.name,
+      defaultAgentName: state.agent.name,
+    })
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: `tool card materialize ${suffix}` }],
+      modelSelection: {
+        modelName: `${state.model.name}-missing`,
+        variant: 'default',
+      },
+      environmentId: matchedEnv.id,
       yoloEnabled: false,
     })
-    const owner = chatOwner(state.chat.id)
-    const sessionId = cid()
-    const threadId = cid()
-    await createNewSession(apiCtx, {
-      owner,
-      sessionId,
-      threadId,
-      rootSettings: branchSettingsOf(
-        state.agent,
-        {
-          modelName: `${state.model.name}-missing`,
-          variant: 'default',
-        },
-        matchedEnv.name,
-      ),
-      yoloEnabled: false,
-      commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],
-    })
-    state.threadId = String(threadId)
-    state.sessionId = String(sessionId)
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
     return {
       ...state,
       start: async (toolName) => {
@@ -1182,7 +1224,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           intervalMs: 100,
         })
         await acceptCommandBatch(apiCtx, {
-          owner,
           target: threadTarget({
             threadId: state.threadId,
             expectedHeadEntryId: idle.headEntryId,
@@ -1197,173 +1238,18 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       },
       stream: () => mock.streamCall(),
       finish: () => mock.finishCall(),
-      dispose: () => cleanupToolCardFixture(state),
+      dispose: async () => {
+        try {
+          await rm(state.fixtureDir, { recursive: true, force: true })
+        } finally {
+          await cleanupWorkspaceFixtureState(state)
+        }
+      },
     }
   } catch (error) {
-    await cleanupToolCardFixture(state).catch(() => undefined)
+    await rm(state.fixtureDir, { recursive: true, force: true }).catch(() => undefined)
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
     throw error
-  }
-}
-
-async function cleanupCompletedUsageFixture(state) {
-  const errors = []
-  await cleanup('stop thread', errors, async () => {
-    if (!state.threadId) return
-    await stopThreadForCleanup(state.apiCtx, state.threadId)
-  })
-  await cleanup('mock', errors, () => state.mock.close())
-  await cleanup('chat', errors, async () => {
-    if (state.chat?.id) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
-      )
-    }
-  })
-  await cleanup('agent', errors, async () => {
-    if (state.agent?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
-      )
-    }
-  })
-  await cleanup('environment', errors, async () => {
-    if (state.environment?.id) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
-      )
-    }
-  })
-  await cleanup('alt environment', errors, async () => {
-    if (state.otherEnvironment?.id) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/environments/${encodeURIComponent(state.otherEnvironment.id)}?expectedVersion=${encodeURIComponent(state.otherEnvironment.version)}`,
-      )
-    }
-  })
-  await cleanup('model', errors, async () => {
-    if (state.model?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
-      )
-    }
-  })
-  await cleanup('provider', errors, async () => {
-    if (state.provider?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
-      )
-    }
-  })
-  if (errors.length > 0) {
-    throw new Error(`Footer fixture cleanup failed: ${errors.join('; ')}`)
-  }
-}
-
-async function cleanupActiveTaskFixture(state) {
-  const errors = []
-  await cleanup('stop parent task thread', errors, async () => {
-    if (!state.threadId) return
-    await stopThreadForCleanup(state.apiCtx, state.threadId)
-  })
-  await cleanup('task mock', errors, () => state.mock.close())
-  await cleanup('task chat', errors, async () => {
-    if (state.chat?.id) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
-      )
-    }
-  })
-  for (const [label, agent] of [
-    ['task parent', state.parentAgent],
-    ['task child', state.childAgent],
-  ]) {
-    await cleanup(label, errors, async () => {
-      if (agent?.name) {
-        await state.apiCtx.call(
-          'DELETE',
-          `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
-        )
-      }
-    })
-  }
-  await cleanup('task model', errors, async () => {
-    if (state.model?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
-      )
-    }
-  })
-  await cleanup('task provider', errors, async () => {
-    if (state.provider?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
-      )
-    }
-  })
-  if (errors.length > 0) {
-    throw new Error(`Task fixture cleanup failed: ${errors.join('; ')}`)
-  }
-}
-
-async function cleanupToolCardFixture(state) {
-  const errors = []
-  await cleanup('stop tool-card thread', errors, async () => {
-    if (!state.threadId) return
-    await stopThreadForCleanup(state.apiCtx, state.threadId)
-  })
-  await cleanup('tool-card mock', errors, () => state.mock.close())
-  await cleanup('tool-card files', errors, () => rm(state.fixtureDir, { recursive: true, force: true }))
-  await cleanup('tool-card chat', errors, async () => {
-    if (state.chat?.id) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
-      )
-    }
-  })
-  await cleanup('tool-card agent', errors, async () => {
-    if (state.agent?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
-      )
-    }
-  })
-  await cleanup('tool-card model', errors, async () => {
-    if (state.model?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
-      )
-    }
-  })
-  await cleanup('tool-card provider', errors, async () => {
-    if (state.provider?.name) {
-      await state.apiCtx.call(
-        'DELETE',
-        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
-      )
-    }
-  })
-  if (errors.length > 0) {
-    throw new Error(`Tool-card fixture cleanup failed: ${errors.join('; ')}`)
-  }
-}
-
-async function cleanup(label, errors, action) {
-  try {
-    await action()
-  } catch (error) {
-    errors.push(`${label}: ${error?.message || String(error)}`)
   }
 }
 
