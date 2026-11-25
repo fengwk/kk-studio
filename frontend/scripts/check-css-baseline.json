@@ -57,11 +57,6 @@
   "src/features/environment/environment-page.css": {
     "spacing": 4
   },
-  "src/features/environment/ide/ide-overlay-panel.css": {
-    "spacing": 17,
-    "outline": 4,
-    "important": 3
-  },
   "src/features/extensions/plugin-config.css": {
     "spacing": 1
   },

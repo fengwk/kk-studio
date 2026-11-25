@@ -1,0 +1,53 @@
+.vscode-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.vscode-workbench {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.vscode-workbench iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.vscode-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.ide-panel-warning-banner,
+.ide-panel-recovery-banner,
+.ide-panel-error-banner,
+.ide-panel-terminal-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+  background: var(--warning-soft);
+}
+
+.ide-panel-error-banner,
+.ide-panel-terminal-error {
+  background: var(--danger-soft);
+}

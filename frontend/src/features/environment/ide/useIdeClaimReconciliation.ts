@@ -6,13 +6,13 @@ import {
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
-import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import { environmentDisplayStatus } from '@/features/environment/environment-utils'
 import {
   type IdePendingClaim,
-  type IdePresentation,
-  type IdeTabLoadResult,
-  type IdeTabStorage,
-} from '@/features/environment/ide/ide-tab-state'
+  type IdeSessionLoadResult,
+  type IdeSessionStorage,
+} from '@/features/environment/ide/ide-session-state'
 import {
   applyIdeMobileLayout,
   openIdeView,
@@ -53,14 +53,11 @@ import {
 } from '@/features/environment/ide/ide-browser-session'
 
 export interface UseIdeClaimReconciliationOptions {
-  storage?: IdeTabStorage
-  initial: IdeTabLoadResult
+  storage?: IdeSessionStorage
+  initial: IdeSessionLoadResult
   session: IdeBrowserSessionState
-  activeEnvironmentId: string | null
-  getPresentation: () => IdePresentation
-  getEnvironmentMap: () => Map<string, IdeEnvironmentInfo>
+  getEnvironmentMap: () => Map<string, EnvironmentDTO>
   onStorageStatusChange: (unavailable: boolean) => void
-  onViewCreated: (environmentId: string, viewId: string) => void
 }
 
 interface ReconcileOptions {
@@ -79,11 +76,8 @@ export function useIdeClaimReconciliation({
   storage,
   initial,
   session,
-  activeEnvironmentId,
-  getPresentation,
   getEnvironmentMap,
   onStorageStatusChange,
-  onViewCreated,
 }: UseIdeClaimReconciliationOptions) {
   const events = useApplicationEvents()
   const [identity, setIdentity] = useState<ApplicationEventConnectionIdentity | null>(
@@ -95,7 +89,6 @@ export function useIdeClaimReconciliation({
   const pageSuspendedRef = useRef(false)
   const sessionRef = useRef(session)
   const lastSessionStatusRef = useRef(session.status)
-  const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
   const lastIdentityRef = useRef<string | null>(null)
   const lastEnvironmentReadyRef = useRef(new Map<string, boolean>())
   const actionsRef = useRef<{
@@ -107,24 +100,11 @@ export function useIdeClaimReconciliation({
   const { views, viewsRef, commitViews, updateView: updateStoredView, startAttempt, clearViews } =
     useIdeViewStore(mountedRef, initial)
 
-  function resolveViewId(key: string): string | null {
-    if (viewsRef.current[key] != null) {
-      return key
-    }
-    return viewIdForEnvironment(key)
-  }
+  const updateView = updateStoredView
+  const mountedViews = useRef(new Set<string>())
 
-  function getView(key: string): IdeViewState | undefined {
-    const direct = viewsRef.current[key]
-    return direct ?? (() => {
-      const viewId = viewIdForEnvironment(key)
-      return viewId == null ? undefined : viewsRef.current[viewId]
-    })()
-  }
-
-  function updateView(key: string, attempt: number, patch: Partial<IdeViewState>): IdeViewState | null {
-    const viewId = resolveViewId(key)
-    return viewId == null ? null : updateStoredView(viewId, attempt, patch)
+  function getView(viewId: string): IdeViewState | undefined {
+    return viewsRef.current[viewId]
   }
 
   function startViewAttempt(seed: Omit<IdeViewState, 'attempt'>): number {
@@ -141,7 +121,6 @@ export function useIdeClaimReconciliation({
     sessionRef,
     viewsRef,
     mountedRef,
-    getPresentation,
     preserveSession: initial.recoveryError,
     onStorageStatusChange,
   })
@@ -149,7 +128,6 @@ export function useIdeClaimReconciliation({
     identityRef,
     sessionRef,
     viewsRef,
-    getPresentation,
     sessionReady,
     isPageSuspended: () => pageSuspendedRef.current,
     setPageSuspended: (suspended) => {
@@ -205,28 +183,15 @@ export function useIdeClaimReconciliation({
     return isIdeBrowserSessionReady(sessionRef.current.status)
   }
 
-  function environmentIdFor(viewId: string): string {
-    return viewsRef.current[viewId]?.environmentId ?? viewId
-  }
-
-  function viewIdForEnvironment(environmentId: string): string | null {
-    const presentation = getPresentation()
-    const selectedViewId = presentation.selectedViewIdsByEnvironment[environmentId]
-    if (selectedViewId != null
-      && viewsRef.current[selectedViewId]?.environmentId === environmentId) {
-      return selectedViewId
-    }
-    const ordered = presentation.viewIdsByEnvironment[environmentId] ?? []
-    return ordered.find((viewId) => viewsRef.current[viewId] != null)
-      ?? Object.entries(viewsRef.current).find(([, view]) => view.environmentId === environmentId)?.[0]
-      ?? null
+  function environmentReady(environmentId: string): boolean {
+    const environment = getEnvironmentMap().get(environmentId)
+    return environment != null && environmentDisplayStatus(environment) === 'READY'
   }
 
   function canRun(viewId: string): boolean {
-    return sessionReady()
-      && identityRef.current != null
-      && !pageSuspendedRef.current
-      && getEnvironmentMap().get(environmentIdFor(viewId))?.ready === true
+    const view = getView(viewId)
+    return view != null && mountedViews.current.has(viewId) && sessionReady() && identityRef.current != null
+      && !pageSuspendedRef.current && environmentReady(view.environmentId)
   }
 
   function setWaitingReady(
@@ -582,23 +547,31 @@ export function useIdeClaimReconciliation({
     }
   }
 
-  function beginCreate(environmentId: string): string {
-    const viewId = createUuid()
-    const claimId = createUuid()
-    const attempt = startAttempt(viewId, {
-      environmentId,
-      viewId,
-      mode: 'create',
-      status: canRun(environmentId) ? 'reconciling' : 'waiting-ready',
-      claimId,
-      iframeLoaded: false,
-      pendingShell: takePendingShellIntent(environmentId),
-    })
-    onViewCreated(environmentId, viewId)
-    if (canRun(viewId)) {
-      runExclusive(() => runCreate(environmentId, attempt, viewId, claimId))
+  function ensureView(environmentId: string, viewId: string): void {
+    if (initial.recoveryError || !isCanonicalUuid(environmentId) || !isCanonicalUuid(viewId)) return
+    const current = getView(viewId)
+    if (current != null && current.environmentId !== environmentId) return
+    const alreadyMounted = mountedViews.current.has(viewId)
+    mountedViews.current.add(viewId)
+    if (current == null) {
+      startAttempt(viewId, {
+        environmentId, viewId, mode: 'create', status: 'waiting-ready', claimId: createUuid(),
+        iframeLoaded: false, pendingShell: takePendingShellIntent(viewId),
+      })
     }
-    return viewId
+    if ((!alreadyMounted || current == null) && canRun(viewId)
+      && current?.status !== 'gone' && current?.status !== 'detached') {
+      reconcile(viewId, 'focus')
+    }
+  }
+
+  function releaseFrame(viewId: string): void {
+    mountedViews.current.delete(viewId)
+    const current = getView(viewId)
+    if (current != null) {
+      // The URL bootstraps a single document. The remote view remains claimable by ID.
+      startViewAttempt({ ...current, entryUrl: undefined, iframeLoaded: false })
+    }
   }
 
   async function runReconcile(
@@ -759,7 +732,7 @@ export function useIdeClaimReconciliation({
         claimId,
         errorMessage: undefined,
       })
-      await runCreate(environmentId, attempt, view.viewId, claimId, view.directory)
+      await runCreate(view.environmentId, attempt, view.viewId, claimId, view.directory)
       return
     }
     if (reason === 'focus' && isBoundToConnection(
@@ -802,44 +775,6 @@ export function useIdeClaimReconciliation({
     })
   }
 
-  function startOrFocus(
-    environmentId: string,
-    environment: IdeEnvironmentInfo | null,
-    mode: IdeActionMode,
-  ): string | null {
-    const view = getView(environmentId)
-    const ready = environment?.ready ?? getEnvironmentMap().get(environmentId)?.ready
-    if (view == null && ready !== true) {
-      return null
-    }
-    if (mode === 'shell') {
-      setPendingShell(environmentId)
-    }
-    if (view != null) {
-      if (view.status === 'ready') {
-        maybeRunPendingShell(environmentId)
-        if (!isBoundToConnection(
-          view,
-          identityRef.current?.eventNodeId ?? '',
-          identityRef.current?.connectionId ?? '',
-        )) {
-          void reconcile(environmentId, 'focus')
-        }
-        return view.viewId
-      }
-      if (view.status === 'detached' || view.status === 'gone') {
-        return view.viewId
-      }
-      void reconcile(view.viewId, 'focus')
-      return view.viewId
-    }
-    return beginCreate(environmentId)
-  }
-
-  function openNewView(environmentId: string): void {
-    beginCreate(environmentId)
-  }
-
   function retryClaim(environmentId: string): void {
     const view = getView(environmentId)
     if (view == null) {
@@ -854,7 +789,7 @@ export function useIdeClaimReconciliation({
         errorMessage: undefined,
       })
       if (canRun(environmentId)) {
-        runExclusive(() => runCreate(environmentId, attempt, view.viewId, claimId, view.directory))
+        runExclusive(() => runCreate(view.environmentId, attempt, view.viewId, claimId, view.directory))
       }
       return
     }
@@ -880,12 +815,12 @@ export function useIdeClaimReconciliation({
       void (async () => {
         try {
           await registerUsageNow(usageOverride(
-            environmentId,
+            before.environmentId,
             before.viewId,
             before.claimId,
             before.bindingEpoch,
           ))
-          await applyIdeMobileLayout(environmentId, before.viewId, {
+          await applyIdeMobileLayout(before.environmentId, before.viewId, {
             browserSessionId: sessionRef.current.browserSessionId,
             bindingEpoch: before.bindingEpoch!,
             expectedDaemonInstanceId: before.daemonInstanceId!,
@@ -904,17 +839,16 @@ export function useIdeClaimReconciliation({
       commitViews(retained)
       writeSession()
     }
-    const environmentMap = getEnvironmentMap()
     const previousReady = lastEnvironmentReadyRef.current
     for (const environmentId of available) {
-      const ready = environmentMap.get(environmentId)?.ready === true
+      const ready = environmentReady(environmentId)
       if (ready && sessionReady() && identityRef.current != null) {
         const viewIds = Object.values(viewsRef.current)
           .filter((view) => view.environmentId === environmentId)
           .map((view) => view.viewId)
         for (const viewId of viewIds) {
           const view = viewsRef.current[viewId]
-          if (view?.status === 'waiting-ready') {
+          if (view?.status === 'waiting-ready' && mountedViews.current.has(viewId)) {
             const wasReady = previousReady.get(environmentId)
             if (view.waitingReason !== 'daemon' || wasReady === false) {
               reconcile(viewId, 'connection')
@@ -935,12 +869,10 @@ export function useIdeClaimReconciliation({
     if (!sessionReady()) {
       return
     }
-    for (const viewIds of Object.values(getPresentation().viewIdsByEnvironment)) {
-      for (const viewId of viewIds) {
-        const view = viewsRef.current[viewId]
-        if (view != null && view.status !== 'detached' && view.status !== 'gone') {
-          void reconcile(viewId, 'restore')
-        }
+    for (const viewId of mountedViews.current) {
+      const view = getView(viewId)
+      if (view != null && view.status !== 'detached' && view.status !== 'gone') {
+        void reconcile(viewId, 'restore')
       }
     }
   }
@@ -1005,47 +937,19 @@ export function useIdeClaimReconciliation({
     }
   }, [session.status])
 
-  useEffect(() => {
-    const previous = lastActiveEnvironmentRef.current
-    lastActiveEnvironmentRef.current = activeEnvironmentId
-    // 首次挂载/会话就绪由 identity 对账入口处理；这里只响应用户切换 Chat 的环境。
-    if (activeEnvironmentId == null || previous === activeEnvironmentId) {
-      return
-    }
-    const currentIdentity = identityRef.current
-    if (!sessionReady() || currentIdentity == null) {
-      return
-    }
-    const view = getView(activeEnvironmentId)
-    if (view == null || view.status === 'detached' || view.status === 'gone') {
-      return
-    }
-    if (
-      view.status === 'ready'
-      && isBoundToConnection(view, currentIdentity.eventNodeId, currentIdentity.connectionId)
-    ) {
-      registerUsageQuiet()
-      maybeRunPendingShell(view.viewId)
-      return
-    }
-    reconcile(view.viewId, 'focus')
-    // activeEnvironmentId 切换只做聚焦/对账，不在没有 view 时自动创建。
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only an Environment transition or session readiness needs focus reconciliation
-  }, [activeEnvironmentId, session.browserSessionId, session.status])
-
   return {
     views,
     viewsRef,
     reconcileView: (viewId: string, reason: 'focus' | 'connection' | 'restore' | 'queued' | 'read-stale' | 'outcome-unknown' | 'directory' | 'retry') =>
       reconcile(viewId, reason),
     identity,
-    startOrFocus,
-    openNewView,
+    ensureView,
+    releaseFrame,
     retryClaim,
     closeEnvironment,
     dismissCloseError,
     changeDirectory,
-    setPendingShell,
+    setPendingShell: (viewId: string) => setPendingShell(viewId, viewId),
     maybeRunPendingShell,
     handleIframeLoaded,
     reconcileEnvironments,

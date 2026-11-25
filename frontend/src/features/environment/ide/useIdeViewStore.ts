@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type RefObject } from 'react'
 import { initialViews, type IdeViewState } from '@/features/environment/ide/ide-view-state'
-import type { IdeTabLoadResult } from '@/features/environment/ide/ide-tab-state'
+import type { IdeSessionLoadResult } from '@/features/environment/ide/ide-session-state'
 
 /**
  * 一个 tab 的 IDE 视图记录。
@@ -8,9 +8,9 @@ import type { IdeTabLoadResult } from '@/features/environment/ide/ide-tab-state'
  * <p>`viewsRef` 是操作读取的唯一事实来源，state 只用于渲染；`attempt` 让迟到的回执
  * 识别自己是哪一次操作的产物。写入在卸载后只更新 ref，不触发已卸载组件的更新。
  */
-export function useIdeViewStore(mountedRef: RefObject<boolean>, initial: IdeTabLoadResult) {
+export function useIdeViewStore(mountedRef: RefObject<boolean>, initial: IdeSessionLoadResult) {
   const [views, setViews] = useState<Record<string, IdeViewState>>(
-    () => initialViews(initial.presentation, initial.recoveryByView),
+    () => initialViews(initial.recoveryByView),
   )
   const viewsRef = useRef(views)
 
