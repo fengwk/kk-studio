@@ -16,7 +16,7 @@
 
 | 模块 | 保留 | 调整范围 |
 | --- | --- | --- |
-| **Thread 面板** | [ThreadPanel](../frontend/src/features/thread/runtime/thread-panel/ThreadPanel.tsx)、[根输入控件](../frontend/src/features/thread/runtime/panes/RootThreadControlArea.tsx)、Composer、Timeline、状态栏、消息块、审批与问卷卡片。 | 重写 [AgentPane 装配](../frontend/src/features/thread/runtime/panes/AgentPane.tsx)和[根控制器](../frontend/src/features/thread/runtime/controllers/useRootThreadControl.ts)的目标、创建、分支和改名接线。保留请求幂等、队列、输入挂起、草稿、上传及只读子代理。模型、变体、执行环境和权限继续按现有执行边界调整。 |
+| **Thread 面板** | [ThreadPanel](../frontend/src/features/thread/runtime/thread-panel/ThreadPanel.tsx)、[根输入控件](../frontend/src/features/thread/runtime/panes/RootThreadControlArea.tsx)、Composer、Timeline、状态栏、消息块、审批与问卷卡片。 | 由 [Thread 与新会话 renderer](../frontend/src/features/thread/workspace/index.ts) 承接目标、创建、分支和改名接线。保留请求幂等、队列、输入挂起、草稿、上传及只读子代理。模型、变体、执行环境和权限继续按现有执行边界调整。 |
 | **Thread 读取与实时** | [快照缓存](../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts)、增量合并、流式对账、断线恢复，以及[执行树的 HTTP 引导与 WebSocket 回读](../frontend/src/features/thread/runtime/queries/useActiveThreadTree.ts)。 | 窗格绑定提供 Thread ID，缓存与订阅随登录上下文隔离。HTTP 与 WebSocket 共用公开执行树查询；Harness 批量读取各执行根的事实，工作区计算目录和状态视图的分组。 |
 | **IDE 前端** | [视图对账](../frontend/src/features/environment/ide/useIdeClaimReconciliation.ts)、浏览器标签页会话和恢复、使用凭据、终端、附件打开与[关闭命令](../frontend/src/features/environment/ide/useIdeCloseCommands.ts)。 | [VS Code 窗格](../frontend/src/features/environment/ide/VsCodePaneRenderer.tsx)处理原生动作、绑定校验、状态和强制关闭确认。[侧栏环境列表](../frontend/src/features/environment/ide/EnvironmentList.tsx)打开工作台。`/files` 和 `/shell` 用 Thread 生效的环境走统一打开流程；`/shell` 等视图就绪后执行原终端动作。 |
 | **IDE 服务端与 Daemon** | [IDE 控制面、数据面、跨节点路由和回收](modules/ide.md)、Daemon 连接与 code-server 桥接。 | 补用户绑定及访问校验，保留 Studio 到 Daemon 的视图控制协议。托管运行时升级单独验收发行件；技能安装锁单独修复。 |
@@ -40,10 +40,10 @@
 | 范围 | 退出内容 |
 | --- | --- |
 | **Project / Issue** | 后端、前端、7 张表、`CONTROLLER_TASK`、独有的 API、文案、E2E 和模块文档。 |
-| **旧 Chat** | [后端](../apps/chat/)、[前端](../frontend/src/features/chat/)、`chat_session`、旧路由、旧目录／多面板外壳和[模块文档](modules/chat.md)。应用归属改用目录边和外键，移除 `SessionOwnership` 与 `AgentReferenceCheck` 派发。 |
+| **旧 Chat** | [后端](../apps/chat/)、前端 Chat 特性、`chat_session`、旧路由、旧目录／多面板外壳和[模块文档](modules/chat.md)。应用归属改用目录边和外键，移除 `SessionOwnership` 与 `AgentReferenceCheck` 派发。 |
 | **被替代的 UI** | 独立 Entry 历史树、旧会话／Thread 选择器、`/agent` 换 Agent 入口、[全局待处理页](../frontend/src/app/pages/InteractionsPage.tsx)、画布库、Studio IDE 浮层及外层标签。保留的行为迁入新宿主后，再删除专用组件、样式、存储和测试。 |
 | **被替代的接口** | 通用的 `POST /api/harness/command-batches` 创建入口、旧 Session／Thread 改名接口、无归属的画布创建／列表接口、通用 Blob 取址接口和 `projects` 实时资源。 |
-| **专用辅助件** | 旧 [SelectionPanel 与 AgentSelectionPanel](../frontend/src/features/thread/SelectionPanel.tsx)、[AgentSelect](../frontend/src/features/thread/AgentSelect.tsx)、[选择项预览](../frontend/src/features/thread/runtime/root-thread/session-selection-items.ts)、[Markdown 预览压平](../frontend/src/features/thread/markdown-preview.ts)与[命中高亮](../frontend/src/features/thread/SearchHitText.tsx)随旧入口退出；新目录只筛选名称。 |
+| **专用辅助件** | 旧 SelectionPanel 与 AgentSelectionPanel、AgentSelect、选择项预览、Markdown 预览压平与命中高亮随旧入口退出；新目录只筛选名称。 |
 
 - **Agent 选择迁到空间默认配置。** 保留可用 Agent 列表及加载、失败和失效时的校验，控件统一用共享 [Select](../frontend/src/shared/ui/controls/Select.tsx)。已有 Session 固定 Agent；草稿不另设换 Agent 面板。
 - **保留执行树和历史事实。** 删除的是独立 Entry 历史树及旧分支草稿的全树预览。正文 Timeline、切点校验、历史复制和父子 Thread 执行树继续使用实际数据；新分支由服务端按 `TURN_END` 创建。全局待处理页删除后，Thread 内审批和问卷仍走原交互查询与执行入口。

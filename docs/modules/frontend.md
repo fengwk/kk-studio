@@ -25,7 +25,7 @@ AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
 PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
 合法 Chat/Thread/Canvas 工作区隐藏 topbar。Escape 按阻塞弹层、菜单、编辑焦点的优先级处理。
 
-一级特性按用户心智划分：[`chat`](../../frontend/src/features/chat)（Chat 工作区、Thread 运行时与编辑区）、
+一级特性按用户心智划分：[`thread`](../../frontend/src/features/thread)（Thread 运行时、新会话与编辑区）、
 [`catalog`](../../frontend/src/features/catalog)（Agent、模型、Provider、Skill Package 与 MCP Server）、
 [`environment`](../../frontend/src/features/environment)（执行环境与 IDE）、
 [`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas 与 settings。
