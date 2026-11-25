@@ -26,4 +26,13 @@ public class StudioUserLock {
         .optional()
         .orElseThrow(() -> DomainException.notFound("user"));
   }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public boolean acquireEnabled(UUID userId) {
+    return jdbc.sql("select disabled_at is null from studio_user where id = :id for update")
+        .param("id", userId)
+        .query(Boolean.class)
+        .optional()
+        .orElseThrow(() -> DomainException.notFound("user"));
+  }
 }

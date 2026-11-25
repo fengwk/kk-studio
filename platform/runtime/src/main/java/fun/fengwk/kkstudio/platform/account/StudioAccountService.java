@@ -26,12 +26,15 @@ public class StudioAccountService {
 
   private static final Pattern USERNAME = Pattern.compile("^[a-z0-9][a-z0-9._-]{0,31}$");
   private final StudioAccountRepository repository;
+  private final List<AccountScheduleSuspension> scheduleSuspensions;
   private final PasswordHasher passwords = new PasswordHasher();
   private final SecureRandom random = new SecureRandom();
   private final String dummyPasswordHash = passwords.encode("dummy-password");
 
-  public StudioAccountService(StudioAccountRepository repository) {
+  public StudioAccountService(
+      StudioAccountRepository repository, List<AccountScheduleSuspension> scheduleSuspensions) {
     this.repository = repository;
+    this.scheduleSuspensions = List.copyOf(scheduleSuspensions);
   }
 
   @Transactional
@@ -167,6 +170,9 @@ public class StudioAccountService {
     }
     if (hash != null || Boolean.FALSE.equals(enabled)) {
       repository.deleteSessions(id);
+    }
+    if (old.enabled() && Boolean.FALSE.equals(enabled)) {
+      scheduleSuspensions.forEach(suspension -> suspension.suspend(id));
     }
     return view(repository.byId(id).orElseThrow());
   }

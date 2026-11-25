@@ -1632,6 +1632,76 @@ comment on column workspace_resource.create_request_hash is '资源创建请求�
 comment on column workspace_resource.created_tree_version is '资源首次创建提交后的树版本';
 comment on column workspace_resource.initial_command_id is '首条消息接受结果的原始 Command ID；不是持有边';
 
+create table workspace_schedule (
+    id uuid primary key,
+    workspace_id uuid not null references chat_space (id) on delete restrict,
+    title varchar(256) not null,
+    message text not null,
+    enabled boolean not null,
+    trigger jsonb not null,
+    time_zone text not null,
+    next_due_at timestamptz(3),
+    version bigint not null default 1,
+    create_request_hash text not null,
+    target_type varchar(16) not null,
+    folder_id uuid,
+    agent_name varchar(64),
+    session_id uuid,
+    thread_id uuid,
+    turn_end_id uuid,
+    constraint fk_workspace_schedule_folder foreign key (workspace_id, folder_id)
+        references workspace_folder (workspace_id, id) on delete restrict,
+    constraint fk_workspace_schedule_agent foreign key (agent_name)
+        references agent (name) on delete restrict,
+    constraint fk_workspace_schedule_session foreign key (workspace_id, session_id)
+        references workspace_resource (workspace_id, session_id) on delete restrict,
+    constraint fk_workspace_schedule_thread foreign key (session_id, thread_id)
+        references harness_thread (session_id, id) on delete restrict,
+    constraint fk_workspace_schedule_turn_end foreign key (session_id, turn_end_id)
+        references harness_entry (session_id, id) on delete restrict,
+    constraint ck_workspace_schedule_title check (title <> ''),
+    constraint ck_workspace_schedule_hash check (create_request_hash ~ '^[0-9a-f]{64}$'),
+    constraint ck_workspace_schedule_version check (version > 0),
+    constraint ck_workspace_schedule_target check (
+        (target_type = 'NEW_SESSION' and folder_id is not null and agent_name is not null
+            and session_id is null and thread_id is null and turn_end_id is null) or
+        (target_type = 'BRANCH' and folder_id is null and agent_name is null
+            and session_id is not null and thread_id is not null and turn_end_id is not null) or
+        (target_type = 'CONTINUE' and folder_id is null and agent_name is null
+            and session_id is not null and thread_id is not null and turn_end_id is null)
+    )
+);
+
+create table workspace_schedule_run (
+    id uuid primary key,
+    schedule_id uuid not null references workspace_schedule (id) on delete cascade,
+    occurrence_key text not null,
+    scheduled_at timestamptz(3) not null,
+    started_at timestamptz(3),
+    time_zone text not null,
+    result varchar(16) not null,
+    reason text,
+    output_thread_id uuid,
+    constraint uk_workspace_schedule_run_occurrence unique (schedule_id, occurrence_key),
+    constraint ck_workspace_schedule_run_result check (result in ('SUBMITTED', 'SKIPPED', 'NOT_SUBMITTED')),
+    constraint fk_workspace_schedule_run_output foreign key (output_thread_id)
+        references harness_thread (id) on delete set null
+);
+
+comment on table workspace_schedule is '空间定时任务配置及下一次计划触发时间';
+comment on column workspace_schedule.create_request_hash is '创建请求规范化内容的 SHA-256 十六进制摘要，用于幂等重放';
+comment on column workspace_schedule.target_type is 'NEW_SESSION、BRANCH 或 CONTINUE';
+comment on column workspace_schedule.trigger is '一次性或重复触发规则';
+comment on column workspace_schedule.version is '配置版本，从 1 开始';
+comment on table workspace_schedule_run is '定时任务触发记录；任务删除时级联删除';
+comment on column workspace_schedule_run.occurrence_key is '自动触发的确定性幂等键；手动触发使用请求键';
+comment on column workspace_schedule_run.output_thread_id is '成功提交后可选的产出 Thread；删除产出时清空链接';
+
+create index idx_workspace_schedule_space on workspace_schedule (workspace_id, id);
+create index idx_workspace_schedule_run_page on workspace_schedule_run (schedule_id, scheduled_at desc, id desc);
+create index idx_workspace_schedule_run_output on workspace_schedule_run (output_thread_id)
+    where output_thread_id is not null;
+
 create index idx_chat_space_default_agent on chat_space (default_agent_name) where default_agent_name is not null;
 create index idx_chat_space_default_environment on chat_space (default_environment_id) where default_environment_id is not null;
 create index idx_workspace_resource_agent on workspace_resource (agent_name) where agent_name is not null;

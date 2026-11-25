@@ -8,4 +8,4 @@
 
 `ResourceOwnership` 批量读取资源对应的空间 ID、名称和所有者 ID，包含已归档空间；未登记的资源不出现在结果中。目录中的 Thread 状态由执行树事实投影，不单独持久化。
 
-公开入口为 `/api/chat-spaces`。创建会话、分叉和画布在同一事务内写领域对象与目录边；深删除失败时，归属与树版本保持不变。目录树使用只读 `REPEATABLE READ` 事务，目录、领域标题与执行事实共用同一快照。请求形状与操作语义见[工作区交互](../workspace-interactions.md)。
+公开入口为 `/api/chat-spaces`。定时任务通过空间接口创建、查询、更新和删除；更新与删除携带 `expectedVersion`，立即运行以 `Idempotency-Key` 标识操作。执行记录按任务分页读取，默认返回最新五条。任务配置或触发记录提交后发送 `schedules` 实时帧，数据为 `{scheduleId}`。创建会话、分叉和画布在同一事务内写领域对象与目录边；深删除失败时，归属与树版本保持不变。目录树使用只读 `REPEATABLE READ` 事务，目录、领域标题与执行事实共用同一快照。请求形状与操作语义见[工作区设计](../workspace-design.md#接口与实时更新)和[工作区交互](../workspace-interactions.md)。

@@ -2143,6 +2143,147 @@ export interface ResourceRefDTO {
   treeVersion: string
 }
 
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleDTO */
+export interface ScheduleDTO {
+  id: string
+  title: string
+  message: string
+  enabled: boolean
+  trigger: ScheduleTriggerDTO
+  timeZone: string
+  target: ScheduleTargetDTO
+  nextDueAt?: number | null
+  version: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleDraftDTO */
+export interface ScheduleDraftDTO {
+  title: string
+  message: string
+  enabled?: boolean | null
+  trigger: ScheduleTriggerDTO
+  timeZone: string
+  target: ScheduleTargetDTO
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.SchedulePatchDTO */
+export interface SchedulePatchDTO {
+  expectedVersion: string
+  title?: string | null
+  message?: string | null
+  enabled?: boolean | null
+  trigger?: ScheduleTriggerDTO | null
+  timeZone?: string | null
+  target?: ScheduleTargetDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.SchedulePreviewDTO */
+export interface SchedulePreviewDTO {
+  next: number[]
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.SchedulePreviewRequestDTO */
+export interface SchedulePreviewRequestDTO {
+  trigger: ScheduleTriggerDTO
+  timeZone: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleRunDTO */
+export interface ScheduleRunDTO {
+  id: string
+  scheduledAt: number
+  startedAt?: number | null
+  timeZone: string
+  result: ScheduleRunResult
+  reason?: string | null
+  thread?: ScheduleRunThreadDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleRunPageDTO */
+export interface ScheduleRunPageDTO {
+  items: ScheduleRunDTO[]
+  olderCursor?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleRunDTO.Result */
+export type ScheduleRunResult =
+  | 'SUBMITTED'
+  | 'SKIPPED'
+  | 'NOT_SUBMITTED'
+
+export const SCHEDULE_RUN_RESULT_VALUES: readonly ScheduleRunResult[] = [
+  'SUBMITTED',
+  'SKIPPED',
+  'NOT_SUBMITTED',
+]
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleRunThreadDTO */
+export interface ScheduleRunThreadDTO {
+  sessionId: string
+  id: string
+  title: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleTargetDTO */
+export interface ScheduleTargetDTO {
+  type: ScheduleTargetType
+  folderId?: string | null
+  agentName?: string | null
+  sessionId?: string | null
+  sourceThreadId?: string | null
+  turnEndEntryId?: string | null
+  threadId?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleTargetDTO.Type */
+export type ScheduleTargetType =
+  | 'NEW_SESSION'
+  | 'BRANCH'
+  | 'CONTINUE'
+
+export const SCHEDULE_TARGET_TYPE_VALUES: readonly ScheduleTargetType[] = [
+  'NEW_SESSION',
+  'BRANCH',
+  'CONTINUE',
+]
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleTriggerDTO */
+export interface ScheduleTriggerDTO {
+  type: ScheduleTriggerType
+  frequency?: ScheduleTriggerFrequency | null
+  localDate?: string | null
+  time?: string | null
+  weekday?: string | null
+  minute?: number | null
+  cron?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleTriggerDTO.Frequency */
+export type ScheduleTriggerFrequency =
+  | 'DAILY'
+  | 'WEEKDAYS'
+  | 'WEEKLY'
+  | 'HOURLY'
+  | 'CRON'
+
+export const SCHEDULE_TRIGGER_FREQUENCY_VALUES: readonly ScheduleTriggerFrequency[] = [
+  'DAILY',
+  'WEEKDAYS',
+  'WEEKLY',
+  'HOURLY',
+  'CRON',
+]
+
+/** Java：fun.fengwk.kkstudio.workspace.dto.ScheduleTriggerDTO.Type */
+export type ScheduleTriggerType =
+  | 'REPEAT'
+  | 'ONCE'
+
+export const SCHEDULE_TRIGGER_TYPE_VALUES: readonly ScheduleTriggerType[] = [
+  'REPEAT',
+  'ONCE',
+]
+
 /** Java：fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO */
 export interface SecretConfiguredDTO {
   configured: boolean
@@ -2849,6 +2990,11 @@ export interface ApiRoutes {
     query: { expectedTreeVersion: string }
     response: WorkspaceTreeVersionDTO
   }
+  'DELETE /api/chat-spaces/{spaceId}/schedules/{id}': {
+    path: { id: string; spaceId: string }
+    query: { expectedVersion: string }
+    response: void
+  }
   'DELETE /api/chat-spaces/{spaceId}/sessions/{id}': {
     path: { id: string; spaceId: string }
     query: { expectedTreeVersion: string }
@@ -2917,6 +3063,15 @@ export interface ApiRoutes {
   }
   'GET /api/chat-spaces': {
     response: ChatSpaceDTO[]
+  }
+  'GET /api/chat-spaces/{spaceId}/schedules': {
+    path: { spaceId: string }
+    response: ScheduleDTO[]
+  }
+  'GET /api/chat-spaces/{spaceId}/schedules/{id}/runs': {
+    path: { id: string; spaceId: string }
+    query: { before?: string }
+    response: ScheduleRunPageDTO
   }
   'GET /api/chat-spaces/{spaceId}/threads/{id}': {
     path: { id: string; spaceId: string }
@@ -3070,6 +3225,11 @@ export interface ApiRoutes {
     body: ResourcePatchDTO
     response: WorkspaceTreeVersionDTO
   }
+  'PATCH /api/chat-spaces/{spaceId}/schedules/{id}': {
+    path: { id: string; spaceId: string }
+    body: SchedulePatchDTO
+    response: ScheduleDTO
+  }
   'PATCH /api/chat-spaces/{spaceId}/threads/{id}': {
     path: { id: string; spaceId: string }
     body: ThreadRenameDTO
@@ -3128,6 +3288,20 @@ export interface ApiRoutes {
     path: { spaceId: string }
     body: FolderCreateDTO
     response: FolderCreatedDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/schedules': {
+    path: { spaceId: string }
+    body: ScheduleDraftDTO
+    response: ScheduleDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/schedules/preview': {
+    path: { spaceId: string }
+    body: SchedulePreviewRequestDTO
+    response: SchedulePreviewDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/schedules/{id}/runs': {
+    path: { id: string; spaceId: string }
+    response: ScheduleRunDTO
   }
   'POST /api/chat-spaces/{spaceId}/sessions': {
     path: { spaceId: string }

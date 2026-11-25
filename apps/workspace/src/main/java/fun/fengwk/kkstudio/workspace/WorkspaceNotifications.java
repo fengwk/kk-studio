@@ -16,13 +16,15 @@ public class WorkspaceNotifications {
   public static final String CHANNEL = "workspace_space_changed";
   private final SubscriptionFanOut<Change> changes = new SubscriptionFanOut<>();
 
-  public sealed interface Change permits Tree, Space, Threads, Resync {}
+  public sealed interface Change permits Tree, Space, Threads, Schedules, Resync {}
 
   public record Tree(long treeVersion) implements Change {}
 
   public record Space(long version) implements Change {}
 
   public record Threads() implements Change {}
+
+  public record Schedules(UUID scheduleId) implements Change {}
 
   public record Resync() implements Change {}
 
@@ -43,7 +45,7 @@ public class WorkspaceNotifications {
     Change change;
     try {
       String[] fields = payload.split(":", -1);
-      if (fields.length != 3) {
+      if (fields.length != 3 && fields.length != 4) {
         throw new IllegalArgumentException("invalid workspace notification");
       }
       id = Uuids.parseCanonical(fields[0], "spaceId");
@@ -52,6 +54,8 @@ public class WorkspaceNotifications {
           switch (fields[1]) {
             case "tree" -> new Tree(version);
             case "space" -> new Space(version);
+            case "schedules" -> new Schedules(
+                fields.length == 4 ? Uuids.parseCanonical(fields[3], "scheduleId") : null);
             default -> throw new IllegalArgumentException("invalid workspace notification");
           };
     } catch (IllegalArgumentException ex) {
@@ -63,6 +67,14 @@ public class WorkspaceNotifications {
 
   public void threads(UUID space) {
     changes.publish(space, new Threads());
+  }
+
+  static void schedules(JdbcClient jdbc, UUID space, UUID scheduleId) {
+    jdbc.sql("select pg_notify(:channel, :payload)")
+        .param("channel", CHANNEL)
+        .param("payload", space + ":schedules:0:" + scheduleId)
+        .query()
+        .listOfRows();
   }
 
   public void resync() {

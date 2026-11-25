@@ -149,6 +149,38 @@ class DurableWorkStoreIntegrationTest {
     assertEquals(wake.availableAt(), issues.find(woken).orElseThrow().availableAt());
   }
 
+  /** A reclaimed lease fences absolute rescheduling and rolls back earlier writes. */
+  @Test
+  void absoluteRescheduleFencesAndRollsBackTheOldOwner() {
+    UUID id = UUID.randomUUID();
+    UUID sideEffect = UUID.randomUUID();
+    Instant due = Instant.parse("2024-01-01T00:00:00.123Z");
+    Instant nextDue = Instant.parse("2100-01-01T00:00:00.456Z");
+    assertEquals(due, issues.requestAt(id, due).availableAt());
+    WorkClaim old = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
+    jdbc.sql(
+            "update durable_work set lease_until = statement_timestamp() - interval '1 second' where target_id = :id")
+        .param("id", id)
+        .update();
+    WorkClaim current = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                    status -> {
+                      tools.request(sideEffect);
+                      issues.rescheduleAt(old, nextDue);
+                    }));
+    assertTrue(tools.find(sideEffect).isEmpty());
+    assertEquals(current.leaseToken(), issues.find(id).orElseThrow().leaseToken());
+
+    issues.rescheduleAt(current, nextDue);
+    assertEquals(nextDue, issues.find(id).orElseThrow().availableAt());
+    assertTrue(issues.claimNext(UUID.randomUUID(), LEASE).isEmpty());
+  }
+
   /** 过期租约可被他人重新领取，旧 claim 随即失去全部写权限。 */
   @Test
   void expiredLeaseIsReclaimedAndFencesTheOldOwner() {
