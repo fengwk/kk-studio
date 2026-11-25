@@ -12,6 +12,7 @@ const ApplicationEventContext = createContext<ApplicationEventManager | null>(nu
 interface ApplicationEventProviderProps {
   children: PropsWithChildren['children']
   /** 测试注入；默认使用生产 URL 与原生 WebSocket。 */
+  enabled?: boolean
   url?: string
   socketFactory?: ApplicationEventSocketFactory
 }
@@ -22,6 +23,7 @@ interface ApplicationEventProviderProps {
  */
 export function ApplicationEventProvider({
   children,
+  enabled = true,
   url,
   socketFactory,
 }: ApplicationEventProviderProps) {
@@ -33,9 +35,10 @@ export function ApplicationEventProvider({
       }),
   )
   useEffect(() => {
+    if (!enabled) return
     manager.connect()
     return () => manager.disconnect()
-  }, [manager])
+  }, [enabled, manager])
   return (
     <ApplicationEventContext.Provider value={manager}>{children}</ApplicationEventContext.Provider>
   )

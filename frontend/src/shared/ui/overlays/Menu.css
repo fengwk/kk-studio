@@ -11,6 +11,11 @@
   box-shadow: var(--shadow-md);
 }
 
+.ui-menu[data-placement='above-start'] {
+  inset-block-end: 100%;
+  inset-inline: 0 auto;
+}
+
 .ui-menu [role='menuitem'] {
   min-height: var(--row-h);
   padding: 0 var(--space-2);

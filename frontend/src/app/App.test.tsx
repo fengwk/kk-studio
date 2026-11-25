@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { BrowserRouter, createMemoryRouter, RouterProvider } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
@@ -41,7 +41,10 @@ vi.mock('@/shared/api/interaction-service', () => ({
 
 
 describe('App routes', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }), { headers: { 'Content-Type': 'application/json' } })))
     vi.clearAllMocks()
     window.history.replaceState({}, '', '/')
     vi.mocked(agentService.listProviders).mockResolvedValue([])
