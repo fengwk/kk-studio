@@ -546,7 +546,7 @@ HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstu
 
 读服务随后用 Work 和连接租约计算 `waitingForEnvironment`，用用量与目录费率计算费用。Thread version 跟踪内核已提交的结构与控制变更。压缩可用性按需另查。
 
-`getExecutionRootFacts` 按一组根在一个 PostgreSQL 语句快照里汇总其执行树：人工等待、可推进工作、阻塞、STOPPED、根 head 回合结果及最近活动时间。最近活动取树内 Thread 行的最大 `updated_at`；每次推进 head 都写入该时间，单独更新调用行的进度不计入。调用状态只查未终止的调用。上层按用途投影，不持久化另一套状态。
+`getExecutionRootFacts` 按一组根在同一个 PostgreSQL 事务快照中读取执行树的成员 Thread，向已注册的每个 Driver 批量读取活动 Work，再用一条查询汇总人工等待、可推进工作、阻塞、STOPPED、根 head 回合结果及最近活动时间。Builtin Driver 只提供 `READY` / `RUNNING` 的模型调用；内核 Store 不读取 Driver 私有表。若加入外层事务，该事务必须提供可重复读或更强的隔离级别。最近活动取树内 Thread 行的最大 `updated_at`；单独更新调用行的进度不计入。上层按用途投影，不持久化另一套状态。
 
 ### 执行控制、运行状态与回合结果
 

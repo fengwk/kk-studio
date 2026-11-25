@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.spi.store;
 
 import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActiveWork;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 
 import java.util.List;
@@ -33,8 +34,12 @@ public interface ThreadStore {
   /** 按 {@code (createdAt, id)} 升序读取 Session 的 USER Thread。 */
   List<ThreadState> listUserBySession(UUID sessionId);
 
-  /** 在单次一致读取中批量读取执行根事实；每个存在的输入根返回一项，未知或非根 ID 不返回。 实现必须使用固定条数查询，不得按根数量逐项查询。 */
-  List<ExecutionRootFacts> findExecutionFacts(List<UUID> rootThreadIds);
+  /** 一次批量读取指定执行根的成员 Thread ID，含根本身。 */
+  List<UUID> listThreadIdsByRoots(List<UUID> rootThreadIds);
+
+  /** 用调用方在同一快照读取的 Driver Work 批量汇总执行根事实；未知或非根 ID 不返回。 */
+  List<ExecutionRootFacts> findExecutionFacts(
+      List<UUID> rootThreadIds, List<DriverActiveWork> driverWork);
 
   /** 按 UUID 升序读取直接子 Thread。 */
   List<ThreadState> listChildren(UUID parentThreadId);

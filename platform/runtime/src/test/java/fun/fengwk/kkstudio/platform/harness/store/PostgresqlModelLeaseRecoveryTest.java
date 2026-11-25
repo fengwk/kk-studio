@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +33,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -89,6 +92,16 @@ class PostgresqlModelLeaseRecoveryTest {
     UUID modelId = seedRunningModel(turn);
     WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, turn.threadId());
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            store,
+            builtinRegistry(store, (threadId, sessionId, path, preparation) -> null),
+            () -> null);
+    List<UUID> roots = List.of(turn.threadId());
+    // RUNNING 本身就是活动事实，不依赖 MODEL Work 行或租约。
+    var runningFacts = runtime.getExecutionRootFacts(roots).getFirst();
+    assertTrue(runningFacts.hasWork());
+    assertFalse(runningFacts.blocked());
     requestWork(modelTarget, turn.threadId());
 
     InvocationRetryPolicy policy = retryOnce();
@@ -110,6 +123,9 @@ class PostgresqlModelLeaseRecoveryTest {
     Work rescheduled = findWork(modelTarget).orElseThrow();
     assertNull(rescheduled.leaseToken());
     assertTrue(claimModel(UUID.randomUUID()).isEmpty(), "not due before retryAt");
+    var retryFacts = runtime.getExecutionRootFacts(roots).getFirst();
+    assertFalse(retryFacts.hasWork());
+    assertTrue(retryFacts.blocked());
     assertEquals(1, findModel(modelId).attempt(), "budget must not change between dispatches");
 
     // 到期后由另一实例 claim：与实例 A 无内存共享，只能读同一 durable 预算。
