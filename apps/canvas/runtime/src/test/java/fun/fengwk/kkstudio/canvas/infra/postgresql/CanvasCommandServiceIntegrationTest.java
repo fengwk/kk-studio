@@ -427,8 +427,7 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   }
 
   private CanvasCommandResult apply(UUID canvasId, List<CanvasCommand> commands) {
-    return commandService.applyCommandsFromUploads(
-        canvasId, UUID.randomUUID(), commands, USER_ID);
+    return commandService.applyCommandsFromUploads(canvasId, UUID.randomUUID(), commands, USER_ID);
   }
 
   private CanvasCommandResult apply(

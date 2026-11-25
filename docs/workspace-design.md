@@ -165,7 +165,7 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 | `/api/chat-spaces/**` | 空间的所有者。 |
 | `/api/harness/**` | Thread 或 Session 所属空间的所有者；插件后台任务只限管理员。 |
 | `/api/canvas/canvases/{id}/**` | 画布所属空间的所有者；画布函数目录对所有用户开放。 |
-| `/api/ide/**`、`/ide/**` | 登录用户可为就绪的环境打开 VS Code。控制面从认证 `StudioPrincipal` 取得用户 ID，并将视图绑定到该用户与发起连接的浏览器会话；控制面与数据面都核对已认证用户、视图用户归属及已有的浏览器会话绑定，复用旧绑定时也重新校验。把文件发送到视图还须通过会话附件授权。 |
+| `/api/ide/**`、`/ide/**` | 登录用户可为就绪的环境打开 VS Code。控制面从认证 `StudioPrincipal` 取得用户 ID，并将视图绑定到该用户与发起连接的浏览器会话；控制面校验已认证用户、浏览器会话和绑定代次，复用旧绑定时也重新校验。数据面校验登录用户与 IDE Cookie 绑定的用户、视图和当前绑定代次，不另收浏览器会话 ID；恢复视图时更换绑定代次，使旧 Cookie 失效。把文件发送到视图还须通过会话附件授权。 |
 | `/api/platform/storage/uploads/**` | 预约记录上传者；完成、取消只限上传者。 |
 | `/api/platform/config-sync/**`、管理和配置接口 | 只限管理员，含读取配置、同步导出和导入预检；不按 HTTP 方法分类。 |
 | `/api/platform/agent-summaries`、`/api/platform/model-summaries`、`/api/platform/environment-summaries` | 登录用户可读。分别返回 Agent 的执行选择、模型及可选变体、环境的就绪状态和能力，不含凭据、请求头或配置原文。 |

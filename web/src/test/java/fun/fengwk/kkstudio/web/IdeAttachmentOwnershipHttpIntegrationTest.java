@@ -31,8 +31,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.platform.account.StudioAccountService;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
-import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.JdbcClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
@@ -71,14 +71,14 @@ class IdeAttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
 
   @MockitoBean private IdeCommandTransport ideCommandTransport;
   @MockitoBean private IdeBrowserUseGateway browserUseGateway;
-  @MockitoBean private ClusterNodeRegistry clusterNodeRegistry;
+  @MockitoBean private JdbcClusterNodeRegistry clusterNodeRegistry;
 
   private MockMvc mvc;
   private Cookie ownerCookie;
   private UUID sessionOwnerId;
 
   @BeforeEach
-  void configure() {
+  void configure() throws Exception {
     mvc = MockMvcBuilders.webAppContextSetup(context).addFilters(accountFilter).build();
     accounts.create("ide-attachment-view-owner", PASSWORD, StudioRole.USER);
     sessionOwnerId =
@@ -87,6 +87,8 @@ class IdeAttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     when(clusterNodeRegistry.route(EnvironmentId.of(ENVIRONMENT_ID)))
         .thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
     when(ideCommandTransport.connectionIdentity(EnvironmentId.of(ENVIRONMENT_ID)))
+        .thenReturn(Optional.of(daemonIdentity()));
+    when(ideCommandTransport.current(EnvironmentId.of(ENVIRONMENT_ID)))
         .thenReturn(Optional.of(daemonIdentity()));
     when(browserUseGateway.findExactIntent(
             any(), any(), any(), eq(EnvironmentId.of(ENVIRONMENT_ID)), any(), any(), any()))
@@ -140,8 +142,7 @@ class IdeAttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     assertEquals(
         "RESOURCE_NOT_FOUND",
         mapper.readTree(response.getContentAsString()).path("reason").asText());
-    verify(ideCommandTransport, times(2))
-        .requestIde(eq(EnvironmentId.of(ENVIRONMENT_ID)), any());
+    verify(ideCommandTransport, times(2)).requestIde(eq(EnvironmentId.of(ENVIRONMENT_ID)), any());
     verify(browserUseGateway, times(1))
         .findExactIntent(
             any(), any(), any(), eq(EnvironmentId.of(ENVIRONMENT_ID)), any(), any(), any());
@@ -158,18 +159,17 @@ class IdeAttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     request.setExpectedBindingEpoch(0L);
     request.setExpectedDaemonInstanceId(DAEMON_INSTANCE_ID);
     request.setDirectory("/workspace");
-    String response =
+    var response =
         mvc.perform(
                 post("/api/ide/environments/" + ENVIRONMENT_ID + "/views")
                     .cookie(ownerCookie)
                     .header("Origin", "http://localhost")
                     .contentType("application/json")
                     .content(mapper.writeValueAsString(request)))
-            .andExpect(status().isOk())
             .andReturn()
-            .getResponse()
-            .getContentAsString();
-    JsonNode opened = mapper.readTree(response);
+            .getResponse();
+    assertEquals(200, response.getStatus(), response.getContentAsString());
+    JsonNode opened = mapper.readTree(response.getContentAsString());
     assertEquals(CURRENT_VIEW_ID.toString(), opened.path("viewId").asText());
     assertEquals(1, opened.path("bindingEpoch").asLong());
     return opened;
@@ -206,12 +206,7 @@ class IdeAttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
             post("/api/auth/login")
                 .header("Origin", "http://localhost")
                 .contentType("application/json")
-                .content(
-                    "{\"username\":\""
-                        + username
-                        + "\",\"password\":\""
-                        + PASSWORD
-                        + "\"}"))
+                .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
         .andExpect(status().isOk())
         .andReturn()
         .getResponse()

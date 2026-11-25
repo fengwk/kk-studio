@@ -142,7 +142,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
                       "node",
                       TRANSFORM,
                       List.of(new CanvasResourceInput.Text("text", "body")))),
-              USER_ID);
+              USER_ID));
       assertRevisionNotification(listener, canvasId + ":1");
 
       assertInstanceOf(

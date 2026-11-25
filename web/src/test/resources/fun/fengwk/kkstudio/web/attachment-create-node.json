@@ -1,0 +1,12 @@
+{
+  "idempotencyKey": "%s",
+  "commands": [
+    {
+      "type": "CREATE_NODE",
+      "nodeId": "%s",
+      "name": "source",
+      "transform": { "x": 0, "y": 0, "width": 10, "height": 10 },
+      "resources": [{ "type": "BLOB", "name": "source.txt", "uploadId": "%s" }]
+    }
+  ]
+}

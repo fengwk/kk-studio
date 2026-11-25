@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
@@ -72,17 +73,19 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
   @Test
   void usersCannotCompleteDeleteOrReferenceAnotherUsersUploadAndOwnerCanStillConsumeIt()
       throws Exception {
+    mvc.perform(get("/api/platform/settings").cookie(alice).header("Origin", ORIGIN))
+        .andExpect(status().isForbidden());
     Upload source = upload(alice, "shared-source.txt");
 
     // Upload endpoints are user-owned: neither another normal user nor an administrator can
     // complete or delete this upload; each refusal leaves the pending row available to Alice.
-    postJson(uploadPath(source.id()) + "/complete", bob, "")
-        .andExpect(status().isNotFound());
+    postJson(uploadPath(source.id()) + "/complete", bob, "").andExpect(status().isNotFound());
     deleteWithOrigin(uploadPath(source.id()), bob).andExpect(status().isNotFound());
     postJson(uploadPath(source.id()) + "/complete", administrator, "")
         .andExpect(status().isNotFound());
     deleteWithOrigin(uploadPath(source.id()), administrator).andExpect(status().isNotFound());
-    assertEquals(1, count("select count(*) from storage_upload where id = ?", UUID.fromString(source.id())));
+    assertEquals(
+        1, count("select count(*) from storage_upload where id = ?", UUID.fromString(source.id())));
 
     source = complete(alice, source);
     String blobId = source.blobId();
@@ -106,7 +109,8 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
             UUID.fromString(blobId)));
 
     // The same upload remains consumable by its owner after the rejected cross-user attempt.
-    String aliceSession = createSession(alice, aliceSpace, aliceFolder, attachmentMessage(aliceFolder, source.id()));
+    String aliceSession =
+        createSession(alice, aliceSpace, aliceFolder, attachmentMessage(aliceFolder, source.id()));
     assertEquals(
         1,
         count(
@@ -120,6 +124,8 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     signSession(alice, aliceSession, blobId, "download-url").andExpect(status().isOk());
     signSession(alice, aliceSession, blobId, "preview-url").andExpect(status().isOk());
 
+    signSession(bob, aliceSession, blobId, "download-url").andExpect(status().isNotFound());
+    signSession(bob, aliceSession, blobId, "preview-url").andExpect(status().isNotFound());
     signSession(bob, bobSession, blobId, "download-url").andExpect(status().isNotFound());
     signSession(bob, bobSession, blobId, "preview-url").andExpect(status().isNotFound());
     getResource(bob, aliceSession, blobId).andExpect(status().isNotFound());
@@ -149,16 +155,27 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     long refCountBefore = blobRefCount(blobId);
     postJson(canvasCommandPath(otherCanvas), other, createBlobNodeCommand(source.id()))
         .andExpect(status().isNotFound());
-    assertEquals(0, count("select count(*) from canvas_resource where canvas_id = ?", UUID.fromString(otherCanvas)));
+    assertEquals(
+        0,
+        count(
+            "select count(*) from canvas_resource where canvas_id = ?",
+            UUID.fromString(otherCanvas)));
     assertEquals(refCountBefore, blobRefCount(blobId));
 
     // Alice's same upload still succeeds after Bob's rejected reference attempt.
-    JsonNode accepted = json(postJson(canvasCommandPath(canvasId), owner, createBlobNodeCommand(source.id()))
-        .andExpect(status().isOk()).andReturn());
+    JsonNode accepted =
+        json(
+            postJson(canvasCommandPath(canvasId), owner, createBlobNodeCommand(source.id()))
+                .andExpect(status().isOk())
+                .andReturn());
     String resourceBlobId = accepted.at("/nodes/0/node/resources/0/blobId").asText();
     assertEquals(blobId, resourceBlobId);
-    assertEquals(1, count("select count(*) from canvas_resource where canvas_id = ? and blob_id = ?",
-        UUID.fromString(canvasId), UUID.fromString(blobId)));
+    assertEquals(
+        1,
+        count(
+            "select count(*) from canvas_resource where canvas_id = ? and blob_id = ?",
+            UUID.fromString(canvasId),
+            UUID.fromString(blobId)));
 
     // Canvas signing is keyed by Canvas + blob ID, not the chat-space route or resource-row ID.
     String path = "/api/canvas/canvases/" + canvasId + "/blobs/" + blobId;
@@ -170,16 +187,31 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     postJson(otherCanvasBlobPath + "/download-url", other, "").andExpect(status().isNotFound());
     postJson(otherCanvasBlobPath + "/preview-url", other, "").andExpect(status().isNotFound());
     // Also reject a blob not held by Alice's Canvas, even though Alice owns the Canvas.
-    postJson("/api/canvas/canvases/" + canvasId + "/blobs/" + UUID.randomUUID() + "/download-url", owner, "")
+    postJson(
+            "/api/canvas/canvases/" + canvasId + "/blobs/" + UUID.randomUUID() + "/download-url",
+            owner,
+            "")
         .andExpect(status().isNotFound());
   }
 
   private Upload upload(Cookie user, String filename) throws Exception {
     String sha = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(CONTENT));
-    String body = mapper.writeValueAsString(
-        Map.of("filename", filename, "mediaType", "text/plain", "sizeBytes", Integer.toString(CONTENT.length), "sha256", sha));
-    JsonNode reserved = json(postJson("/api/platform/storage/uploads", user, body)
-        .andExpect(status().isCreated()).andReturn());
+    String body =
+        mapper.writeValueAsString(
+            Map.of(
+                "filename",
+                filename,
+                "mediaType",
+                "text/plain",
+                "sizeBytes",
+                Integer.toString(CONTENT.length),
+                "sha256",
+                sha));
+    JsonNode reserved =
+        json(
+            postJson("/api/platform/storage/uploads", user, body)
+                .andExpect(status().isCreated())
+                .andReturn());
     String id = reserved.get("id").asText();
     if ("READY".equals(reserved.path("type").asText())) {
       return new Upload(id, reserved.get("blobId").asText());
@@ -193,115 +225,139 @@ class AttachmentOwnershipHttpIntegrationTest extends WebPostgresTestSupport {
     if (pending.blobId() != null) {
       return pending;
     }
-    JsonNode ready = json(postJson(uploadPath(pending.id()) + "/complete", user, "")
-        .andExpect(status().isOk()).andReturn());
+    JsonNode ready =
+        json(
+            postJson(uploadPath(pending.id()) + "/complete", user, "")
+                .andExpect(status().isOk())
+                .andReturn());
     assertEquals("READY", ready.get("type").asText());
     assertNotEquals(pending.id(), ready.get("blobId").asText());
     return new Upload(pending.id(), ready.get("blobId").asText());
   }
 
   private String createSpace(Cookie owner, String title) throws Exception {
-    String body = mapper.writeValueAsString(
-        Map.of("title", title + " workspace", "rootFolderName", "Root", "defaultAgentName", "default-assistant"));
-    return json(postJson("/api/chat-spaces", owner, body)
-        .andExpect(status().isOk()).andReturn()).get("id").asText();
+    String body =
+        mapper.writeValueAsString(
+            Map.of(
+                "title",
+                title + " workspace",
+                "rootFolderName",
+                "Root",
+                "defaultAgentName",
+                "default-assistant"));
+    return json(postJson("/api/chat-spaces", owner, body).andExpect(status().isOk()).andReturn())
+        .get("id")
+        .asText();
   }
 
   private String rootFolder(Cookie owner, String spaceId) throws Exception {
-    return json(mvc.perform(get("/api/chat-spaces/{id}/tree", spaceId).cookie(owner).header("Origin", ORIGIN))
-        .andExpect(status().isOk()).andReturn()).at("/folders/0/id").asText();
+    return json(mvc.perform(
+                get("/api/chat-spaces/{id}/tree", spaceId).cookie(owner).header("Origin", ORIGIN))
+            .andExpect(status().isOk())
+            .andReturn())
+        .at("/folders/0/id")
+        .asText();
   }
 
   private String createSession(Cookie owner, String spaceId, String folderId, String message)
       throws Exception {
     String body = message.startsWith("{") ? message : textMessage(folderId, message);
     return json(postJson("/api/chat-spaces/" + spaceId + "/sessions", owner, body)
-        .andExpect(status().isOk()).andReturn()).get("sessionId").asText();
+            .andExpect(status().isOk())
+            .andReturn())
+        .get("sessionId")
+        .asText();
   }
 
   private String createCanvas(Cookie owner, String spaceId, String folderId, String title)
       throws Exception {
-    String treeVersion = json(mvc.perform(get("/api/chat-spaces/{id}/tree", spaceId)
-        .cookie(owner)
-        .header("Origin", ORIGIN)).andExpect(status().isOk()).andReturn()).get("treeVersion").asText();
-    String body = mapper.writeValueAsString(
-        Map.of("folderId", folderId, "title", title, "expectedTreeVersion", treeVersion));
+    String treeVersion =
+        json(mvc.perform(
+                    get("/api/chat-spaces/{id}/tree", spaceId)
+                        .cookie(owner)
+                        .header("Origin", ORIGIN))
+                .andExpect(status().isOk())
+                .andReturn())
+            .get("treeVersion")
+            .asText();
+    String body =
+        mapper.writeValueAsString(
+            Map.of("folderId", folderId, "title", title, "expectedTreeVersion", treeVersion));
     return json(postJson("/api/chat-spaces/" + spaceId + "/canvases", owner, body)
-        .andExpect(status().isOk()).andReturn()).get("id").asText();
+            .andExpect(status().isOk())
+            .andReturn())
+        .get("id")
+        .asText();
   }
 
   private String createBlobNodeCommand(String uploadId) throws Exception {
-    String nodeId = UUID.randomUUID().toString();
-    return mapper.writeValueAsString(
-        Map.of(
-            "idempotencyKey", UUID.randomUUID().toString(),
-            "commands",
-            new Object[] {
-              Map.of(
-                  "type", "CREATE_NODE",
-                  "nodeId", nodeId,
-                  "name", "source",
-                  "transform", Map.of("x", 0, "y", 0, "width", 10, "height", 10),
-                  "resources",
-                  new Object[] {
-                    Map.of("type", "BLOB", "name", "source.txt", "uploadId", uploadId)
-                  })
-            }));
+    return new ClassPathResource("attachment-create-node.json", getClass())
+        .getContentAsString(StandardCharsets.UTF_8)
+        .formatted(UUID.randomUUID(), UUID.randomUUID(), uploadId);
   }
 
   private String attachmentMessage(String folderId, String uploadId) throws Exception {
     return mapper.writeValueAsString(
         Map.of(
-            "folderId", folderId,
+            "folderId",
+            folderId,
             "message",
             new Object[] {Map.of("type", "ATTACHMENT", "uploadId", uploadId)}));
   }
 
   private String textMessage(String folderId, String text) throws Exception {
     return mapper.writeValueAsString(
-        Map.of("folderId", folderId, "message", new Object[] {Map.of("type", "TEXT", "text", text)}));
+        Map.of(
+            "folderId", folderId, "message", new Object[] {Map.of("type", "TEXT", "text", text)}));
   }
 
-  private ResultActions signSession(
-      Cookie user, String sessionId, String blobId, String action) throws Exception {
-    return postJson("/api/harness/sessions/" + sessionId + "/blobs/" + blobId + "/" + action, user, "");
-  }
-
-  private ResultActions getResource(
-      Cookie user, String sessionId, String blobId) throws Exception {
-    return mvc.perform(get("/api/harness/sessions/{sessionId}/resources/{resourceId}", sessionId, blobId)
-        .cookie(user)
-        .header("Origin", ORIGIN));
-  }
-
-  private ResultActions postJson(String path, Cookie user, String body)
+  private ResultActions signSession(Cookie user, String sessionId, String blobId, String action)
       throws Exception {
-    MockHttpServletRequestBuilder request = post(path)
-        .header("Origin", ORIGIN)
-        .header("Idempotency-Key", UUID.randomUUID().toString())
-        .contentType(MediaType.APPLICATION_JSON)
-        .content(body);
+    return postJson(
+        "/api/harness/sessions/" + sessionId + "/blobs/" + blobId + "/" + action, user, "");
+  }
+
+  private ResultActions getResource(Cookie user, String sessionId, String blobId) throws Exception {
+    return mvc.perform(
+        get("/api/harness/sessions/{sessionId}/resources/{resourceId}", sessionId, blobId)
+            .cookie(user)
+            .header("Origin", ORIGIN));
+  }
+
+  private ResultActions postJson(String path, Cookie user, String body) throws Exception {
+    MockHttpServletRequestBuilder request =
+        post(path)
+            .header("Origin", ORIGIN)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body);
     if (user != null) {
       request.cookie(user);
     }
     return mvc.perform(request);
   }
 
-  private ResultActions deleteWithOrigin(String path, Cookie user)
-      throws Exception {
+  private ResultActions deleteWithOrigin(String path, Cookie user) throws Exception {
     return mvc.perform(delete(path).cookie(user).header("Origin", ORIGIN));
   }
 
   private Cookie login(String username, String password) throws Exception {
-    MvcResult result = postJson("/api/auth/login", null,
-        mapper.writeValueAsString(Map.of("username", username, "password", password)))
-        .andExpect(status().isOk()).andReturn();
+    MvcResult result =
+        postJson(
+                "/api/auth/login",
+                null,
+                mapper.writeValueAsString(Map.of("username", username, "password", password)))
+            .andExpect(status().isOk())
+            .andReturn();
     return result.getResponse().getCookie("studio_session");
   }
 
   private void createUser(String username) throws Exception {
-    postJson("/api/users", administrator,
-        mapper.writeValueAsString(Map.of("username", username, "password", "password-123", "role", "USER")))
+    postJson(
+            "/api/users",
+            administrator,
+            mapper.writeValueAsString(
+                Map.of("username", username, "password", "password-123", "role", "USER")))
         .andExpect(status().isOk());
   }
 

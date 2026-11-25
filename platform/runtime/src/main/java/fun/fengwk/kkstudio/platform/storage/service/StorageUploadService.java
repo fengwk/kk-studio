@@ -172,7 +172,7 @@ public class StorageUploadService {
     return reservation.reserveStaged(request);
   }
 
-  /** 为同一预约重签直传 URL；不创建行，也不延长行的生存时间。 */
+  /** 仅接受 Daemon 传输流程已由服务端为本次传输签发的暂存上传 ID；重签不创建行，也不延长有效期。 */
   public StorageUploadDTO renewStaged(UUID uploadId) {
     try (StorageUploadOperationLock.Handle ignored = operationLock.acquire(uploadId)) {
       var media = settingsSnapshot.get().storageMedia();

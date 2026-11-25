@@ -47,10 +47,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
   void unknownCanvasReturnsProblem() throws Exception {
     mockMvc
         .perform(
-            post(
-                    "/api/canvas/canvases/{canvasId}/resources/{resourceId}/download-url",
-                    CANVAS,
-                    RESOURCE)
+            post("/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url", CANVAS, RESOURCE)
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en-US"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
@@ -64,7 +61,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
   void invalidCanvasIdReturnsProblem() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvas/canvases/not-a-uuid/resources/{resourceId}/download-url", RESOURCE)
+            post("/api/canvas/canvases/not-a-uuid/blobs/{blobId}/download-url", RESOURCE)
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en-US"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
@@ -87,7 +84,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
             + "\",\"expectedResourceIds\":[]}]}";
     doThrow(DomainException.notFound("canvas"))
         .when(commandService)
-        .applyCommands(any(), any(), any());
+        .applyCommandsFromUploads(any(), any(), any(), any());
     mockMvc
         .perform(
             post("/api/canvas/canvases/{canvasId}/commands", CANVAS)
@@ -98,7 +95,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .andExpect(jsonPath("$.detail").value("canvas not found"));
     doThrow(DomainException.conflict("IDEMPOTENCY_CONFLICT", "different request"))
         .when(commandService)
-        .applyCommands(any(), any(), any());
+        .applyCommandsFromUploads(any(), any(), any(), any());
     mockMvc
         .perform(
             post("/api/canvas/canvases/{canvasId}/commands", CANVAS)
@@ -109,7 +106,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .andExpect(jsonPath("$.reason").value("IDEMPOTENCY_CONFLICT"));
     doThrow(DomainException.validation("canvas", "invalid command"))
         .when(commandService)
-        .applyCommands(any(), any(), any());
+        .applyCommandsFromUploads(any(), any(), any(), any());
     mockMvc
         .perform(
             post("/api/canvas/canvases/{canvasId}/commands", CANVAS)
