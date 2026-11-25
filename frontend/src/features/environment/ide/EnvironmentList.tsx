@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react'
 import { CodeXml } from 'lucide-react'
-import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { ENVIRONMENT_STATUS_LABEL_KEY, environmentDisplayStatus } from '@/features/environment/environment-utils'
 import { IconButton } from '@/shared/ui/controls/IconButton'
@@ -15,20 +13,10 @@ export interface EnvironmentListProps {
 export function EnvironmentList({ open, findOpenView }: EnvironmentListProps) {
   const { environments, resolveTarget } = useIdeWorkspace()
   const { t } = useI18n()
-  const [now, setNow] = useState(Date.now)
-
-  useEffect(() => {
-    const deadlines = environments
-      .map((environment) => environment.statusExpiresAt)
-      .filter((deadline): deadline is number => deadline != null && deadline > now)
-    if (deadlines.length === 0) return
-    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(...deadlines) - Date.now() + 1)
-    return () => window.clearTimeout(timer)
-  }, [environments, now])
 
   return (
     <nav className="environment-list" aria-label={t('ai.environment.ide.listLabel')}>
-      {environments.map((environment: EnvironmentDTO) => {
+      {environments.map((environment) => {
         const status = environmentDisplayStatus(environment)
         const available = status === 'READY'
         const connection = t(ENVIRONMENT_STATUS_LABEL_KEY[status])
