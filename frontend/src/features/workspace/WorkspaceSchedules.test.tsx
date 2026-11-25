@@ -509,7 +509,7 @@ describe('WorkspaceSchedules', () => {
       },
     ]
     const entries = createHarnessEntries()
-    let conflictOnce = true
+    const versions: string[] = []
 
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = new URL(String(input), 'http://localhost')
@@ -553,18 +553,20 @@ describe('WorkspaceSchedules', () => {
         return jsonResponse({ next: [Date.UTC(2026, 10, 27, 9, 0), Date.UTC(2026, 11, 4, 9, 0)] })
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}` && method === 'PATCH') {
-        if (conflictOnce) {
-          conflictOnce = false
-          schedules[0] = { ...schedules[0]!, version: '2' }
+        const body = JSON.parse(String(init?.body)) as { expectedVersion: string; title: string }
+        versions.push(body.expectedVersion)
+        if (body.expectedVersion !== schedules[0]!.version) {
           return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'Stale' }, 409)
         }
-        const body = JSON.parse(String(init?.body)) as { expectedVersion: string; title: string }
-        expect(body.expectedVersion).toBe('2')
         schedules[0] = { ...schedules[0]!, title: body.title, version: '3' }
         return jsonResponse(schedules[0])
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}` && method === 'DELETE') {
-        expect(url.searchParams.get('expectedVersion')).toBe('3')
+        const version = url.searchParams.get('expectedVersion')!
+        versions.push(version)
+        if (version !== schedules[0]!.version) {
+          return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT' }, 409)
+        }
         schedules.splice(0, 1)
         return new Response(null, { status: 204 })
       }
@@ -592,14 +594,21 @@ describe('WorkspaceSchedules', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     expect(await within(dialog).findByText('请填写名称。')).toBeInTheDocument()
 
-    // Edit title -> 409 refreshes schedules and preserves typed title
+    // The list sees the other client's write, but the open form still submits version 1.
+    schedules[0] = { ...schedules[0]!, title: '其他客户端的标题', version: '2' }
+    await act(() => queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(spaceId) }))
+    expect(await screen.findByText('其他客户端的标题')).toBeInTheDocument()
     fireEvent.change(nameInput, { target: { value: '周报草稿 v2' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('工作区已变更，请检查后重试。')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('任务已变更')
     expect(nameInput).toHaveValue('周报草稿 v2')
+    expect(within(dialog).getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(versions).toEqual(['1'])
 
-    // Retry save uses refreshed version '2' and succeeds
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '放弃修改并重新读取' }))
+    const latestTitle = await screen.findByDisplayValue('其他客户端的标题')
+    fireEvent.change(latestTitle, { target: { value: '周报草稿 v2' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑定时任务' })).toBeNull())
     expect(await screen.findByText('周报草稿 v2')).toBeInTheDocument()
 
@@ -619,7 +628,20 @@ describe('WorkspaceSchedules', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
     fireEvent.click(within(await screen.findByRole('dialog', { name: '编辑定时任务' })).getByRole('button', { name: '删除任务' }))
     const confirmModal2 = await screen.findByRole('alertdialog', { name: '删除定时任务「周报草稿 v2」？' })
+    schedules[0] = { ...schedules[0]!, title: '更新后的任务', version: '4' }
+    await act(() => queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(spaceId) }))
+    expect(await screen.findByText('更新后的任务')).toBeInTheDocument()
     fireEvent.click(within(confirmModal2).getByRole('button', { name: '删除任务' }))
+    const deleteConflict = await screen.findByRole('dialog', { name: '任务已变更' })
+    expect(within(deleteConflict).queryByRole('button', { name: '删除任务' })).toBeNull()
+    fireEvent.click(within(deleteConflict).getByText('关闭'))
+    expect(versions).toEqual(['1', '2', '3'])
+
+    fireEvent.click(screen.getByRole('button', { name: '更新后的任务的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: '编辑定时任务' })).getByRole('button', { name: '删除任务' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: '删除定时任务「更新后的任务」？' })).getByRole('button', { name: '删除任务' }))
+    expect(versions).toEqual(['1', '2', '3', '4'])
 
     await waitFor(() => expect(screen.getByText('还没有定时任务')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: '新建定时任务' })).toHaveFocus()
@@ -915,14 +937,14 @@ describe('WorkspaceSchedules', () => {
     fireEvent.click(screen.getByRole('button', { name: '「Err Task」的执行记录' }))
     expect(await screen.findByText('请求失败')).toBeInTheDocument()
 
-    // Delete 409 shows conflict error inside confirm modal
+    // Delete 409 closes the destructive confirmation and explains how to review.
     fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
     fireEvent.click(within(await screen.findByRole('dialog', { name: '编辑定时任务' })).getByRole('button', { name: '删除任务' }))
     const modal = await screen.findByRole('alertdialog')
     fireEvent.click(within(modal).getByRole('button', { name: '删除任务' }))
-    expect(await within(modal).findByText('工作区已变更，请检查后重试。')).toBeInTheDocument()
-    fireEvent.click(within(modal).getByRole('button', { name: '取消' }))
+    const conflict = await screen.findByRole('dialog', { name: '任务已变更' })
+    fireEvent.click(within(conflict).getByText('关闭'))
 
     // List fetch error shows unavailable
     listFails = true
