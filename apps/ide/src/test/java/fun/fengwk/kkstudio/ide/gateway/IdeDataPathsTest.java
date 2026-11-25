@@ -7,12 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
-import org.junit.jupiter.api.Test;
 
 class IdeDataPathsTest {
 

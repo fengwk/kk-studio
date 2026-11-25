@@ -1,7 +1,11 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -13,8 +17,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 /**
  * IDE 浏览器 cookie 会话登记。

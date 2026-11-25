@@ -1,5 +1,10 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
@@ -9,14 +14,11 @@ import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
 
 /**
  * 浏览器 IDE 的 bootstrap/session 入口：只处理 view 基址下的两个保留端点。

@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
-import jakarta.servlet.http.HttpServletRequest;
+
 import java.net.URI;
 import java.util.Locale;
 import java.util.Objects;

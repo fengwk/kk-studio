@@ -1,15 +1,17 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
+
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
 
 /** 将 view 作用域 cookie 映射为数据入口授权；绑定事实只读取唯一权威快照。 */
 @Component

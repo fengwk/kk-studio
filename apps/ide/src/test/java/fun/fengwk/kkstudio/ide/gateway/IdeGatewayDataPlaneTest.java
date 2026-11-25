@@ -892,6 +892,14 @@ class IdeGatewayDataPlaneTest {
    */
   private static HttpServletRequest browserRequest() {
     HttpServletRequest request = mock(HttpServletRequest.class);
+    when(request.getHeaders("Origin"))
+        .thenAnswer(
+            ignored -> {
+              String origin = request.getHeader("Origin");
+              return origin == null
+                  ? Collections.emptyEnumeration()
+                  : Collections.enumeration(List.of(origin));
+            });
     when(request.getAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE)).thenReturn(PRINCIPAL);
     when(request.getAttribute(IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE)).thenReturn(USER_ID);
     return request;

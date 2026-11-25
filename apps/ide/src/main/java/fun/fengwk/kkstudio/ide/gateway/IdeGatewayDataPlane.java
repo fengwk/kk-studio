@@ -163,14 +163,14 @@ public class IdeGatewayDataPlane {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
       return;
     }
-    if (!viewAuthorizer.belongsToUser(environmentId, viewId, request.getHeader("Cookie"), userId)) {
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
-      return;
-    }
     Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
         viewAuthorizer.authorize(environmentId, viewId, request.getHeader("Cookie"));
     if (access.isEmpty()) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
+      return;
+    }
+    if (!viewAuthorizer.belongsToUser(environmentId, viewId, request.getHeader("Cookie"), userId)) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
 

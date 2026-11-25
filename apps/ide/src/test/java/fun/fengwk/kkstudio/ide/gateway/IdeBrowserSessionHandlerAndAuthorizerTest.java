@@ -9,6 +9,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
@@ -18,17 +24,13 @@ import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 /** 意图：bootstrap 与数据面只接受权威快照中仍匹配的 cookie；handler 只看 cookie 与快照，不维护第二份授权真相。 */
 class IdeBrowserSessionHandlerAndAuthorizerTest {

@@ -1055,6 +1055,7 @@ class IdeGatewayJettyIntegrationTest {
     @Override
     protected void service(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException {
+      request.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL);
       ForwardingTarget target = forwardingTarget.get();
       String prefix = "/tls-ide/" + ENV + "/" + VIEW;
       String uri = request.getRequestURI();
