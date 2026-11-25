@@ -686,8 +686,10 @@ export async function runWorkspaceContractMatrix(ui) {
       )
       // 确定性可逆的新值：与原始值不同的正整数字符串。
       const changed = original === '2501' ? '2502' : '2501'
+      const openAiRuntime = () => page.getByRole('link', { name: /^(?:AI Runtime|AI 运行时)$/ }).click()
       try {
-        await goto('/settings/aiRuntime')
+        await goto('/settings/preferences')
+        await openAiRuntime()
         const base = page.getByLabel(UI_LABELS.settingsBaseDelayLabel)
         await base.waitFor({ state: 'visible', timeout: 10_000 })
         // GET hydration：draft 与权威聚合一致。
@@ -739,6 +741,8 @@ export async function runWorkspaceContractMatrix(ui) {
           page.waitForEvent('load'),
           conflictDialog.getByRole('button', { name: UI_LABELS.settingsReloadLatest }).click(),
         ])
+        // Server settings navigation is populated from the schema after login and reload.
+        await openAiRuntime()
         const refreshedBase = page.getByLabel(UI_LABELS.settingsBaseDelayLabel)
         await refreshedBase.waitFor({ state: 'visible', timeout: 10_000 })
         assert(
