@@ -102,6 +102,43 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   }
 
   @Test
+  void ideUseAfterHttpLogoutIsRejectedAndRevokesExistingProof() throws Exception {
+    HttpClient http = HttpClient.newHttpClient();
+    FrameCollector collector = new FrameCollector();
+    WebSocket socket = connect(collector);
+    ConnectionIdentity identity = assertConnected(collector);
+    UUID browserSessionId = UUID.fromString("44444444-4444-4444-4444-444444444444");
+    UUID environmentId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    UUID viewId = UUID.fromString("55555555-5555-5555-5555-555555555555");
+    UUID claimId = UUID.fromString("66666666-6666-6666-6666-666666666666");
+
+    socket
+        .sendText(ideUseFrame(browserSessionId, environmentId, viewId, claimId), true)
+        .get(10, TimeUnit.SECONDS);
+    assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", collector.nextText());
+    assertTrue(browserUseRegistry.activeBoundProofs(identity, browserSessionId).isPresent());
+
+    HttpResponse<String> logout =
+        http.send(
+            adminRequest(uri("/api/auth/logout"))
+                .timeout(Duration.ofSeconds(10))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(204, logout.statusCode(), logout.body());
+
+    // 下一次使用证明更新立即触发登录复核，无需等待心跳。
+    socket
+        .sendText(ideUseFrame(browserSessionId, environmentId, viewId, claimId), true)
+        .get(10, TimeUnit.SECONDS);
+    assertEquals(
+        "{\"type\":\"error\",\"code\":\"NOT_AUTHENTICATED\",\"message\":\"Login required\"}",
+        collector.nextText());
+    assertEquals(4001, collector.nextCloseCode());
+    assertFalse(browserUseRegistry.usage(identity).isPresent());
+  }
+
+  @Test
   void ideUseAcceptsTheMaximumViewListOverRealJetty() throws Exception {
     FrameCollector collector = new FrameCollector();
     WebSocket socket = connect(collector);

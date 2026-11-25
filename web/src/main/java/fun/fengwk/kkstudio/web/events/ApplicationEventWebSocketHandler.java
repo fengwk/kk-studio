@@ -215,7 +215,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   protected void handleTextMessage(WebSocketSession session, TextMessage message) {
     ConnectionState state = connections.get(session.getId());
     if (state != null) {
-      state.handle(message.getPayload(), nanoClock.getAsLong());
+      state.handle(message.getPayload());
     }
   }
 
@@ -314,7 +314,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final StudioAccountService accounts;
     private final ResourceAccess access;
     private final ChatSpaceService spaces;
-    private long lastAuthenticationCheckNanos;
+    private long lastPeriodicAuthenticationCheckNanos;
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
 
     /**
@@ -354,7 +354,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       this.accounts = accounts;
       this.access = access;
       this.spaces = spaces;
-      this.lastAuthenticationCheckNanos = nowNanos;
+      this.lastPeriodicAuthenticationCheckNanos = nowNanos;
       this.lastPongNanos = nowNanos;
       this.lastHeartbeatNanos = nowNanos;
     }
@@ -376,7 +376,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       return closed;
     }
 
-    private void handle(String payload, long nowNanos) {
+    private void handle(String payload) {
       if (closed) {
         return;
       }
@@ -393,7 +393,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       switch (frame) {
         case SubscriptionFrame subscription -> {
           if (subscription.type() == EventFrameCodec.SubscriptionType.SUBSCRIBE) {
-            subscribe(subscription.resource(), subscription.afterEntryId(), nowNanos);
+            subscribe(subscription.resource(), subscription.afterEntryId());
           } else {
             unsubscribe(subscription.resource());
           }
@@ -403,16 +403,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    private void subscribe(ResourceKey resource, UUID afterEntryId, long nowNanos) {
+    private void subscribe(ResourceKey resource, UUID afterEntryId) {
       synchronized (closeLock) {
-        if (closed) {
-          return; // 连接已关闭：不再登记新订阅
-        }
-        if (!recheckAuthentication(nowNanos)) {
-          return;
-        }
-        if (!canRead(resource, principal)) {
-          enqueueResourceError("RESOURCE_NOT_FOUND", "Resource not found", resource);
+        if (closed || !recheckAuthentication() || !requireReadable(resource)) {
           return;
         }
         if (subscriptions.containsKey(resource)) {
@@ -474,10 +467,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    /** Explicit thread-tree refresh never changes the connection's subscription refcount. */
+    /** Explicit refresh does not create a subscription. */
     private void refresh(ResourceKey resource) {
       synchronized (closeLock) {
-        if (closed) {
+        if (closed || !recheckAuthentication()) {
           return;
         }
         if (resource.kind() == ApplicationEventHub.ResourceKind.THREAD) {
@@ -489,7 +482,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
                 resource);
             return;
           }
-          if (!hub.requestThreadSnapshot(subscription)) {
+          if (requireReadable(resource) && !hub.requestThreadSnapshot(subscription)) {
             enqueueResourceError(
                 EventFrameCodec.THREAD_SNAPSHOT_FAILED,
                 "thread snapshot could not be requested",
@@ -511,7 +504,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
               resource);
           return;
         }
-        if (!hub.requestThreadTreeSnapshot(resource)) {
+        if (requireReadable(resource) && !hub.requestThreadTreeSnapshot(resource)) {
           enqueueResourceError(
               EventFrameCodec.TREE_SNAPSHOT_FAILED,
               "thread-tree snapshot could not be requested",
@@ -526,10 +519,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    /** ide-use 的裁决与 ack 在同一 closeLock 内完成；拒绝是连接级 error，不关闭连接。 */
+    /** 登录复核、ide-use 裁决与 ack 在同一 closeLock 内完成。 */
     private void acceptIdeUse(IdeBrowserUse usage) {
       synchronized (closeLock) {
-        if (closed) {
+        if (closed || !recheckAuthentication()) {
           return;
         }
         Acceptance acceptance = browserUseRegistry.accept(identity, generation, usage);
@@ -679,8 +672,15 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
 
     private void authenticationTick(long nowNanos) {
       synchronized (closeLock) {
-        if (!closed && nowNanos - lastAuthenticationCheckNanos >= AUTHENTICATION_INTERVAL_NANOS) {
-          recheckAuthentication(nowNanos);
+        // 主动动作只检查自身目标，不推迟空闲订阅的周期复核。
+        if (!closed
+            && nowNanos - lastPeriodicAuthenticationCheckNanos >= AUTHENTICATION_INTERVAL_NANOS
+            && recheckAuthentication()) {
+          subscriptions.keySet().stream()
+              .filter(resource -> !canRead(resource, principal))
+              .toList()
+              .forEach(this::unsubscribe);
+          lastPeriodicAuthenticationCheckNanos = nowNanos;
         }
       }
     }
@@ -694,18 +694,22 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       };
     }
 
-    private boolean recheckAuthentication(long nowNanos) {
+    private boolean requireReadable(ResourceKey resource) {
+      if (canRead(resource, principal)) {
+        return true;
+      }
+      unsubscribe(resource);
+      enqueueResourceError(EventFrameCodec.RESOURCE_NOT_FOUND, "Resource not found", resource);
+      return false;
+    }
+
+    private boolean recheckAuthentication() {
       StudioPrincipal current = accounts.authenticate(token).orElse(null);
       if (current == null || !current.userId().equals(principal.userId())) {
         fail("NOT_AUTHENTICATED", "Login required", LOGIN_REQUIRED_CLOSE_CODE);
         return false;
       }
-      subscriptions.keySet().stream()
-          .filter(resource -> !canRead(resource, current))
-          .toList()
-          .forEach(this::unsubscribe);
       principal = current;
-      lastAuthenticationCheckNanos = nowNanos;
       return true;
     }
 
