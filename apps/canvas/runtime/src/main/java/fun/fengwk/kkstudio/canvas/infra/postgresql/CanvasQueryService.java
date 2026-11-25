@@ -73,6 +73,13 @@ public class CanvasQueryService {
         .filter(resource -> resource.ownerNodeId() != null);
   }
 
+  public boolean containsHeldBlob(UUID canvasId, UUID blobId) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(blobId, "blobId");
+    return canvasStore.findDocument(canvasId).isPresent()
+        && resourceRepository.containsHeldBlob(canvasId, blobId);
+  }
+
   public List<CanvasDocument> findDocuments(Collection<UUID> ids) {
     return canvasStore.findDocuments(ids);
   }
