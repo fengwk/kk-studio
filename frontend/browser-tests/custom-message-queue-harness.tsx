@@ -115,7 +115,6 @@ export function CustomMessageQueueHarness() {
   const projection: ThreadProjection = {
     threadId: HARNESS_CHILD_THREAD_ID,
     sessionId: 'session-child-1',
-    agents: [],
     models: [],
     thread: {
       threadId: HARNESS_CHILD_THREAD_ID,

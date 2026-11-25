@@ -18,15 +18,16 @@ import type { PaneRendererProps } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
 import { isNotFoundError, request } from '@/shared/api/client'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentDTO, WorkspaceFolderDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentSummaryDTO, WorkspaceFolderDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
+import { useComposerModels } from './useComposerModels'
 import { TurnCutDialog } from './TurnCutDialog'
 import './thread-workspace.css'
 
 type Props = PaneRendererProps<{ kind: 'thread'; threadId: string }>
-const emptyEnvironments: EnvironmentDTO[] = []
+const emptyEnvironments: EnvironmentSummaryDTO[] = []
 const commands = THREAD_COMMANDS.filter(({ id }) => ['upload', 'models', 'yolo', 'stop', 'debug'].includes(id))
 
 export function ThreadPaneRenderer(props: Props) {
@@ -36,8 +37,8 @@ export function ThreadPaneRenderer(props: Props) {
 function LoadedPane(props: Props) {
   const projection = useThreadProjection(props.target.threadId)
   const environments = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => request('GET /api/platform/environments', {}),
+    queryKey: queryKeys.environments.summaries,
+    queryFn: () => request('GET /api/platform/environment-summaries', {}),
   }).data ?? emptyEnvironments
   if (projection.isRoot === true && !projection.unavailable && !isNotFoundError(projection.snapshotQuery.error)) {
     return <RootPane {...props} projection={projection} environments={environments} />
@@ -47,7 +48,7 @@ function LoadedPane(props: Props) {
 
 function ReadOnlyPane({ projection, environments, onUnsentChange }: {
   projection: ThreadProjection
-  environments: EnvironmentDTO[]
+  environments: EnvironmentSummaryDTO[]
   onUnsentChange: Props['onUnsentChange']
 }) {
   useLayoutEffect(() => { onUnsentChange(false) }, [onUnsentChange])
@@ -58,7 +59,7 @@ function ReadOnlyPane({ projection, environments, onUnsentChange }: {
 
 function RootPane({ active, onUnsentChange, projection, environments, replace, space }: Props & {
   projection: ThreadProjection
-  environments: EnvironmentDTO[]
+  environments: EnvironmentSummaryDTO[]
 }) {
   const { t } = useI18n()
   const cache = useQueryClient()
@@ -66,6 +67,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
   const { controller, draft, settingsStatus, selectModel, selectEnvironment, setYoloEnabled, ...settings } = useBoundBranchPanel({ projection })
   const views = useBoundThreadPanelViews(threadId, projection)
   const tree = useActiveThreadTree(threadId)
+  const models = useComposerModels()
   const [cut, setCut] = useState<{ kind: 'branch' | 'fork'; endEntryId: string; initialName: string }>()
   const [inspections, setInspections] = useState<({ threadId: string } & ThreadNavigationOptions)[]>([])
   const inspection = inspections.at(-1)
@@ -115,7 +117,12 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
                 stopPending: controller.stopPending || controller.stopReplayPending,
               }}
               controls={<RootThreadControlArea rootThreadId={threadId} messages={timeline.messages} queuedMessages={timeline.queuedMessages}
-                hidden={debug || covered} composer={{
+                hidden={debug || covered}
+                notice={controller.pendingMessage?.unknownOutcome && <div className="thread-draft-notice">
+                  <Button disabled={controller.pending} onClick={() => void controller.retryPendingMessage()}>{t('shared.conflict.retry')}</Button>
+                  <Button variant="secondary" disabled={controller.pending} onClick={controller.abandonPendingMessage}>{t('shared.cancel')}</Button>
+                </div>}
+                composer={{
                   parts: controller.draft,
                   pending: controller.pending,
                   disabled: controller.disabled || !draft,
@@ -126,7 +133,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
                   commands,
                   onCommand: handleCommand,
                   settings: draft && {
-                    models: projection.models,
+                    models: models.data ?? [],
                     modelSelection: getBuiltinModelSelection(draft.execution),
                     environmentName: draft.environmentName,
                     environments,

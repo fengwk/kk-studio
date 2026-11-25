@@ -19,8 +19,9 @@ async function serve(page: Page, { agents = true, admin = false, rejectFolder = 
     const path = new URL(req.url()).pathname
     const json = (value: unknown) => route.fulfill({ json: value })
     if (path === '/api/auth/me') return json({ id: 'user', username: 'tester', role: admin ? 'ADMIN' : 'USER', enabled: true })
-    if (path === '/api/platform/agents') return json(agents ? [{ name: 'assistant', execution }] : [])
-    if (path === '/api/platform/models' || path === '/api/platform/environments') return json([])
+    if (path === '/api/platform/agent-summaries') return json(agents ? [{ name: 'assistant', driver: 'builtin', modelName: 'Code model', variant: 'max' }] : [])
+    if (path === '/api/platform/model-summaries') return json([{ name: 'Code model', type: 'MODEL', defaultVariant: 'max', variantIds: ['max'] }])
+    if (path === '/api/platform/models' || path === '/api/platform/environment-summaries') return json([])
     if (path === '/api/harness/interactions') return json({ items: [], total: 0, nextCursor: null })
     if (path === `${api}/tree`) return json({ treeVersion: '1', folders: [{ id: folderId, name: 'Work', children: [], resources: [] }] })
     if (path.startsWith(`${api}/sessions`) && req.method() === 'POST') {
@@ -132,12 +133,13 @@ for (const scenario of ['available', 'admin', 'user'] as const) {
 }
 
 test('an invalid folder leaves the unsent draft and explains the failure', async ({ page }) => {
-  await serve(page, { rejectFolder: true })
-  await page.goto(harness)
+  const posts = await serve(page, { rejectFolder: true })
+  await page.goto(`${harness}?folder=${folderId}`)
   const editor = page.getByRole('textbox')
   await editor.fill('Do not drop this message')
   await sendButton(page).click()
   await expect(page.getByRole('alert')).toContainText('Choose another folder')
+  expect(posts[0].body).toMatchObject({ folderId })
   await expect(editor).toHaveText('Do not drop this message')
   await expect(unsent(page)).toHaveAttribute('data-unsent', 'true')
 })

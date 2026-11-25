@@ -11,13 +11,13 @@ import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import '@/features/thread/runtime/panes/child-thread-view.css'
-import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentSummaryDTO } from '@/shared/api/generated/contracts'
 
 interface ThreadViewProps {
   threadId?: string
   /** 纯展示组件消费必填的投影，自身不再拥有或自建订阅 */
   projection: ThreadProjection
-  environments: EnvironmentDTO[]
+  environments: EnvironmentSummaryDTO[]
   /** 查看层/独立地址的返回入口（顶部标题区）。 */
   navigation?: ReactNode
   /** 只读查看（子代理）：标题带只读标识。 */
@@ -111,7 +111,7 @@ export function ThreadView({
 
 interface ConnectedThreadViewProps {
   threadId: string
-  environments: EnvironmentDTO[]
+  environments: EnvironmentSummaryDTO[]
   navigation?: ReactNode
   readOnly?: boolean
   selected?: boolean

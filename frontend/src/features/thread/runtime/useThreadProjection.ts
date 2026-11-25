@@ -23,7 +23,6 @@ export type ThreadProjection = ReturnType<typeof useThreadProjection>
 export function useThreadProjection(threadId: string) {
   const {
     unavailable,
-    agents,
     models,
     thread,
     sessionId,
@@ -93,7 +92,6 @@ export function useThreadProjection(threadId: string) {
   return {
     threadId,
     sessionId,
-    agents,
     models,
     thread,
     bound,

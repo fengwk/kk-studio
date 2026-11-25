@@ -81,24 +81,15 @@ function renderShell(
   return { ...view, sockets }
 }
 
-describe('AppShell chat immersive routes', () => {
-  it.each([
-    '/chats/chat-1',
-    '/chats/chat-1/',
-  ])('hides the global topbar and adds the immersive class for %s', (path) => {
-    renderShell(path, <div>Chat workspace</div>)
-
-    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(document.querySelector('.app-frame')).toHaveClass('workspace-immersive')
-    expect(screen.getByText('Chat workspace')).toBeInTheDocument()
-  })
-
+describe('AppShell legacy Chat routes', () => {
   it.each([
     '/chats',
     '/chats/',
+    '/chats/chat-1',
+    '/chats/chat-1/',
     '/chats/chat-1/extra',
     '/chats/chat-1/7',
-  ])('keeps the global topbar outside a valid chat workspace route: %s', (path) => {
+  ])('does not treat the retired route as a workspace: %s', (path) => {
     renderShell(path, <div>Chat route</div>)
 
     expect(screen.getByRole('banner')).toBeInTheDocument()

@@ -1305,8 +1305,10 @@ describe('useAgentThreadController', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
+    const client = new QueryClient()
+    client.setQueryData(['models', 'list'], await agentService.listModels())
     const { result } = renderHook(() => useTestController(currentThread.threadId), {
-      wrapper,
+      wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     expect(result.current.runtimeLabels.environmentName).toBe('dev-cluster')

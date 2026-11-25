@@ -10,13 +10,12 @@ import { ThreadPanel, ThreadStatusFooter } from '@/features/thread/runtime/threa
 import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-commands'
 import type { PaneRendererProps } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
-import { agentService } from '@/shared/api/agent-service'
 import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
-import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessModelSelectionDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
+import { useComposerModels } from './useComposerModels'
 import { usePaneDraft } from './usePaneDraft'
 import './thread-workspace.css'
 
@@ -37,14 +36,17 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   const [model, setModel] = useState<HarnessModelSelectionDTO>()
   const [environmentName, setEnvironmentName] = useState<string | null>(null)
   const [yolo, setYolo] = useState<boolean>()
-  const agents = useQuery({ queryKey: queryKeys.agents.list, queryFn: agentService.listAgents })
-  const models = useQuery({ queryKey: queryKeys.models.list, queryFn: agentService.listModels })
-  const environments = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => request('GET /api/platform/environments', {}),
+  const agents = useQuery({
+    queryKey: ['agents', 'summaries'],
+    queryFn: ({ signal }) => request('GET /api/platform/agent-summaries', {}, { signal }),
   })
-  const agent = agents.data?.find(({ name, execution }) => name === space.defaultAgentName && execution != null)
-  const modelSelection = model ?? (agent ? getBuiltinModelSelection(agent.execution) : null)
+  const models = useComposerModels()
+  const environments = useQuery({
+    queryKey: queryKeys.environments.summaries,
+    queryFn: () => request('GET /api/platform/environment-summaries', {}),
+  })
+  const agent = agents.data?.find(({ name, driver }) => name === space.defaultAgentName && driver != null)
+  const modelSelection = model ?? (agent?.modelName ? { modelName: agent.modelName, variant: agent.variant } : null)
   const environment = environments.data?.find(({ id, name }) => environmentName == null
     ? id === space.defaultEnvironmentId : name === environmentName)
   const environmentLabel = space.defaultEnvironmentId ? t('ai.runtime.draft.environmentDefault') : undefined
@@ -52,15 +54,15 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
 
   const send = useMutation({
     mutationFn: (payload: ComposerPart[]) => request('POST /api/chat-spaces/{spaceId}/sessions', {
-        path: { spaceId: space.id },
-        body: {
-          folderId: target.folderId,
-          message: partsToMessageContents(payload),
-          modelSelection,
-          environmentId: environmentName == null ? undefined : environment?.id,
-          yoloEnabled,
-        },
-      }, { idempotencyKey: target.draftId }),
+      path: { spaceId: space.id },
+      body: {
+        folderId: target.folderId,
+        message: partsToMessageContents(payload),
+        modelSelection,
+        environmentId: environmentName == null ? undefined : environment?.id,
+        yoloEnabled,
+      },
+    }, { idempotencyKey: target.draftId }),
     onSuccess: ({ threadId }) => {
       clearStoredComposerDraft(scope)
       // 接受后读取服务端快照，不制造临时历史；首条命令在快照中是排队项或已物化的消息。

@@ -173,8 +173,7 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 运行中的 Thread 另给 FROZEN_INVOCATION：只读取当时已存在的活动 Invocation 的冻结请求，不新建、
 复制或延长任何持久事实。事件详情可按需重建某个历史模型输出的请求：
 普通模型输出的请求前缀严格截断在该输出的 parent，压缩结果使用冻结的子执行重建；
-展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。本地新建分支草稿进入 Debug 可只读检查已有事件与历史请求，
-绝不为此预创建 Thread。
+展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。
 
 ## 工作区 Thread 窗格
 
@@ -424,8 +423,7 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 并透传 WebSocket。
 
 测试入口：[`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide) 的状态机、存储与
-对账单测，以及 [`AgentPane.test.tsx`](../../frontend/src/features/thread/runtime/panes/AgentPane.test.tsx) 对非 Chat 入口
-隐藏与 Chat 宿主的守护。真实浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 从
+对账单测。真实浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 从
 [开发与测试](../operations/development-and-testing.md#真实-ide-与-daemon-验收) 的真实 IDE 入口执行；只记录实际
 运行结果，不预设固定用例数。
 
