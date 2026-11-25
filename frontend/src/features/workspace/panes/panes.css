@@ -1,0 +1,144 @@
+.ws-pane-layout {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ws-pane-host {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.ws-pane-host[hidden] { display: none; }
+
+.ws-pane-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ws-pane-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  height: var(--control-h);
+  padding-inline: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.ws-pane-header[data-narrow] { height: var(--touch-target); }
+.ws-pane-header:has([aria-expanded='true']) { z-index: var(--z-dropdown); }
+
+.ws-pane-title,
+.ws-pane-target-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-pane-title { flex: 1; }
+
+.ws-pane-letter {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+}
+
+.ws-pane-letter[data-active] { background: var(--accent-soft); color: var(--fg); }
+.ws-pane-letter[data-pane-grip] { cursor: grab; }
+.ws-pane-letter[data-pane-grip]:active { cursor: grabbing; }
+
+.ws-pane-switch {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  height: var(--touch-target);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+.ws-pane-switch:hover { background: var(--hover); }
+.ws-pane-switch[aria-expanded='true'] { background: var(--surface-active); }
+.ws-pane-switch > svg { flex: none; width: var(--space-4); height: var(--space-4); }
+.ws-pane-actions { display: flex; align-items: center; flex: none; }
+.ws-pane-actions .ws-pane-touch { width: var(--touch-target); height: var(--touch-target); flex-basis: var(--touch-target); }
+.ws-pane-header [aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+.ws-pane-menu { position: absolute; inset-block-start: 100%; inset-inline-end: var(--space-2); }
+.ws-pane-menu[data-switch] { inset-inline: var(--space-2); }
+
+.ws-pane-divider {
+  position: absolute;
+  z-index: var(--z-raised);
+  background: var(--border);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ws-pane-divider[data-axis='Y'] { cursor: row-resize; }
+.ws-pane-divider::before { position: absolute; content: ''; inset: 0 calc(-1 * var(--space-1)); }
+.ws-pane-divider[data-axis='Y']::before { inset: calc(-1 * var(--space-1)) 0; }
+.ws-pane-divider:is(:hover, :focus-visible, :active) { background: var(--accent); }
+
+.ws-pane-picker {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+}
+
+.ws-pane-picker::backdrop { background: var(--scrim-soft); }
+.ws-pane-picker[data-overview] { background: var(--border); }
+.ws-pane-target { position: absolute; display: grid; place-items: center; pointer-events: none; }
+.ws-pane-picker[data-overview] .ws-pane-target { background: var(--surface); }
+.ws-pane-picker[data-overview] .ws-pane-target:has([aria-current='true']) { background: var(--surface-raised); }
+.ws-pane-target-title { position: absolute; inset: var(--space-1) var(--space-2) auto; text-align: center; }
+
+.ws-pane-target > button {
+  display: grid;
+  place-items: center;
+  width: min(100%, var(--touch-target));
+  height: var(--touch-target);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.ws-pane-target > button:hover { background: var(--accent-soft-hover); }
+.ws-pane-target > button[aria-current='true'] { background: var(--accent); color: var(--fg-on-accent); }
