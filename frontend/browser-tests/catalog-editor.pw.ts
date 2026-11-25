@@ -147,7 +147,7 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   await page.screenshot({ path: '../reports/layout/catalog-editor-320.png', fullPage: true })
 })
 
-test('navigates model sections on desktop and reveals preset and pricing errors inline', async ({ page }) => {
+test('shows model sections in one column and reveals preset and pricing errors inline', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.route('**/api/platform/models/capabilities?**', (route) => route.fulfill({ json: {
     promptCacheOptions: [{ retention: 'NONE' }, { retention: 'SHORT' }],
@@ -155,26 +155,14 @@ test('navigates model sections on desktop and reveals preset and pricing errors 
     promptCacheState: 'CONFIGURABLE',
   } }))
 
-  // 预设错误：导航跳到「模型预设」不提交，提交后内联错误被定位到。
+  // 无目录栏，提交后仍自动定位到正文的内联错误。
   await page.goto('/browser-tests/catalog-editor-harness.html?scenario=model&errors=preset')
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
   const body = dialog.locator('.modal-body')
-  const nav = dialog.getByRole('navigation', { name: '区块导航' })
-
-  await expect(nav).toBeVisible()
-  expect((await nav.getByRole('button').allTextContents()).map((label) => label.trim()))
-    .toEqual(['基本信息', '请求限制与能力', '模型预设', '价格与费率'])
-  // 宽屏是「导航列 + 表单列」双轨，不是把导航折叠进正文。
-  const trackCount = await body.evaluate((el) =>
-    getComputedStyle(el).gridTemplateColumns.split(/\s+/).filter(Boolean).length)
-  expect(trackCount).toBe(2)
-
-  await nav.getByRole('button', { name: '模型预设' }).click()
-  await expectFocusedInside(page, '#catalog-section-presets')
-  await expect(dialog.locator('#catalog-section-presets')).toBeInViewport()
-  // 跳转按钮不提交表单。
-  await expectSubmitCount(page, 0)
+  await expect(dialog.getByRole('navigation')).toHaveCount(0)
+  await expect(dialog.locator('#catalog-section-presets')).toBeVisible()
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(0)
 
   await dialog.getByRole('button', { name: '创建' }).click()
   await expectSubmitCount(page, 1)
@@ -220,7 +208,6 @@ test('manages agent capabilities and keeps save visible on narrow dialogs', asyn
 
   const dialog = page.getByRole('dialog')
   const body = dialog.locator('.modal-body')
-  const nav = dialog.getByRole('navigation', { name: '区块导航' })
   const panelOf = (legend: string) =>
     dialog.locator('fieldset.capability-picker').filter({ has: page.locator('legend', { hasText: legend }) })
   const skillsPanel = panelOf('技能')
@@ -229,24 +216,11 @@ test('manages agent capabilities and keeps save visible on narrow dialogs', asyn
   await expect(dialog.locator('fieldset.capability-picker > legend')).toHaveText([
     '工具 · 已选 0', '技能 · 已选 0', '子 Agent · 已选 0',
   ])
-  // 窄屏导航变成正文顶部的横向跳转条。
-  await expect(nav).toHaveCSS('flex-direction', 'row')
-  await nav.getByRole('button', { name: '执行', exact: true }).click()
-  await expect(dialog.locator('#catalog-section-execution')).toBeFocused()
-  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(100)
-  await nav.getByRole('button', { name: '基本信息' }).click()
-  await expect(dialog.locator('#catalog-section-basics')).toBeFocused()
-  await expectSubmitCount(page, 0)
+  await expect(dialog.getByRole('navigation')).toHaveCount(0)
 
-  // 能力明细默认收起：首屏只呈现入口与已选数量。
-  await expect(skillsPanel.locator('details.capability-selection-details[open]')).toHaveCount(0)
-  await expect(skillsPanel.getByText('管理技能', { exact: true })).toBeVisible()
-  await expect(skillsPanel.getByRole('searchbox', { name: '搜索技能' })).toBeHidden()
-
-  await skillsPanel.locator('summary').click()
+  // 能力直接可搜索、可选择。
   const search = skillsPanel.getByRole('searchbox', { name: '搜索技能' })
   await expect(search).toBeVisible()
-  await expect(skillsPanel.locator('details.capability-selection-details[open]')).toHaveCount(1)
   await expect(skillsPanel.locator('.capability-name')).toHaveText([
     'engineering / review',
     'engineering / deploy',
@@ -278,12 +252,7 @@ test('manages agent capabilities and keeps save visible on narrow dialogs', asyn
     'engineering / deploy',
   ])
 
-  // 收起后已选项以摘要行呈现。
-  await skillsPanel.locator('summary').click()
-  await expect(skillsPanel.locator('details.capability-selection-details[open]')).toHaveCount(0)
   await expect(skillsPanel.locator('legend')).toHaveText('技能 · 已选 1')
-  await expect(skillsPanel.locator('.capability-selection-summary')).toHaveText('engineering / review')
-  await expect(skillsPanel.locator('.capability-selection-summary')).toBeVisible()
   await expectNoHorizontalOverflow(page, body)
   await page.screenshot({ path: '../reports/layout/catalog-editor-agent-390.png', fullPage: true })
 
@@ -301,24 +270,20 @@ test('manages agent capabilities and keeps save visible on narrow dialogs', asyn
 
   // 目录查询失败时面板给出失败与重试，而不是伪装成「目录还没有技能」。
   await page.goto('/browser-tests/catalog-editor-harness.html?scenario=agent&directories=error')
-  await skillsPanel.locator('summary').click()
   await expect(skillsPanel.getByRole('alert')).toContainText('资源加载失败')
   await expect(skillsPanel.getByText('目录还没有技能')).toHaveCount(0)
   await skillsPanel.getByRole('button', { name: '重试' }).click()
   await expect(harnessState(page)).toHaveAttribute('data-retry-count', '1')
   await page.screenshot({ path: '../reports/layout/catalog-editor-agent-directory-error.png', fullPage: true })
 
-  // 英文界面：能力管理入口与搜索标签来自 manageSkills / searchSkills 两个英文键。
+  // 英文界面的搜索和筛选标签仍正确本地化。
   await page.goto('/browser-tests/catalog-editor-harness.html?scenario=agent&locale=en-US')
   const englishSkills = panelOf('Skills')
-  await expect(englishSkills.getByText('Manage skills', { exact: true })).toBeVisible()
-  await englishSkills.locator('summary').click()
   await expect(englishSkills.getByRole('searchbox', { name: 'Search skills' })).toBeVisible()
   await expect(englishSkills.getByRole('button', { name: 'Selected', exact: true })).toBeVisible()
-  await expect(dialog.getByRole('navigation', { name: 'Section navigation' })).toBeVisible()
 })
 
-test('expands a collapsed capability section to reveal its submit error', async ({ page }) => {
+test('scrolls to and focuses an inline capability error on submit', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/browser-tests/catalog-editor-harness.html?scenario=agent&errors=skills')
 
@@ -327,15 +292,12 @@ test('expands a collapsed capability section to reveal its submit error', async 
     .locator('fieldset.capability-picker')
     .filter({ has: page.locator('legend', { hasText: '技能' }) })
 
-  // 提交前：能力明细全部收起，页面里没有任何错误落点。
-  await expect(dialog.locator('details.capability-selection-details[open]')).toHaveCount(0)
   await expect(dialog.locator('.field-error')).toHaveCount(0)
 
   await dialog.getByRole('button', { name: '创建' }).click()
   await expectSubmitCount(page, 1)
 
-  // 错误在收起的分组里：必须自动展开、滚动到可见并聚焦。
-  await expect(skillsPanel.locator('details.capability-selection-details[open]')).toHaveCount(1)
+  // 错误在下方能力区：提交后滚到可见并聚焦。
   const skillError = skillsPanel.locator('.field-error')
   await expect(skillError).toHaveText('Skills 名称冲突，请检查勾选项')
   await expect(skillError).toBeVisible()

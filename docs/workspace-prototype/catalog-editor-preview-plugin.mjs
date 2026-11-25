@@ -81,17 +81,6 @@ export function catalogEditorPreviewPlugin(sourceRoot) {
         code = code.replace(anchor, replacement)
       }
       switch (file) {
-        case 'AiConsoleResourceEditorModal.tsx':
-          replace(/  const bodyClassName = [\s\S]*?\n  const body = \(/, '  const body = (')
-          replace(/className=\{bodyClassName\}>[\s\S]*?(?=      <div className="catalog-editor-content">)/, 'className="modal-body catalog-editor-body">\n')
-          replace("sections.length > 0 ? 'catalog-editor-card' : ''", "sections.length > 0 ? 'catalog-editor-card catalog-preview-editor' : ''")
-          break
-        case 'CapabilitySelectionPanels.tsx':
-          replace('label, manageLabel, searchLabel', 'label, searchLabel')
-          replace(/  const selectedNames = [^\n]*\n/)
-          replace(/      <details className="capability-selection-details">\n        <summary>\{manageLabel\}<\/summary>\n/)
-          replace(/      <\/details>\n      \{selectedNames.length > 0 \? \([\s\S]*?\) : null\}\n/)
-          break
         case 'AiAgentResourceForm.tsx':
           replace("import { Select } from '@/shared/ui/controls/Select'\n")
           replace(/        <label className="form-group">\n          <FieldLabel required>\{t\('ai.catalog.form.executionDriver'\)\}<\/FieldLabel>[\s\S]*?        <\/label>\n/)

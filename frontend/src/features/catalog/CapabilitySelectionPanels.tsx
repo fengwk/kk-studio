@@ -14,10 +14,9 @@ export interface CapabilityDirectory {
 }
 
 export function CapabilitySelectionPanel({
-  label, manageLabel, searchLabel, options, selected, emptyText, directory, error, onToggle,
+  label, searchLabel, options, selected, emptyText, directory, error, onToggle,
 }: {
   label: string
-  manageLabel: string
   searchLabel: string
   options: CapabilityOption[]
   selected: string[]
@@ -32,7 +31,6 @@ export function CapabilitySelectionPanel({
   const [search, setSearch] = useState('')
   const [selectedOnly, setSelectedOnly] = useState(false)
   const checkedValues = new Set(selected)
-  const selectedNames = options.filter((option) => checkedValues.has(option.value)).slice(0, 2)
   const status = directory?.status ?? 'ready'
   const empty = !options.some((option) => !option.missing)
   const term = search.trim().toLocaleLowerCase()
@@ -52,8 +50,6 @@ export function CapabilitySelectionPanel({
       aria-describedby={errorId}
     >
       <legend>{label} · {t('ai.catalog.form.selectedCount', { count: checkedValues.size })}</legend>
-      <details className="capability-selection-details">
-        <summary>{manageLabel}</summary>
         <div className="capability-selection-panel">
           {error ? <FieldError id={errorId}>{error}</FieldError> : null}
           <label className="capability-search-label" htmlFor={searchId}>{searchLabel}</label>
@@ -111,10 +107,6 @@ export function CapabilitySelectionPanel({
             </section>
           ))}
         </div>
-      </details>
-      {selectedNames.length > 0 ? (
-        <div className="inline-hint capability-selection-summary">{selectedNames.map((option) => option.name).join(' · ')}</div>
-      ) : null}
     </fieldset>
   )
 }

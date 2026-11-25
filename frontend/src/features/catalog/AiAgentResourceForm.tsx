@@ -201,7 +201,6 @@ export function AgentForm({
       <CatalogEditorSection name="capabilities">
         <CapabilitySelectionPanel
           label={t('ai.catalog.form.agentTools')}
-          manageLabel={t('ai.catalog.form.manageTools')}
           searchLabel={t('ai.catalog.form.searchTools')}
           options={toolCandidates}
           selected={visibleSelectedTools}
@@ -212,7 +211,6 @@ export function AgentForm({
         />
         <CapabilitySelectionPanel
           label={t('ai.catalog.form.agentSkills')}
-          manageLabel={t('ai.catalog.form.manageSkills')}
           searchLabel={t('ai.catalog.form.searchSkills')}
           options={skillCandidates}
           selected={visibleSelectedSkills}
@@ -229,7 +227,6 @@ export function AgentForm({
         />
         <CapabilitySelectionPanel
           label={t('ai.catalog.form.agentSubagents')}
-          manageLabel={t('ai.catalog.form.manageSubagents')}
           searchLabel={t('ai.catalog.form.searchSubagents')}
           options={subagentCandidates}
           selected={draft.subagents}
