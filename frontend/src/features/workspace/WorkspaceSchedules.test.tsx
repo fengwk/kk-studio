@@ -12,14 +12,23 @@ import type {
 import { setLocale } from '@/shared/i18n'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import type { PaneTarget } from './pane-target'
+import { workspaceKeys } from './queries'
 import {
+  buildTargetFromDraft,
+  buildTimeZoneOptions,
+  buildTriggerFromDraft,
   extractTurnCuts,
   flattenFolders,
+  formatScheduleFullTime,
   formatScheduleNextRun,
+  formatScheduleRunTime,
+  getLocalTimeZone,
   INITIAL_HISTORY_CURSORS,
   listTreeSessions,
   popNewerCursor,
   pushOlderCursor,
+  resolveRunReasonText,
+  todayInTimeZone,
   validateScheduleTitle,
 } from './schedule-helpers'
 import { useWorkspaceRealtime } from './useWorkspaceRealtime'
@@ -178,6 +187,96 @@ describe('schedule-helpers', () => {
     const ts = Date.UTC(2026, 10, 26, 1, 0, 0) // 2026-11-26 09:00 Asia/Shanghai (Thu)
     expect(formatScheduleNextRun(ts, 'Asia/Shanghai', 'zh-CN')).toBe('11-26 周四 09:00')
     expect(formatScheduleNextRun(ts, 'Asia/Shanghai', 'en-US')).toBe('11-26 Thu 09:00')
+    expect(formatScheduleRunTime(ts, 'Asia/Shanghai', 'en-US')).toBe('2026-11-26 Thu 09:00')
+    expect(formatScheduleFullTime(ts, 'Asia/Shanghai', 'en-US')).toBe('2026-11-26 09:00 (Asia/Shanghai)')
+    expect(formatScheduleNextRun(ts, 'Invalid/Zone', 'en-US')).toBe('2026-11-26 01:00')
+    expect(formatScheduleRunTime(ts, 'Invalid/Zone', 'en-US')).toBe('2026-11-26 01:00')
+    expect(formatScheduleFullTime(ts, 'Invalid/Zone', 'en-US')).toContain('(Invalid/Zone)')
+    expect(todayInTimeZone('UTC', ts)).toBe('2026-11-26')
+    expect(todayInTimeZone('Invalid/Zone', ts)).toBe('2026-11-26')
+    expect(getLocalTimeZone()).toBeTruthy()
+    expect(buildTimeZoneOptions('UTC', 'Europe/Paris')).toContain('Europe/Paris')
+    expect(popNewerCursor(INITIAL_HISTORY_CURSORS)).toEqual(INITIAL_HISTORY_CURSORS)
+
+    // extractTurnCuts handles CUSTOM_MESSAGE, truncation >35 chars, and TURN_END without TURN_START
+    const longText = 'x'.repeat(40)
+    expect(extractTurnCuts([
+      {
+        entryId: cut1Id,
+        sessionId,
+        parentEntryId: null,
+        entryType: 'CUSTOM_MESSAGE',
+        payload: { message: { role: 'USER', contents: [{ type: 'TEXT', text: longText }] } },
+        createdAt: 1,
+        usageCost: null,
+      },
+      {
+        entryId: cut2Id,
+        sessionId,
+        parentEntryId: cut1Id,
+        entryType: 'TURN_END',
+        payload: { outcome: 'COMPLETED' },
+        createdAt: 2,
+        usageCost: null,
+      },
+    ])).toEqual([
+      { entryId: cut2Id, turnNumber: 1, summary: `${'x'.repeat(35)}…` },
+    ])
+
+    // buildTriggerFromDraft covers ONCE & all REPEAT frequencies & invalid fields
+    const baseTrigger = {
+      triggerType: 'REPEAT' as const,
+      frequency: 'DAILY' as const,
+      weekday: '',
+      repeatTime: '09:00',
+      minute: '15',
+      cron: '0 9 * * 1-5',
+      onceDate: '2026-12-01',
+      onceTime: '10:30',
+    }
+    expect(buildTriggerFromDraft({ ...baseTrigger, triggerType: 'ONCE', onceDate: 'bad' })).toEqual({ ok: false, field: 'onceDate', errorKey: 'workspace.schedule.dateRequired' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, triggerType: 'ONCE', onceTime: 'bad' })).toEqual({ ok: false, field: 'onceTime', errorKey: 'workspace.schedule.timeRequired' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, triggerType: 'ONCE' })).toEqual({ ok: true, trigger: { type: 'ONCE', localDate: '2026-12-01', time: '10:30' } })
+    expect(buildTriggerFromDraft({ ...baseTrigger, repeatTime: '' })).toEqual({ ok: false, field: 'repeatTime', errorKey: 'workspace.schedule.timeRequired' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'WEEKDAYS' })).toEqual({ ok: true, trigger: { type: 'REPEAT', frequency: 'WEEKDAYS', time: '09:00' } })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'WEEKLY', repeatTime: '' })).toEqual({ ok: false, field: 'repeatTime', errorKey: 'workspace.schedule.timeRequired' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'WEEKLY' })).toEqual({ ok: true, trigger: { type: 'REPEAT', frequency: 'WEEKLY', weekday: 'MONDAY', time: '09:00' } })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'HOURLY', minute: 'abc' })).toEqual({ ok: false, field: 'minute', errorKey: 'workspace.schedule.minuteInvalid' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'HOURLY', minute: '60' })).toEqual({ ok: false, field: 'minute', errorKey: 'workspace.schedule.minuteInvalid' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'HOURLY', minute: '5' })).toEqual({ ok: true, trigger: { type: 'REPEAT', frequency: 'HOURLY', minute: 5 } })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'CRON', cron: '0 9 *' })).toEqual({ ok: false, field: 'cron', errorKey: 'workspace.schedule.cronRequired' })
+    expect(buildTriggerFromDraft({ ...baseTrigger, frequency: 'CRON', cron: '0  9  *  *  1-5' })).toEqual({ ok: true, trigger: { type: 'REPEAT', frequency: 'CRON', cron: '0 9 * * 1-5' } })
+
+    // buildTargetFromDraft covers all 3 target types and missing fields
+    const baseTarget = {
+      targetType: 'NEW_SESSION' as const,
+      folderId: rootFolderId,
+      agentName: 'Coder',
+      sessionId,
+      sourceThreadId: thread1Id,
+      turnEndEntryId: cut1Id,
+      threadId: thread1Id,
+    }
+    expect(buildTargetFromDraft({ ...baseTarget, folderId: '' })).toEqual({ ok: false, field: 'folderId', errorKey: 'workspace.schedule.folderRequired' })
+    expect(buildTargetFromDraft({ ...baseTarget, agentName: '' })).toEqual({ ok: false, field: 'agentName', errorKey: 'workspace.schedule.agentRequired' })
+    expect(buildTargetFromDraft(baseTarget)).toEqual({ ok: true, target: { type: 'NEW_SESSION', folderId: rootFolderId, agentName: 'Coder' } })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'BRANCH', sessionId: '' })).toEqual({ ok: false, field: 'sessionId', errorKey: 'workspace.schedule.sessionRequired' })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'BRANCH', sourceThreadId: '' })).toEqual({ ok: false, field: 'sourceThreadId', errorKey: 'workspace.schedule.threadRequired' })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'BRANCH', turnEndEntryId: '' })).toEqual({ ok: false, field: 'turnEndEntryId', errorKey: 'workspace.schedule.turnEndRequired' })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'BRANCH' })).toEqual({ ok: true, target: { type: 'BRANCH', sessionId, sourceThreadId: thread1Id, turnEndEntryId: cut1Id } })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'CONTINUE', sessionId: '' })).toEqual({ ok: false, field: 'sessionId', errorKey: 'workspace.schedule.sessionRequired' })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'CONTINUE', threadId: '' })).toEqual({ ok: false, field: 'threadId', errorKey: 'workspace.schedule.threadRequired' })
+    expect(buildTargetFromDraft({ ...baseTarget, targetType: 'CONTINUE' })).toEqual({ ok: true, target: { type: 'CONTINUE', sessionId, threadId: thread1Id } })
+
+    // resolveRunReasonText covers all known reasons + custom + default fallbacks
+    const tr = (k: string) => k
+    expect(resolveRunReasonText('SKIPPED', 'EXPIRED', tr)).toBe('workspace.schedule.reasonExpired')
+    expect(resolveRunReasonText('SKIPPED', 'EXECUTION_NOT_SETTLED', tr)).toBe('workspace.schedule.reasonNotSettled')
+    expect(resolveRunReasonText('NOT_SUBMITTED', 'RESOURCE_NOT_FOUND', tr)).toBe('workspace.schedule.reasonTargetUnavailable')
+    expect(resolveRunReasonText('NOT_SUBMITTED', 'INVALID_TURN_END', tr)).toBe('workspace.schedule.reasonTargetUnavailable')
+    expect(resolveRunReasonText('NOT_SUBMITTED', 'CUSTOM_REASON', tr)).toBe('CUSTOM_REASON')
+    expect(resolveRunReasonText('SKIPPED', '', tr)).toBe('workspace.schedule.skipped')
+    expect(resolveRunReasonText('NOT_SUBMITTED', null, tr)).toBe('workspace.schedule.notSubmitted')
   })
 })
 
@@ -609,5 +708,225 @@ describe('WorkspaceSchedules', () => {
 
     expect(await screen.findByText('WS 已更新任务', {}, { timeout: 2000 })).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: /WS 推送的新运行/ }, { timeout: 2000 })).toBeInTheDocument()
+  })
+
+  it('creates schedule across modes, surfaces preview/submit errors, and handles list/history/action failures', async () => {
+    const created: ScheduleDTO[] = []
+    let previewBehavior: 'ok' | 'empty' | 'bad_cron' | 'server_err' = 'ok'
+    let createBehavior: 'invalid_turn' | 'invalid_sched' | 'generic' | 'ok' = 'invalid_turn'
+
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input), 'http://localhost')
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules` && method === 'GET') {
+        return jsonResponse(created)
+      }
+      if (url.pathname === '/api/platform/agent-summaries' && method === 'GET') {
+        return jsonResponse([{ name: 'Coder', description: '' }, { name: 'Reviewer', description: '' }])
+      }
+      if (url.pathname === `/api/harness/threads/${thread1Id}` && method === 'GET') {
+        return jsonResponse({
+          version: '1',
+          thread: {
+            threadId: thread1Id, parentThreadId: null, name: 'main', sessionId, headEntryId: cut2Id,
+            rootThreadId: thread1Id, yoloEnabled: false, nextCommandSequence: '1', version: '1',
+            status: 'IDLE', executionControl: 'IDLE', branchSettings: { agentName: 'Coder', environmentId: null, yoloEnabled: false },
+            createdAt: 1, updatedAt: 2,
+          },
+          baseEntryId: null, entries: createHarnessEntries(), queuedCommands: [], activeAssistantOutput: null,
+          generationFailures: [], toolInvocations: [], stopReceipts: [], unconfirmedExecutions: [],
+        })
+      }
+      if (url.pathname === `/api/harness/threads/${thread2Id}` && method === 'GET') {
+        return jsonResponse({
+          version: '1',
+          thread: {
+            threadId: thread2Id, parentThreadId: null, name: 'alt', sessionId, headEntryId: cut1Id,
+            rootThreadId: thread2Id, yoloEnabled: false, nextCommandSequence: '1', version: '1',
+            status: 'IDLE', executionControl: 'IDLE', branchSettings: { agentName: 'Coder', environmentId: null, yoloEnabled: false },
+            createdAt: 1, updatedAt: 2,
+          },
+          baseEntryId: null, entries: createHarnessEntries().slice(0, 3), queuedCommands: [], activeAssistantOutput: null,
+          generationFailures: [], toolInvocations: [], stopReceipts: [], unconfirmedExecutions: [],
+        })
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/preview` && method === 'POST') {
+        if (previewBehavior === 'empty') return jsonResponse({ next: [] })
+        if (previewBehavior === 'bad_cron') return jsonResponse({ reason: 'INVALID_SCHEDULE', detail: 'bad' }, 400)
+        if (previewBehavior === 'server_err') return jsonResponse({ detail: 'boom' }, 500)
+        return jsonResponse({ next: [Date.UTC(2026, 11, 1, 9, 0)] })
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules` && method === 'POST') {
+        if (createBehavior === 'invalid_turn') {
+          createBehavior = 'invalid_sched'
+          return jsonResponse({ reason: 'INVALID_TURN_END', detail: 'bad turn' }, 400)
+        }
+        if (createBehavior === 'invalid_sched') {
+          createBehavior = 'generic'
+          return jsonResponse({ reason: 'INVALID_SCHEDULE', detail: 'bad schedule detail' }, 400)
+        }
+        if (createBehavior === 'generic') {
+          createBehavior = 'ok'
+          return jsonResponse({ detail: 'server exploded' }, 500)
+        }
+        const body = JSON.parse(String(init?.body)) as { title: string; message: string; trigger: ScheduleDTO['trigger']; timeZone: string; target: ScheduleDTO['target'] }
+        const item: ScheduleDTO = {
+          id: schedule1Id,
+          title: body.title,
+          message: body.message,
+          enabled: true,
+          trigger: body.trigger,
+          timeZone: body.timeZone,
+          target: body.target,
+          nextDueAt: Date.now() + 60_000,
+          version: '1',
+        }
+        created.push(item)
+        return jsonResponse(item, 201)
+      }
+      return jsonResponse({}, 404)
+    })
+
+    const report = vi.fn()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSchedules space={sampleSpace} tree={sampleTree} open={vi.fn()} report={report} />
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建定时任务' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建定时任务' })
+
+    // Switch target to CONTINUE and BRANCH, then back to NEW_SESSION
+    fireEvent.click(within(dialog).getByLabelText('继续 Thread'))
+    fireEvent.click(within(dialog).getByLabelText('从某一轮分支'))
+    await waitFor(() => expect(within(dialog).getByLabelText(/回合切点/)).toHaveTextContent(/第 1 轮/))
+
+    // Switch frequency to HOURLY, CRON, WEEKLY, and mode to ONCE
+    fireEvent.click(within(dialog).getByRole('button', { name: '重复' }))
+    fireEvent.click(within(dialog).getByLabelText(/频率/))
+    fireEvent.click(await screen.findByRole('option', { name: '每小时' }))
+    fireEvent.change(within(dialog).getByLabelText(/每小时的第几分钟/), { target: { value: '25' } })
+
+    fireEvent.click(within(dialog).getByLabelText(/频率/))
+    fireEvent.click(await screen.findByRole('option', { name: '每周' }))
+    expect(within(dialog).getByLabelText(/星期/)).toHaveTextContent('周一')
+
+    previewBehavior = 'bad_cron'
+    fireEvent.click(within(dialog).getByLabelText(/频率/))
+    fireEvent.click(await screen.findByRole('option', { name: '自定义 cron' }))
+    expect(await within(dialog).findByText('cron 表达式无效或近期不会运行。')).toBeInTheDocument()
+
+    previewBehavior = 'empty'
+    fireEvent.click(within(dialog).getByRole('button', { name: '一次' }))
+    expect(await within(dialog).findByText('这个时间已经过去，请选之后的时间。')).toBeInTheDocument()
+
+    previewBehavior = 'server_err'
+    fireEvent.click(within(dialog).getByRole('button', { name: '重复' }))
+    fireEvent.click(within(dialog).getByLabelText(/频率/))
+    fireEvent.click(await screen.findByRole('option', { name: '每天' }))
+    expect(await within(dialog).findByText('请求失败')).toBeInTheDocument()
+
+    // Fill valid title/message with preview ok (switch to WEEKDAYS to trigger fresh preview) and exercise submit error branches
+    previewBehavior = 'ok'
+    fireEvent.click(within(dialog).getByLabelText(/频率/))
+    fireEvent.click(await screen.findByRole('option', { name: '工作日（周一至周五）' }))
+    fireEvent.click(within(dialog).getByLabelText('新建会话'))
+    fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: 'Daily Summary' } })
+    fireEvent.change(within(dialog).getByLabelText(/发送的消息/), { target: { value: 'Summarize updates' } })
+    expect(await within(dialog).findByText(/接下来：/)).toBeInTheDocument()
+
+    // Submit 1 -> INVALID_TURN_END (switches to BRANCH momentarily? No, dialog renders error for turnEndEntryId or alert)
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    // Wait for second submit -> INVALID_SCHEDULE
+    await waitFor(() => expect(createBehavior).toBe('invalid_sched'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('bad schedule detail')
+
+    // Submit 3 -> 500 error
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('server exploded')
+
+    // Submit 4 -> succeeds
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建定时任务' })).toBeNull())
+    expect(await screen.findByText('Daily Summary')).toBeInTheDocument()
+  })
+
+  it('reports toggle, runNow, delete conflict, and list/history fetch errors', async () => {
+    const schedule: ScheduleDTO = {
+      id: schedule1Id,
+      title: 'Err Task',
+      message: 'msg',
+      enabled: true,
+      trigger: { type: 'REPEAT', frequency: 'DAILY', time: '09:00' },
+      timeZone: 'UTC',
+      target: { type: 'NEW_SESSION', folderId: rootFolderId, agentName: 'Coder' },
+      nextDueAt: Date.now() + 60_000,
+      version: '1',
+    }
+    let listFails = false
+
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input), 'http://localhost')
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules` && method === 'GET') {
+        if (listFails) return jsonResponse({ detail: 'down' }, 500)
+        return jsonResponse([schedule])
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}` && method === 'PATCH') {
+        return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'stale' }, 409)
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}/runs` && method === 'POST') {
+        return jsonResponse({ detail: 'run failed' }, 500)
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}/runs` && method === 'GET') {
+        return jsonResponse({ detail: 'history failed' }, 500)
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}` && method === 'DELETE') {
+        return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'stale' }, 409)
+      }
+      if (url.pathname === '/api/platform/agent-summaries') {
+        return jsonResponse([{ name: 'Coder', description: '' }])
+      }
+      if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/preview`) {
+        return jsonResponse({ next: [Date.UTC(2026, 11, 1, 9, 0)] })
+      }
+      return jsonResponse({}, 404)
+    })
+
+    const report = vi.fn()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSchedules space={sampleSpace} tree={sampleTree} open={vi.fn()} report={report} />
+      </QueryClientProvider>,
+    )
+
+    const sw = await screen.findByRole('switch', { name: '启用「Err Task」' })
+    fireEvent.click(sw)
+    await waitFor(() => expect(report).toHaveBeenCalledWith('工作区已变更，请检查后重试。'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '立即运行' }))
+    await waitFor(() => expect(report).toHaveBeenCalledWith('run failed'))
+
+    fireEvent.click(screen.getByRole('button', { name: '「Err Task」的执行记录' }))
+    expect(await screen.findByText('请求失败')).toBeInTheDocument()
+
+    // Delete 409 shows conflict error inside confirm modal
+    fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: '编辑定时任务' })).getByRole('button', { name: '删除任务' }))
+    const modal = await screen.findByRole('alertdialog')
+    fireEvent.click(within(modal).getByRole('button', { name: '删除任务' }))
+    expect(await within(modal).findByText('工作区已变更，请检查后重试。')).toBeInTheDocument()
+    fireEvent.click(within(modal).getByRole('button', { name: '取消' }))
+
+    // List fetch error shows unavailable
+    listFails = true
+    await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(spaceId) })
+    expect(await screen.findByText('资源不可用')).toBeInTheDocument()
   })
 })
