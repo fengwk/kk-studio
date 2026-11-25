@@ -1,5 +1,3 @@
-import { ArrowLeft } from 'lucide-react'
-import { Link, useNavigate } from 'react-router'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
@@ -10,8 +8,6 @@ import './canvas-editor.css'
 export function CanvasEditor() {
   const { state, snapshot, snapshotQuery } = useCanvasRuntime()
   const { t } = useI18n()
-  const navigate = useNavigate()
-  const openLibrary = () => navigate('/canvas')
 
   if (snapshotQuery.isError) {
     const notFound = (snapshotQuery.error as { status?: number }).status === 404
@@ -23,7 +19,6 @@ export function CanvasEditor() {
         />
         <p>{(snapshotQuery.error as Error).message}</p>
         <div className="canvas-editor-state-actions">
-          <Button variant="secondary" onClick={openLibrary}>{t('canvas.editor.backToLibrary')}</Button>
           {!notFound ? (
             <Button onClick={() => void snapshotQuery.refetch()}>{t('canvas.editor.retry')}</Button>
           ) : null}
@@ -41,27 +36,12 @@ export function CanvasEditor() {
   }
 
   return (
-    <section className="view editor-view active" id="editorView" tabIndex={-1} aria-label={t('canvas.editor.ariaLabel')}>
-      <header className="editor-header">
-        <Link
-          className="sidebar-icon-btn canvas-back-button"
-          to="/canvas"
-          title={t('canvas.editor.backToLibrary')}
-          aria-label={t('canvas.editor.backToLibrary')}
-        >
-          <ArrowLeft aria-hidden="true" />
-        </Link>
-        <div className="document-title">
-          <strong>{snapshot.document.title}</strong>
-          <span className="save-state" id="saveState" aria-live="polite">
-            {state.commandPending || state.draftPersistPending
-              ? t('canvas.editor.save.saving')
-              : state.storageError
-                ? t('canvas.editor.save.failed')
-                : t('canvas.editor.save.saved')}
-          </span>
-        </div>
-      </header>
+    <section className="view editor-view active" tabIndex={-1} aria-label={t('canvas.editor.ariaLabel')}>
+      <span className="sr-only" aria-live="polite">
+        {state.commandPending || state.draftPersistPending
+          ? t('canvas.editor.save.saving')
+          : state.storageError ? t('canvas.editor.save.failed') : t('canvas.editor.save.saved')}
+      </span>
       <CanvasStage />
     </section>
   )
