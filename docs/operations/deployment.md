@@ -343,7 +343,9 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 
 每个容器只承载一张卡片。容器入口先物化本地配置缓存与凭证：由发行归档内的冻结 Node
 调用 `daemon-config-cache.mjs`，按 `KK_STUDIO_DAEMON_ENVIRONMENT_ID`（或
-`KK_STUDIO_DAEMON_ENVIRONMENT_NAME`）从 Studio 读取卡片，必要时把 `studioUrl` 修正为
+`KK_STUDIO_DAEMON_ENVIRONMENT_NAME`）从 Studio 读取卡片。容器只用于一次性测试栈：
+通过 `e2e` profile 预置的管理员账号登录，再用返回的会话和 Studio 精确 Origin 调用卡片 API。
+会话仅留在引导进程中，不写入文件、不传给 Daemon。必要时把 `studioUrl` 修正为
 `http://app:8080`，写出 `{environmentId, version, daemonConfig}` 形式的
 `/workspace/.kk-studio/daemon.json`；注册凭证单独写入同目录的 `daemon.token`
 （目录 0700、文件 0600），随后直接启动 Daemon，并只传入

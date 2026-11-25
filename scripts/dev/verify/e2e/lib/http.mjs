@@ -1,5 +1,7 @@
 /** 共享 HTTP / 断言工具（Node 原生 fetch，无第三方依赖）。 */
 
+import { loginE2eStudio, sessionCookie } from '../../../../../deploy/reliability/e2e-studio-login.mjs'
+
 /** Java long 上界：wire 上的 canonical 版本游标只能是这个范围内的非负十进制文本。 */
 const LONG_MAX = 9223372036854775807n
 
@@ -52,15 +54,7 @@ const studioCookies = new Map()
 
 /** Authenticate the seeded E2E administrator and retain the server-issued session cookie. */
 export async function loginStudio(baseUrl, timeoutMs = 60_000) {
-  const response = await httpJson(
-    baseUrl,
-    'POST',
-    '/api/auth/login',
-    { username: 'kkstudio', password: 'kkstudio' },
-    timeoutMs,
-    { Origin: new URL(baseUrl).origin },
-  ).catch((err) => { throw new Error(`Studio login failed${err instanceof HttpError ? ` (HTTP ${err.status})` : ''}`) })
-  const cookie = sessionCookie(response.headers)
+  const cookie = await loginE2eStudio(baseUrl, timeoutMs)
   setStudioCookie(baseUrl, cookie)
   return cookie
 }
@@ -101,12 +95,6 @@ export function createHttpClient({ baseUrl, origin = new URL(baseUrl).origin }) 
       return response.json
     },
   }
-}
-
-function sessionCookie(headers) {
-  const value = headers.get('set-cookie')
-  assert(value && /;\s*HttpOnly(?:;|$)/i.test(value), 'login response did not set an HttpOnly session cookie')
-  return value.split(';', 1)[0]
 }
 
 export function httpJson(baseUrl, method, requestPath, body, timeoutMs, requestHeaders) {

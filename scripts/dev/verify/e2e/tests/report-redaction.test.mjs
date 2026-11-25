@@ -52,7 +52,7 @@ test('the real API runner redacts failures in cases, summary, markdown, error ar
     if (request.url === '/api/auth/login') {
       response.writeHead(200, {
         'Content-Type': 'application/json',
-        'Set-Cookie': 'session=fixture; HttpOnly',
+        'Set-Cookie': 'studio_session=fixture; HttpOnly',
       })
       response.end('{}')
       return
