@@ -1,0 +1,58 @@
+import { createUuid } from '@/shared/lib/uuid'
+import type { PaneTarget } from './pane-target'
+import { canSplit, needsSinglePane, paneIds, projectLayout, splitPane, type PaneState, type Rect } from './panes/model'
+
+type BindingState = PaneState<PaneTarget>
+type Unsent = (paneId: string) => boolean
+
+export function newDraft(folderId?: string): Extract<PaneTarget, { kind: 'draft' }> {
+  return { kind: 'draft', draftId: createUuid(), ...(folderId ? { folderId } : {}) }
+}
+
+export function reconcileBindings(state: BindingState, exists: (target: PaneTarget) => boolean): BindingState {
+  let bindings = state.bindings
+  for (const id of paneIds(state.layout)) {
+    const target = bindings[id]
+    if (!target || !exists(target)) bindings = { ...bindings, [id]: newDraft() }
+  }
+  return bindings === state.bindings ? state : { ...state, bindings }
+}
+
+export function sameTarget(a: PaneTarget | undefined, b: PaneTarget): boolean {
+  switch (b.kind) {
+    case 'draft': return a?.kind === b.kind && a.draftId === b.draftId
+    case 'thread': return a?.kind === b.kind && a.threadId === b.threadId
+    case 'canvas': return a?.kind === b.kind && a.canvasId === b.canvasId
+    case 'vscode': return a?.kind === b.kind && a.environmentId === b.environmentId && a.viewId === b.viewId
+  }
+}
+
+export function bindPane(state: BindingState, paneId: string, target: PaneTarget): BindingState {
+  const ids = paneIds(state.layout)
+  if (!ids.includes(paneId)) return state
+  const bindings = { ...state.bindings, [paneId]: target }
+  if (target.kind === 'thread' || target.kind === 'vscode') {
+    for (const id of ids) {
+      if (id !== paneId && sameTarget(bindings[id], target)) bindings[id] = newDraft()
+    }
+  }
+  return { ...state, focusedPaneId: paneId, bindings }
+}
+
+export function canOpenDirectly(state: BindingState, paneId: string, unsent: Unsent): boolean {
+  return state.bindings[paneId]?.kind === 'draft' && !unsent(paneId)
+}
+
+export function bindBeside(state: BindingState, sourceId: string, target: PaneTarget, unsent: Unsent,
+  bounds: Rect, fullscreen: boolean): BindingState | undefined {
+  const ids = paneIds(state.layout)
+  if (!ids.includes(sourceId)) return undefined
+  const empty = ids.find(id => id !== sourceId && canOpenDirectly(state, id, unsent))
+  if (empty) return bindPane(state, empty, target)
+  const rect = needsSinglePane(state.layout, bounds) ? undefined
+    : fullscreen ? bounds : projectLayout(state.layout, bounds).panes.get(sourceId)
+  const axis = canSplit(state.layout, 'X', rect) ? 'X' : canSplit(state.layout, 'Y', rect) ? 'Y' : undefined
+  if (!axis) return undefined
+  const next = splitPane(state, sourceId, axis)
+  return bindPane(next, next.focusedPaneId, target)
+}
