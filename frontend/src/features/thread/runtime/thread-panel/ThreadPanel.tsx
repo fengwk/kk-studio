@@ -56,7 +56,8 @@ export interface ThreadPanelComposerInput {
   disabled: boolean
   sendDisabled?: boolean
   onPartsChange: (parts: ComposerPart[]) => void
-  onHistoryPartsChange?: (parts: ComposerPart[]) => void
+  /** 上下键浏览已发送消息时的内容更新；与 `onPartsChange` 分开，宿主据此不把浏览内容当作用户编辑落盘。 */
+  onHistoryPartsChange: (parts: ComposerPart[]) => void
   /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
