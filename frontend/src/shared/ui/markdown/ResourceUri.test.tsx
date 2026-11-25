@@ -1,10 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import {
-  getSessionBlobDownloadUrl,
-  getSessionBlobPreviewUrl,
-} from '@/shared/api/resource-service'
+import { fetchSessionResource } from '@/shared/api/resource-service'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import {
   ResourceOpenInIdeContext,
@@ -14,34 +11,16 @@ import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/resource-service', () => ({
-  getSessionBlobDownloadUrl: vi.fn(),
-  getSessionBlobPreviewUrl: vi.fn(),
+  fetchSessionResource: vi.fn(),
 }))
 
 const RESOURCE_ID = '12345678-1234-1234-1234-123456789abc'
 const RESOURCE_URI = `resource://files/${RESOURCE_ID}`
 const SESSION_ID = '11111111-2222-3333-4444-555555555555'
 
-function signedUrl(
-  url: string,
-  mediaType: string | null = 'text/plain',
-  headers: Record<string, string> = {},
-) {
-  return {
-    method: 'GET' as const,
-    url,
-    headers,
-    expiresAt: 1786492800000,
-    mediaType,
-    sizeBytes: '12',
-  }
-}
-
 beforeEach(() => {
   setLocale('en-US')
-  vi.mocked(getSessionBlobDownloadUrl).mockReset()
-  vi.mocked(getSessionBlobPreviewUrl).mockReset()
-  vi.stubGlobal('fetch', vi.fn())
+  vi.mocked(fetchSessionResource).mockReset()
 })
 
 afterEach(() => {
@@ -50,11 +29,19 @@ afterEach(() => {
 })
 
 describe('resource URI markdown', () => {
-  it('renders a resource link as signed preview and download actions, never as navigation', async () => {
-    vi.mocked(getSessionBlobDownloadUrl).mockResolvedValueOnce(
-      signedUrl('https://s3.test/orig.txt', 'text/plain'),
-    )
-    vi.mocked(fetch).mockResolvedValueOnce(new Response('preview', { status: 200 }))
+  it('renders a resource link as same-origin preview and download actions, never as navigation', async () => {
+    vi.mocked(fetchSessionResource)
+      .mockResolvedValueOnce(new Blob(['preview'], { type: 'text/plain' }))
+      .mockResolvedValueOnce(new Blob(['download'], { type: 'image/png' }))
+    const createObjectURL = vi.fn(() => 'blob:resource-download')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    })
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
     render(
       <ResourceSessionContext.Provider value={SESSION_ID}>
         <MarkdownRenderer content={`[notes](${RESOURCE_URI})`} />
@@ -64,23 +51,15 @@ describe('resource URI markdown', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
     expect(await screen.findByText('preview')).toBeInTheDocument()
-    expect(getSessionBlobDownloadUrl).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID)
-    expect(getSessionBlobPreviewUrl).not.toHaveBeenCalled()
-    expect(fetch).toHaveBeenCalledWith('https://s3.test/orig.txt', {
-      method: 'GET',
-      headers: {},
-      signal: undefined,
-    })
+    expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false)
 
-    vi.mocked(getSessionBlobDownloadUrl).mockResolvedValueOnce(
-      signedUrl('https://s3.test/download.txt', 'text/plain'),
-    )
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     fireEvent.click(screen.getByRole('button', { name: 'Download' }))
     await waitFor(() => expect(clickSpy).toHaveBeenCalledOnce())
+    expect(fetchSessionResource).toHaveBeenNthCalledWith(2, SESSION_ID, RESOURCE_ID, true)
     const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement
-    expect(anchor.href).toBe('https://s3.test/download.txt')
+    expect(anchor.href).toBe('blob:resource-download')
     expect(anchor.download).toBe('notes')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:resource-download')
   })
 
   it('shows Open in IDE only when the Chat host supplies an eligible action, with pending and localized limit errors', async () => {
@@ -100,8 +79,7 @@ describe('resource URI markdown', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Opening in IDE…')
     expect(button).toBeDisabled()
     expect(open).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID)
-    expect(getSessionBlobDownloadUrl).not.toHaveBeenCalled()
-    expect(getSessionBlobPreviewUrl).not.toHaveBeenCalled()
+    expect(fetchSessionResource).not.toHaveBeenCalled()
 
     finishOpen()
     await waitFor(() => expect(button).toBeEnabled())
@@ -120,10 +98,7 @@ describe('resource URI markdown', () => {
   })
 
   it('resolves resource references embedded in tool output while preserving the URI text', async () => {
-    vi.mocked(getSessionBlobDownloadUrl).mockResolvedValueOnce(
-      signedUrl('https://s3.test/tool.txt', 'text/plain'),
-    )
-    vi.mocked(fetch).mockResolvedValueOnce(new Response('tool output', { status: 200 }))
+    vi.mocked(fetchSessionResource).mockResolvedValueOnce(new Blob(['tool output'], { type: 'text/plain' }))
     const view = render(
       <ResourceSessionContext.Provider value={SESSION_ID}>
         <ResourceUriText text={`Attached resource: ${RESOURCE_URI}, available.`} />
@@ -134,79 +109,64 @@ describe('resource URI markdown', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
     expect(await screen.findByText('tool output')).toBeInTheDocument()
-    expect(getSessionBlobDownloadUrl).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID)
+    expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false)
   })
 
-  it('signs inline image preview and falls back to signed original on error, aborting on unmount', async () => {
-    vi.mocked(getSessionBlobDownloadUrl).mockResolvedValueOnce(
-      signedUrl('https://s3.test/orig.png', 'image/png'),
-    )
-    vi.mocked(getSessionBlobPreviewUrl).mockResolvedValueOnce(
-      signedUrl('https://s3.test/preview.webp', null),
-    )
+  it('revokes an inline image object URL when its markdown is unmounted', async () => {
+    vi.mocked(fetchSessionResource).mockResolvedValueOnce(new Blob(['image'], { type: 'image/png' }))
+    const createObjectURL = vi.fn(() => 'blob:resource-preview')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    })
     const view = render(
       <ResourceSessionContext.Provider value={SESSION_ID}>
         <MarkdownRenderer content={`![diagram](${RESOURCE_URI})`} />
       </ResourceSessionContext.Provider>,
     )
 
-    const img = await screen.findByRole('img', { name: 'diagram' })
-    expect(img).toHaveAttribute('src', 'https://s3.test/preview.webp')
-    expect(getSessionBlobDownloadUrl).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, {
-      signal: expect.any(AbortSignal),
-    })
-    expect(getSessionBlobPreviewUrl).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, {
-      signal: expect.any(AbortSignal),
-    })
-
-    const signal = vi.mocked(getSessionBlobDownloadUrl).mock.calls[0]?.[2]?.signal
-    expect(signal?.aborted).toBe(false)
-
-    fireEvent.error(img)
-    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute(
-      'src',
-      'https://s3.test/orig.png',
-    )
-
+    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute('src', 'blob:resource-preview')
+    expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false, expect.any(AbortSignal))
     view.unmount()
-    expect(signal?.aborted).toBe(true)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:resource-preview')
   })
 
-  it('updates and aborts pending signing when the resource URI changes', async () => {
+  it('revokes an image URL when its resource URI changes', async () => {
     const nextResourceId = '22345678-1234-1234-1234-123456789abc'
-    vi.mocked(getSessionBlobDownloadUrl)
-      .mockResolvedValueOnce(signedUrl('https://s3.test/first.png', 'image/png'))
-      .mockResolvedValueOnce(signedUrl('https://s3.test/second.png', 'image/png'))
-    vi.mocked(getSessionBlobPreviewUrl)
-      .mockRejectedValueOnce(new Error('no preview'))
-      .mockResolvedValueOnce(signedUrl('https://s3.test/second.webp', null))
-
+    vi.mocked(fetchSessionResource)
+      .mockResolvedValueOnce(new Blob(['first'], { type: 'image/png' }))
+      .mockResolvedValueOnce(new Blob(['second'], { type: 'image/png' }))
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce('blob:first-resource')
+      .mockReturnValueOnce('blob:second-resource')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    })
     const renderImage = (resourceId: string) => (
       <ResourceSessionContext.Provider value={SESSION_ID}>
         <MarkdownRenderer content={`![diagram](resource://files/${resourceId})`} />
       </ResourceSessionContext.Provider>
     )
     const view = render(renderImage(RESOURCE_ID))
-    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute(
-      'src',
-      'https://s3.test/first.png',
-    )
+    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute('src', 'blob:first-resource')
 
     view.rerender(renderImage(nextResourceId))
-    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute(
-      'src',
-      'https://s3.test/second.webp',
-    )
-    expect(getSessionBlobDownloadUrl).toHaveBeenLastCalledWith(SESSION_ID, nextResourceId, {
-      signal: expect.any(AbortSignal),
-    })
+
+    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute('src', 'blob:second-resource')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:first-resource')
+    view.unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:second-resource')
   })
 
   it('renders unknown resource schemes as inert text', () => {
     render(<MarkdownRenderer content="[unsafe](resource:untrusted)" />)
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText(/unsafe.*Resource is unavailable/)).toBeInTheDocument()
-    expect(getSessionBlobDownloadUrl).not.toHaveBeenCalled()
-    expect(getSessionBlobPreviewUrl).not.toHaveBeenCalled()
+    expect(fetchSessionResource).not.toHaveBeenCalled()
   })
 })

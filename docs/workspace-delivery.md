@@ -24,7 +24,7 @@
 | **Harness** | Session／Entry 历史、Command、Work、模型与工具调用、审批、Join、停止及退出确认；保留现有模块边界。 | 增加按回合切点创建空闲分支、单 Thread 深删除和可达历史回收、执行事实批量读取；修复物理事务锁序。移除 `SET_AGENT` 和 `CONTROLLER_TASK`，保留 `PLUGIN_TASK`。 |
 | **模型与工具** | [Provider 协议](modules/harness-model.md)、SSE、用量计价、缓存身份、回合内冻结请求、真实重试，以及[内置工具、技能与异步委派](modules/builtin-tools.md)的执行行为。 | Anthropic 的协议能力改由适配器决定；先验证实际 wire 行为与回退，再移除可编辑字段。托管文件的工具访问接入资源授权，Daemon 文件、LSP、MCP 和插件执行机制保持。 |
 | **Catalog、设置与共享 UI** | Agent、模型、提供商、技能包、MCP、Environment、插件、系统设置 schema、配置同步与共享控件。 | 更新设置导航和权限、Agent／模型表单分段、按钮和焦点规则。新增头像及日期、时间控件。保留校验、未保存确认、同步预检与配置冲突处理。 |
-| **Web 与存储** | Spring Boot 装配、`/ws/events` 传输、上传和 Blob 生命周期。 | 更新 SPA 路由、登录及订阅授权，加入 `chat-space`；开发代理保留浏览器 Host 和 Origin。登录上传记录 userId；Session/Canvas 按持有边签发取址，保留受控 Session 代理流；Canvas BLOB 输入用上传者校验的 `uploadId`。 |
+| **Web 与存储** | Spring Boot 装配、`/ws/events` 传输、上传和 Blob 生命周期。 | 更新 SPA 路由、登录及订阅授权，加入 `chat-space`；开发代理保留浏览器 Host 和 Origin。登录上传记录 userId；Session/Canvas 按持有边签发取址，并提供受控的同源 Session 资源预览／下载流；Canvas BLOB 输入用上传者校验的 `uploadId`。 |
 
 **VS Code 视图按 `viewId` 固定 iframe 宿主。** 窗格切换、交换、全屏和隐藏只改占位与可见性，保持 iframe 在同一父节点。刷新和重连按同一个视图 ID 对账。关闭或替换窗格里的工作台时，沿用保存／不保存／取消及确认后的强制关闭；取消时不改变绑定或布局。原生事件核对来源 iframe、Origin 和视图绑定，目录、终端和附件动作不取其它窗格的环境。恢复描述继续按浏览器标签页保存；旧浮层宽度和标签选择随旧壳退出。
 
@@ -71,7 +71,7 @@
 | 保留的界面存在窄屏、样式和文案问题。 | 390px 核对 Composer 的环境与变体选择器；名称保留全称、以 CSS 省略；环境事件按代码本地化；空画布只保留一个添加入口。按[样式检查](workspace-ui.md#样式检查)收敛间距、描边和焦点。 |
 | 版本信息、构建输入和测试门禁。 | 构建时注入 Studio 版本；[本地栈](../deploy/local/compose.yaml)、[分布式栈](../deploy/distributed/compose.yaml)、[测试栈](../deploy/test/compose.yaml)按 digest 固定镜像；选定真实模型用例进入受控 CI。 |
 
-**附件隔离必须覆盖上传、持有与取址的每个入口。** `/api/platform/storage/uploads/**` 供已登录用户使用；reserve 记录 principal 的 userId，complete/delete 和引用转换只允许该上传者。服务端的 ownerless staging 仅由可信内部调用路径消费，不是用户上传授权的替代方式。Canvas BLOB 写入接收 READY `uploadId`，服务端按当前 userId 锁定上传并登记 Blob 持有边；不能以客户端 Blob ID 直接建立引用。Session 与 Canvas 的下载/预览 URL 分别走其资源坐标下的 POST `download-url` / `preview-url`，同时验证资源归属和持有边；通用 Blob ID 取址删除。旧的 Session 资源代理流保留并按 Session 归属、持有边及 ACTIVE Blob 校验。工具读取、工具结果登记和消息引用也先校验来源权限，再消费或新增持有；已授权的复制和受信上传通过各自事务登记。[资源 URI 校验器](../common/src/main/java/fun/fengwk/kkstudio/common/resource/ResourceUriValidator.java)只描述格式，不授予资源权限。双用户用例用于验证直接引用和经工具路径都不能跨用户获得新的持有边；此处描述目标契约，不代表验证已通过。
+**附件隔离必须覆盖上传、持有与取址的每个入口。** `/api/platform/storage/uploads/**` 供已登录用户使用；reserve 记录 principal 的 userId，complete/delete 和引用转换只允许该上传者。服务端的 ownerless staging 仅由可信内部调用路径消费，不是用户上传授权的替代方式。Canvas BLOB 写入接收 READY `uploadId`，服务端按当前 userId 锁定上传并登记 Blob 持有边；不能以客户端 Blob ID 直接建立引用。Session 与 Canvas 的下载/预览 URL 分别走其资源坐标下的 POST `download-url` / `preview-url`，同时验证资源归属和持有边；通用 Blob ID 取址删除。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 为 Markdown 资源链接提供同源预览与下载流，按 Session 归属、持有边及 ACTIVE Blob 校验。工具读取、工具结果登记和消息引用也先校验来源权限，再消费或新增持有；已授权的复制和受信上传通过各自事务登记。[资源 URI 校验器](../common/src/main/java/fun/fengwk/kkstudio/common/resource/ResourceUriValidator.java)只描述格式，不授予资源权限。双用户用例用于验证直接引用和经工具路径都不能跨用户获得新的持有边；此处描述目标契约，不代表验证已通过。
 
 视觉验收复查工具摘要、思考块、已答问卷、附件名称、表格和 Mermaid 复制、窄屏费用与速率、空状态和 Agent 卡片。未确认的候选以当前实现为准，确认后再修。
 

@@ -545,7 +545,7 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 
 `session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：读取 `resource://files/<uuid>` 前要求当前 Session 已持有；用户消息只能使用当前用户持有的 READY 上传，工具结果登记须通过其获准来源；这些获准写入在接受/物化事务内登记引用。图片和其他媒体结果仍保留原始 `resource://` URI；重复登记幂等，Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
 
-Session 资源取址由 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `/preview-url` 的 POST 完成；两者先校验当前 principal 对 Session 的访问权，再校验 `session_blob_ref` 持有边，任一不满足均按 404。Canvas 对应接口为 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url` 与 `/preview-url`，验证画布归属及其持有的 Blob。接口返回现有格式的短期 S3 预签名 GET URL；不提供按 Blob ID 通用取址，已签发 URL 在有效期内仍可用。旧的 Session 代理流 `GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 继续保留，也须验证 Session 授权、持有边及 ACTIVE Blob。资源 URI 被前端拦截，不能作为浏览器导航地址。
+Session 资源取址由 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `/preview-url` 的 POST 完成；两者先校验当前 principal 对 Session 的访问权，再校验 `session_blob_ref` 持有边，任一不满足均按 404。Canvas 对应接口为 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url` 与 `/preview-url`，验证画布归属及其持有的 Blob。接口返回现有格式的短期 S3 预签名 GET URL；不提供按 Blob ID 通用取址，已签发 URL 在有效期内仍可用。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 为 Markdown 资源链接提供同源预览与下载流，同样校验 Session 授权、持有边及 ACTIVE Blob。资源 URI 被前端拦截，不能作为浏览器导航地址。
 
 ## Environment
 

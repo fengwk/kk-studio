@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { request } from '@/shared/api/client'
 import {
+  fetchSessionResource,
   getSessionBlobDownloadUrl,
   getSessionBlobPreviewUrl,
   resolveSessionBlobUrls,
@@ -16,6 +17,24 @@ const apiRequest = vi.mocked(request)
 describe('resource-service', () => {
   beforeEach(() => {
     apiRequest.mockReset()
+  })
+
+  it('fetches same-origin session resource streams via the typed route', async () => {
+    const blob = new Blob(['bytes'], { type: 'text/plain' })
+    const controller = new AbortController()
+    apiRequest.mockResolvedValue(blob)
+
+    await expect(
+      fetchSessionResource('session-1', 'res-1', true, controller.signal),
+    ).resolves.toBe(blob)
+    expect(apiRequest).toHaveBeenCalledWith(
+      'GET /api/harness/sessions/{sessionId}/resources/{resourceId}',
+      {
+        path: { sessionId: 'session-1', resourceId: 'res-1' },
+        query: { download: true },
+      },
+      { signal: controller.signal },
+    )
   })
 
   it('signs session-scoped download and preview URLs with AbortSignal forwarding', async () => {

@@ -12,6 +12,23 @@ export interface SessionBlobUrls {
   sizeBytes: string | null
 }
 
+/** Fetch a session-held resource through the authenticated same-origin stream. */
+export function fetchSessionResource(
+  sessionId: string,
+  resourceId: string,
+  download = false,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  return request(
+    'GET /api/harness/sessions/{sessionId}/resources/{resourceId}',
+    {
+      path: { sessionId, resourceId },
+      query: { download },
+    },
+    { signal },
+  )
+}
+
 /** Sign the original object download URL for a session-held blob. */
 export function getSessionBlobDownloadUrl(
   sessionId: string,

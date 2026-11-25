@@ -77,7 +77,7 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Workspace | `/api/chat-spaces` | 空间、目录树、Session/Canvas 创建与空间内资源归属、重命名和删除；新 Session 的首条命令与目录登记原子接受 |
 | Harness command | `/api/harness/threads/{threadId}/command-batches` | 既有 Thread 续写，返回 202；Session 与 Thread 的创建由 Workspace 入口负责 |
 | Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、compact、yolo、stop、tool approval；不提供 Session CRUD 或 Thread 改名 |
-| Session resource | `/api/harness/sessions/{sessionId}/blobs/{blobId}`、`/api/harness/sessions/{sessionId}/resources/{resourceId}` | 按 Session 归属和持有边提供预签名取址或流式预览／下载 |
+| Session resource | `/api/harness/sessions/{sessionId}/blobs/{blobId}/{download-url,preview-url}`、`/api/harness/sessions/{sessionId}/resources/{resourceId}` | 按 Session 归属和持有边提供预签名取址，以及 Markdown 资源链接的同源流式预览／下载 |
 | Builtin | `/api/harness/builtin/...` | Model Request Debug、历史 Provider 请求重建与活动模型请求追帧 |
 | Interaction | `/api/harness/interactions`、`/api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input` | 等待分页（条目是 `INPUT`/`APPROVAL`/`ENVIRONMENT_WAIT` 判别联合，`total` 是同一过滤条件下真实可见的待处理计数）与问卷回答/拒答提交 |
 
@@ -96,7 +96,7 @@ Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platfo
 
 
 
-`POST /api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `preview-url` 分别签发短期预签名 GET URL，必须通过当前用户的 Session 归属授权和 `session_blob_ref` 持有检查，任一不满足返回 404。旧的 `GET /api/harness/sessions/{sessionId}/resources/{resourceId}?download=false` 代理流继续可用；`download=true` 强制作为附件下载。它同样检查 Session 授权、持有边与 ACTIVE Blob，其他情况返回 404；响应使用 Blob 的媒体类型，不返回对象存储地址，并设置禁止缓存与内容嗅探的安全头。Canvas 的 POST 取址在 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url|preview-url`，按 Canvas 归属和持有边授权。
+`POST /api/harness/sessions/{sessionId}/blobs/{blobId}/download-url` 与 `preview-url` 分别签发短期预签名 GET URL，必须通过当前用户的 Session 归属授权和 `session_blob_ref` 持有检查，任一不满足返回 404。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}?download=false` 为 Markdown 资源链接提供同源预览与下载流（`download=true` 强制作为附件下载）；它同样检查 Session 授权、持有边与 ACTIVE Blob，其他情况返回 404，响应使用 Blob 的媒体类型，不返回对象存储地址，并设置禁止缓存与内容嗅探的安全头。Canvas 的 POST 取址在 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url|preview-url`，按 Canvas 归属和持有边授权。
 
 Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 

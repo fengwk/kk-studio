@@ -271,7 +271,7 @@ flowchart TB
 | `GET /schedules/{id}/runs?before={cursor}` | 展开时才查；省略游标取最新五条，`before` 取下一页较早记录，返回 `{items,olderCursor}`。游标是 `(scheduledAt,id)` 的不透明表示，同一任务内严格按该组合倒序，不查总数、不用偏移量。客户端保留本次展开的页游标以返回较新页，收起后丢弃。`ScheduleRun` 含 `id, scheduledAt, startedAt, timeZone, result, reason` 和可选的 `thread:{sessionId,id,title}`；只返回当前空间可读的公开 Thread，点击时仍按统一打开流程复验。未提交的记录显示调度原因；已提交但没有可读 Thread 时不返回链接。 |
 | `GET /api/harness/interactions`（保留） | 带 `rootThreadId` 时返回该根及子执行的待处理审批和问卷；不带时按当前用户可访问的全部空间查询，管理员另含插件后台任务。条目含执行根 ID、标题、最后活动时间及来源；空间来源另带空间 ID 和名称。「待处理」按执行根合并，同根最后一项处理完才移出。 |
 
-附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url`、`preview-url` 和 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url`、`preview-url`，均为 POST。Session 取址校验当前用户对 Session 的资源访问权及 `session_blob_ref` 持有边；Canvas 取址校验 Canvas 归属与该画布对 Blob 的持有边。任一不满足均返回 404，不提供凭 Blob ID 的通用取址。接口继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。旧的 `GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 代理流保留，继续校验 Session 访问权、持有边和 Blob ACTIVE 状态。
+附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url`、`preview-url` 和 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url`、`preview-url`，均为 POST。Session 取址校验当前用户对 Session 的资源访问权及 `session_blob_ref` 持有边；Canvas 取址校验 Canvas 归属与该画布对 Blob 的持有边。任一不满足均返回 404，不提供凭 Blob ID 的通用取址。接口继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 为 Markdown 资源链接提供同源预览与下载流，校验 Session 访问权、持有边和 Blob ACTIVE 状态。
 
 用户与登录接口不在空间路径下：
 
