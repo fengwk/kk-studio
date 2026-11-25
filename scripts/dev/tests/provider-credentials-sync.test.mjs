@@ -4,6 +4,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import test from 'node:test'
 
 import { ValidationError, syncProviderSpecs } from '../lib/provider-credentials.mjs'
@@ -108,4 +109,47 @@ test('test intent: partially configured specs skip the rest and report in determ
   assert.equal(putPayload.description, 'Seeded B')
 
   assert.deepEqual(lines, ['prov-a: skip (no credential pair)', 'prov-b: configured=True baseUrl_set=True'])
+})
+
+test('the real synchronizer uses the Studio session and does not resend credentials on redirect', async t => {
+  const calls = []
+  let redirect = false
+  const server = createServer(async (request, response) => {
+    let content = ''
+    for await (const chunk of request) content += chunk
+    calls.push({ method: request.method, path: request.url, headers: request.headers, content })
+    response.setHeader('Content-Type', 'application/json')
+    if (request.url === '/api/auth/login') {
+      response.setHeader('Set-Cookie', 'studio_session=fixture; Path=/; HttpOnly')
+      return response.end('{}')
+    }
+    if (request.url === '/api/platform/providers') {
+      return response.end(JSON.stringify([{ name: SPEC_A.name, providerType: SPEC_A.providerType, version: '7' }]))
+    }
+    if (request.url === `/api/platform/providers/${SPEC_A.name}`) {
+      if (redirect) {
+        response.writeHead(307, { Location: '/unexpected' })
+        return response.end('opaqueFixture')
+      }
+      return response.end(JSON.stringify({ baseUrl: 'https://api.a.example/v1', credential: { configured: true } }))
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  const inputs = { TEST_A_BASE_URL: 'https://api.a.example', TEST_A_API_KEY: 'opaqueFixture' }
+  assert.deepEqual(await syncProviderSpecs(origin, [SPEC_A], inputs), ['prov-a: configured=True baseUrl_set=True'])
+  assert.deepEqual(calls.map(call => `${call.method} ${call.path}`), [
+    'POST /api/auth/login', 'GET /api/platform/providers', 'PUT /api/platform/providers/prov-a',
+  ])
+  assert.ok(calls.every(call => call.headers.origin === origin))
+  assert.ok(calls.slice(1).every(call => call.headers.cookie === 'studio_session=fixture'))
+  assert.equal(JSON.parse(calls[2].content).expectedVersion, '7')
+  assert.deepEqual(JSON.parse(calls[2].content).credential, { operation: 'SET', value: 'opaqueFixture' })
+
+  calls.length = 0
+  redirect = true
+  await assert.rejects(syncProviderSpecs(origin, [SPEC_A], inputs), { message: 'Failed to update provider prov-a (HTTP 307)' })
+  assert.deepEqual(calls.map(call => call.path), ['/api/auth/login', '/api/platform/providers', '/api/platform/providers/prov-a'])
 })

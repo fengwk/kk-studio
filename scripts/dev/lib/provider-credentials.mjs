@@ -10,6 +10,7 @@
  * to the parsed JSON response (GET without a body, PUT with one), so tests never need a server.
  */
 
+import { loginE2eStudio } from '../../../deploy/reliability/e2e-studio-login.mjs'
 import { isValidPort, splitUrl } from './url-split.mjs'
 
 export const DEFAULT_MODEL_CALL_TIMEOUT_MILLIS = '1800000'
@@ -87,22 +88,29 @@ export function normalizeBaseUrl(baseUrlRaw, requiresV1Suffix, envName = '', pro
   return trimmed
 }
 
-/** Default HTTP helper: GET without a body, PUT with one; resolves to the parsed JSON body. */
-async function defaultRequest(url, { body, headers = {}, timeoutMillis = 30000 } = {}) {
-  const response = await fetch(url, {
-    method: body === undefined ? 'GET' : 'PUT',
-    headers,
-    body,
-    signal: AbortSignal.timeout(timeoutMillis),
-  })
-  if (!response.ok) {
-    throw new HttpError(response.status)
+/** Use one disposable Studio session per sync. Never redirect a credential update. */
+function studioRequest(backendUrl) {
+  const origin = new URL(backendUrl).origin
+  let cookie
+  return async (url, { body, headers = {} } = {}) => {
+    cookie ??= await loginE2eStudio(origin)
+    const response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'PUT',
+      headers: { ...headers, Cookie: cookie, Origin: origin },
+      body,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      throw new HttpError(response.status)
+    }
+    return response.status === 204 ? null : response.json()
   }
-  return response.status === 204 ? null : response.json()
 }
 
 /** Fetch existing providers from the backend. */
-export async function getProviders(backendUrl, request = defaultRequest) {
+export async function getProviders(backendUrl, request) {
   const base = backendUrl.replace(/\/+$/, '')
   try {
     return await request(`${base}/api/platform/providers`)
@@ -117,7 +125,7 @@ function quoteAll(value) {
 }
 
 /** Update a single provider on the backend with URL-encoded provider path. */
-export async function putProvider(backendUrl, providerName, payload, request = defaultRequest) {
+export async function putProvider(backendUrl, providerName, payload, request) {
   const base = backendUrl.replace(/\/+$/, '')
   try {
     return await request(`${base}/api/platform/providers/${quoteAll(providerName)}`, {
@@ -134,7 +142,6 @@ export async function putProvider(backendUrl, providerName, payload, request = d
 
 /** Construct provider update payload while preserving current metadata and timeouts. */
 export function buildPayload(baseUrl, apiKey, current, spec = null) {
-  const providerType = spec !== null ? spec.providerType : current.providerType || 'openai_responses'
   const description = current.description || (spec !== null ? spec.defaultDescription : '')
   return {
     description,
@@ -150,7 +157,7 @@ export function buildPayload(baseUrl, apiKey, current, spec = null) {
 const flag = (value) => (value ? 'True' : 'False')
 
 /** Synchronize a fixed provider-spec set from an explicit environment snapshot. */
-export async function syncProviderSpecs(backendUrl, specs, envValues, request = defaultRequest) {
+export async function syncProviderSpecs(backendUrl, specs, envValues, request) {
   const base = backendUrl.replace(/\/+$/, '')
 
   // Step 1: Pre-HTTP validation of pairs and URL formats across all specs
@@ -176,8 +183,9 @@ export async function syncProviderSpecs(backendUrl, specs, envValues, request = 
     return specs.map((spec) => `${spec.name}: skip (no credential pair)`)
   }
 
-  // Step 3: Fetch existing providers once
-  const listed = await getProviders(base, request)
+  // Step 3: Authenticate and fetch existing providers once, after local validation.
+  const studio = request ?? studioRequest(base)
+  const listed = await getProviders(base, studio)
   const rows = Array.isArray(listed) ? listed : []
   const rowMap = new Map(
     rows.filter((row) => row !== null && typeof row === 'object' && 'name' in row).map((row) => [row.name, row]),
@@ -204,7 +212,7 @@ export async function syncProviderSpecs(backendUrl, specs, envValues, request = 
   // Step 5: Execute PUT requests
   const results = new Map()
   for (const [spec, payload] of validations) {
-    const body = await putProvider(base, spec.name, payload, request)
+    const body = await putProvider(base, spec.name, payload, studio)
     results.set(spec.name, `${spec.name}: configured=${flag(body?.credential?.configured)} baseUrl_set=${flag(body?.baseUrl)}`)
   }
 
