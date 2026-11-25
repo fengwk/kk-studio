@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IDE Pane Browser Harness</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; }
+      .ide-harness { display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100%; }
+      .ide-harness-stage { min-height: 0; }
+      .ide-harness-sidebar { display: flex; flex-direction: column; justify-content: flex-end; border-right: 1px solid var(--border); background: var(--surface); }
+      .ide-harness-controls { display: flex; flex-wrap: wrap; }
+      @media (max-width: 760px) {
+        .ide-harness { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+        .ide-harness-sidebar { grid-row: 2; border-top: 1px solid var(--border); border-right: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./ide-pane-harness.tsx"></script>
+  </body>
+</html>
