@@ -47,7 +47,7 @@ describe('AiResourceForms', () => {
     await user.type(screen.getByPlaceholderText('用途说明'), 'provider desc')
     await selectFormOption(user, '提供商类型', 'anthropic')
     await user.type(
-      screen.getByPlaceholderText('https://api.example.com/v1'),
+      screen.getByPlaceholderText('https://api.example.invalid/v1'),
       'https://proxy.example/v1',
     )
     await user.type(screen.getByPlaceholderText('可留空'), 'secret')
@@ -67,7 +67,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('secret')).toHaveAttribute('autocomplete', 'off')
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
-    expect(screen.getByText('留空会以无 Authorization 方式请求 OpenAI-compatible 端点。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^帮助：.*API Key/ })).toBeInTheDocument()
   })
 
   it('uses backend cache options while preserving a stored retention until the user changes it', async () => {
@@ -382,7 +382,7 @@ describe('AiResourceForms', () => {
   it('explains that an empty edit credential preserves the existing secret without echoing it', () => {
     const { container } = render(<ProviderFormHarness mode="edit" />)
 
-    expect(screen.getByText('留空会保留已配置的 API Key；密钥不会回显。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^帮助：.*API Key/ })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('留空保留当前密钥')).toHaveValue('')
     expect(screen.getByPlaceholderText('minimax')).toHaveAttribute('readonly')
     // ProviderUpdateDTO 没有 providerType：编辑模式只读显示，创建后不可改协议。
@@ -542,7 +542,7 @@ describe('AiResourceForms', () => {
     },
   )
 
-  it('keeps default variant aligned and disables reasoning effort when reasoning is disabled', async () => {
+  it('keeps default variant aligned and hides reasoning effort when reasoning is disabled', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
@@ -559,10 +559,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('默认预设')).toHaveAttribute('data-value', 'medium')
 
     await user.click(screen.getByLabelText('推理'))
-    expect(screen.getByLabelText('思考强度 1')).toBeDisabled()
-    expect(
-      screen.getByText(/推理当前已关闭；若需配置思考强度，请勾选上方的「推理」。/),
-    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('思考强度 1')).not.toBeInTheDocument()
   })
 
   it('keeps at least one input modality and toggles IMAGE alongside TEXT', async () => {
@@ -585,22 +582,18 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('IMAGE')).not.toBeChecked()
   })
 
-  /** 空思考强度表示不覆盖协议默认：开启/重新开启 Reasoning 都不得自动补全。 */
-  it('keeps an empty reasoning effort as the protocol default and restores effort inputs on re-enable', async () => {
+  /** Empty effort remains the protocol default; the field is rendered only while reasoning is enabled. */
+  it('keeps an empty reasoning effort as the protocol default and hides effort while reasoning is off', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
     // 新增 variant 的思考强度默认为空（协议默认），且提示文案说明空值语义
     await user.click(screen.getByRole('button', { name: '添加预设' }))
     expect(screen.getByLabelText('思考强度 2')).toHaveValue('')
-    expect(
-      screen.getByText(/留空使用提供商协议的默认值；off 表示显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。/),
-    ).toBeInTheDocument()
 
     await user.click(screen.getByLabelText('推理'))
-    expect(screen.getByLabelText('思考强度 1')).toBeDisabled()
-    expect(screen.getByLabelText('思考强度 2')).toBeDisabled()
-    expect(screen.getByText(/推理当前已关闭；若需配置思考强度，请勾选上方的「推理」。/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('思考强度 1')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('思考强度 2')).not.toBeInTheDocument()
 
     // 重新开启后仍然是空值，不得被 variant id / medium 补全
     await user.click(screen.getByLabelText('推理'))
@@ -623,7 +616,7 @@ describe('AiResourceForms', () => {
 
     // 禁用 Reasoning
     await user.click(screen.getByLabelText('推理'))
-    expect(screen.getByLabelText('思考强度 1')).toBeDisabled()
+    expect(screen.queryByLabelText('思考强度 1')).not.toBeInTheDocument()
 
     // protocolOptions 依然可用且保留已编辑的值
     expect(screen.getByLabelText('原生协议选项 1')).toBeInTheDocument()
@@ -638,7 +631,7 @@ describe('AiResourceForms', () => {
     expect(protocolInput2).toHaveValue('{\n  "top_p": 0.9\n}')
   })
 
-  it('defaults reasoning to false on new model creation and marks new variant effort as disabled', async () => {
+  it('defaults reasoning to false on new model creation and hides effort for new variants', async () => {
     const user = userEvent.setup()
     function DefaultNewModelHarness() {
       const [draft, setDraft] = useState<ModelDraft>(emptyModelDraft({ name: 'minimax' }))
@@ -670,15 +663,9 @@ describe('AiResourceForms', () => {
 
     // 新建时默认 reasoning 为 false
     expect(screen.getByLabelText('推理')).not.toBeChecked()
-    const effort1 = screen.getByLabelText('思考强度 1')
-    expect(effort1).toBeInTheDocument()
-    expect(effort1).toBeDisabled()
-
-    // 新增 variant 同样始终渲染且为 disabled
+    expect(screen.queryByLabelText('思考强度 1')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '添加预设' }))
-    const effort2 = screen.getByLabelText('思考强度 2')
-    expect(effort2).toBeInTheDocument()
-    expect(effort2).toBeDisabled()
+    expect(screen.queryByLabelText('思考强度 2')).not.toBeInTheDocument()
   })
 
   it('preserves pre-filled reasoningEffort when toggled off and restores when toggled on', async () => {
@@ -689,83 +676,26 @@ describe('AiResourceForms', () => {
     await user.type(effort1, 'high')
     expect(effort1).toHaveValue('high')
 
-    // 关闭 Reasoning：输入框置灰，但草稿值依然保留
+    // 隐藏字段不删除草稿。
     await user.click(screen.getByLabelText('推理'))
     expect(screen.getByLabelText('推理')).not.toBeChecked()
-    expect(effort1).toBeDisabled()
-    expect(effort1).toHaveValue('high')
+    expect(screen.queryByLabelText('思考强度 1')).not.toBeInTheDocument()
 
     // 重新开启 Reasoning：输入框激活，草稿值完整恢复
     await user.click(screen.getByLabelText('推理'))
     expect(screen.getByLabelText('推理')).toBeChecked()
-    expect(effort1).toBeEnabled()
-    expect(effort1).toHaveValue('high')
+    expect(screen.getByLabelText('思考强度 1')).toHaveValue('high')
   })
 
-  it('binds aria-describedby to the disabled reason in both zh-CN and en-US', async () => {
-    const user = userEvent.setup()
-
-    // 1. 中文测试
-    act(() => setLocale('zh-CN'))
-    const { unmount } = render(<ModelFormHarness />)
-    const reasoningCheckbox = screen.getByLabelText('推理')
-    await user.click(reasoningCheckbox) // 关闭 Reasoning
-
-    const zhEffort = screen.getByLabelText('思考强度 1')
-    expect(zhEffort).toBeDisabled()
-    const hintId = zhEffort.getAttribute('aria-describedby')
-    expect(hintId).toBeTruthy()
-    const hintElement = document.getElementById(hintId!)
-    expect(hintElement).not.toBeNull()
-    expect(hintElement?.textContent).toContain('推理当前已关闭')
-    expect(hintElement?.textContent).toContain('勾选上方的「推理」')
-
-    // 重新开启后，不设置 aria-describedby 到关闭提示
-    await user.click(reasoningCheckbox)
-    expect(zhEffort).toBeEnabled()
-    expect(zhEffort).not.toHaveAttribute('aria-describedby')
-    unmount()
-
-    // 2. 英文测试
-    act(() => setLocale('en-US'))
+  it.each([
+    ['zh-CN', '思考强度 1', '使用模型默认', '帮助：思考强度'],
+    ['en-US', 'Reasoning Effort 1', 'Use model default', 'Help: Reasoning Effort'],
+  ] as const)('localizes effort placeholder and help in %s', (locale, input, placeholder, help) => {
+    act(() => setLocale(locale))
     render(<ModelFormHarness />)
-    const enReasoningCheckbox = screen.getByLabelText('Reasoning')
-    await user.click(enReasoningCheckbox) // 关闭 Reasoning
-
-    const enEffort = screen.getByLabelText('Reasoning Effort 1')
-    expect(enEffort).toBeDisabled()
-    const enHintId = enEffort.getAttribute('aria-describedby')
-    expect(enHintId).toBeTruthy()
-    const enHintElement = document.getElementById(enHintId!)
-    expect(enHintElement).not.toBeNull()
-    expect(enHintElement?.textContent).toContain('Reasoning is disabled')
-    expect(enHintElement?.textContent).toContain('check Reasoning above to enable')
-
+    expect(screen.getByLabelText(input)).toHaveAttribute('placeholder', placeholder)
+    expect(screen.getByRole('button', { name: help })).toBeInTheDocument()
     act(() => setLocale('zh-CN'))
-  })
-
-  /** 同屏表单必须分别关联自己的提示，不能复用固定 DOM id。 */
-  it('uses separate disabled-reason hint ids when two model forms are mounted', async () => {
-    const user = userEvent.setup()
-    render(
-      <>
-        <ModelFormHarness />
-        <ModelFormHarness />
-      </>,
-    )
-
-    for (const checkbox of screen.getAllByLabelText('推理')) {
-      await user.click(checkbox)
-    }
-    const efforts = screen.getAllByLabelText('思考强度 1')
-    const hintIds = efforts.map((effort) => effort.getAttribute('aria-describedby'))
-    expect(new Set(hintIds).size).toBe(2)
-    for (const effort of efforts) {
-      expect(effort).toBeDisabled()
-      const hintId = effort.getAttribute('aria-describedby')
-      expect(hintId).toBeTruthy()
-      expect(document.getElementById(hintId!)?.textContent).toContain('推理当前已关闭')
-    }
   })
 
   it('sanitizes integer limits and decimal pricing while editing', async () => {
@@ -951,7 +881,6 @@ describe('AiResourceForms', () => {
     await selectFormOption(user, '默认模型', 'Claude-Sonnet-4.5')
     expect(screen.getByLabelText('模型预设覆盖')).toHaveAttribute('data-value', '')
     // 能力区默认收起：先展开 Tools 面板再确认空目录文案。
-    await user.click(screen.getByText('管理工具'))
     expect(screen.getByText('目录还没有工具')).toBeInTheDocument()
   })
 

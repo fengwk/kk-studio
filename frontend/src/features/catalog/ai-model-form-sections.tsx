@@ -5,7 +5,7 @@ import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldError } from '@/shared/ui/controls/FieldError'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { joinDescribedBy, useFieldErrorId } from '@/shared/ui/controls/field-error'
+import { useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { useI18n } from '@/shared/i18n'
 import type { ModelInputModality } from '@/shared/api/generated/contracts'
 import { MODEL_INPUT_MODALITY_VALUES } from '@/shared/api/generated/contracts'
@@ -51,26 +51,23 @@ export function ModelLimitFields({
           ) : null}
         </div>
         <div className={`form-group${fieldErrors.inputLimit ? ' is-error' : ''}`}>
-          <FieldLabel htmlFor={inputLimitId}>{t('ai.catalog.form.inputLimit')}</FieldLabel>
+          <FieldLabel htmlFor={inputLimitId} help={t('ai.catalog.form.inputLimitHelp')}>{t('ai.catalog.form.inputLimit')}</FieldLabel>
           <NumberInput
             id={inputLimitId}
             value={draft.inputLimit}
             min={1}
-            placeholder="272000"
+            placeholder={t('ai.catalog.form.inputLimitPlaceholder')}
             onChange={(inputLimit) => onChange({ ...draft, inputLimit })}
             aria-label={t('ai.catalog.form.inputLimit')}
-            aria-describedby={joinDescribedBy('model-input-limit-hint', inputLimitErrorId)}
+            aria-describedby={inputLimitErrorId}
             invalid={Boolean(fieldErrors.inputLimit)}
           />
-          <span id="model-input-limit-hint" className="inline-hint">
-            {t('ai.catalog.form.inputLimitHint')}
-          </span>
           {fieldErrors.inputLimit ? (
             <FieldError id={inputLimitErrorId}>{fieldErrors.inputLimit}</FieldError>
           ) : null}
         </div>
         <div className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
-          <FieldLabel required htmlFor={maxOutputTokensId}>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
+          <FieldLabel required htmlFor={maxOutputTokensId} help={t('ai.catalog.form.maxOutputLimitHint')}>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
           <NumberInput
             id={maxOutputTokensId}
             value={draft.maxOutputTokens}
@@ -81,7 +78,6 @@ export function ModelLimitFields({
             aria-describedby={maxOutputTokensErrorId}
             invalid={Boolean(fieldErrors.maxOutputTokens)}
           />
-          <span className="inline-hint">{t('ai.catalog.form.maxOutputLimitHint')}</span>
           {fieldErrors.maxOutputTokens ? (
             <FieldError id={maxOutputTokensErrorId}>{fieldErrors.maxOutputTokens}</FieldError>
           ) : null}
@@ -144,26 +140,20 @@ export function ModelInputModalityField({
   onChange: (draft: ModelDraft) => void
 }) {
   const { t } = useI18n()
+  const headingId = useId()
   const errorId = useFieldErrorId(error)
   function toggle(value: ModelInputModality) {
     onChange({ ...draft, inputModalities: toggleInputModality(draft.inputModalities, value) })
   }
   return (
-    <fieldset
-      className={`form-group capability-picker${error ? ' is-error' : ''}`}
-      aria-describedby={errorId}
-    >
-      <legend>
-        <FieldLabel required>{t('ai.catalog.form.inputTypes')}</FieldLabel>
-      </legend>
-      <p className="inline-hint">{t('ai.catalog.form.inputModalityHint')}</p>
-      <div className="capability-options">
+    <section className={`structured-section${error ? ' is-error' : ''}`} role="group" aria-labelledby={headingId} aria-describedby={errorId}>
+      <div className="structured-section-head"><h3 id={headingId}>{t('ai.catalog.form.inputTypes')}</h3></div>
+      <div className="ability-toggle-row">
         {MODEL_INPUT_MODALITY_VALUES.map((item) => {
           const checked = draft.inputModalities.includes(item)
           return (
             <Checkbox
               key={item}
-              className={`capability-option${checked ? ' is-selected' : ''}`}
               checked={checked}
               onChange={() => toggle(item)}
             >
@@ -173,6 +163,6 @@ export function ModelInputModalityField({
         })}
       </div>
       {error ? <FieldError id={errorId}>{error}</FieldError> : null}
-    </fieldset>
+    </section>
   )
 }

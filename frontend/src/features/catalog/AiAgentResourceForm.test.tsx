@@ -18,8 +18,8 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /** 能力区默认收起：先展开对应面板再操作候选。 */
-async function openCapabilityPanel(user: ReturnType<typeof userEvent.setup>, summary: string) {
-  await user.click(screen.getByText(summary))
+async function openCapabilityPanel(_user: ReturnType<typeof userEvent.setup>, _summary: string) {
+  // 能力候选面板默认展开，无需点击标题。
 }
 
 /** 以 legend 前缀定位单个能力面板，避免三个面板的提示互相串味。 */
@@ -88,8 +88,7 @@ function agent(name: string, description: string | null): AgentDTO {
 }
 
 describe('AgentForm current contracts', () => {
-  it('shows an unknown driver without model prompts and preserves its settings through edits', async () => {
-    const user = userEvent.setup()
+  it('preserves an unknown driver through edits without showing model prompts', () => {
     const execution = { driver: 'future', settings: { nested: { token: 'opaque' } } }
     let latest: AgentDraft = { ...emptyAgentDraft(), name: 'assistant', execution }
     function Harness() {
@@ -101,15 +100,12 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
     // 非内置执行配置不应暴露模型校验或重置入口；普通编辑不改变不透明配置。
-    expect(screen.getByLabelText('执行驱动')).toHaveTextContent('future')
+    expect(screen.queryByLabelText('执行驱动')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('默认模型')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '使用第一个模型' })).not.toBeInTheDocument()
-    await chooseSelectOption(user, '执行驱动', 'future (不可用)')
     fireEvent.change(screen.getByPlaceholderText('用途说明'), { target: { value: 'edited' } })
     expect(toEditableAgentUpdate(latest).execution).toEqual(execution)
-    await chooseSelectOption(user, '执行驱动', 'builtin')
-    expect(screen.getByLabelText('默认模型')).toBeInTheDocument()
-    expect(latest.execution).toBeNull()
+    expect(latest.execution).toEqual(execution)
   })
 
   it('does not ask for a model when an unknown driver is configured and the catalog is empty', () => {

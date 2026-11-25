@@ -100,7 +100,7 @@ describe('Catalog 表单字段错误的可访问关联', () => {
     expect(screen.getByRole('textbox', { name: '名称' })).toBe(nameInput)
     expect(screen.getByText('请填写名称').closest('label')).toBeNull()
 
-    const baseUrlInput = screen.getByPlaceholderText('https://api.example.com/v1')
+    const baseUrlInput = screen.getByPlaceholderText('https://api.example.invalid/v1')
     expect(baseUrlInput).toHaveAttribute('aria-invalid', 'true')
     expect(describedByText(baseUrlInput)).toEqual(['请填写基础 URL'])
     expect(screen.getByRole('textbox', { name: '基础 URL' })).toBe(baseUrlInput)
@@ -147,10 +147,7 @@ describe('Catalog 表单字段错误的可访问关联', () => {
     // 已有关联说明的字段要把说明与错误一起交给 aria-describedby。
     const inputLimit = screen.getByLabelText('输入上限')
     expect(inputLimit).toHaveAttribute('aria-invalid', 'true')
-    expect(describedByText(inputLimit)).toEqual([
-      '可选的每次请求输入 token 上限；留空表示仅受上下文窗口约束。',
-      '输入上限无效',
-    ])
+    expect(describedByText(inputLimit)).toEqual(['输入上限无效'])
 
     const defaultVariant = screen.getByLabelText('默认预设')
     expect(defaultVariant).toHaveAttribute('aria-invalid', 'true')

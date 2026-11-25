@@ -17,7 +17,6 @@ import {
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { applyAgentModelSelection } from '@/features/catalog/ai-draft-normalizers'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
-import { Select } from '@/shared/ui/controls/Select'
 import { ModelSelectionPicker } from '@/shared/ui/controls/ModelSelectionPicker'
 import { joinDescribedBy, useFieldErrorId } from '@/shared/ui/controls/field-error'
 import { useI18n } from '@/shared/i18n'
@@ -100,24 +99,6 @@ export function AgentForm({
       </CatalogEditorSection>
 
       <CatalogEditorSection name="execution">
-        <label className="form-group">
-          <FieldLabel required>{t('ai.catalog.form.executionDriver')}</FieldLabel>
-          <Select
-            aria-label={t('ai.catalog.form.executionDriver')}
-            value={driver}
-            options={[
-              ...(driver !== 'builtin'
-                ? [{ value: driver, label: `${driver} (${t('ai.catalog.form.unavailable')})` }]
-                : []),
-              { value: 'builtin', label: 'builtin' },
-            ]}
-            onChange={(value) => {
-              if (value === 'builtin' && driver !== 'builtin') {
-                onChange({ ...draft, execution: null, model: '', variant: '' })
-              }
-            }}
-          />
-        </label>
         {driver === 'builtin' ? (
           <>
             <div className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>

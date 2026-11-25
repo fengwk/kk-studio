@@ -410,11 +410,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await dialog.getByLabel('名称', { exact: true }).fill('new-model')
     await dialog.getByLabel('模型 ID', { exact: true }).fill('acme-new-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
-    const advancedOptions = dialog.locator('.advanced-options').first()
-    await expect(advancedOptions).not.toHaveAttribute('open', '')
-    await expect(advancedOptions.getByLabel('原生协议选项 1', { exact: true })).not.toBeVisible()
-    await advancedOptions.locator('summary').click()
-    await expect(advancedOptions.getByLabel('原生协议选项 1', { exact: true })).toBeVisible()
+    await expect(dialog.getByRole('textbox', { name: '原生协议选项 1', exact: true })).toBeVisible()
 
     const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
     const inputPrice = baseRateInput(pricing, 'input')
@@ -713,6 +709,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
 
         await page.locator('.create-card').click()
         const dialog = page.getByRole('dialog')
+        await dialog.locator('label.ui-checkbox').filter({ hasText: new RegExp(`^${copy.fields.reasoning.name}$`) }).click()
         for (const field of Object.values(copy.fields)) {
           await expect(dialog.getByRole(field.role, { name: field.name, exact: true })).toHaveCount(1)
         }
@@ -721,8 +718,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
             dialog.getByRole(stale.role, { name: stale.name, exact: true }),
           ).toHaveCount(0)
         }
-        // 折叠在 <details> 内的字段不在可访问性树里，按 aria-label 精确断言。
-        await expect(dialog.locator(`[aria-label="${copy.protocolOptions}"]`)).toHaveCount(1)
+        await expect(dialog.getByRole('textbox', { name: copy.protocolOptions, exact: true })).toBeVisible()
         await expect(dialog.locator(`[aria-label="${staleCopy.protocolOptions}"]`))
           .toHaveCount(0)
         const presetsSection = page.locator('.structured-section')
@@ -730,7 +726,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         await expect(
           presetsSection.getByRole('heading', { name: copy.presetsHeading, exact: true }),
         ).toHaveCount(1)
-        await expect(presetsSection).toContainText(copy.variantHint)
+        await expect(presetsSection).not.toContainText(copy.variantHint)
 
         await dialog.getByRole('tab', { name: item.groupTab, exact: true }).click()
         await expect(dialog).toHaveAccessibleName(item.title)

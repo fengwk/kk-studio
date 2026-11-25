@@ -157,7 +157,6 @@ export function ModelForm({
             placeholder="MiniMax-M2.7"
             required
           />
-          <span className="inline-hint">{t('ai.catalog.form.nameHint')}</span>
           {fieldErrors.name ? <FieldError id={nameErrorId}>{fieldErrors.name}</FieldError> : null}
         </div>
 
@@ -174,7 +173,6 @@ export function ModelForm({
             list={mode === 'create' ? 'model-remote-ids' : undefined}
             required
           />
-          <span className="inline-hint">{t('ai.catalog.form.modelIdHint')}</span>
           {mode === 'create' ? (
             <RemoteModelIdPicker
               listId="model-remote-ids"
@@ -234,6 +232,7 @@ export function ModelForm({
             aria-invalid={Boolean(fieldErrors.defaultVariant)}
             value={defaultVariant}
             options={variantOptions.map((name) => ({ value: name, label: name }))}
+            required
             onChange={(variant) => onChange({ ...draft, defaultVariant: variant })}
           />
           {fieldErrors.defaultVariant ? (

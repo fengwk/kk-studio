@@ -174,14 +174,14 @@ describe('AI resource cards', () => {
       />,
     )
 
-    // 标签行保留 label；tag limit 沿用 2，第 3 个折叠为 +1。
+    // 子 Agent 标签沿用两项上限，第 3 项折叠为 +1。
     expect(screen.getByText('子 Agent')).toBeInTheDocument()
     expect(screen.getByText('helper')).toBeInTheDocument()
     expect(screen.getByText('writer')).toBeInTheDocument()
     expect(screen.queryByText('architect')).not.toBeInTheDocument()
     expect(screen.getByText('+1')).toBeInTheDocument()
 
-    // 空 subagents 行保留 label，右侧留空。
+    // 空 subagents 行保留标签，右侧为空。
     rerender(
       <AgentResourceCard
         agent={agent({
@@ -193,7 +193,8 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('子 Agent')).toBeInTheDocument()
+    expect(screen.queryByText('子 Agent')).not.toBeInTheDocument()
+    expect(screen.queryByText('helper')).not.toBeInTheDocument()
     expect(screen.queryByText('+1')).not.toBeInTheDocument()
   })
 
