@@ -12,7 +12,9 @@ export const COMPOSER_DRAFT_STORAGE_PREFIX = 'kk-studio.composer-draft:'
 export const UI_LABELS = {
   composerInput: /^(?:Send a message to AI|给 AI 发送消息)$/,
   sendButton: /^(?:Send message|发送消息)$/,
+  openCommandsButton: /^(?:Open commands|打开命令表)$/,
   commandPalette: /^(?:Command palette|命令表)$/,
+  attachmentStrip: /^(?:Attachments|附件)$/,
   permissionButton: /^(?:Permission mode|权限模式)$/,
   permissionOptions: /^(?:Permission options|权限选项)$/,
   permissionDefault: /^(?:Default|默认)$/,
@@ -23,15 +25,30 @@ export const UI_LABELS = {
   modelButton: /^(?:Model and Variant|模型与预设|Model & Variant|Model 与 Variant)$/,
   modelOptions: /^(?:Model options|模型选项)$/,
   variantOptions: /^(?:Variant options|预设选项)$/,
+  eventsTab: /^(?:Events|事件)$/,
+  eventDetailsHeading: /^(?:Event details|事件详情)$/,
   closeDebugButton: /^(?:Close Debug|关闭 Debug)$/,
   backToParentButton: /^(?:Back|返回)$/,
   splitRightButton: /^(?:Split right|向右拆分)$/,
   threadStatusFooter: /^(?:Thread status|Thread 状态)$/,
+  threadToolProposedChanges: /^(?:Proposed changes|拟修改内容)$/,
+  allowButton: /^(?:Allow|允许)$/,
+  denyButton: /^(?:Deny|拒绝)$/,
   settingsRouteAiRuntime: /^(?:AI Runtime|AI 运行时)$/,
+  settingsBaseDelayLabel: /^(?:Base delay \(ms\)|基础延迟（毫秒）)$/,
   settingsSave: /^(?:Save|保存)$/,
-  settingsConflictDialog: /^(?:Configuration conflict|配置冲突|Settings conflict|设置冲突|Conflict|冲突)$/,
-  settingsReloadLatest: /^(?:Reload latest|刷新最新)$/,
+  settingsAllSaved: /^(?:All changes saved|所有更改已保存)$/,
+  settingsConflictDialog: /^(?:The data has changed|数据已发生变化)$/,
+  settingsReloadLatest: /^(?:Refresh|刷新)$/,
   notificationSwitch: /^(?:Browser notifications|浏览器通知)$/,
+}
+
+export function previewDialogLabel(name) {
+  return new RegExp(`^(?:Preview |预览 )${escapeRegExp(name)}$`)
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export function composerDraftStorageKey(scope) {

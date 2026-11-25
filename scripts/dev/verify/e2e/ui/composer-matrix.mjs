@@ -12,15 +12,25 @@ import {
   sleep,
 } from '../lib/http.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
-import { assertReadOnlyZeroFooter } from './assertions.mjs'
 import { clearChatPaneState } from './chat-pane-storage.mjs'
 import { runWorkspaceContractMatrix, waitForThreadSnapshot } from './workspace-contracts.mjs'
+export { expectStorage } from './workspace-helpers.mjs'
 import {
+  activeOptionText,
+  bindBlankComposer as bindWorkspaceBlankComposer,
   bindThreadComposer as bindWorkspaceThreadComposer,
+  caretOffset,
   cleanupWorkspaceFixtureState,
+  composerMetrics,
   expectComposerText as expectWorkspaceComposerText,
   expectStorage as expectWorkspaceStorage,
+  previewDialogLabel,
+  resolveCatalogTarget as resolveWorkspaceCatalogTarget,
+  setCaretOffset,
+  UI_LABELS,
   waitForActiveModel as waitForWorkspaceActiveModel,
+  waitForComposer as waitForWorkspaceComposer,
+  waitForPlaceholder as waitForWorkspacePlaceholder,
   waitForQueuedMessages as waitForWorkspaceQueuedMessages,
   withUiFixture as withWorkspaceUiFixture,
 } from './workspace-helpers.mjs'
@@ -134,30 +144,31 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.duplicate_entries',
+    'ui.workspace.composer.duplicate_entries',
     'Composer 对相同文本的 durable/queued 条目仍保持独立游标',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const duplicate = `duplicate message ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createHoldingQueueFixture(apiCtx, {
+        () => createWorkspaceHoldingQueueFixture(apiCtx, {
           title: `e2e-ui-composer-duplicate-${stamp}`,
           historicalMessage: duplicate,
           queuedMessages: [duplicate],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `duplicate scratch ${stamp}`
           await composer.fill(draft)
 
           await composer.press('ArrowUp')
-          await expectComposerText(page, duplicate)
+          await expectWorkspaceComposerText(page, duplicate)
           await composer.press('ArrowUp')
-          await expectComposerText(page, duplicate)
+          await expectWorkspaceComposerText(page, duplicate)
           await composer.press('ArrowDown')
-          await expectComposerText(page, duplicate)
+          await expectWorkspaceComposerText(page, duplicate)
           await composer.press('ArrowDown')
-          await expectComposerText(page, draft)
+          await expectWorkspaceComposerText(page, draft)
 
           await shot(caseArt, 'composer-history-duplicate-entries')
           expectNoFatal(pageErrors, consoleErrors)
@@ -167,26 +178,27 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.multiline_scroll',
+    'ui.workspace.composer.multiline_scroll',
     'Composer 召回溢出多行历史后光标与内部滚动同步到末尾',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const currentDraft = `current composer draft ${stamp}`
       const historicalMessage = Array.from(
         { length: 24 },
         (_, index) =>
           `UI-E2E-COMPOSER-HISTORY-${stamp}-${String(index + 1).padStart(2, '0')}`,
       ).join('\n')
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-scroll-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           await composer.fill(currentDraft)
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
 
           const metrics = await composerMetrics(composer)
           assert(
@@ -204,7 +216,7 @@ export async function runComposerMatrix(ui) {
           await shot(caseArt, 'composer-history-multiline-bottom')
 
           await composer.press('ArrowDown')
-          await expectComposerText(page, currentDraft)
+          await expectWorkspaceComposerText(page, currentDraft)
           expectNoFatal(pageErrors, consoleErrors)
         },
       )
@@ -212,24 +224,25 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.multiline_caret_boundaries',
+    'ui.workspace.composer.multiline_caret_boundaries',
     'Composer 多行中间位置保留原生方向键，仅首行边界召回历史',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `caret boundary history ${stamp}`
       const currentDraft = 'line 1\nline 2\nline 3'
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-caret-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           await composer.fill(currentDraft)
 
           await setCaretOffset(composer, currentDraft.length)
           await composer.press('ArrowUp')
-          await expectComposerText(page, currentDraft)
+          await expectWorkspaceComposerText(page, currentDraft)
           const afterNativeUp = await caretOffset(composer)
           assert(
             afterNativeUp > 0 && afterNativeUp < currentDraft.length,
@@ -238,7 +251,7 @@ export async function runComposerMatrix(ui) {
 
           await setCaretOffset(composer, 0)
           await composer.press('ArrowDown')
-          await expectComposerText(page, currentDraft)
+          await expectWorkspaceComposerText(page, currentDraft)
           const afterNativeDown = await caretOffset(composer)
           assert(
             afterNativeDown > 0 && afterNativeDown < currentDraft.length,
@@ -247,7 +260,7 @@ export async function runComposerMatrix(ui) {
 
           await setCaretOffset(composer, 0)
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
           await shot(caseArt, 'composer-history-multiline-caret-boundary')
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -256,37 +269,38 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.edit_recalled',
+    'ui.workspace.composer.edit_recalled',
     '编辑召回消息后提升为新草稿并可刷新恢复',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `editable history ${stamp}`
       const originalDraft = `original scratch ${stamp}`
       const editedDraft = `${historicalMessage} edited`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-edit-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          let composer = await bindThreadComposer(page, goto, fixture)
+          let composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(originalDraft)
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
           await page.keyboard.type(' edited')
-          await expectComposerText(page, editedDraft)
-          await expectStorage(page, draftKey, editedDraft)
+          await expectWorkspaceComposerText(page, editedDraft)
+          await expectWorkspaceStorage(page, draftKey, editedDraft)
 
           await composer.press('ArrowUp')
-          await expectComposerText(page, historicalMessage)
+          await expectWorkspaceComposerText(page, historicalMessage)
           await composer.press('ArrowDown')
-          await expectComposerText(page, editedDraft)
+          await expectWorkspaceComposerText(page, editedDraft)
 
           await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
-          composer = await waitForComposer(page)
-          await expectStorage(page, draftKey, editedDraft)
-          await expectComposerText(page, editedDraft)
+          composer = await waitForWorkspaceComposer(page)
+          await expectWorkspaceStorage(page, draftKey, editedDraft)
+          await expectWorkspaceComposerText(page, editedDraft)
           await shot(caseArt, 'composer-history-edited-recalled')
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -295,42 +309,40 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.draft_persistence_boundaries',
+    'ui.workspace.composer.draft_persistence_boundaries',
     '空 Pane 草稿精确刷新恢复，空白内容清存储且无历史时上键不变',
     async (caseArt) => {
-      await withUiFixture(
+      await ensureSignedIn?.()
+      await withWorkspaceUiFixture(
         page,
-        () => createBlankChatFixture(apiCtx, {
+        () => createBlankWorkspaceFixture(apiCtx, {
           title: `e2e-ui-composer-persistence-${stamp}`,
         }),
         async (fixture) => {
-          let composer = await bindBlankComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
+          let { composer, draftKey } = await bindWorkspaceBlankComposer(page, goto, fixture)
           const exactDraft = '  first line\nsecond line  '
 
           await composer.fill(`no history ${stamp}`)
           await composer.press('ArrowUp')
-          await expectComposerText(page, `no history ${stamp}`)
+          await expectWorkspaceComposerText(page, `no history ${stamp}`)
 
           await composer.fill('  first line')
           await composer.press('Shift+Enter')
           await page.keyboard.type('second line  ')
-          await expectStorage(page, draftKey, exactDraft)
+          await expectWorkspaceStorage(page, draftKey, exactDraft)
           await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
-          composer = await waitForComposer(page)
-          await expectComposerText(page, exactDraft)
-          await expectStorage(page, draftKey, exactDraft)
+          composer = await waitForWorkspaceComposer(page)
+          await expectWorkspaceComposerText(page, exactDraft)
+          await expectWorkspaceStorage(page, draftKey, exactDraft)
 
           await composer.fill(' ')
           await composer.press('Shift+Enter')
           await page.keyboard.type(' ')
-          await expectStorage(page, draftKey, null)
-          await waitForPlaceholder(composer, true)
+          await expectWorkspaceStorage(page, draftKey, null)
+          await waitForWorkspacePlaceholder(composer, true)
           await composer.fill('')
-          await expectStorage(page, draftKey, null)
-          await waitForPlaceholder(composer, true)
+          await expectWorkspaceStorage(page, draftKey, null)
+          await waitForWorkspacePlaceholder(composer, true)
 
           await shot(caseArt, 'composer-draft-persistence-boundaries')
           expectNoFatal(pageErrors, consoleErrors)
@@ -340,23 +352,24 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.composer.palette_precedence',
+    'ui.workspace.composer.palette_precedence',
     '命令菜单打开时方向键只导航命令，不召回消息或覆盖草稿',
     async (caseArt) => {
+      await ensureSignedIn?.()
       const historicalMessage = `palette history ${stamp}`
-      await withUiFixture(
+      await withWorkspaceUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createWorkspaceDurableHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-palette-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
+          const composer = await bindWorkspaceThreadComposer(page, goto, fixture)
           const draft = `palette scratch ${stamp}`
           const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
-          await page.getByRole('button', { name: '打开命令表' }).click()
-          const palette = page.getByRole('listbox', { name: '命令表' })
+          await page.getByRole('button', { name: UI_LABELS.openCommandsButton }).click()
+          const palette = page.getByRole('listbox', { name: UI_LABELS.commandPalette })
           await palette.waitFor({ state: 'visible', timeout: 10_000 })
           const activeBefore = await activeOptionText(palette)
           await composer.focus()
@@ -366,13 +379,13 @@ export async function runComposerMatrix(ui) {
             activeBefore !== activeAfter,
             `ArrowDown did not move the active command: ${activeBefore}`,
           )
-          await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectWorkspaceComposerText(page, draft)
+          await expectWorkspaceStorage(page, draftKey, draft)
           await composer.press('ArrowUp')
-          await expectComposerText(page, draft)
+          await expectWorkspaceComposerText(page, draft)
           await composer.press('Escape')
           await palette.waitFor({ state: 'hidden', timeout: 10_000 })
-          await expectComposerText(page, draft)
+          await expectWorkspaceComposerText(page, draft)
 
           await composer.fill('/sto')
           await palette.waitFor({ state: 'visible', timeout: 10_000 })
@@ -382,11 +395,11 @@ export async function runComposerMatrix(ui) {
           )
           await shot(caseArt, 'composer-command-palette-without-duplicate-search')
           await composer.press('ArrowUp')
-          await expectComposerText(page, '/sto')
+          await expectWorkspaceComposerText(page, '/sto')
           await composer.press('Escape')
           await palette.waitFor({ state: 'hidden', timeout: 10_000 })
-          await expectComposerText(page, '/sto')
-          await expectStorage(page, draftKey, '/sto')
+          await expectWorkspaceComposerText(page, '/sto')
+          await expectWorkspaceStorage(page, draftKey, '/sto')
 
           await shot(caseArt, 'composer-command-palette-precedence')
           expectNoFatal(pageErrors, consoleErrors)
@@ -1559,6 +1572,96 @@ async function createWorkspaceHoldingQueueFixture(
   }
 }
 
+async function createBlankWorkspaceFixture(apiCtx, { title }) {
+  const target = await resolveWorkspaceCatalogTarget(apiCtx)
+  const state = {
+    apiCtx,
+    space: null,
+    threadId: null,
+  }
+  try {
+    state.space = await createWorkspaceSpace(apiCtx, {
+      title,
+      defaultAgentName: target.agent.name,
+      defaultYoloEnabled: false,
+    })
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
+    }
+  } catch (error) {
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
+    throw error
+  }
+}
+
+async function createWorkspaceDurableHistoryFixture(
+  apiCtx,
+  { title, messages },
+) {
+  assert(
+    Array.isArray(messages) && messages.length > 0,
+    'durable history messages required',
+  )
+  const target = await resolveWorkspaceCatalogTarget(apiCtx)
+  const state = {
+    apiCtx,
+    space: null,
+    sessionId: null,
+    threadId: null,
+  }
+  try {
+    state.space = await createWorkspaceSpace(apiCtx, {
+      title,
+      defaultAgentName: target.agent.name,
+      defaultYoloEnabled: false,
+    })
+    const created = await createWorkspaceSession(apiCtx, state.space.id, {
+      idempotencyKey: cid(),
+      message: [{ type: 'TEXT', text: messages[0] }],
+      modelSelection: target.model,
+      yoloEnabled: false,
+    })
+    state.threadId = String(created.threadId)
+    state.sessionId = String(created.sessionId)
+    for (const message of messages.slice(1)) {
+      let accepted
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt > 0) await sleep(80)
+        await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 30_000,
+          intervalMs: 50,
+        }).catch(() => {})
+        try {
+          accepted = await acceptCommandBatch(apiCtx, {
+            target: threadTarget({
+              threadId: state.threadId,
+            }),
+            commands: [userMessageCommand(message, cid())],
+          })
+          break
+        } catch (error) {
+          if (!isExitUnconfirmedConflict(error)) throw error
+        }
+      }
+      if (!accepted) {
+        throw new Error(`THREAD batch did not stabilize after 5 attempts for message: ${message}`)
+      }
+    }
+    await waitForQuiescentThread(apiCtx, state.threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    return {
+      ...state,
+      dispose: () => cleanupWorkspaceFixtureState(state),
+    }
+  } catch (error) {
+    await cleanupWorkspaceFixtureState(state).catch(() => undefined)
+    throw error
+  }
+}
+
 async function createHoldingQueueFixture(
   apiCtx,
   { title, historicalMessage, queuedMessages = [] },
@@ -2011,7 +2114,7 @@ async function expectComposerText(page, expected) {
   }
 }
 
-export async function expectStorage(page, key, expected) {
+async function expectStorage(page, key, expected) {
   if (typeof key === 'object') {
     await expectThreadDraft(page, key.threadId, expected)
     return
@@ -2170,81 +2273,6 @@ function composerDraftStorageKey(scope) {
 
 function chatPaneDraftKey(fixture) {
   return composerDraftStorageKey(`agent-pane:CHAT:${fixture.chat.id}:pane-1`)
-}
-
-async function setCaretOffset(composer, targetOffset) {
-  const placed = await composer.evaluate((root, requestedOffset) => {
-    const document = root.ownerDocument
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    let remaining = requestedOffset
-    let node = walker.nextNode()
-    while (node) {
-      const length = node.textContent?.length ?? 0
-      if (remaining <= length) {
-        const range = document.createRange()
-        range.setStart(node, remaining)
-        range.collapse(true)
-        const selection = document.getSelection()
-        selection?.removeAllRanges()
-        selection?.addRange(range)
-        root.focus({ preventScroll: true })
-        return true
-      }
-      remaining -= length
-      node = walker.nextNode()
-    }
-    return false
-  }, targetOffset)
-  assert(placed, `could not place composer caret at ${targetOffset}`)
-}
-
-async function caretOffset(composer) {
-  return composer.evaluate((root) => {
-    const selection = root.ownerDocument.getSelection()
-    if (!selection || selection.rangeCount === 0) return -1
-    const caret = selection.getRangeAt(0)
-    if (!caret.collapsed || !root.contains(caret.startContainer)) return -1
-    const prefix = root.ownerDocument.createRange()
-    prefix.selectNodeContents(root)
-    prefix.setEnd(caret.startContainer, caret.startOffset)
-    return prefix.toString().length
-  })
-}
-
-async function composerMetrics(composer) {
-  return composer.evaluate((root) => {
-    const selection = root.ownerDocument.getSelection()
-    const range =
-      selection && selection.rangeCount > 0
-        ? selection.getRangeAt(0)
-        : null
-    let selectionAtEnd = false
-    if (
-      range
-      && range.collapsed
-      && root.contains(range.commonAncestorContainer)
-    ) {
-      const trailing = root.ownerDocument.createRange()
-      trailing.selectNodeContents(root)
-      trailing.setStart(range.endContainer, range.endOffset)
-      selectionAtEnd = trailing.toString().length === 0
-    }
-    return {
-      focused: root.ownerDocument.activeElement === root,
-      scrollTop: root.scrollTop,
-      scrollHeight: root.scrollHeight,
-      clientHeight: root.clientHeight,
-      bottomGap: root.scrollHeight - root.clientHeight - root.scrollTop,
-      selectionCollapsed: range?.collapsed ?? false,
-      selectionAtEnd,
-    }
-  })
-}
-
-async function activeOptionText(palette) {
-  const option = palette.locator('[role="option"][aria-selected="true"]')
-  await option.waitFor({ state: 'visible', timeout: 10_000 })
-  return (await option.innerText()).trim()
 }
 
 async function waitForActiveModel(apiCtx, threadId, timeoutMs = 15_000) {
