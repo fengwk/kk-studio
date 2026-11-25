@@ -1,5 +1,6 @@
 import { assert, assertDecimalVersion, assertExactFields, cid, expectHttpError, sleep } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
+import { createCanvas } from './canvas-api.mjs'
 
 export const cases = []
 const registerCase = createCaseAdder(cases)
@@ -54,7 +55,7 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas Function 目录与免费 fake 运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；GET /api/canvas/functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/未知字段/非法 fingerprint 400），目录定义 fingerprint 不匹配返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；GET /api/canvas/functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/未知字段/非法 fingerprint 400），目录定义 fingerprint 不匹配返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），Canvas blob preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
   async run(ctx) {
     const definitions = (await apiRequest(ctx, 'GET', '/api/canvas/functions')).json
     assert(Array.isArray(definitions) && definitions.length > 0, JSON.stringify(definitions))
@@ -95,19 +96,7 @@ registerCase({
       JSON.stringify(imageFunction.outputs),
     )
 
-    const spaceId = await ctx.createSpace(`e2e-function-space-${cid().slice(0, 8)}`)
-    const tree = (await apiRequest(ctx, 'GET', `/api/chat-spaces/${spaceId}/tree`)).json
-    const created = await apiRequest(ctx, 'POST', `/api/chat-spaces/${spaceId}/canvases`, {
-      folderId: tree.folders[0]?.id,
-      title: `e2e-function-${cid().slice(0, 8)}`,
-      expectedTreeVersion: tree.treeVersion,
-    }, { 'Idempotency-Key': cid() })
-    assert(created.status === 200, `create canvas status ${created.status}`)
-    assertExactFields(created.json, ['kind', 'id', 'treeVersion'], 'created canvas ResourceRef')
-    assert(created.json.kind === 'CANVAS' && UUID_TEXT.test(created.json.id), JSON.stringify(created.json))
-    assertDecimalVersion(created.json.treeVersion, 'canvas treeVersion')
-    const canvas = (await apiRequest(ctx, 'GET', `/api/canvas/canvases/${created.json.id}`)).json.document
-    assertDecimalVersion(canvas.revision, 'canvas.revision')
+    const canvas = await createCanvas(ctx, `e2e-function-${cid().slice(0, 8)}`)
 
     // 一个 batch 内声明 Function 节点与一个纯数据节点：后者用于非 Function 边界。
     const functionNodeId = cid()
@@ -235,7 +224,8 @@ registerCase({
         && ['READY', 'RUNNING'].includes(run.status)
         && typeof run.stage === 'string'
         && run.error === null
-        && Number.isFinite(run.updatedAt),
+        && Number.isSafeInteger(run.updatedAt)
+        && run.updatedAt > 0,
       JSON.stringify(run),
     )
     assert(!('stateJson' in run) && !('attempt' in run) && !('leaseToken' in run), JSON.stringify(run))
@@ -280,7 +270,7 @@ registerCase({
         await apiRequest(
           ctx,
           'POST',
-          `/api/canvas/canvases/${canvas.id}/resources/${published.resources[0].id}/preview-url`,
+          `/api/canvas/canvases/${canvas.id}/blobs/${published.resources[0].blobId}/preview-url`,
         )
       ).json
     const previewResponse = await fetch(preview.url, { headers: preview.headers || {} })

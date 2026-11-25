@@ -47,6 +47,8 @@ import { cases as configSyncCases } from './cases/config-sync.mjs'
 import { cases as runtimeIdeCases } from './cases/environment-runtime-ide.mjs'
 import { cases as appEventsCases } from './cases/app-events.mjs'
 import { cases as modelAttemptCases } from './cases/model-attempt-visibility.mjs'
+import { cases as sessionAttachmentCases } from './cases/session-attachment.mjs'
+import { cases as canvasStorageCases } from './cases/canvas-storage.mjs'
 import { cases as canvasFunctionCases } from './cases/canvas-function.mjs'
 import { workspaceCases } from './cases/workspace.mjs'
 import { cases as canvasApiCases } from './cases/canvas-api.mjs'
@@ -63,7 +65,7 @@ export const ALL_CASES = [
   ...seedCases, ...crudCases, ...i18nCases, ...configMatrixCases,
   ...systemSettingsCases, ...environmentCardCases, ...configSyncCases, ...runtimeIdeCases,
   ...appEventsCases, ...modelAttemptCases, ...canvasFunctionCases,
-  ...canvasApiCases, ...interactionCases, ...queuedBatchCases,
+  ...canvasApiCases, ...canvasStorageCases, ...sessionAttachmentCases, ...interactionCases, ...queuedBatchCases,
   ...workspaceCases,
   ...realCases, ...distributedCases,
 ]

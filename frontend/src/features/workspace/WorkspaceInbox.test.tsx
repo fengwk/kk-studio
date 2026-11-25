@@ -158,4 +158,65 @@ describe('WorkspaceInbox', () => {
 
     view.unmount()
   })
+
+  it('shows loading, error, empty, disabled non-space rows, and closes on Escape or outside pointerdown', async () => {
+    let resolvePending!: (res: Response) => void
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => { resolvePending = resolve }))
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const onOpen = vi.fn()
+    render(
+      <QueryClientProvider client={client}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={new FakeWebSocketHarness().factory}>
+          <WorkspaceInbox userId="user-2" onOpen={onOpen} />
+        </ApplicationEventProvider>
+      </QueryClientProvider>,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Pending interactions' })
+    fireEvent.click(trigger)
+    expect(screen.getByText('Loading workspace')).toBeInTheDocument()
+
+    // Escape closes popup and returns focus
+    const region = screen.getByRole('region', { name: 'Pending interactions' })
+    fireEvent.keyDown(region, { key: 'Escape' })
+    expect(screen.queryByRole('region', { name: 'Pending interactions' })).toBeNull()
+    expect(trigger).toHaveFocus()
+
+    // Resolve with empty list
+    resolvePending(new Response(JSON.stringify({ items: [], nextCursor: null, total: 0 }), { headers: { 'Content-Type': 'application/json' } }))
+    fireEvent.click(trigger)
+    expect(await screen.findByText('No pending interactions')).toBeInTheDocument()
+
+    // Outside pointerdown dismisses
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('region', { name: 'Pending interactions' })).toBeNull()
+
+    // Non-CHAT_SPACE item is disabled with fallback title
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [{
+        type: 'INPUT',
+        toolInvocationId: id(90),
+        threadId: bgRoot,
+        rootThreadId: bgRoot,
+        sessionId: id(91),
+        toolCallId: 'c9',
+        toolName: 'question',
+        argumentsJson: '{}',
+        createdAt: 100,
+        owner: { kind: 'SYSTEM', id: id(92), title: '' },
+      }],
+      nextCursor: null,
+      total: 1,
+    }), { headers: { 'Content-Type': 'application/json' } }))
+    await client.invalidateQueries({ queryKey: ['workspace-inbox', 'user-2'] })
+    fireEvent.click(trigger)
+    const bgRow = await screen.findByRole('button', { name: /Background task/ })
+    expect(bgRow).toBeDisabled()
+
+    // Error state on fresh query without prior data
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'fail' }), { status: 500, headers: { 'Content-Type': 'application/problem+json' } }))
+    await client.resetQueries({ queryKey: ['workspace-inbox', 'user-2'] })
+    expect(await screen.findByText('Request failed')).toBeInTheDocument()
+  })
 })
