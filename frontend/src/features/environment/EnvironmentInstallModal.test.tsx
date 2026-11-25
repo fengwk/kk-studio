@@ -236,8 +236,8 @@ describe('EnvironmentInstallModal', () => {
 
   it('states the current overwrite effects without install settings or backup promises', async () => {
     open()
-    const dialog = await screen.findByRole('dialog', { name: '安装/覆盖环境' })
-    expect(within(dialog).getByRole('heading', { name: '安装/覆盖环境' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '安装 / 覆盖' })
+    expect(within(dialog).getByRole('heading', { name: '安装 / 覆盖' })).toBeInTheDocument()
     expect(dialog).toHaveTextContent('选择目标操作系统，复制命令后，在目标主机的终端执行。')
     expect(dialog).toHaveTextContent('无需预装 JRE 或 Node；请确保 Bash 可用。')
     expect(dialog).toHaveTextContent('覆盖安装会中断当前工具调用；本地配置和数据保留。')
@@ -252,7 +252,7 @@ describe('EnvironmentInstallModal', () => {
     setLocale('en-US')
     try {
       const install = open()
-      const dialog = screen.getByRole('dialog', { name: 'Install/overwrite environment' })
+      const dialog = screen.getByRole('dialog', { name: 'Install / Overwrite' })
       expect(dialog).toHaveTextContent(
         'Choose the target operating system, copy the command and run it in a terminal on the target host.',
       )

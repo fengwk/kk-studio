@@ -4,6 +4,9 @@ import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
+import { useI18n } from '@/shared/i18n'
 
 export function SettingsCard({
   title,
@@ -45,6 +48,7 @@ export function SettingsSwitchRow({
   fieldPath?: string
   nullable?: boolean
 }) {
+  const { t } = useI18n()
   return (
     <div
       className="settings-row"
@@ -53,7 +57,7 @@ export function SettingsSwitchRow({
     >
       <div className="settings-row-text">
         <strong>{label}</strong>
-        {description ? <span className="settings-row-description">{description}</span> : null}
+        {description ? <HelpHint label={t('shared.helpAbout', { topic: label })}>{description}</HelpHint> : null}
       </div>
       <Switch checked={checked} onChange={onChange} label={ariaLabel ?? label} disabled={disabled} />
     </div>
@@ -93,10 +97,7 @@ export function SettingsTextField({
       data-settings-field-path={fieldPath}
       data-settings-nullable={nullable}
     >
-      <label className="settings-field-label" htmlFor={fieldId}>
-        {label}
-      </label>
-      {text ? <span className="settings-field-description">{text}</span> : null}
+      <FieldLabel htmlFor={fieldId} help={text}>{label}</FieldLabel>
       <TextInput
         id={fieldId}
         className="settings-input"
@@ -153,10 +154,7 @@ export function SettingsNumberField({
       data-settings-min={min}
       data-settings-max={max}
     >
-      <label className="settings-field-label" htmlFor={fieldId}>
-        {label}
-      </label>
-      {text ? <span className="settings-field-description">{text}</span> : null}
+      <FieldLabel htmlFor={fieldId} help={text}>{label}</FieldLabel>
       <NumberInput
         id={fieldId}
         value={value}
@@ -214,10 +212,7 @@ export function SettingsSelectField({
       data-settings-nullable={nullable}
       data-settings-options={options.map((option) => option.value).join(',')}
     >
-      <label className="settings-field-label" htmlFor={fieldId}>
-        {label}
-      </label>
-      {text ? <span className="settings-field-description">{text}</span> : null}
+      <FieldLabel htmlFor={fieldId} help={text}>{label}</FieldLabel>
       <Select
         id={fieldId}
         value={value}
@@ -266,10 +261,7 @@ export function SettingsIntegerListField({
       data-settings-min={min}
       data-settings-max={max}
     >
-      <label className="settings-field-label" htmlFor={fieldId}>
-        {label}
-      </label>
-      {text ? <span className="settings-field-description">{text}</span> : null}
+      <FieldLabel htmlFor={fieldId} help={text}>{label}</FieldLabel>
       <TagInput
         id={fieldId}
         value={value}

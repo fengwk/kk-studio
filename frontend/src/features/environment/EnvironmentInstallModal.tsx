@@ -130,7 +130,7 @@ export function EnvironmentInstallModal({
     <Dialog
       className="environment-install-modal modal-touch-target"
       title={
-        t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')
+        t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.installOverwrite')
       }
       pending={pending}
       onClose={onClose}

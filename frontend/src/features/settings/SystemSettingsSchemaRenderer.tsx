@@ -1,4 +1,5 @@
 import { requireTranslationKey, useI18n } from '@/shared/i18n'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import {
   SettingsCard,
   SettingsIntegerListField,
@@ -112,6 +113,7 @@ function SchemaField({
           nullable={field.nullable}
           label={label}
           value={value as string}
+          placeholder={field.path === 'backendNetwork.proxyUrl' ? t('settings.field.backendNetwork.proxyUrl.direct') : undefined}
           maxLength={field.max ?? undefined}
           hint={hint}
           onChange={update}
@@ -151,7 +153,7 @@ function SchemaField({
           data-settings-field-path={field.path}
           data-settings-nullable={field.nullable}
         >
-          {hint ? <span className="settings-field-description">{hint}</span> : null}
+          {hint ? <HelpHint label={t('shared.helpAbout', { topic: label })}>{hint}</HelpHint> : null}
           <PermissionEditor
             groups={value as PermissionGroupDraft[]}
             options={field.options ?? []}

@@ -8,7 +8,7 @@ test('retry backoff strategy options save and clear dirty state', async ({ page 
   await page.route('**/api/**', (route) => route.fulfill({ json: [] }))
   await page.goto('/browser-tests/settings-catalog-harness.html')
   await page.getByRole('tab', { name: 'AI 运行时' }).click()
-  const select = page.getByLabel('退避策略')
+  const select = page.getByRole('button', { name: '退避策略', exact: true })
   await expect(select).toContainText('指数')
   await select.click()
   await expect(page.getByRole('option', { name: '指数', exact: true })).toBeVisible()

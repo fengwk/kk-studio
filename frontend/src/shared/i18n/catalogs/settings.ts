@@ -527,9 +527,10 @@ export const settingsCatalog = {
     'zh-CN': '代理地址',
   },
   'settings.field.backendNetwork.proxyUrl.hint': {
-    'en-US': 'HTTP proxy used by backend outbound requests. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected.',
-    'zh-CN': '后端发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后后端新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
+    'en-US': 'Use an unauthenticated http://host:port proxy. Only new HTTP requests use the saved proxy.',
+    'zh-CN': '使用无认证的 http://host:port 代理。保存后只影响新发起的 HTTP 请求。',
   },
+  'settings.field.backendNetwork.proxyUrl.direct': { 'en-US': 'Direct connection', 'zh-CN': '直连' },
   'settings.field.backendNetwork.noProxyHosts': {
     'en-US': 'Proxy bypass rules',
     'zh-CN': '代理绕过规则',

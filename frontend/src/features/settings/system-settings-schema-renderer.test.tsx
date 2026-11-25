@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -155,8 +155,9 @@ describe('system settings schema renderer', () => {
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     // hint 为渲染后的本地化文本，不得出现双重翻译导致的 ⟦missing: 标记。
+    expect(screen.queryByText('全系统所有会话中同时运行的子 Agent 任务总数上限。设为 0 表示不设全局上限。')).not.toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('button', { name: '帮助：全局最大并发' }))
     expect(screen.getByText('全系统所有会话中同时运行的子 Agent 任务总数上限。设为 0 表示不设全局上限。')).toBeInTheDocument()
-    expect(screen.getByText('单个子 Agent 任务的交互轮数软预算。达到上限后提醒子 Agent 结束当前阶段并汇报。')).toBeInTheDocument()
     expect(container.textContent).not.toContain('⟦missing:')
   })
 
@@ -197,7 +198,7 @@ describe('system settings schema renderer', () => {
     const switchRow = screen
       .getByRole('switch', { name: '代理地址' })
       .closest('.settings-row')!
-    expect(switchRow).toHaveTextContent('后端发起外部请求时使用的 HTTP 代理')
+    expect(within(switchRow as HTMLElement).getByRole('button', { name: '帮助：代理地址' })).toBeInTheDocument()
   })
 
   it('fail-closes on a duplicate field path', () => {

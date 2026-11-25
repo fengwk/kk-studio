@@ -206,7 +206,7 @@ async function api(page: Page) {
   }
 }
 
-for (const width of [1280, 390, 320]) {
+for (const width of [1440, 390, 320]) {
   test(`edits the only card config, saves CAS, then copies install and uninstall commands at ${width}px`, async ({
     page,
   }, testInfo) => {
@@ -214,10 +214,8 @@ for (const width of [1280, 390, 320]) {
     const mock = await api(page)
     await page.goto(HARNESS_URL)
     await expect(manageButton(page, 'host-one')).toBeVisible({ timeout: 15000 })
-    // 卡片不再平铺动作：已安装过的卡片只有管理入口。
     const card = page.locator('.environment-card')
-    await expect(card.locator('.resource-card-actions button')).toHaveCount(1)
-    await expect(page.getByRole('button', { name: '安装 / 覆盖 host-one', exact: true })).toHaveCount(0)
+    await expect(card.locator('.resource-card-actions button')).toHaveText(['安装 / 覆盖', '管理', '编辑配置', '删除环境'])
     await expect(card.getByText('Daemon 版本', { exact: true })).toBeVisible()
     await expect(card).not.toContainText('已应用')
     await page.screenshot({ path: testInfo.outputPath(`cards-${width}.png`), fullPage: true })
@@ -226,24 +224,18 @@ for (const width of [1280, 390, 320]) {
     const manage = await openManage(page, 'host-one')
     // 弹窗动作按原文案顺序平铺，不带卡片上的 aria 名称后缀。
     await expect(manage.locator('.environment-management-actions button')).toHaveText([
-      '编辑配置',
-      '安装 / 覆盖',
       '更新 Daemon',
       '卸载',
       '重新生成 Token',
-      '删除环境',
     ])
-    // 诊断详情默认折叠：展开前既不渲染宿主/配置/事件，也不读事件端点。
-    const diagnostics = manage.locator('.environment-diagnostics')
-    await expect(diagnostics.locator('summary')).toHaveText('诊断详情')
-    await expect(manage.locator('.env-mgmt-section')).toHaveCount(0)
-    expect(mock.calls.filter(call => call.endsWith('/events'))).toHaveLength(0)
+    await expect(manage.locator('.env-mgmt-section')).toHaveCount(3)
     await page.screenshot({ path: testInfo.outputPath(`manage-${width}.png`), fullPage: true })
     const manageBox = await manage.boundingBox()
     expect(manageBox!.x).toBeGreaterThanOrEqual(0)
     expect(manageBox!.x + manageBox!.width).toBeLessThanOrEqual(width)
 
-    await manage.getByRole('button', { name: '编辑配置', exact: true }).click()
+    await manage.getByRole('button', { name: '关闭', exact: true }).last().click()
+    await card.getByRole('button', { name: '编辑配置 host-one', exact: true }).click()
     await expect(manage).toHaveCount(0)
     const edit = page.getByRole('dialog', { name: '编辑环境：host-one' })
     await expect(edit.getByRole('textbox', { name: '环境名称' })).toBeDisabled()
@@ -257,8 +249,8 @@ for (const width of [1280, 390, 320]) {
       '~/ts-server',
     )
     await expect(edit.getByRole('button', { name: /帮助：Daemon 代理/ })).toBeVisible()
-    await edit.getByRole('button', { name: /帮助：Daemon 代理/ }).click()
-    await expect(edit.getByText(/留空表示直连/).first()).toBeVisible()
+    await edit.getByRole('button', { name: /帮助：Daemon 代理/ }).focus()
+    await expect(page.getByText(/留空表示直连/).first()).toBeVisible()
 
     await edit.getByRole('textbox', { name: '备注' }).fill("draft 汉字 '$`")
     await edit
@@ -293,8 +285,8 @@ for (const width of [1280, 390, 320]) {
     })
 
     const beforeInstall = mock.calls.length
-    await pickManageAction(page, 'host-one', '安装 / 覆盖')
-    const install = page.getByRole('dialog', { name: '安装/覆盖环境' })
+    await card.getByRole('button', { name: '安装 / 覆盖 host-one', exact: true }).click()
+    const install = page.getByRole('dialog', { name: '安装 / 覆盖' })
     await expect(install.getByRole('textbox', { name: 'Studio 地址' })).toHaveCount(0)
     await expect(install.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveCount(0)
     await install.getByRole('button', { name: '操作系统' }).click()
@@ -337,7 +329,7 @@ for (const width of [1280, 390, 320]) {
     )}`
     expect(uninstallCommand).toContain(uninstallUrl)
     expect(uninstallCommand).not.toContain(token)
-    expect(mock.calls.slice(before)).toEqual([])
+    expect(mock.calls.slice(before).filter(call => !call.endsWith('/events'))).toEqual([])
     await page.screenshot({ path: testInfo.outputPath(`uninstall-${width}.png`), fullPage: true })
   })
 }
@@ -373,7 +365,7 @@ for (const width of [1280, 390]) {
         proxyUrl: null,
       },
     })
-    const install = page.getByRole('dialog', { name: '安装/覆盖环境' })
+    const install = page.getByRole('dialog', { name: '安装 / 覆盖' })
     await expect(install).toBeVisible()
     await expect(install.getByRole('button', { name: '复制安装命令' })).toBeEnabled()
     await expect(install).not.toContainText(token)
@@ -394,12 +386,12 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole('button', { name: `安装 / 覆盖 fresh-${width}`, exact: true }),
     ).toBeVisible()
-    await expect(card.getByRole('button', { name: /重新生成 Token|删除环境|卸载/ })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: /重新生成 Token|卸载/ })).toHaveCount(0)
     await expectNoHorizontalOverflow(page, width)
   })
 }
 
-test('keeps event history and config details inside the collapsible diagnostics', async ({
+test('shows event history and config details directly in management', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -451,13 +443,6 @@ test('keeps event history and config details inside the collapsible diagnostics'
   await page.screenshot({ path: testInfo.outputPath('card-config-status.png'), fullPage: true })
 
   const modal = await openManage(page, 'recovered-box')
-  const diagnostics = modal.locator('.environment-diagnostics')
-  await expect(diagnostics.locator('summary')).toHaveText('诊断详情')
-  await expect(modal.locator('.env-mgmt-section')).toHaveCount(0)
-  expect(calls.filter(call => call.endsWith('/events'))).toHaveLength(0)
-  await page.screenshot({ path: testInfo.outputPath('management-collapsed.png'), fullPage: true })
-
-  await diagnostics.locator('summary').click()
   const hostSection = modal.locator('.env-mgmt-section[aria-label="宿主信息"]')
   await expect(hostSection).toBeVisible()
   // 能力键逐个完整呈现：每个键不折断，超宽时只在键与键之间换行。
@@ -480,8 +465,8 @@ test('keeps event history and config details inside the collapsible diagnostics'
   await expect(configCells.filter({ hasText: '已应用版本' }).locator('.val')).toHaveText('3')
   await expect(configCells.filter({ hasText: 'Daemon 代理' }).locator('.val')).toHaveText('直连')
   const events = modal.locator('.env-mgmt-section[aria-label="事件记录"]')
-  await expect(events.getByText('daemon connection lost')).toBeVisible()
-  await expect(events.getByText('environment ready')).toBeVisible()
+  await expect(events.getByText('Daemon 连接已断开。')).toBeVisible()
+  await expect(events.getByText('环境已就绪。')).toBeVisible()
   // 事件按发生时间倒序呈现，最新一条在前；级别与类型用本地化名称承载，协议码只在 title。
   const eventItems = events.locator('.env-event-item')
   await expect(eventItems.locator('.env-event-type')).toHaveText(['已就绪', '已断开'])
@@ -512,8 +497,6 @@ test('keeps event history and config details inside the collapsible diagnostics'
   await expect(configCells.filter({ hasText: 'Daemon 代理' }).locator('.val')).toHaveText('直连')
   await page.screenshot({ path: testInfo.outputPath('management-diagnostics-390.png'), fullPage: true })
 
-  await diagnostics.locator('summary').click()
-  await expect(modal.locator('.env-mgmt-section')).toHaveCount(0)
 })
 
 test('rotates the token and deletes the card through plain modal labels', async ({ page }) => {
@@ -544,6 +527,7 @@ test('rotates the token and deletes the card through plain modal labels', async 
       return route.fulfill({ status: 204, body: '' })
     }
     if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+    if (path.endsWith('/events')) return route.fulfill({ json: [] })
     if (path.endsWith('/env-danger')) return route.fulfill({ json: card })
     return route.fulfill({ json: deleted ? [] : [card] })
   })
@@ -568,7 +552,7 @@ test('rotates the token and deletes the card through plain modal labels', async 
   expect(await page.locator('body').innerText()).not.toContain(token)
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
 
-  await pickManageAction(page, 'danger-box', '删除环境')
+  await page.getByRole('button', { name: '删除环境 danger-box', exact: true }).click()
   const remove = page.getByRole('alertdialog', { name: '删除环境' })
   await expect(remove.getByText('确认删除环境「danger-box」？')).toBeVisible()
   await expect(remove.getByRole('button', { name: '取消', exact: true })).toBeVisible()
@@ -767,7 +751,6 @@ test('one failed runtime read masks only that card and stops presenting its cach
 
   // 诊断详情里的配置摘要读到同一份运行快照。
   const modal = await openManage(page, 'beta-box')
-  await modal.locator('.environment-diagnostics > summary').click()
   const configSection = modal.locator('.env-mgmt-section[aria-label="配置"]')
   await expect(configSection.getByText('已应用', { exact: true })).toBeVisible()
   const betaCells = modal.locator('.env-host-meta-card')
@@ -778,7 +761,6 @@ test('one failed runtime read masks only that card and stops presenting its cach
 
   betaRuntimeFails = true
   const reopened = await openManage(page, 'beta-box')
-  await reopened.locator('.environment-diagnostics > summary').click()
   const failedConfig = reopened.locator('.env-mgmt-section[aria-label="配置"]')
   await expect(failedConfig.getByRole('status')).toHaveText('运行状态读取失败', { timeout: 15000 })
   const failedCells = reopened.locator('.env-host-meta-card')
@@ -964,8 +946,6 @@ for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
       await manage.click()
       const modal = page.getByRole('dialog', { name: copy.dialog('diag-box') })
       await expect(modal).toBeVisible()
-      await expect(modal.locator('.environment-diagnostics > summary')).toHaveText(copy.summary)
-      await modal.locator('.environment-diagnostics > summary').click()
       const events = modal.locator(`.env-mgmt-section[aria-label="${copy.eventsTitle}"]`)
       await expect(events).toBeVisible()
 
@@ -1025,9 +1005,6 @@ const populatedEvents = [
     message: 'daemon update failed: exit status 1',
   },
 ]
-
-/** 呈现顺序：管理面把服务端时间正序反转，最新一条在最前。 */
-const renderedEvents = [...populatedEvents].reverse()
 
 /** 能力键混排短键与接近卡片宽度的长键，用来验证整键渲染。 */
 const populatedCapabilityIds = [
@@ -1092,7 +1069,6 @@ for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
       await manage.click()
       const modal = page.getByRole('dialog', { name: copy.dialog('diag-box') })
       await expect(modal).toBeVisible()
-      await modal.locator('.environment-diagnostics > summary').click()
 
       // 能力键是完整标识符：整键换行，不在词中断开，也不越出卡片。
       const capabilities = modal.locator('.env-host-capabilities')
@@ -1126,10 +1102,9 @@ for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
       for (const code of ['INFO', 'WARN', 'READY', 'CONNECTING', 'DISCONNECTED', 'UPDATE_FAILED']) {
         await expect(events.getByText(code, { exact: true })).toHaveCount(0)
       }
-      // 服务端消息是本地化名称下的次要说明，不被名称替代也不改写。
-      await expect(items.locator('.env-event-message')).toHaveText(
-        renderedEvents.map(event => event.message),
-      )
+      await expect(items.locator('.env-event-message')).toHaveText(locale === 'zh-CN'
+        ? ['Daemon 更新失败。', '已释放 Daemon 连接。', '环境已就绪。']
+        : ['Daemon update failed.', 'Daemon connection released.', 'Environment is ready.'])
 
       if (sliceShotsDir) {
         await capabilities.scrollIntoViewIfNeeded()
@@ -1306,10 +1281,9 @@ for (const [locale, labels] of Object.entries(environmentPageCopy)) {
       await expect(search).toBeFocused()
       // 焦点只在搜索框外框上显现一次，输入框自身的 outline 必须为零。
       await expect(searchBox).toHaveCSS('outline-style', 'solid')
-      await expect(searchBox).toHaveCSS('outline-width', '2px')
+      await expect(searchBox).toHaveCSS('outline-width', '1px')
       await expect(searchBox).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
       await expect(search).toHaveCSS('outline-style', 'none')
-      await expect(search).toHaveCSS('outline-width', '0px')
 
       await sliceShot(page, `environment-search-focus-${locale}-${viewport.width}`)
       await expectNoHorizontalOverflow(page, viewport.width)

@@ -21,6 +21,7 @@ export interface ResourceCardProps {
   subtitle?: string
   /** 标题行右侧的状态标记槽（状态 pill、版本等）；共享卡不解释其语义。 */
   badge?: ReactNode
+  stackBadgeOnNarrow?: boolean
   meta?: ResourceCardMetaRow[]
   /** 元信息之上的业务内容槽（正文、进度、附件等）。 */
   children?: ReactNode
@@ -101,13 +102,14 @@ export function ResourceCard({
   title,
   subtitle,
   badge,
+  stackBadgeOnNarrow,
   meta,
   children,
   actions,
   className,
 }: ResourceCardProps) {
   return (
-    <article className={['resource-card', className].filter(Boolean).join(' ')}>
+    <article className={['resource-card', stackBadgeOnNarrow && 'resource-card-responsive-badge', className].filter(Boolean).join(' ')}>
       <div className="resource-card-head">
         <div className="resource-card-icon" aria-hidden="true">
           {icon}
