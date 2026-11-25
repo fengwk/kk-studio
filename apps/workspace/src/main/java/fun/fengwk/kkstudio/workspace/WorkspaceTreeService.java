@@ -1,0 +1,184 @@
+package fun.fengwk.kkstudio.workspace;
+
+import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery;
+import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery.PublicThread;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Service
+public class WorkspaceTreeService {
+  private final ChatSpaceService spaces;
+  private final WorkspacePlacements placements;
+  private final HarnessPlacementQuery harness;
+  private final ObjectProvider<HarnessRuntime> runtime;
+  private final CanvasQueryService canvases;
+  private final JdbcClient jdbc;
+
+  WorkspaceTreeService(
+      ChatSpaceService spaces,
+      WorkspacePlacements placements,
+      HarnessPlacementQuery harness,
+      ObjectProvider<HarnessRuntime> runtime,
+      CanvasQueryService canvases,
+      JdbcClient jdbc) {
+    this.spaces = spaces;
+    this.placements = placements;
+    this.harness = harness;
+    this.runtime = runtime;
+    this.canvases = canvases;
+    this.jdbc = jdbc;
+  }
+
+  public record WorkspaceTreeDTO(String treeVersion, List<WorkspaceFolderNodeDTO> folders) {}
+
+  public record WorkspaceFolderNodeDTO(
+      UUID id,
+      String name,
+      List<WorkspaceFolderNodeDTO> children,
+      List<WorkspaceResourceNodeDTO> resources) {}
+
+  public record WorkspaceResourceNodeDTO(
+      Kind kind, UUID id, String title, @Nullable List<WorkspaceThreadSummaryDTO> threads) {}
+
+  public record WorkspaceThreadSummaryDTO(
+      UUID id,
+      String title,
+      ThreadStatus.State state,
+      ThreadStatus.@Nullable Reason reason,
+      String version,
+      Instant lastActivityAt) {}
+
+  public record WorkspaceThreadPlacementDTO(
+      UUID sessionId,
+      String sessionTitle,
+      UUID folderId,
+      String title,
+      ThreadStatus.State state,
+      ThreadStatus.@Nullable Reason reason,
+      String version) {}
+
+  private record FolderRow(UUID id, UUID parentId, String name) {}
+
+  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+  public WorkspaceTreeDTO tree(StudioPrincipal actor, UUID spaceId) {
+    var space = spaces.get(actor, spaceId);
+    var folders =
+        jdbc.sql(
+                "select id, parent_id, name from workspace_folder where workspace_id = :space order by position, id")
+            .param("space", spaceId)
+            .query(FolderRow.class)
+            .list();
+    var edges = placements.list(spaceId);
+    var sessionIds =
+        edges.stream()
+            .filter(edge -> edge.kind() == Kind.SESSION)
+            .map(WorkspacePlacements.Edge::id)
+            .toList();
+    var canvasIds =
+        edges.stream()
+            .filter(edge -> edge.kind() == Kind.CANVAS)
+            .map(WorkspacePlacements.Edge::id)
+            .toList();
+    var titles =
+        harness.sessions(sessionIds).stream()
+            .collect(
+                Collectors.toMap(
+                    HarnessPlacementQuery.SessionTitle::id,
+                    HarnessPlacementQuery.SessionTitle::title));
+    var canvasTitles =
+        canvases.findDocuments(canvasIds).stream()
+            .collect(Collectors.toMap(CanvasDocument::id, CanvasDocument::title));
+    var threads = harness.threads(sessionIds);
+    var facts =
+        threads.isEmpty()
+            ? List.<ExecutionRootFacts>of()
+            : runtime
+                .getObject()
+                .getExecutionRootFacts(threads.stream().map(PublicThread::rootId).toList());
+    var byRoot =
+        facts.stream()
+            .collect(Collectors.toMap(ExecutionRootFacts::rootThreadId, Function.identity()));
+    var bySession = new HashMap<UUID, List<WorkspaceThreadSummaryDTO>>();
+    for (var thread : threads) {
+      var root = byRoot.get(thread.rootId());
+      var status = ThreadStatus.project(root);
+      bySession
+          .computeIfAbsent(thread.sessionId(), ignored -> new ArrayList<>())
+          .add(
+              new WorkspaceThreadSummaryDTO(
+                  thread.id(),
+                  thread.title(),
+                  status.state(),
+                  status.reason(),
+                  Long.toString(thread.version()),
+                  root.lastActivityAt()));
+    }
+    var nodes = new HashMap<UUID, WorkspaceFolderNodeDTO>();
+    for (var folder : folders) {
+      nodes.put(
+          folder.id(),
+          new WorkspaceFolderNodeDTO(
+              folder.id(), folder.name(), new ArrayList<>(), new ArrayList<>()));
+    }
+    var roots = new ArrayList<WorkspaceFolderNodeDTO>();
+    for (var folder : folders) {
+      (folder.parentId() == null ? roots : nodes.get(folder.parentId()).children())
+          .add(nodes.get(folder.id()));
+    }
+    for (var edge : edges) {
+      boolean session = edge.kind() == Kind.SESSION;
+      nodes
+          .get(edge.folderId())
+          .resources()
+          .add(
+              new WorkspaceResourceNodeDTO(
+                  edge.kind(),
+                  edge.id(),
+                  session ? titles.get(edge.id()) : canvasTitles.get(edge.id()),
+                  session ? bySession.getOrDefault(edge.id(), List.of()) : null));
+    }
+    return new WorkspaceTreeDTO(Long.toString(space.treeVersion()), roots);
+  }
+
+  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+  public WorkspaceThreadPlacementDTO thread(StudioPrincipal actor, UUID space, UUID id) {
+    spaces.get(actor, space);
+    return threadPlacement(space, id);
+  }
+
+  WorkspaceThreadPlacementDTO threadPlacement(UUID space, UUID id) {
+    var thread = harness.thread(id).orElseThrow(ChatSpaceService::resourceNotFound);
+    var edge = placements.require(space, thread.sessionId(), Kind.SESSION);
+    var title = harness.sessions(List.of(thread.sessionId())).getFirst().title();
+    var status =
+        ThreadStatus.project(
+            runtime.getObject().getExecutionRootFacts(List.of(thread.rootId())).getFirst());
+    return new WorkspaceThreadPlacementDTO(
+        thread.sessionId(),
+        title,
+        edge.folderId(),
+        thread.title(),
+        status.state(),
+        status.reason(),
+        Long.toString(thread.version()));
+  }
+}

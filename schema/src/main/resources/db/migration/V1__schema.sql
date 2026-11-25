@@ -1637,6 +1637,14 @@ create table workspace_resource (
     session_id   uuid        unique references harness_session (id) on delete restrict,
     canvas_id    uuid        unique references canvas_document (id) on delete restrict,
     agent_name   varchar(64) references agent (name) on delete restrict,
+    create_request_hash text,
+    created_tree_version bigint,
+    initial_command_id uuid,
+    constraint ck_workspace_resource_create check (
+        (create_request_hash is null and created_tree_version is null and initial_command_id is null) or
+        (create_request_hash is not null and created_tree_version is not null
+            and create_request_hash ~ '^[0-9a-f]{64}$' and created_tree_version > 0)
+    ),
     constraint fk_workspace_resource_folder foreign key (workspace_id, folder_id)
         references workspace_folder (workspace_id, id) on delete restrict,
     constraint uk_workspace_resource_session unique (workspace_id, session_id),
@@ -1656,6 +1664,9 @@ comment on column workspace_resource.position is '目录内资源序列中从零
 comment on column workspace_resource.session_id is 'Session 资源 ID，与 canvas_id 互斥';
 comment on column workspace_resource.canvas_id is 'Canvas 资源 ID，与 session_id 互斥';
 comment on column workspace_resource.agent_name is 'Session 的固定 Agent；Canvas 不设置';
+comment on column workspace_resource.create_request_hash is '资源创建请求摘要，随归属边删除';
+comment on column workspace_resource.created_tree_version is '资源首次创建提交后的树版本';
+comment on column workspace_resource.initial_command_id is '首条消息接受结果的原始 Command ID；不是持有边';
 
 create index idx_chat_space_default_agent on chat_space (default_agent_name) where default_agent_name is not null;
 create index idx_chat_space_default_environment on chat_space (default_environment_id) where default_environment_id is not null;

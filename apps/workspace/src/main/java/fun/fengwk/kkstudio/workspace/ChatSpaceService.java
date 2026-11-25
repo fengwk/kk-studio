@@ -206,18 +206,46 @@ public class ChatSpaceService {
     }
   }
 
+  Space get(StudioPrincipal actor, UUID id) {
+    return find(actor, id, false);
+  }
+
   Space lock(StudioPrincipal actor, UUID id) {
+    return find(actor, id, true);
+  }
+
+  private Space find(StudioPrincipal actor, UUID id, boolean lock) {
     return jdbc.sql(
             """
         select id, title, archived_at, version, tree_version, default_agent_name,
                default_environment_id, default_yolo_enabled
-        from chat_space where id = :id and owner_user_id = :owner for update
-        """)
+        from chat_space where id = :id and owner_user_id = :owner
+        """
+                + (lock ? " for update" : ""))
         .param("id", id)
         .param("owner", actor.userId())
         .query(Space.class)
         .optional()
-        .orElseThrow(() -> DomainException.notFound("workspace"));
+        .orElseThrow(
+            () -> DomainException.notFoundReason("WORKSPACE_NOT_FOUND", "Space not found"));
+  }
+
+  long advance(UUID spaceId) {
+    return jdbc.sql(
+            "update chat_space set tree_version = tree_version + 1 where id = :id returning tree_version")
+        .param("id", spaceId)
+        .query(Long.class)
+        .single();
+  }
+
+  static void requireTreeVersion(Space space, long expected) {
+    if (space.treeVersion() != expected) {
+      throw DomainException.versionConflict("workspace-tree", expected, space.treeVersion());
+    }
+  }
+
+  static DomainException resourceNotFound() {
+    return DomainException.notFoundReason("RESOURCE_NOT_FOUND", "Resource not found");
   }
 
   static String name(String value, String field) {

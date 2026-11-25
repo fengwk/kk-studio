@@ -2191,6 +2191,16 @@ export interface ProviderUpdateDTO {
   expectedVersion: string
 }
 
+/** Java：fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind */
+export type ResourceOwnershipKind =
+  | 'SESSION'
+  | 'CANVAS'
+
+export const RESOURCE_OWNERSHIP_KIND_VALUES: readonly ResourceOwnershipKind[] = [
+  'SESSION',
+  'CANVAS',
+]
+
 /** Java：fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO */
 export interface SecretConfiguredDTO {
   configured: boolean
@@ -2673,6 +2683,29 @@ export const THREAD_RUNTIME_STATUS_VALUES: readonly ThreadRuntimeStatus[] = [
   'IDLE',
 ]
 
+/** Java：fun.fengwk.kkstudio.workspace.ThreadStatus.Reason */
+export type ThreadStatusReason = 'STOPPED'
+
+export const THREAD_STATUS_REASON_VALUES: readonly ThreadStatusReason[] = [
+  'STOPPED',
+]
+
+/** Java：fun.fengwk.kkstudio.workspace.ThreadStatus.State */
+export type ThreadStatusState =
+  | 'NEEDS_YOU'
+  | 'RUNNING'
+  | 'WAITING'
+  | 'FAILED'
+  | 'IDLE'
+
+export const THREAD_STATUS_STATE_VALUES: readonly ThreadStatusState[] = [
+  'NEEDS_YOU',
+  'RUNNING',
+  'WAITING',
+  'FAILED',
+  'IDLE',
+]
+
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolCatalogEntryDTO */
 export interface ToolCatalogEntryDTO {
   name: string
@@ -2775,7 +2808,191 @@ export interface UpdateStudioUserRequestDTO {
   enabled?: boolean | null
 }
 
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.ChatSpaceCreateDTO */
+export interface WorkspaceControllerChatSpaceCreateDTO {
+  title: string
+  rootFolderName: string
+  defaultAgentName?: string | null
+  defaultEnvironmentId?: string | null
+  defaultYoloEnabled?: boolean | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.ChatSpacePatchDTO */
+export interface WorkspaceControllerChatSpacePatchDTO {
+  expectedVersion: string
+  title?: string | null
+  archived?: boolean | null
+  defaultYoloEnabled?: boolean | null
+  defaultAgentName?: string | null
+  defaultEnvironmentId?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.ChatSpaceSummaryDTO */
+export interface WorkspaceControllerChatSpaceSummaryDTO {
+  id: string
+  title: string
+  archivedAt?: number | null
+  version: string
+  defaultAgentName?: string | null
+  defaultEnvironmentId?: string | null
+  defaultYoloEnabled: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.WorkspaceFolderCreateDTO */
+export interface WorkspaceControllerWorkspaceFolderCreateDTO {
+  parentId?: string | null
+  name: string
+  expectedTreeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.WorkspaceFolderCreatedDTO */
+export interface WorkspaceControllerWorkspaceFolderCreatedDTO {
+  id: string
+  treeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.WorkspaceFolderPatchDTO */
+export interface WorkspaceControllerWorkspaceFolderPatchDTO {
+  name?: string | null
+  parentId?: string | null
+  beforeId?: string | null
+  expectedTreeVersion?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceController.WorkspaceTreeVersionDTO */
+export interface WorkspaceControllerWorkspaceTreeVersionDTO {
+  treeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceResources.WorkspaceCanvasCreateDTO */
+export interface WorkspaceResourcesWorkspaceCanvasCreateDTO {
+  folderId: string
+  title: string
+  expectedTreeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceResources.WorkspaceResourcePatchDTO */
+export interface WorkspaceResourcesWorkspaceResourcePatchDTO {
+  title?: string | null
+  folderId?: string | null
+  beforeId?: string | null
+  expectedTreeVersion?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceResources.WorkspaceResourceRefDTO */
+export interface WorkspaceResourcesWorkspaceResourceRefDTO {
+  kind: ResourceOwnershipKind
+  id: string
+  treeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceBranchCreatedDTO */
+export interface WorkspaceSessionsWorkspaceBranchCreatedDTO {
+  sessionId: string
+  threadId: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceForkCreatedDTO */
+export interface WorkspaceSessionsWorkspaceForkCreatedDTO {
+  sessionId: string
+  threadId: string
+  treeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceSessionCreateDTO */
+export interface WorkspaceSessionsWorkspaceSessionCreateDTO {
+  folderId: string
+  message: HarnessUserMessageContentDTO[]
+  modelSelection?: HarnessModelSelectionDTO | null
+  environmentId?: string | null
+  yoloEnabled?: boolean | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceSessionCreatedDTO */
+export interface WorkspaceSessionsWorkspaceSessionCreatedDTO {
+  sessionId: string
+  threadId: string
+  commandId: string
+  treeVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceThreadRenameDTO */
+export interface WorkspaceSessionsWorkspaceThreadRenameDTO {
+  title: string
+  expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceTurnCutDTO */
+export interface WorkspaceSessionsWorkspaceTurnCutDTO {
+  sourceThreadId: string
+  turnEndEntryId: string
+  title: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceFolderNodeDTO */
+export interface WorkspaceTreeServiceWorkspaceFolderNodeDTO {
+  id: string
+  name: string
+  children: WorkspaceTreeServiceWorkspaceFolderNodeDTO[]
+  resources: WorkspaceTreeServiceWorkspaceResourceNodeDTO[]
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceResourceNodeDTO */
+export interface WorkspaceTreeServiceWorkspaceResourceNodeDTO {
+  kind: ResourceOwnershipKind
+  id: string
+  title: string
+  threads?: WorkspaceTreeServiceWorkspaceThreadSummaryDTO[] | null
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceThreadPlacementDTO */
+export interface WorkspaceTreeServiceWorkspaceThreadPlacementDTO {
+  sessionId: string
+  sessionTitle: string
+  folderId: string
+  title: string
+  state: ThreadStatusState
+  reason?: ThreadStatusReason | null
+  version: string
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceThreadSummaryDTO */
+export interface WorkspaceTreeServiceWorkspaceThreadSummaryDTO {
+  id: string
+  title: string
+  state: ThreadStatusState
+  reason?: ThreadStatusReason | null
+  version: string
+  lastActivityAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceTreeDTO */
+export interface WorkspaceTreeServiceWorkspaceTreeDTO {
+  treeVersion: string
+  folders: WorkspaceTreeServiceWorkspaceFolderNodeDTO[]
+}
+
 export interface ApiRoutes {
+  'DELETE /api/chat-spaces/{spaceId}/canvases/{canvasId}': {
+    path: { canvasId: string; spaceId: string }
+    query: { expectedRevision: string; expectedTreeVersion: string }
+    response: WorkspaceControllerWorkspaceTreeVersionDTO
+  }
+  'DELETE /api/chat-spaces/{spaceId}/folders/{folderId}': {
+    path: { folderId: string; spaceId: string }
+    query: { expectedTreeVersion: string }
+    response: WorkspaceControllerWorkspaceTreeVersionDTO
+  }
+  'DELETE /api/chat-spaces/{spaceId}/sessions/{id}': {
+    path: { id: string; spaceId: string }
+    query: { expectedTreeVersion: string }
+    response: WorkspaceControllerWorkspaceTreeVersionDTO
+  }
+  'DELETE /api/chat-spaces/{spaceId}/threads/{id}': {
+    path: { id: string; spaceId: string }
+    query: { expectedTreeVersion: string; expectedVersion: string }
+    response: WorkspaceControllerWorkspaceTreeVersionDTO
+  }
   'DELETE /api/chat/chats/{chatId}': {
     path: { chatId: string }
     query: { expectedVersion: string }
@@ -2839,6 +3056,17 @@ export interface ApiRoutes {
   }
   'GET /api/canvas/functions': {
     response: CanvasFunctionDefinitionDTO[]
+  }
+  'GET /api/chat-spaces': {
+    response: WorkspaceControllerChatSpaceSummaryDTO[]
+  }
+  'GET /api/chat-spaces/{spaceId}/threads/{id}': {
+    path: { id: string; spaceId: string }
+    response: WorkspaceTreeServiceWorkspaceThreadPlacementDTO
+  }
+  'GET /api/chat-spaces/{spaceId}/tree': {
+    path: { spaceId: string }
+    response: WorkspaceTreeServiceWorkspaceTreeDTO
   }
   'GET /api/chat/chats': {
     query: { cursor?: string; limit?: number }
@@ -2995,6 +3223,26 @@ export interface ApiRoutes {
   'GET /api/users': {
     response: StudioUserDTO[]
   }
+  'PATCH /api/chat-spaces/{spaceId}': {
+    path: { spaceId: string }
+    body: WorkspaceControllerChatSpacePatchDTO
+    response: WorkspaceControllerChatSpaceSummaryDTO
+  }
+  'PATCH /api/chat-spaces/{spaceId}/folders/{folderId}': {
+    path: { folderId: string; spaceId: string }
+    body: WorkspaceControllerWorkspaceFolderPatchDTO
+    response: WorkspaceControllerWorkspaceTreeVersionDTO
+  }
+  'PATCH /api/chat-spaces/{spaceId}/resources/{kind}/{id}': {
+    path: { id: string; kind: ResourceOwnershipKind; spaceId: string }
+    body: WorkspaceResourcesWorkspaceResourcePatchDTO
+    response: WorkspaceControllerWorkspaceTreeVersionDTO
+  }
+  'PATCH /api/chat-spaces/{spaceId}/threads/{id}': {
+    path: { id: string; spaceId: string }
+    body: WorkspaceSessionsWorkspaceThreadRenameDTO
+    response: WorkspaceTreeServiceWorkspaceThreadPlacementDTO
+  }
   'PATCH /api/users/{id}': {
     path: { id: string }
     body: UpdateStudioUserRequestDTO
@@ -3038,6 +3286,35 @@ export interface ApiRoutes {
   'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/preview-url': {
     path: { canvasId: string; resourceId: string }
     response: CanvasPresignedUrlDTO
+  }
+  'POST /api/chat-spaces': {
+    body: WorkspaceControllerChatSpaceCreateDTO
+    response: WorkspaceControllerChatSpaceSummaryDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/canvases': {
+    path: { spaceId: string }
+    body: WorkspaceResourcesWorkspaceCanvasCreateDTO
+    response: WorkspaceResourcesWorkspaceResourceRefDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/folders': {
+    path: { spaceId: string }
+    body: WorkspaceControllerWorkspaceFolderCreateDTO
+    response: WorkspaceControllerWorkspaceFolderCreatedDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/sessions': {
+    path: { spaceId: string }
+    body: WorkspaceSessionsWorkspaceSessionCreateDTO
+    response: WorkspaceSessionsWorkspaceSessionCreatedDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/sessions/{id}/branches': {
+    path: { id: string; spaceId: string }
+    body: WorkspaceSessionsWorkspaceTurnCutDTO
+    response: WorkspaceSessionsWorkspaceBranchCreatedDTO
+  }
+  'POST /api/chat-spaces/{spaceId}/sessions/{id}/forks': {
+    path: { id: string; spaceId: string }
+    body: WorkspaceSessionsWorkspaceTurnCutDTO
+    response: WorkspaceSessionsWorkspaceForkCreatedDTO
   }
   'POST /api/chat/chats': {
     body: ChatCreateDTO

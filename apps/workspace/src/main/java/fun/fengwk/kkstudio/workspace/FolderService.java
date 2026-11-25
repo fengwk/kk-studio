@@ -65,7 +65,7 @@ public class FolderService {
       }
       return new Created(id, result.createdTreeVersion());
     }
-    requireVersion(space, request.expectedTreeVersion());
+    ChatSpaceService.requireTreeVersion(space, request.expectedTreeVersion());
     String name = ChatSpaceService.name(request.name(), "name");
     var folders = folders(spaceId);
     requireParent(folders, request.parentId());
@@ -89,7 +89,7 @@ public class FolderService {
     } catch (DuplicateKeyException ex) {
       throw nameExists();
     }
-    return new Created(id, advance(spaceId));
+    return new Created(id, spaces.advance(spaceId));
   }
 
   @Transactional
@@ -109,7 +109,7 @@ public class FolderService {
               .param("key", ChatSpaceService.nameKey(name))
               .update();
       if (updated == 0) {
-        throw DomainException.notFound("folder");
+        throw ChatSpaceService.resourceNotFound();
       }
     } catch (DuplicateKeyException ex) {
       throw nameExists();
@@ -128,7 +128,7 @@ public class FolderService {
     var space = spaces.lock(actor, spaceId);
     var folders = folders(spaceId);
     var source = requireFolder(folders, folderId);
-    requireVersion(space, expectedTreeVersion);
+    ChatSpaceService.requireTreeVersion(space, expectedTreeVersion);
     requireParent(folders, parentId);
     var byId = new HashMap<UUID, Folder>();
     for (var folder : folders) {
@@ -158,7 +158,7 @@ public class FolderService {
     } catch (DuplicateKeyException ex) {
       throw nameExists();
     }
-    return advance(spaceId);
+    return spaces.advance(spaceId);
   }
 
   @Transactional
@@ -166,7 +166,7 @@ public class FolderService {
     var space = spaces.lock(actor, spaceId);
     var folders = folders(spaceId);
     var source = requireFolder(folders, folderId);
-    requireVersion(space, expectedTreeVersion);
+    ChatSpaceService.requireTreeVersion(space, expectedTreeVersion);
     boolean hasResources =
         jdbc.sql(
                 """
@@ -189,7 +189,7 @@ public class FolderService {
         .update();
     siblings.remove(folderId);
     reorder(spaceId, source.parentId(), siblings);
-    return advance(spaceId);
+    return spaces.advance(spaceId);
   }
 
   private List<Folder> folders(UUID spaceId) {
@@ -206,7 +206,7 @@ public class FolderService {
     return folders.stream()
         .filter(folder -> folder.id().equals(id))
         .findFirst()
-        .orElseThrow(() -> DomainException.notFound("folder"));
+        .orElseThrow(() -> ChatSpaceService.resourceNotFound());
   }
 
   private static void requireParent(List<Folder> folders, UUID parentId) {
@@ -249,23 +249,7 @@ public class FolderService {
         .update();
   }
 
-  private long advance(UUID spaceId) {
-    return jdbc.sql(
-            """
-        update chat_space set tree_version = tree_version + 1 where id = :id returning tree_version
-        """)
-        .param("id", spaceId)
-        .query(Long.class)
-        .single();
-  }
-
-  private static void requireVersion(ChatSpaceService.Space space, long expected) {
-    if (space.treeVersion() != expected) {
-      throw DomainException.versionConflict("workspace-tree", expected, space.treeVersion());
-    }
-  }
-
-  private static DomainException invalidFolder() {
+  static DomainException invalidFolder() {
     return DomainException.validationReason(
         "INVALID_FOLDER", "The folder is not a valid destination");
   }

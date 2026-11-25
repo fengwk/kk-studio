@@ -261,7 +261,11 @@ class WorkspacePostgresIntegrationTest {
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     var context = new AnnotationConfigApplicationContext();
     context.register(
-        TransactionConfig.class, WorkspaceAutoConfiguration.class, StudioUserLock.class);
+        TransactionConfig.class,
+        ChatSpaceService.class,
+        FolderService.class,
+        WorkspaceResourceOwnership.class,
+        StudioUserLock.class);
     context.registerBean(JdbcClient.class, () -> JdbcClient.create(dataSource));
     context.registerBean(
         JdbcTransactionManager.class, () -> new JdbcTransactionManager(dataSource));
