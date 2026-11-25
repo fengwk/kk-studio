@@ -51,18 +51,6 @@ const documentPaths = [
   'docs/operations/environment-daemon.md',
 ]
 
-const prototypeRoot = 'docs/workspace-prototype'
-const prototypeFiles = ['index.html', 'build-preview.mjs', 'tsconfig.json', 'vite.config.mjs']
-const prototypeSourceDirectories = ['canvas', 'mock', 'presentation', 'settings', 'workspace']
-const prototypeSourceFile = /^(?:[\w-]+\/)?[\w.-]+\.(?:[cm]?js|css|tsx?|webp)$/u
-
-function isPrototypeSource(relativePath) {
-  if (!relativePath.startsWith(`${prototypeRoot}/`)) return false
-  const source = relativePath.slice(prototypeRoot.length + 1)
-  if (!prototypeSourceFile.test(source)) return false
-  return !source.includes('/') || prototypeSourceDirectories.includes(source.split('/')[0])
-}
-
 const navigationTargets = documentPaths.filter((relativePath) => relativePath !== 'docs/README.md')
 const markdownSurfaces = [
   'README.md',
@@ -247,11 +235,8 @@ function looksLikeCheckablePath(value) {
 }
 
 function checkFixedLayout() {
-  const expected = new Set([...documentPaths, ...prototypeFiles.map((name) => `${prototypeRoot}/${name}`)])
-  const expectedDirectories = new Set([
-    'docs', 'docs/modules', 'docs/operations', prototypeRoot,
-    ...prototypeSourceDirectories.map((name) => `${prototypeRoot}/${name}`),
-  ])
+  const expected = new Set(documentPaths)
+  const expectedDirectories = new Set(['docs', 'docs/modules', 'docs/operations'])
   const actual = new Set(
     walkFiles(docsRoot).map((absolutePath) => relativeFromRoot(absolutePath)),
   )
@@ -264,7 +249,7 @@ function checkFixedLayout() {
     }
   }
   for (const relativePath of actual) {
-    if (!expected.has(relativePath) && !isPrototypeSource(relativePath)) {
+    if (!expected.has(relativePath)) {
       addError(`unexpected docs file: ${relativePath}`)
     }
   }

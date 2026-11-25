@@ -11,34 +11,6 @@
 | [视觉语言与组件体系](workspace-ui.md) | 颜色、间距、焦点、边框和动效遵守什么规则，由哪些共享组件承载，怎样用门禁防止样式回退？ |
 | [保留、重构、删除与交付](workspace-delivery.md) | 现有代码哪些保留、重写或删除，重写必须保持哪些行为，按什么顺序交付和验收？ |
 
-## 运行原型
-
-从仓库根目录启动，已装前端依赖时跳过第一条：
-
-```sh
-npm --prefix frontend ci
-npm --prefix frontend run dev:prototype
-```
-
-打开 [127.0.0.1:5176](http://127.0.0.1:5176/)。保存组件或样式即可热更新；改动页面骨架或 mock 模块会重新载入。登录、对话、审批、定时和设置使用本地样例，VS Code 是静态工作台画面。不需要启动后端或 Daemon。原型默认以内置管理员 kkstudio 进入；退出后可用 kkstudio 或普通用户 chen 加任意密码登录。
-
-| 修改 | 源码 |
-| --- | --- |
-| 侧栏 | [ResourceTree](workspace-prototype/workspace/ResourceTree.tsx)、[ScheduleList](workspace-prototype/workspace/ScheduleList.tsx)、[WorkspaceMenu](workspace-prototype/workspace/WorkspaceMenu.tsx) |
-| 窗格 | [布局树](workspace-prototype/workspace/layout.js)、[窗格容器](workspace-prototype/workspace/pane-layout-view.js)、[PaneHeader](workspace-prototype/workspace/PaneHeader.tsx) |
-| 对话和环境 | [ThreadPane](workspace-prototype/workspace/ThreadPane.tsx)、[环境入口和 VS Code](workspace-prototype/workspace/EnvironmentViews.tsx) |
-| 画布和设置 | [CanvasResource](workspace-prototype/canvas/CanvasResource.tsx)、[SettingsPreview](workspace-prototype/settings/SettingsPreview.tsx) |
-| 登录和账户 | [登录与修改密码表单](workspace-prototype/workspace/AccountForms.tsx)、[用户状态](workspace-prototype/workspace/session.ts)、[头像](workspace-prototype/workspace/UserAvatar.tsx)、[用户设置](workspace-prototype/settings/UsersPreview.tsx) |
-| 样例、审批和 IDE | [mock](workspace-prototype/mock/) |
-
-用 [Vite 构建脚本](workspace-prototype/build-preview.mjs)生成离线单文件：
-
-```sh
-npm --prefix frontend run build:prototype
-```
-
-打开命令输出的 HTML，或把它单独复制给评审者。HTML、截图和 Vite 缓存留在 `reports/`，不提交。原型复用正式 UI 控件和样式 token；迁移时保留组件及其样式，用真实数据替换 mock，评审工具栏不迁入产品。交互回归使用 [Chromium 检查](workspace-prototype/verify-preview.cjs)（可传 `--live`）、[斜杠命令检查](workspace-prototype/check-slash-commands.cjs)和[目录拖拽检查](workspace-prototype/check-tree-drag.cjs)。
-
 ## 一次完整操作
 
 在对话标题栏点「向右拆分」，新窗格默认显示「新会话」。直接输入并发送即可开始对话；也可以点目录里的「1.3.0 工作流」或左下的 VS Code 图标，再选择打开到哪个窗格。点任一窗格标题里的「全屏」可专注当前内容，点「退出全屏」或按 `Esc` 恢复原布局。
@@ -140,7 +112,7 @@ type PaneBindings = Partial<Record<UUID, Target>>
 
 VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流程。一个窗格展示一个工作台，由窗格标题切换，不再叠加 Studio 的 IDE 标签。仅隐藏或全屏时，嵌入宿主保持挂载；不要移动导致 iframe 重载的 DOM 节点。Composer 的 `/files` 打开当前环境的 VS Code，也走同一流程。
 
-- **设置**：侧栏底部是头像和齿轮；展开时头像在齿轮左边，收起时头像在齿轮下面。头像显示用户名首字母，点开只有「修改密码」和「退出登录」。管理员看到全部分类：界面 → 偏好；Harness → Agent、模型、提供商、技能包、环境、MCP 服务；系统 → 常规、用户、插件、AI 运行时、工具与权限、环境默认值、后端网络、存储与媒体、高级、同步。普通用户只看到界面。分类只在桌面左栏或窄屏选择器显示，正文不重复标题；左箭头返回对话。系统设置继续由已有 schema 和聚合版本驱动；保留校验、重置、提交失败及冲突。同步保留选择导出、导入预检和确认流程。全量部署信息放常规，其中的 Studio 版本由前端构建时注入，与项目版本一致；浏览器偏好只在界面。离线原型只读写本次预览已保存的系统设置，不处理正式配置或凭据。
+- **设置**：侧栏底部是头像和齿轮；展开时头像在齿轮左边，收起时头像在齿轮下面。头像显示用户名首字母，点开只有「修改密码」和「退出登录」。管理员看到全部分类：界面 → 偏好；Harness → Agent、模型、提供商、技能包、环境、MCP 服务；系统 → 常规、用户、插件、AI 运行时、工具与权限、环境默认值、后端网络、存储与媒体、高级、同步。普通用户只看到界面。分类只在桌面左栏或窄屏选择器显示，正文不重复标题；左箭头返回对话。系统设置继续由已有 schema 和聚合版本驱动；保留校验、重置、提交失败及冲突。同步保留选择导出、导入预检和确认流程。全量部署信息放常规，其中的 Studio 版本由前端构建时注入，与项目版本一致；浏览器偏好只在界面。
 - **共享组件**：使用现有 `Button`、`IconButton`、`ResourceCard/Grid`、`CreateCard`、`StateBlock`、表单和确认弹窗。普通和紧凑按钮采用共享尺寸，触屏关键操作至少 44px。文字按钮常驻底色，只有图标的按钮平时透明；按钮悬停、目录与标签选中用底色，不画装饰边框。文本、选择控件和 Composer 在指针或键盘聚焦时统一使用 `--border` 的 1px 轮廓；普通按钮只在键盘焦点可见时显示轮廓，保留校验错误的语义。卡片 label/value 字号一致，用色与字重分层。只有确有空值含义的字段才显示「无 / 默认」。字段说明只放在标签后的 `?` 提示里，标签和输入之间、输入下方不放常驻说明；不折叠有用的表单段。日期和时间用与下拉框同外观的选择器，不用浏览器原生控件。规则细节见[视觉语言与组件体系](workspace-ui.md)。
 - **编辑器**：Agent 的工具、技能、子 Agent 直接展开；模型费率规则和倍率分段直显，配置 JSON 保持可见。模型默认变体必选。输入上限留空时显示「跟随上下文窗口」；名称、模型 ID 和输入类型只在校验失败时提示。费率时段的时间为 24 小时制；结束时间的小时列末尾有 24，选中即 `24:00`，与同日 `00:00` 区分。修改已生效方案会改变历史费用展示，这条提醒放在「价格方案」后的 `?` 里。Anthropic 的 mid-conversation system message / per-message effort 不作为用户开关：适配器按模型、能力和端点决定，使用现有明确的协议回退。单纯隐藏 UI 不改变现有已保存值、构造或发送路径；在适配器的能力判定与既有策略等价性通过协议测试后，1.3.0 空库契约移除用户可编辑字段。
 - **环境 / 插件**：环境动作顺序为安装 / 覆盖、管理、编辑、删除；管理直接显示主机、配置与事件，事件消息按当前语言显示。安装覆盖会中断正在执行的调用，须明示；编辑配置不重装。插件仅在配置未应用或应用失败时显示版本差异提示；外部连接状态是独立事实。
