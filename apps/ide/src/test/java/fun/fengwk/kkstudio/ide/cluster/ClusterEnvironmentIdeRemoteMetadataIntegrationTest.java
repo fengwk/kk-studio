@@ -65,6 +65,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -106,11 +107,13 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   private EnvironmentIdeServiceImpl nodeBLocal;
   private RecordingTransport transportB;
   private AtomicInteger received;
+  private final List<StudioPrincipal> forwardedPrincipals = new CopyOnWriteArrayList<>();
   private ClusterEnvironmentIdeService nodeAService;
 
   @BeforeEach
   void setUp() throws IOException {
     received = new AtomicInteger();
+    forwardedPrincipals.clear();
     nodeBAuthentication =
         new HmacClusterInternalAuthentication(
             SECRET, NODE_B, Clock.systemUTC(), Duration.ofSeconds(30), 1024);
@@ -157,8 +160,10 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         dto.getEntryUrl().startsWith("/ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
+    assertEquals(received.get(), forwardedPrincipals.size());
+    assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
     assertTrue(localTransportA.commands.isEmpty());
-    assertEquals(IdeAction.OPEN_VIEW, transportB.commands.getFirst().getAction());
+    assertEquals(IdeAction.OPEN_VIEW, transportB.commands.getLast().getAction());
   }
 
   @Test
@@ -168,8 +173,10 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
     nodeAService.focusTerminal(ENV, VIEW, binding, PRINCIPAL);
 
-    assertEquals(2, received.get());
-    assertEquals(2, transportB.commands.size());
+    assertEquals(3, received.get());
+    assertEquals(received.get(), forwardedPrincipals.size());
+    assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
+    assertEquals(3, transportB.commands.size());
     IdeCommand focus = transportB.commands.getLast();
     assertEquals(IdeAction.FOCUS_TERMINAL, focus.getAction());
     assertEquals(DOCUMENT, focus.getBrowserSessionId());
@@ -190,7 +197,9 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         dto.getEntryUrl().startsWith("/ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
-    IdeCommand sent = transportB.commands.getFirst();
+    assertEquals(received.get(), forwardedPrincipals.size());
+    assertTrue(forwardedPrincipals.stream().allMatch(PRINCIPAL::equals));
+    IdeCommand sent = transportB.commands.getLast();
     assertEquals(IdeAction.OPEN_VIEW, sent.getAction());
     assertFalse(sent.hasDirectory(), "zero roots must not be sent as a directory");
   }
@@ -493,6 +502,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             UUID.fromString(parameters.get("principalUserId")),
             parameters.get("principalUsername"),
             StudioRole.valueOf(parameters.get("principalRole")));
+    forwardedPrincipals.add(principal);
     String method = exchange.getRequestMethod();
     String[] segments = path.split("/");
     try {

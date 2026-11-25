@@ -407,20 +407,22 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     private final List<IdeCommand> commands = new ArrayList<>();
+    private long revision;
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
       CompletableFuture<IdeResult> reply = new CompletableFuture<>();
+      revision++;
       if (command.getAction() == IdeAction.LIST_VIEWS) {
-        reply.complete(IdeResult.newBuilder().setOk(true).setRevision(1L).build());
+        reply.complete(IdeResult.newBuilder().setOk(true).setRevision(revision).build());
         return new IdeRequest(
             new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE), UUID.randomUUID(), reply);
       }
       IdeResult.Builder builder =
           IdeResult.newBuilder()
               .setOk(true)
-              .setRevision(1L)
+              .setRevision(revision)
               .addViews(
                   IdeViewSummary.newBuilder()
                       .setViewId(command.getViewId())
