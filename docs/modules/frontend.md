@@ -569,7 +569,7 @@ Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 
 [`VizBlock`](../../frontend/src/shared/ui/markdown/VizBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart)
 渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；
 SVG 裁到图形范围并与正文左对齐。`kchart` 是 JSON 数据图，图上方显示 `scene.heading` 与 `scene.subtitle`，
-图下方显示来源与注释；渲染结果带数据表时提供默认折叠的「图表数据 · N 行」，展开后沿用 Markdown 表格样式。
+图下方显示来源与注释。
 `mermaid`、`layers`、`blocks`、`swimlane` 作为结构图源码交给 KChart，标题由紧凑排版直接画在图中。
 配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。
 放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。

@@ -84,8 +84,8 @@ test.describe('Visualization rendering and sanitization', () => {
   }
 
   for (const width of [390, 1440]) {
-    test(`renders a kchart title, source, note and expandable data table at ${width}px`, async ({ page }, info) => {
-      // 数据图由宿主显示图题与元信息，数据表默认折叠；窄屏和宽屏下复制按钮都不遮挡图。
+    test(`renders kchart metadata without a data table at ${width}px`, async ({ page }, info) => {
+      // 窄屏和宽屏都只显示图及元信息，复制按钮不遮挡图。
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       const svg = await renderViz(page, 'kchart', KCHART_SOURCE, '&code&locale=zh-CN')
       await expect(page.locator('.md-viz-heading')).toHaveText('发布节奏')
@@ -93,15 +93,7 @@ test.describe('Visualization rendering and sanitization', () => {
       await expect(page.locator('.md-viz-source')).toHaveText('来源：发布记录')
       await expect(page.locator('.md-viz-note')).toHaveText('注：仅统计已完成项')
 
-      const details = page.locator('.md-viz-data')
-      await expect(details).not.toHaveAttribute('open')
-      await expect(details.locator('summary')).toHaveText('图表数据 · 2 行')
-      await expect(details.locator('table thead th')).toHaveText(['地区', '订单'])
-      await details.locator('summary').click()
-      await expect(details).toHaveAttribute('open')
-      await expect(details.locator('tbody tr')).toHaveCount(2)
-      await expect(details.locator('tbody tr').nth(0)).toContainText('华东')
-      await expect(details.locator('tbody tr').nth(0)).toContainText('120')
+      await expect(page.locator('.md-viz-shell').locator('details, table')).toHaveCount(0)
 
       await expectCopyAboveFigure(page, svg)
       await page.locator('.md-viz-shell').screenshot({ path: info.outputPath(`kchart-${width}.png`) })

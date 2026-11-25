@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   ChartRenderResult,
@@ -96,7 +96,14 @@ describe('VizBlock', () => {
     expect(kchart.diagram).toHaveBeenCalledWith('row', expect.objectContaining({ syntax }))
   })
 
-  it('renders chart title, subtitle, source and note around the SVG', async () => {
+  it('renders chart metadata around the SVG without rendering the returned table', async () => {
+    // 即使 KChart 返回非空数据表，宿主也只显示图与元信息。
+    kchart.render.mockImplementationOnce(async (spec) => ({
+      svg: '<svg data-chart="bar"></svg>',
+      scene: sceneOf(spec),
+      table: DATA_TABLE,
+      diagnostics: [],
+    }))
     const { VizBlock } = await loadVizBlock()
     const view = render(<VizBlock syntax="kchart" code={JSON.stringify(CHART_SPEC)} />)
     await expectSvg(view.container, 'data-chart="bar"')
@@ -113,46 +120,7 @@ describe('VizBlock', () => {
     expect(screen.getByText('每周完成量')).toHaveClass('md-viz-subtitle')
     expect(screen.getByText('来源：发布记录')).toBeInTheDocument()
     expect(screen.getByText('注：仅统计已完成项')).toBeInTheDocument()
-    expect(view.container.querySelector('details.md-viz-data')).toBeNull()
-  })
-
-  it('shows a collapsed data table with its row count and Markdown table structure', async () => {
-    kchart.render.mockImplementationOnce(async (spec, options) => ({
-      svg: `<svg data-chart="bar" data-width="${options.width}"></svg>`,
-      scene: sceneOf(spec),
-      table: DATA_TABLE,
-      diagnostics: [],
-    }))
-    const { VizBlock } = await loadVizBlock()
-    const view = render(<VizBlock syntax="kchart" code={JSON.stringify(CHART_SPEC)} />)
-    await expectSvg(view.container, 'data-chart="bar"')
-
-    const details = view.container.querySelector('details.md-viz-data')
-    expect(details).not.toBeNull()
-    expect(details).not.toHaveAttribute('open')
-    const summary = details?.querySelector('summary')
-    expect(summary).toHaveTextContent('图表数据 · 2 行')
-    expect(details?.querySelectorAll('thead th')).toHaveLength(2)
-    expect(details?.querySelectorAll('tbody tr')).toHaveLength(2)
-    expect(details?.querySelector('tbody tr td')).toHaveTextContent('华东')
-
-    if (summary) {
-      fireEvent.click(summary)
-    }
-    expect(details).toHaveAttribute('open')
-  })
-
-  it('does not render an empty data table', async () => {
-    kchart.render.mockImplementationOnce(async (spec, options) => ({
-      svg: `<svg data-chart="bar" data-width="${options.width}"></svg>`,
-      scene: sceneOf(spec),
-      table: { columns: [], rows: [] },
-      diagnostics: [],
-    }))
-    const { VizBlock } = await loadVizBlock()
-    const view = render(<VizBlock syntax="kchart" code={JSON.stringify(CHART_SPEC)} />)
-    await expectSvg(view.container, 'data-chart="bar"')
-    expect(view.container.querySelector('details.md-viz-data')).toBeNull()
+    expect(view.container.querySelector('details, table')).toBeNull()
   })
 
   it('uses the SVG cache when the same source and syntax mount again', async () => {

@@ -39,20 +39,6 @@
   font-size: var(--font-size-xs);
 }
 
-.md-viz-data {
-  margin-top: var(--space-2);
-}
-
-.md-viz-data > summary {
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-}
-
-.md-viz-data > table {
-  margin-top: var(--space-2);
-}
-
 .md-viz-error {
   color: var(--fg-muted);
   white-space: normal;

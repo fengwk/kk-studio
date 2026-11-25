@@ -2,7 +2,6 @@ import { memo, useEffect, useId, useRef, useState } from 'react'
 import type {
   ChartDiagnostic,
   ChartSpec,
-  DataTable,
   Scene,
   Theme,
 } from '@fengwk/kchart'
@@ -15,9 +14,9 @@ type KChart = typeof import('@fengwk/kchart')
 type Measure = (text: string, size: number, weight: number, fontFamily: string) => number
 type Renderer = { kchart: KChart; theme: Theme; measure?: Measure }
 
-type ChartFigure = { source: string; scene: Scene; table: DataTable | null }
+type ChartFigure = { source: string; scene: Scene }
 type CachedViz =
-  | { kind: 'chart'; spec: ChartSpec; svg: string; scene: Scene; table: DataTable | null }
+  | { kind: 'chart'; spec: ChartSpec; svg: string; scene: Scene }
   | { kind: 'diagram'; svg: string; scene: Scene }
 type RenderOutcome =
   | CachedViz
@@ -107,7 +106,7 @@ async function renderDiagram(source: string, syntax: DiagramSyntax, width: numbe
   return { kind: 'diagram' as const, svg: result.svg, scene: result.scene }
 }
 
-/** 数据图声明是 JSON：先按原文解析，再把规格交给 KChart 渲染并取回表格。 */
+/** 数据图声明是 JSON：先按原文解析，再把规格交给 KChart 渲染。 */
 async function renderChart(source: string, width: number, lang: string): Promise<RenderOutcome> {
   let spec: ChartSpec
   try {
@@ -134,7 +133,7 @@ async function renderChart(source: string, width: number, lang: string): Promise
       detail: diagnostic ? chartDiagnosticText(diagnostic) : undefined,
     }
   }
-  return { kind: 'chart', spec, svg: result.svg, scene: result.scene, table: result.table }
+  return { kind: 'chart', spec, svg: result.svg, scene: result.scene }
 }
 
 /** 挂载前只重写 SVG 引用属性，让标题、标记和裁剪都指向当前图。 */
@@ -193,7 +192,7 @@ function SourceView({ code, syntax }: { code: string; syntax: VizSyntax }) {
   )
 }
 
-/** 按紧凑布局宽度重绘和缓存；数据图另显示标题、来源、注释与可折叠数据表。 */
+/** 按紧凑布局宽度重绘和缓存；数据图另显示标题、副标题、来源和注释。 */
 export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSyntax; code: string }) {
   const { t, locale } = useI18n()
   const hostRef = useRef<HTMLDivElement>(null)
@@ -242,7 +241,7 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
         return
       }
       if (result.kind === 'chart') {
-        setFigure({ source, scene: result.scene, table: result.table })
+        setFigure({ source, scene: result.scene })
         if (Array.isArray(result.spec.interaction) && result.spec.interaction.length > 0) {
           attachInteraction(result.spec, svg)
         }
@@ -339,30 +338,6 @@ export const VizBlock = memo(function VizBlock({ syntax, code }: { syntax: VizSy
             <div className="md-viz-note">{t('shared.vizNote', { note: chartFigure.scene.note })}</div>
           ) : null}
         </div>
-      ) : null}
-      {chartFigure?.table && chartFigure.table.rows.length > 0 ? (
-        <details className="md-viz-data">
-          <summary>
-            {t(
-              chartFigure.table.rows.length === 1 ? 'shared.vizChartData.one' : 'shared.vizChartData.other',
-              { count: chartFigure.table.rows.length },
-            )}
-          </summary>
-          <table>
-            <thead>
-              <tr>
-                {chartFigure.table.columns.map(({ key, label }) => <th key={key} scope="col">{label}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {chartFigure.table.rows.map((row, rowIndex) => (
-                <tr key={rowIndex}>
-                  {row.map((cell, cellIndex) => <td key={cellIndex}>{cell.text}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
       ) : null}
     </CopyableShell>
   )
