@@ -428,7 +428,7 @@ describe('WorkspaceShell', () => {
         return jsonResponse({ document: { id: canvas1Id, title: 'Architecture Canvas', revision: '7', content: '{}' } })
       }
       if (url.pathname.includes(`/canvases/${canvas1Id}`) && method === 'DELETE') {
-        return jsonResponse({ reason: 'RESOURCE_IN_USE', detail: 'in use' }, 409)
+        return jsonResponse({ reason: 'RESOURCE_IN_USE', detail: 'Target is used by schedules: Daily Summary, Weekly Report' }, 409)
       }
       if (url.pathname.includes(`/sessions/${session2Id}`) && method === 'DELETE') {
         return new Response(null, { status: 204 })
@@ -490,17 +490,19 @@ describe('WorkspaceShell', () => {
     fireEvent.submit(renameRowInput.closest('form')!)
     await waitFor(() => expect(within(treeEl).queryByLabelText('Rename Architecture Canvas')).toBeNull())
 
-    // Delete canvas: first readCanvasRevision fails (reports alert), then succeeds and DELETE returns 409 error in modal
+    // Preflight failure and an in-use refusal are notices, not destructive confirmations.
     fireEvent.keyDown(canvasRow, { key: 'Delete' })
-    const failNotice = await screen.findByRole('alertdialog', { name: 'Request failed' })
-    fireEvent.click(within(failNotice).getByRole('button', { name: 'Confirm' }))
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    const failNotice = await screen.findByRole('dialog', { name: 'Request failed' })
+    expect(within(failNotice).getAllByRole('button')).toHaveLength(1)
+    fireEvent.click(within(failNotice).getByRole('button', { name: 'Close' }))
 
     fireEvent.keyDown(canvasRow, { key: 'Delete' })
     const delCanvasModal = await screen.findByRole('alertdialog', { name: 'Delete Architecture Canvas?' })
     fireEvent.click(within(delCanvasModal).getByRole('button', { name: 'Confirm' }))
-    expect(await within(delCanvasModal).findByText('This resource is still in use.')).toBeInTheDocument()
-    fireEvent.click(within(delCanvasModal).getByRole('button', { name: 'Cancel' }))
+    const inUse = await screen.findByRole('dialog', { name: 'This resource is still in use.' })
+    expect(inUse).toHaveTextContent('Daily Summary, Weekly Report')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    fireEvent.click(within(inUse).getByRole('button', { name: 'Close' }))
 
     // Delete single-thread session vs multi-thread thread (expand sessions first)
     fireEvent.click(within(treeEl).getByRole('treeitem', { name: 'Solo Session' }))

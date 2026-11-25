@@ -218,6 +218,24 @@ async function setup(page: Page, initialOptions?: {
   }
 }
 
+test('opening a drawer item gives the pane picker focus and returns to the sidebar trigger on Escape', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto(path)
+  const trigger = page.getByRole('button', { name: 'Open sidebar' })
+  await trigger.click()
+  await page.getByRole('treeitem', { name: 'Diagram' }).click()
+  await expect(page.locator('.workspace-main')).not.toHaveAttribute('inert')
+  await trigger.click()
+  await page.getByRole('treeitem', { name: 'Diagram' }).click()
+  const picker = page.getByRole('dialog', { name: 'Open in pane' })
+  await expect(picker).toBeVisible()
+  await expect(picker.locator(':focus')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(picker).toBeHidden()
+  await expect(trigger).toBeFocused()
+})
+
 test('responsive sidebar drawer, collapse rail, resize and acceptance screenshots', async ({ page }) => {
   await setup(page)
   for (const width of [1440, 1024, 390, 320]) {
@@ -232,6 +250,8 @@ test('responsive sidebar drawer, collapse rail, resize and acceptance screenshot
     if (width <= 390) {
       await page.keyboard.press('Escape')
       await expect(page.getByRole('treeitem', { name: 'Projects' })).toBeHidden()
+      await expect(page.locator('.workspace-main')).not.toHaveAttribute('inert')
+      await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeFocused()
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 })

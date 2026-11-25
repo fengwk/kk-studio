@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
-import { ApiError } from '@/shared/api/client'
+import { ApiError, apiErrorDetail } from '@/shared/api/client'
 import type { ChatSpaceDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { createUuid } from '@/shared/lib/uuid'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 import { Tabs } from '@/shared/ui/controls/Tabs'
 import { newDraft } from './pane-bindings'
@@ -79,13 +80,15 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   const [collapsed, setCollapsed] = useState(false)
   const [drawer, setDrawer] = useState(false)
   const [tab, setTab] = useState('directory')
-  const [notice, report] = useState('')
+  const [notice, setNotice] = useState<{ title: string; detail?: string | null }>()
+  const report = useCallback((title: string) => setNotice({ title }), [])
   const [creation, setCreation] = useState<{ kind: 'canvas' | 'space'; parentId?: string; key: string }>()
   const [deletion, setDeletion] = useState<{ row: TreeRow; request: TreeDeletion; busy?: boolean; error?: string }>()
   const [defaults, setDefaults] = useState(false)
   const resize = useRef<{ x: number; width: number }>(undefined)
   const narrowTrigger = useRef<HTMLButtonElement>(null)
   const drawerClose = useRef<HTMLButtonElement>(null)
+  const restoreDrawerFocus = useRef(false)
   const consumed = useRef('')
   const panes = useWorkspacePanes({ userId, space, rows: index, renderers, closeView, report, openSpaceSettings: () => setDefaults(true) })
   const fullscreen = panes.layoutProps.fullscreen
@@ -93,7 +96,11 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   const errorText = (error: unknown) => {
     if (error instanceof ApiError) {
       const reason = error.reason ?? error.code
-      if (reason && Object.hasOwn(workspaceErrors, reason)) return t(workspaceErrors[reason as keyof typeof workspaceErrors])
+      if (reason && Object.hasOwn(workspaceErrors, reason)) {
+        const title = t(workspaceErrors[reason as keyof typeof workspaceErrors])
+        const detail = reason === 'RESOURCE_IN_USE' ? apiErrorDetail(error) : null
+        return detail ? `${title} ${detail}` : title
+      }
     }
     return t('shared.requestFailed')
   }
@@ -112,7 +119,13 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   useEffect(() => {
     try { localStorage.setItem(key, JSON.stringify({ width, expanded: [...expanded] })) } catch { /* Keep state in memory. */ }
   }, [expanded, key, width])
-  useEffect(() => { if (drawer) drawerClose.current?.focus() }, [drawer])
+  useLayoutEffect(() => {
+    if (drawer) drawerClose.current?.focus()
+    else if (restoreDrawerFocus.current) {
+      restoreDrawerFocus.current = false
+      narrowTrigger.current?.focus()
+    }
+  }, [drawer])
 
   const params = new URLSearchParams(link.search)
   const threadId = params.get('thread'), canvasId = params.get('canvas')
@@ -131,11 +144,12 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
     if (target) openPane(target)
     else report(t('workspace.unavailable'))
     link.consume()
-  }, [canvasId, index, link, openPane, t, threadId, threadLink.data, threadLink.isError, threadLink.isFetching])
+  }, [canvasId, index, link, openPane, report, t, threadId, threadLink.data, threadLink.isError, threadLink.isFetching])
 
-  function closeDrawer() { setDrawer(false); narrowTrigger.current?.focus() }
+  function closeDrawer() { restoreDrawerFocus.current = true; setDrawer(false) }
   function open(target: PaneTarget, anchor?: HTMLElement | null) {
-    if (drawer) closeDrawer()
+    // The picker or opened pane owns focus; the trigger is only the picker's return target.
+    if (drawer) setDrawer(false)
     panes.open(target, drawer ? narrowTrigger.current : anchor)
   }
   function openRow(row: TreeRow, anchor: HTMLElement) {
@@ -239,7 +253,9 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       </div>} />, panes.removeView)}
     </main>
     {panes.confirmation}
-    {notice && <ConfirmActionModal pending={false} modal={{ title: notice, description: '', onConfirm: () => report('') }} onClose={() => report('')} />}
+    {notice && <Dialog title={notice.title} onClose={() => setNotice(undefined)}>
+      {notice.detail && <p className="modal-body">{notice.detail}</p>}
+    </Dialog>}
     {creation && <NameDialog title={t(creation.kind === 'space' ? 'workspace.newSpace' : 'workspace.newCanvas')}
       onCancel={() => setCreation(undefined)} onConfirm={async name => {
         if (creation.kind === 'space') {
@@ -257,7 +273,13 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       onConfirm: () => {
         setDeletion({ ...deletion, busy: true })
         void write(() => deleteTreeRow(space.id, deletion.request)).then(() => setDeletion(undefined))
-          .catch((error: Error) => setDeletion({ ...deletion, error: error.message }))
+          .catch((error: Error) => {
+            const cause = error.cause
+            if (cause instanceof ApiError && (cause.reason ?? cause.code) === 'RESOURCE_IN_USE') {
+              setDeletion(undefined)
+              setNotice({ title: t('workspace.inUse'), detail: apiErrorDetail(cause) })
+            } else setDeletion({ ...deletion, error: error.message })
+          })
       },
     } : null} />
     {defaults && <SpaceDefaults space={space} onClose={() => setDefaults(false)} save={body => write(() => patchSpace(space.id, body), true)} />}
