@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -36,12 +37,17 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipalArgumentResolver;
+import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchController;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.ModelImageCountLimitResolver;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
@@ -60,6 +66,8 @@ class HarnessAcceptanceProblemWireTest {
   private final UUID session = UUID.randomUUID();
   private final UUID thread = UUID.randomUUID();
   private final UUID upload = UUID.randomUUID();
+  private final StudioPrincipal actor =
+      new StudioPrincipal(UUID.randomUUID(), "wire-test", StudioRole.USER);
   private StorageUploadService uploads;
   private MockMvc mvc;
   private HarnessRuntime runtime;
@@ -110,11 +118,14 @@ class HarnessAcceptanceProblemWireTest {
             mock(StorageBlobManager.class),
             new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
             imageLimitResolver);
-    HarnessCommandBatchService service = new HarnessCommandBatchService(acceptance, runtime);
+    HarnessCommandBatchService service =
+        new HarnessCommandBatchService(acceptance, runtime, mock(ResourceAccess.class));
     mvc =
         MockMvcBuilders.standaloneSetup(
                 new HarnessCommandBatchController(service),
                 new HarnessThreadCommandBatchController(service))
+            .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
+            .defaultRequest(get("/").requestAttr(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, actor))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(
@@ -126,7 +137,7 @@ class HarnessAcceptanceProblemWireTest {
   /** 附件不存在与跨 Session 资源是用户输入错误，未就绪附件则保留存储冲突原因。 */
   @Test
   void userMessageRejectsInvalidContentsAndPropagatesStorageConflict() throws Exception {
-    when(uploads.lockReady(upload))
+    when(uploads.lockReady(upload, actor.userId()))
         .thenThrow(DomainException.notFound("upload"))
         .thenThrow(DomainException.conflict("STORAGE_VERIFICATION", "pending"));
     String attachment = "{\"type\":\"ATTACHMENT\",\"uploadId\":\"" + upload + "\"}";

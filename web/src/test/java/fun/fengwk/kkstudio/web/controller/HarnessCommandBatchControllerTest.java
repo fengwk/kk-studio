@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
@@ -71,15 +72,17 @@ class HarnessCommandBatchControllerTest {
 
   private HarnessCommandAcceptanceOrchestrator acceptanceService;
   private HarnessRuntime runtime;
+  private ResourceAccess resourceAccess;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
+    resourceAccess = mock(ResourceAccess.class);
     HarnessCommandBatchController controller =
         new HarnessCommandBatchController(
-            new HarnessCommandBatchService(acceptanceService, runtime));
+            new HarnessCommandBatchService(acceptanceService, runtime, resourceAccess));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())

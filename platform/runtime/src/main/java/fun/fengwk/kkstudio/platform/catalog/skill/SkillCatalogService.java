@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
@@ -215,16 +216,18 @@ public class SkillCatalogService {
 
   /** 用已完成的原始上传构建预览；原始上传被消费，规范化归档作为暂存上传保留。 */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
-  public SkillPackageStagingDTO previewUpload(SkillPackageStagingCreateDTO previewDTO) {
+  public SkillPackageStagingDTO previewUpload(
+      StudioPrincipal actor, SkillPackageStagingCreateDTO previewDTO) {
+    Objects.requireNonNull(actor, "actor");
     requireBody(previewDTO != null);
     String packageName = SkillPackageInputs.requirePackageName(previewDTO.getPackageName());
     String packageVersion = SkillPackageInputs.requireVersionText(previewDTO.getPackageVersion());
     String description = description(previewDTO.getDescription());
     UUID uploadId = previewDTO.getUploadId();
-    SkillArchiveBuilder.Result archive = staging.readUploaded(uploadId);
+    SkillArchiveBuilder.Result archive = staging.readUploaded(uploadId, actor.userId());
     UUID stagingUploadId = staging.stage(packageName, archive);
     try {
-      uploadService.delete(uploadId);
+      uploadService.delete(uploadId, actor.userId());
     } catch (RuntimeException error) {
       staging.cancelBestEffort(stagingUploadId);
       throw error;

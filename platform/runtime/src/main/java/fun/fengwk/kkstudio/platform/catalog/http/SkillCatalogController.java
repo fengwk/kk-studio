@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
@@ -95,8 +96,9 @@ public class SkillCatalogController {
 
   @PostMapping("/skill-package-stagings")
   @ResponseStatus(HttpStatus.CREATED)
-  public SkillPackageStagingDTO createStaging(@RequestBody SkillPackageStagingCreateDTO createDTO) {
-    return skillCatalogService.previewUpload(createDTO);
+  public SkillPackageStagingDTO createStaging(
+      @RequestBody SkillPackageStagingCreateDTO createDTO, StudioPrincipal actor) {
+    return skillCatalogService.previewUpload(actor, createDTO);
   }
 
   @PostMapping("/skill-package-stagings/{stagingId}/publish")

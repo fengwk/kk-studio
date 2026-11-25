@@ -86,8 +86,8 @@ final class SkillPackageArchiveStaging {
   }
 
   /** 读取已完成的原始上传并重建规范化归档；超限时翻译为校验错误。 */
-  SkillArchiveBuilder.Result readUploaded(UUID uploadId) {
-    StorageUploadService.ReadyUpload ready = uploadService.peekReady(uploadId);
+  SkillArchiveBuilder.Result readUploaded(UUID uploadId, UUID userId) {
+    StorageUploadService.ReadyUpload ready = uploadService.peekReady(uploadId, userId);
     byte[] bytes;
     try {
       bytes =

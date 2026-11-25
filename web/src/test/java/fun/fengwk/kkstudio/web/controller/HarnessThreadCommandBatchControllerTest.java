@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.ResourceAccess;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
@@ -72,15 +74,17 @@ class HarnessThreadCommandBatchControllerTest {
 
   private HarnessCommandAcceptanceOrchestrator acceptanceService;
   private HarnessRuntime runtime;
+  private ResourceAccess resourceAccess;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
+    resourceAccess = mock(ResourceAccess.class);
     HarnessThreadCommandBatchController controller =
         new HarnessThreadCommandBatchController(
-            new HarnessCommandBatchService(acceptanceService, runtime));
+            new HarnessCommandBatchService(acceptanceService, runtime, resourceAccess));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setCustomArgumentResolvers(new StudioPrincipalArgumentResolver())
@@ -100,6 +104,19 @@ class HarnessThreadCommandBatchControllerTest {
                 false,
                 false));
     when(runtime.getThreadSnapshot(any())).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+  }
+
+  @Test
+  void rejectsThreadNotOwnedByCurrentPrincipalBeforeAcceptance() throws Exception {
+    doThrow(ResourceAccess.notFound())
+        .when(resourceAccess)
+        .requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
+
+    postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
+        .andExpect(status().isNotFound());
+
+    verify(resourceAccess).requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
+    verifyNoInteractions(acceptanceService, runtime);
   }
 
   /** 成功：owner-free 的 SET_* 混合批次映射为 path Thread + 精确 cursor 的 THREAD target，响应回读接受后的权威 Thread。 */
@@ -126,6 +143,7 @@ class HarnessThreadCommandBatchControllerTest {
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     verify(acceptanceService).acceptOnThread(eq(PRINCIPAL.userId()), commandCaptor.capture());
+    verify(resourceAccess).requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
     assertEquals(UUID.fromString(THREAD_ID), target.threadId());
@@ -160,6 +178,7 @@ class HarnessThreadCommandBatchControllerTest {
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     verify(acceptanceService).acceptOnThread(eq(PRINCIPAL.userId()), commandCaptor.capture());
+    verify(resourceAccess).requireThread(PRINCIPAL, UUID.fromString(THREAD_ID));
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
     assertEquals(UUID.fromString(THREAD_ID), target.threadId());
