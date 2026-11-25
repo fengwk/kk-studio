@@ -13,6 +13,7 @@ const ROOT_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/repo-root.sh')
 const LIB_DIR = path.join(REPOSITORY_ROOT, 'scripts/dev/lib')
 const E2E_CREDENTIALS_LIB = path.join(LIB_DIR, 'e2e-credentials.sh')
 const E2E_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/lib.sh')
+const E2E_AUTH_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/lib/studio-auth.sh')
 const MATRIX_RUNNER = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs')
 // 最小的根 POM 骨架：入口只读取 kk-studio-parent 的 <version>。
 const ROOT_POM = '<project>\n  <artifactId>kk-studio-parent</artifactId>\n  <version>9.9.9</version>\n</project>\n'
@@ -40,7 +41,7 @@ function withLauncherCheckout(body) {
   try {
     const checkout = path.join(temporary, 'checkout')
     mkdirSync(path.join(checkout, 'scripts/dev/lib'), { recursive: true })
-    mkdirSync(path.join(checkout, 'scripts/dev/verify/e2e'), { recursive: true })
+    mkdirSync(path.join(checkout, 'scripts/dev/verify/e2e/lib'), { recursive: true })
     writeFileSync(path.join(checkout, '.git'), 'gitdir: /tmp/example\n')
     writeFileSync(path.join(checkout, 'pom.xml'), ROOT_POM)
     for (const name of [...LAUNCHER_LIBS, 'e2e-credentials.sh']) {
@@ -48,6 +49,7 @@ function withLauncherCheckout(body) {
     }
     copyFileSync(APP_SCRIPT, path.join(checkout, 'scripts/dev/app.sh'))
     copyFileSync(E2E_LIB, path.join(checkout, 'scripts/dev/verify/e2e/lib.sh'))
+    copyFileSync(E2E_AUTH_LIB, path.join(checkout, 'scripts/dev/verify/e2e/lib/studio-auth.sh'))
     return body(checkout, path.join(temporary, 'runtime'))
   } finally {
     rmSync(temporary, { recursive: true, force: true })
