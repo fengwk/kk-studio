@@ -83,14 +83,16 @@ class IdeBrowserUseGatewayTest {
     assertFalse(
         gateway.findExactIntent(
             LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, UUID.randomUUID()));
-    assertTrue(gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT, UUID.randomUUID()).isEmpty());
+    assertTrue(
+        gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT, UUID.randomUUID()).isEmpty());
     IdeBrowserUseGateway.Proofs proofs =
         gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT, USER).orElseThrow();
 
     assertEquals(DOCUMENT, proofs.browserSessionId());
     assertEquals(USER, proofs.userId());
     assertEquals(4L, proofs.revision());
-    assertEquals(List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, USER, 7L)), proofs.views());
+    assertEquals(
+        List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, USER, 7L)), proofs.views());
     verifyNoMoreInteractions(nodes);
   }
 
@@ -106,7 +108,7 @@ class IdeBrowserUseGatewayTest {
 
     assertThrows(
         DomainException.class,
-        () -> gateway.findExactIntent(REMOTE_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
+        () -> gateway.findExactIntent(REMOTE_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM, USER));
     verify(nodes).liveInternalOrigin(REMOTE_NODE);
     verifyNoMoreInteractions(nodes);
   }
@@ -119,7 +121,7 @@ class IdeBrowserUseGatewayTest {
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> gateway.activeBoundProofs(REMOTE_NODE, CONNECTION, DOCUMENT));
+            () -> gateway.activeBoundProofs(REMOTE_NODE, CONNECTION, DOCUMENT, USER));
 
     assertInstanceOf(IllegalStateException.class, error.getCause());
     verify(nodes).liveInternalOrigin(REMOTE_NODE);

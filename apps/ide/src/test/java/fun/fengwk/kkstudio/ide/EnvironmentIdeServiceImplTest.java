@@ -97,6 +97,7 @@ class EnvironmentIdeServiceImplTest {
   private StorageBlobRepository blobRepository;
   private StorageBlobContentService blobContentService;
   private EnvironmentIdeServiceImpl service;
+  private boolean createPreflightExpected;
 
   @BeforeEach
   void setUp() {
@@ -140,7 +141,8 @@ class EnvironmentIdeServiceImplTest {
   void openViewUsesExplicitInstanceAndCompleteSnapshot() {
     transport.replies.add(openSnapshot(5L, 7L));
 
-    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("create", 0L, "/client/dir"), PRINCIPAL);
+    EnvironmentIdeViewDTO dto =
+        service.openView(ENV, openRequest("create", 0L, "/client/dir"), PRINCIPAL);
 
     assertEquals(VIEW.toString(), dto.getViewId());
     assertEquals(BROWSER_SESSION.toString(), dto.getBrowserSessionId());
@@ -197,7 +199,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("IDE_PROTOCOL_ERROR", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -214,7 +217,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
+            DomainException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("validation", error.code().code());
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -266,7 +270,8 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(
         "validation",
         assertThrows(
-                DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL))
+                DomainException.class,
+                () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL))
             .code()
             .code());
 
@@ -274,7 +279,9 @@ class EnvironmentIdeServiceImplTest {
     close.setExpectedDaemonInstanceId(invalid);
     assertEquals(
         "validation",
-        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close, PRINCIPAL))
+        assertThrows(
+                DomainException.class,
+                () -> service.closeView(ENV, VIEW.toString(), close, PRINCIPAL))
             .code()
             .code());
 
@@ -283,7 +290,8 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(
         "validation",
         assertThrows(
-                DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), focus, PRINCIPAL))
+                DomainException.class,
+                () -> service.focusTerminal(ENV, VIEW.toString(), focus, PRINCIPAL))
             .code()
             .code());
 
@@ -292,7 +300,8 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(
         "validation",
         assertThrows(
-                DomainException.class, () -> service.collapseMobile(ENV, VIEW.toString(), apply, PRINCIPAL))
+                DomainException.class,
+                () -> service.collapseMobile(ENV, VIEW.toString(), apply, PRINCIPAL))
             .code()
             .code());
 
@@ -320,7 +329,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
@@ -334,7 +344,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -383,12 +394,16 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void readViewReportsOtherOwner() {
     UUID otherBrowserSession = UUID.fromString("cccccccc-dddd-eeee-ffff-000000000000");
-    transport.replies.add(snapshot(5L, summary(7L, CLAIM)));
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL);
+    transport.replies.add(snapshot(6L, summary(7L, CLAIM)));
 
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.readView(ENV, VIEW.toString(), readRequest(otherBrowserSession), PRINCIPAL));
+            () ->
+                service.readView(
+                    ENV, VIEW.toString(), readRequest(otherBrowserSession), PRINCIPAL));
 
     assertEquals("VIEW_OWNED_BY_OTHER_SESSION", error.reason());
   }
@@ -401,7 +416,8 @@ class EnvironmentIdeServiceImplTest {
     EnvironmentIdeViewBindingDTO wrongEpoch = binding(8L);
     DomainException stale =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), wrongEpoch, PRINCIPAL));
+            DomainException.class,
+            () -> service.focusTerminal(ENV, VIEW.toString(), wrongEpoch, PRINCIPAL));
     assertEquals("STALE_BINDING", stale.reason());
 
     EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
@@ -412,7 +428,8 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(snapshot(7L));
     DomainException gone =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
+            DomainException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
     assertEquals("VIEW_GONE", gone.reason());
   }
 
@@ -441,7 +458,8 @@ class EnvironmentIdeServiceImplTest {
     change.setDirectory("/next");
     transport.replies.add(snapshot(6L, summary(7L, CLAIM, "/daemon/next")));
 
-    EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL);
+    EnvironmentIdeViewDTO changed =
+        service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL);
 
     assertEquals("/daemon/next", changed.getDirectory());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY), actions());
@@ -611,7 +629,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
+            DomainException.class,
+            () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
@@ -624,7 +643,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
+            DomainException.class,
+            () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
 
     assertEquals("VIEW_GONE", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -658,7 +678,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
+            DomainException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     IdeViewSnapshotStore.Snapshot current = snapshot();
@@ -673,7 +694,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
@@ -689,7 +711,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
+            DomainException.class,
+            () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.FOCUS_TERMINAL), actions());
@@ -703,11 +726,13 @@ class EnvironmentIdeServiceImplTest {
 
     transport.failNext.set(IdeAction.FOCUS_TERMINAL);
     assertThrows(
-        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
+        DomainException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L), PRINCIPAL));
 
     transport.failNext.set(IdeAction.CLOSE_VIEW);
     assertThrows(
-        DomainException.class, () -> service.closeView(ENV, VIEW.toString(), closeRequest(true), PRINCIPAL));
+        DomainException.class,
+        () -> service.closeView(ENV, VIEW.toString(), closeRequest(true), PRINCIPAL));
 
     CountDownLatch started = new CountDownLatch(1);
     CompletableFuture<IdeResult> pendingReply = transport.pending(started);
@@ -771,7 +796,8 @@ class EnvironmentIdeServiceImplTest {
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
 
     DomainException error =
-        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close, PRINCIPAL));
+        assertThrows(
+            DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close, PRINCIPAL));
 
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
     assertEquals("validation", error.code().code());
@@ -798,7 +824,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
+            DomainException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
     assertEquals("validation", error.code().code());
@@ -813,7 +840,8 @@ class EnvironmentIdeServiceImplTest {
 
     // 同 epoch 的重试仍被授权，而不是退化为 STALE_BINDING/VIEW_GONE。
     transport.replies.add(snapshot(6L, summary(7L, CLAIM, "/daemon/next")));
-    EnvironmentIdeViewDTO retried = service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL);
+    EnvironmentIdeViewDTO retried =
+        service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL);
     assertEquals("/daemon/next", retried.getDirectory());
   }
 
@@ -823,7 +851,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("DAEMON_NOT_READY", error.reason());
     assertTrue(transport.commands.isEmpty());
@@ -835,7 +864,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertTrue(transport.commands.isEmpty());
@@ -869,7 +899,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(0, tickets.pendingCount());
@@ -884,7 +915,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
+            DomainException.class,
+            () -> service.openView(ENV, openRequest("create", 0L, null), PRINCIPAL));
 
     assertEquals("VIEW_GONE", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
@@ -920,7 +952,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
+            DomainException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY), actions());
@@ -941,7 +974,8 @@ class EnvironmentIdeServiceImplTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
+            DomainException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), change, PRINCIPAL));
 
     assertEquals("STALE_BINDING", error.reason());
     IdeViewSnapshotStore.Snapshot current = snapshot();
@@ -1015,8 +1049,9 @@ class EnvironmentIdeServiceImplTest {
     return transport.allActions;
   }
 
-  private static EnvironmentIdeOpenViewDTO openRequest(
+  private EnvironmentIdeOpenViewDTO openRequest(
       String mode, long expectedEpoch, String directory) {
+    createPreflightExpected = "create".equals(mode);
     EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
     request.setViewId(VIEW.toString());
     request.setBrowserSessionId(BROWSER_SESSION.toString());
@@ -1118,7 +1153,6 @@ class EnvironmentIdeServiceImplTest {
 
     private final List<IdeCommand> commands = new CopyOnWriteArrayList<>();
     private final List<IdeAction> allActions = new CopyOnWriteArrayList<>();
-    private int preflightIntentCount;
     private final Deque<IdeResult> replies = new ArrayDeque<>();
     private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
     private final AtomicInteger abandoned = new AtomicInteger();
@@ -1134,10 +1168,9 @@ class EnvironmentIdeServiceImplTest {
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       allActions.add(command.getAction());
       boolean createPreflight =
-          command.getAction() == IdeAction.LIST_VIEWS
-              && browserUse.queries.size() > preflightIntentCount;
+          command.getAction() == IdeAction.LIST_VIEWS && createPreflightExpected;
       if (createPreflight) {
-        preflightIntentCount = browserUse.queries.size();
+        createPreflightExpected = false;
       } else {
         commands.add(command);
       }
