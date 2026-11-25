@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** 领域与命令的共享校验，保证领域各处对名称、正文与集合的处理一致。 */
-final class CanvasValidation {
+public final class CanvasValidation {
 
   /** 节点、group 与 function 名称的最大长度（与数据库列一致）。 */
   static final int MAX_NAME_LENGTH = 256;
@@ -33,7 +33,7 @@ final class CanvasValidation {
   }
 
   /** Resource 名称校验，长度上限为 {@link #MAX_RESOURCE_NAME_LENGTH}。 */
-  static String requireResourceName(String value, String field) {
+  public static String requireResourceName(String value, String field) {
     return requireText(value, field, MAX_RESOURCE_NAME_LENGTH);
   }
 

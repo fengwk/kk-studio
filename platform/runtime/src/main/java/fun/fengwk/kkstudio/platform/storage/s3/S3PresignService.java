@@ -73,10 +73,19 @@ public class S3PresignService {
   }
 
   public S3PresignedUrl presignDownload(String key, Long expiresInSeconds) {
+    return presignDownload(key, expiresInSeconds, null);
+  }
+
+  public S3PresignedUrl presignDownload(
+      String key, Long expiresInSeconds, String responseContentDisposition) {
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
     Duration duration = resolveExpires(expiresInSeconds);
     GetObjectRequest getRequest =
-        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
+        GetObjectRequest.builder()
+            .bucket(properties.getBucket())
+            .key(normalizedKey)
+            .responseContentDisposition(responseContentDisposition)
+            .build();
     GetObjectPresignRequest presignRequest =
         GetObjectPresignRequest.builder()
             .signatureDuration(duration)

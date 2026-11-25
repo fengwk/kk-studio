@@ -55,11 +55,11 @@ export function listCanvasFunctions(
 export function getCanvasResourceOriginalUrl(
   canvasId: string,
   blobId: string,
-  options?: CanvasRequestOptions,
+  options?: CanvasRequestOptions & { downloadName?: string },
 ): Promise<CanvasPresignedUrlDTO> {
   return request(
     'POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url',
-    { path: { canvasId, blobId } },
+    { path: { canvasId, blobId }, query: { downloadName: options?.downloadName } },
     { signal: options?.signal },
   )
 }

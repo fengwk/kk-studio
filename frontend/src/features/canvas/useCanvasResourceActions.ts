@@ -27,12 +27,16 @@ export function useCanvasResourceActions(resource: Resource) {
     setLoading(true)
     setError(null)
     setFulfilled(false)
-    void getCanvasResourceOriginalUrl(resource.canvasId, resource.blobId)
+    void getCanvasResourceOriginalUrl(
+      resource.canvasId,
+      resource.blobId,
+      intent === 'download' ? { downloadName: resource.name } : undefined,
+    )
       .then(({ url }) => {
         if (requestIdRef.current !== requestId) {
           return
         }
-        triggerAnchor(intent, url, resource.name)
+        triggerAnchor(intent, url)
         setFulfilled(true)
       })
       .catch((reason: unknown) => {
@@ -50,13 +54,12 @@ export function useCanvasResourceActions(resource: Resource) {
   return { loading, error, fulfilled, ensureSigned }
 }
 
-function triggerAnchor(intent: OriginalIntent, url: string, name: string): void {
+function triggerAnchor(intent: OriginalIntent, url: string): void {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.rel = 'noreferrer'
-  if (intent === 'download') {
-    anchor.download = name
-  } else {
+  // S3 serves the download as an attachment, including across origins.
+  if (intent === 'open') {
     anchor.target = '_blank'
   }
   document.body.appendChild(anchor)

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.storage.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.ContentDisposition;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -138,10 +139,18 @@ public class StorageBlobManager {
 
   /** 为 ACTIVE blob 生成原始内容 GET 预签名 URL（DELETING/不存在抛 404 语义异常）。 */
   public StoragePresignedUrlDTO presignOriginalUrl(UUID blobId) {
+    return presignOriginalUrl(blobId, null);
+  }
+
+  /** 为 ACTIVE blob 签发原件 URL，并将指定的响应 Content-Disposition 纳入签名。 */
+  public StoragePresignedUrlDTO presignOriginalUrl(UUID blobId, ContentDisposition disposition) {
     StorageBlob blob = requireActive(blobId);
+    String key = StorageObjectKeys.blobOriginal(blobId);
     StoragePresignedUrlDTO signed =
         StoragePresignedUrls.from(
-            s3PresignService.presignDownload(StorageObjectKeys.blobOriginal(blobId), null));
+            disposition == null
+                ? s3PresignService.presignDownload(key, null)
+                : s3PresignService.presignDownload(key, null, disposition.toString()));
     signed.setMediaType(blob.getMediaType());
     signed.setSizeBytes(blob.getSizeBytes());
     return signed;

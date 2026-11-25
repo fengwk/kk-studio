@@ -105,9 +105,9 @@ HTTP 的 BLOB 输入使用 READY 上传的 `uploadId`，而 Canvas 领域资源�
 
 单独删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。
 
-Canvas Blob 下载与预览使用 `POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url` 和 `preview-url`。每次签发都校验当前用户对 Canvas 的归属权限及该 Canvas 的 Blob 持有边；不提供通用 Blob ID 取址。
+Canvas Blob 下载与预览使用 `POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url` 和 `preview-url`。每次签发都校验当前用户对 Canvas 的归属权限及该 Canvas 的 Blob 持有边；不提供通用 Blob ID 取址。`download-url` 省略查询参数 `downloadName` 时返回可内联打开的原件地址；下载操作传入资源名称，由 S3 响应 `Content-Disposition: attachment` 和 UTF-8 文件名，跨源下载也不会离开画布。文件名拒绝空值、超长和控制字符输入，路径分隔符替换为 `_`。`preview-url` 不受影响。
 
-[`CanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。
+[`CanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。签发下载或预览 URL 时，[`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 按 `(canvasId, blobId)` 检查持有边，无需加载画布快照。
 
 ## Revision 通知
 

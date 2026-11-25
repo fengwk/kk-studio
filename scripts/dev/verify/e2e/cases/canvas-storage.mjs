@@ -42,10 +42,13 @@ registerCase({
   level: 'L1',
   title: 'Canvas 持有者 Blob 签名与上传契约',
   docs:
-    '验证 upload reserve->PUT->complete 后须先经 typed command CREATE_NODE 的 BLOB 槽位持有 READY upload（uploadId），再由持有该 Blob 的 Canvas 经 POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url|preview-url 获取预签名 URL，typed command KEEP 复用同一 Resource 且不推进 revision，Canvas blob download/preview-url 只暴露 method/url/headers/expiresAt，TEXT、不存在的 Blob 与无持有关系的 Canvas 明确拒绝',
-  async run(ctx) {
+    '验证 upload reserve->PUT->complete 后须先经 typed command CREATE_NODE 的 BLOB 槽位持有 READY upload（uploadId），再由持有该 Blob 的 Canvas 经 POST /api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url|preview-url 获取预签名 URL，typed command KEEP 复用同一 Resource 且不推进 revision，Canvas blob download/preview-url 只暴露 method/url/headers/expiresAt，TEXT、不存在的 Blob 与无持有关系的 Canvas 明确拒绝；MinIO 实际响应在省略 downloadName 时不强制下载，指定时返回带 UTF-8 文件名的附件，跨用户取址和非法文件名分别返回 404、400',
+  async run(admin) {
+    const ctx = await admin.createUser()
+    const otherUser = await admin.createUser()
+    const resourceName = '样例 "一".png'
     const canvas = await createCanvas(ctx, `e2e-resource-storage-${cid().slice(0, 8)}`)
-    const upload = await uploadPng(ctx)
+    const upload = await uploadPng(ctx, TINY_PNG, resourceName)
 
     // BLOB 资源槽位消费 READY uploadId：服务端生成 Resource 并派生 blob 媒体事实。
     const nodeId = cid()
@@ -60,7 +63,7 @@ registerCase({
             nodeId,
             name: 'tiny',
             transform: { x: 0, y: 0, width: 100, height: 100 },
-            resources: [{ type: 'BLOB', name: 'tiny.png', uploadId: upload.id }],
+            resources: [{ type: 'BLOB', name: resourceName, uploadId: upload.id }],
           },
         ],
       },
@@ -79,7 +82,7 @@ registerCase({
         && resource.type === 'BLOB'
         && resource.kind === 'IMAGE'
         && resource.mediaType === 'image/png'
-        && resource.name === 'tiny.png'
+        && resource.name === resourceName
         && resource.ownerNodeId === nodeId
         && resource.canvasId === canvas.id
         && resource.resourceIndex === 0,
@@ -108,12 +111,26 @@ registerCase({
     )
 
     // Canvas 持有的 Blob 直读预签名：只暴露 method/url/headers/expiresAt，字节与上传一致。
-    const download = assertPresigned(
-      (await ctx.call('POST', `/api/canvas/canvases/${canvas.id}/blobs/${resource.blobId}/download-url`)).json,
-      'canvas blob download url',
+    const originalPath = `/api/canvas/canvases/${canvas.id}/blobs/${resource.blobId}/download-url`
+    const inline = assertPresigned((await ctx.call('POST', originalPath)).json, 'canvas blob inline URL')
+    const inlineResponse = await fetch(inline.url, { headers: inline.headers })
+    assert(inlineResponse.ok, `inline HTTP ${inlineResponse.status}`)
+    assert(!/^attachment/i.test(inlineResponse.headers.get('content-disposition') ?? ''), 'Open forced attachment')
+    await inlineResponse.arrayBuffer()
+
+    const attachmentPath = `${originalPath}?${new URLSearchParams({ downloadName: resource.name })}`
+    await expectHttpError(() => otherUser.call('POST', attachmentPath), { status: 404, code: 'not_found' })
+    await expectHttpError(
+      () => ctx.call('POST', `${originalPath}?downloadName=bad%0D%0Aname.png`),
+      { status: 400, code: 'validation' },
     )
-    const downloadResponse = await fetch(download.url, { headers: download.headers || {} })
+    const download = assertPresigned((await ctx.call('POST', attachmentPath)).json, 'canvas blob attachment URL')
+    const downloadResponse = await fetch(download.url, { headers: download.headers })
     assert(downloadResponse.ok, `download HTTP ${downloadResponse.status}`)
+    const disposition = downloadResponse.headers.get('content-disposition') ?? ''
+    const filename = /; filename\*=UTF-8''([^;]+)$/i.exec(disposition)?.[1]
+    assert(/^attachment;/i.test(disposition) && filename && decodeURIComponent(filename) === resourceName,
+      'MinIO must serve attachment with the UTF-8 resource name')
     const downloaded = new Uint8Array(await downloadResponse.arrayBuffer())
     assert(
       downloaded.length === TINY_PNG.length &&

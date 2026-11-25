@@ -3,14 +3,16 @@ package fun.fengwk.kkstudio.canvas.infra.platform;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.http.ContentDisposition;
 
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
@@ -46,22 +48,35 @@ class CanvasResourceUrlServiceTest {
     when(blobs.presignOriginalUrl(BLOB)).thenReturn(original);
     when(blobs.presignPreviewUrl(BLOB)).thenReturn(preview);
 
-    assertSame(original, service.presign(PRINCIPAL, CANVAS, BLOB, true));
-    assertSame(preview, service.presign(PRINCIPAL, CANVAS, BLOB, false));
+    assertSame(original, service.originalUrl(PRINCIPAL, CANVAS, BLOB, null));
+    assertSame(preview, service.previewUrl(PRINCIPAL, CANVAS, BLOB));
     verify(blobs).presignOriginalUrl(BLOB);
     verify(blobs).presignPreviewUrl(BLOB);
     verify(access, times(2)).require(PRINCIPAL, Kind.CANVAS, CANVAS);
   }
 
-  /** Blob 未被画布持有时不可签发 URL。 */
+  /** 文件名保留 Unicode 与引号，且不会把路径分隔符交给浏览器。 */
+  @Test
+  void encodesAttachmentNameWithoutPathSeparators() {
+    when(query.containsHeldBlob(CANVAS, BLOB)).thenReturn(true);
+    service.originalUrl(PRINCIPAL, CANVAS, BLOB, "../资料\\\"图\".png");
+
+    var disposition = ArgumentCaptor.forClass(ContentDisposition.class);
+    verify(blobs).presignOriginalUrl(eq(BLOB), disposition.capture());
+    var parsed = ContentDisposition.parse(disposition.getValue().toString());
+    assertEquals("attachment", parsed.getType());
+    assertEquals(".._资料_\"图\".png", parsed.getFilename());
+  }
+
+  /** Blob 未被画布持有时，不能签发附件 URL。 */
   @Test
   void rejectsBlobNotHeldByCanvas() {
     when(query.containsHeldBlob(CANVAS, BLOB)).thenReturn(false);
     DomainException rejected =
-        assertThrows(DomainException.class, () -> service.presign(PRINCIPAL, CANVAS, BLOB, true));
+        assertThrows(
+            DomainException.class, () -> service.originalUrl(PRINCIPAL, CANVAS, BLOB, "test.png"));
     assertEquals(DomainErrorCode.NOT_FOUND, rejected.code());
     verify(access).require(PRINCIPAL, Kind.CANVAS, CANVAS);
-    verify(blobs, never()).presignOriginalUrl(any());
-    verify(blobs, never()).presignPreviewUrl(any());
+    verifyNoInteractions(blobs);
   }
 }
