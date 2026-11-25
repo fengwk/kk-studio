@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import type { ThreadProjection } from '../useThreadProjection'
 import type { useBoundThreadPanelViews } from '../controllers/useBoundThreadPanelViews'
 import { formatModelLabel } from '@/features/catalog'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 
 type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'parent'
+
+/**
+ * Debug 视图的退出键：内层已消费的 Esc（如先清选中事件）、重复按键、输入法组合与阻塞弹窗内的 Esc 都不退出。
+ */
+export function isDebugCloseEscape(event: KeyboardEvent<HTMLElement>): boolean {
+  return event.key === 'Escape' && !event.defaultPrevented && !event.repeat
+    && !event.nativeEvent.isComposing && event.keyCode !== 229
+    && !shouldDeferToBlockingModal(event.currentTarget)
+}
 
 /** 临时查看层报告；与根的路由/草稿/busy 摘要分离，不缓存 controller 或节点。 */
 export interface ThreadPresentation {

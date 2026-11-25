@@ -160,6 +160,24 @@ describe('ThreadPaneRenderer', () => {
     )
   })
 
+  it('leaves Debug on Escape and hands focus back to the composer', async () => {
+    // 没有选中事件时，Debug 里的 Esc 直接回到对话并可以立即继续输入；内层已处理的 Esc 不退出。
+    const user = userEvent.setup()
+    renderThreadPane()
+    await user.click(await screen.findByRole('button', { name: '打开命令表' }))
+    await user.click(screen.getByRole('option', { name: /调试/ }))
+    const close = await screen.findByRole('button', { name: '关闭 Debug' })
+
+    const consumed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    consumed.preventDefault()
+    close.dispatchEvent(consumed)
+    expect(screen.getByRole('button', { name: '关闭 Debug' })).toBeInTheDocument()
+
+    fireEvent.keyDown(close, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '关闭 Debug' })).toBeNull())
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus())
+  })
+
   it('opens branch and fork TurnCutDialog from TURN_END, toggles debug view, and inspects child thread', async () => {
     const user = userEvent.setup()
     const treeData: WorkspaceTreeDTO = {

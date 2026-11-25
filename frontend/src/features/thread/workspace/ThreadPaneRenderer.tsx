@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useBoundBranchPanel } from '@/features/thread/runtime/controllers/useBoundBranchPanel'
 import { useBoundThreadPanelViews } from '@/features/thread/runtime/controllers/useBoundThreadPanelViews'
 import { RootInteractionsProvider } from '@/features/thread/runtime/interactions/root-interactions'
@@ -9,8 +9,10 @@ import { CompactionBranchView } from '@/features/thread/runtime/panes/Compaction
 import { RootThreadControlArea } from '@/features/thread/runtime/panes/RootThreadControlArea'
 import { ThreadPane } from '@/features/thread/runtime/panes/ThreadPane'
 import { ThreadNavigationContext, type ThreadNavigationOptions } from '@/features/thread/runtime/panes/thread-navigation-context'
+import { isDebugCloseEscape } from '@/features/thread/runtime/panes/thread-presentation'
 import { useActiveThreadTree } from '@/features/thread/runtime/queries/useActiveThreadTree'
 import { EntryBranchContext, EntryForkContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
+import type { ThreadComposerHandle } from '@/features/thread/runtime/thread-panel/thread-composer-contract'
 import { THREAD_COMMANDS, type ThreadCommand } from '@/features/thread/runtime/thread-panel/thread-commands'
 import { useThreadProjection, type ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { hasMessageContent } from '@/features/thread/composer/composer-parts'
@@ -66,6 +68,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
   const { threadId, timeline, sessionId } = projection
   const { controller, draft, settingsStatus, selectModel, selectEnvironment, setYoloEnabled, ...settings } = useBoundBranchPanel({ projection })
   const views = useBoundThreadPanelViews(threadId, projection)
+  const composerRef = useRef<ThreadComposerHandle>(null)
   const tree = useActiveThreadTree(threadId)
   const models = useComposerModels()
   const [cut, setCut] = useState<{ kind: 'branch' | 'fork'; endEntryId: string; initialName: string }>()
@@ -97,13 +100,24 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
     if (id === 'debug') views.switchMode('debug')
     if (id === 'stop') void controller.stopThread()
   }
+  /** 退出 Debug 后把焦点交回 Composer；交互面板接管输入或弹窗打开时 Composer 自行放弃聚焦。 */
+  function closeDebug() {
+    views.switchMode('conversation')
+    composerRef.current?.focus()
+  }
 
   return <ThreadNavigationContext.Provider value={inspect}>
-    <div className="workspace-thread-view" hidden={covered}>
+    <div className="workspace-thread-view" hidden={covered} onKeyDown={(event) => {
+      if (debug && isDebugCloseEscape(event)) {
+        event.preventDefault()
+        event.stopPropagation()
+        closeDebug()
+      }
+    }}>
       <RootInteractionsProvider rootThreadId={threadId} approvalsVisible={!debug && !covered}>
         <EntryBranchContext.Provider value={(id) => startCut('branch', id)}>
           <EntryForkContext.Provider value={(id) => startCut('fork', id)}>
-            {debug && <Button variant="secondary" onClick={() => views.switchMode('conversation')}>{t('ai.runtime.debug.close')}</Button>}
+            {debug && <Button variant="secondary" onClick={closeDebug}>{t('ai.runtime.debug.close')}</Button>}
             <ThreadPane projection={projection} environments={environments} views={views}
               activity={{
                 widgets: <ActiveThreadTree tree={tree} currentThreadId={threadId} />,
@@ -123,6 +137,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
                   <Button variant="secondary" disabled={controller.pending} onClick={controller.abandonPendingMessage}>{t('shared.cancel')}</Button>
                 </div>}
                 composer={{
+                  composerRef,
                   parts: controller.draft,
                   pending: controller.pending,
                   disabled: controller.disabled || !draft,
