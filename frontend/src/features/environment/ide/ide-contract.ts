@@ -11,7 +11,7 @@ import {
   CANONICAL_POSITIVE_DECIMAL,
   compareDecimal,
 } from '@/features/environment/ide/ide-decimal'
-import { isIdeDirectory, type IdePendingClaim } from '@/features/environment/ide/ide-tab-state'
+import { isIdeDirectory, type IdePendingClaim } from '@/features/environment/ide/ide-session-state'
 
 /** 前端解析到的 IDE 契约错误；与网络结果未知严格区分，绝不触发自动重试。 */
 export class IdeProtocolError extends Error {

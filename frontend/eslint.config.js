@@ -17,6 +17,7 @@ const featureDependencies = {
   chat: ['thread/*', 'environment/ide/ide-panel-context', 'environment/environment-service'],
   thread: ['account/account-context', 'catalog', 'environment/ide/ide-panel-context', 'workspace/pane-target', 'workspace/queries'],
   catalog: ['environment/environment-service'],
+  environment: ['workspace/pane-target'],
 }
 
 const featureBoundary = {

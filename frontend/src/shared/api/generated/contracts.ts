@@ -2302,7 +2302,7 @@ export const SECRET_UPDATE_OPERATION_VALUES: readonly SecretUpdateOperation[] = 
 
 /** Java：fun.fengwk.kkstudio.workspace.dto.SessionCreateDTO */
 export interface SessionCreateDTO {
-  folderId: string
+  folderId?: string | null
   message: HarnessUserMessageContentDTO[]
   modelSelection?: HarnessModelSelectionDTO | null
   environmentId?: string | null

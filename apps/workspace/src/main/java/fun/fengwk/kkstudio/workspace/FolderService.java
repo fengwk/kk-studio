@@ -114,7 +114,7 @@ public class FolderService {
     } catch (DuplicateKeyException ex) {
       throw nameExists();
     }
-    return space.treeVersion();
+    return spaces.treeChanged(spaceId, space.treeVersion());
   }
 
   @Transactional

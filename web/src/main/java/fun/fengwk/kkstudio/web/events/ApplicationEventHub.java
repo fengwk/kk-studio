@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
+import fun.fengwk.kkstudio.workspace.WorkspaceNotifications;
 
 import java.util.List;
 import java.util.Map;
@@ -48,6 +49,7 @@ final class ApplicationEventHub implements AutoCloseable {
     THREAD,
     CANVAS,
     THREAD_TREE,
+    CHAT_SPACE,
     INTERACTIONS,
     ENVIRONMENTS
   }
@@ -66,7 +68,8 @@ final class ApplicationEventHub implements AutoCloseable {
     private static boolean requiresId(ResourceKind kind) {
       return kind == ResourceKind.THREAD
           || kind == ResourceKind.CANVAS
-          || kind == ResourceKind.THREAD_TREE;
+          || kind == ResourceKind.THREAD_TREE
+          || kind == ResourceKind.CHAT_SPACE;
     }
   }
 
@@ -81,6 +84,7 @@ final class ApplicationEventHub implements AutoCloseable {
           Signal.ThreadTreeSnapshotFailed,
           Signal.InteractionsChanged,
           Signal.EnvironmentChanged,
+          Signal.WorkspaceChanged,
           Signal.Resync {
     record Version(String version) implements Signal {}
 
@@ -112,6 +116,8 @@ final class ApplicationEventHub implements AutoCloseable {
 
     /** Environment 连接状态需要回读（全局资源）。 */
     record EnvironmentChanged() implements Signal {}
+
+    record WorkspaceChanged(WorkspaceNotifications.Change change) implements Signal {}
 
     record Resync() implements Signal {}
   }
@@ -145,6 +151,7 @@ final class ApplicationEventHub implements AutoCloseable {
   private final ThreadSnapshotPublisher threadSnapshotPublisher;
   private final Consumer<UUID> threadValidator;
   private final Consumer<UUID> threadTreeValidator;
+  private final WorkspaceNotifications workspaceNotifications;
   private final Map<ResourceKey, ApplicationEventResourceState> resources =
       new ConcurrentHashMap<>();
 
@@ -251,6 +258,33 @@ final class ApplicationEventHub implements AutoCloseable {
       ThreadSnapshotPublisher threadSnapshotPublisher,
       Consumer<UUID> threadValidator,
       Consumer<UUID> threadTreeValidator) {
+    this(
+        harnessChanges,
+        realtimeSource,
+        realtimeSubscriptions,
+        canvasVersionSource,
+        environmentChangeSource,
+        maxBufferedSignals,
+        threadTreeSnapshotPublisher,
+        threadSnapshotPublisher,
+        threadValidator,
+        threadTreeValidator,
+        new WorkspaceNotifications());
+  }
+
+  ApplicationEventHub(
+      HarnessChangeSubscriptions harnessChanges,
+      RealtimeEventSource realtimeSource,
+      RealtimeSubscriptionService realtimeSubscriptions,
+      CanvasVersionEventSource canvasVersionSource,
+      NotificationInvalidationSource environmentChangeSource,
+      IntSupplier maxBufferedSignals,
+      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
+      ThreadSnapshotPublisher threadSnapshotPublisher,
+      Consumer<UUID> threadValidator,
+      Consumer<UUID> threadTreeValidator,
+      WorkspaceNotifications workspaceNotifications) {
+    this.workspaceNotifications = Objects.requireNonNull(workspaceNotifications);
     this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.realtimeSubscriptions =
@@ -473,6 +507,15 @@ final class ApplicationEventHub implements AutoCloseable {
                   () -> fanout(state, new Signal.ThreadTreeSnapshotFailed()));
         }
       }
+      case CHAT_SPACE -> state.invalidationRelease =
+          workspaceNotifications.subscribe(
+              state.key.id(),
+              change ->
+                  fanout(
+                      state,
+                      change instanceof WorkspaceNotifications.Resync
+                          ? new Signal.Resync()
+                          : new Signal.WorkspaceChanged(change)));
       case INTERACTIONS -> {
         HarnessChangeSubscription subscription =
             harnessChanges

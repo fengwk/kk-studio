@@ -14,7 +14,7 @@ import {
   validateViewSnapshot,
   viewFingerprint,
 } from '@/features/environment/ide/ide-contract'
-import type { IdePendingClaim } from '@/features/environment/ide/ide-tab-state'
+import type { IdePendingClaim } from '@/features/environment/ide/ide-session-state'
 
 const ENV = 'a1000000-0000-4000-8000-000000000001'
 const VIEW = 'c1000000-0000-4000-8000-000000000001'

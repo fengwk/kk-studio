@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
+import fun.fengwk.kkstudio.workspace.WorkspaceNotifications;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -74,6 +75,7 @@ final class EventFrameCodec {
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
   private static final String THREAD_TREE = "thread-tree";
+  private static final String CHAT_SPACE = "chat-space";
   private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
 
@@ -261,6 +263,26 @@ final class EventFrameCodec {
       }
       node.put("name", "changed");
       node.set("data", NODES.objectNode());
+    } else if (signal instanceof Signal.WorkspaceChanged changed) {
+      if (resource.kind() != ResourceKind.CHAT_SPACE) {
+        throw new IllegalArgumentException("workspace change requires a chat-space resource");
+      }
+      switch (changed.change()) {
+        case WorkspaceNotifications.Tree tree -> {
+          node.put("name", "tree");
+          node.set("data", dataNode("treeVersion", Long.toString(tree.treeVersion())));
+        }
+        case WorkspaceNotifications.Space space -> {
+          node.put("name", "space");
+          node.set("data", dataNode("version", Long.toString(space.version())));
+        }
+        case WorkspaceNotifications.Threads ignored -> {
+          node.put("name", "threads");
+          node.set("data", NODES.objectNode());
+        }
+        case WorkspaceNotifications.Resync ignored -> throw new IllegalArgumentException(
+            "resync is not an event frame");
+      }
     } else if (signal instanceof Signal.Resync) {
       throw new IllegalArgumentException("resync signal is not an event frame");
     } else {
@@ -410,6 +432,9 @@ final class EventFrameCodec {
     if (THREAD_TREE.equals(kindName)) {
       return new ResourceKey(ResourceKind.THREAD_TREE, resourceId(node));
     }
+    if (CHAT_SPACE.equals(kindName)) {
+      return new ResourceKey(ResourceKind.CHAT_SPACE, resourceId(node));
+    }
     if (INTERACTIONS.equals(kindName)) {
       JsonCodecSupport.requireFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.INTERACTIONS, null);
@@ -419,7 +444,7 @@ final class EventFrameCodec {
       return new ResourceKey(ResourceKind.ENVIRONMENTS, null);
     }
     throw new IllegalArgumentException(
-        "frame.resource.kind must be thread, canvas, thread-tree, interactions, or"
+        "frame.resource.kind must be thread, canvas, thread-tree, chat-space, interactions, or"
             + " environments");
   }
 
@@ -434,6 +459,7 @@ final class EventFrameCodec {
       case THREAD -> node.put("kind", THREAD);
       case CANVAS -> node.put("kind", CANVAS);
       case THREAD_TREE -> node.put("kind", THREAD_TREE);
+      case CHAT_SPACE -> node.put("kind", CHAT_SPACE);
       case INTERACTIONS -> node.put("kind", INTERACTIONS);
       case ENVIRONMENTS -> node.put("kind", ENVIRONMENTS);
     }
@@ -447,6 +473,7 @@ final class EventFrameCodec {
   private static boolean isHintResource(ResourceKind kind) {
     return kind == ResourceKind.THREAD
         || kind == ResourceKind.THREAD_TREE
+        || kind == ResourceKind.CHAT_SPACE
         || kind == ResourceKind.INTERACTIONS
         || kind == ResourceKind.ENVIRONMENTS;
   }
