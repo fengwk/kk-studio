@@ -1,7 +1,5 @@
-package fun.fengwk.kkstudio.workspace;
+package fun.fengwk.kkstudio.workspace.http;
 
-import com.fasterxml.jackson.annotation.JsonSetter;
-import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -15,19 +13,32 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
-import fun.fengwk.kkstudio.workspace.WorkspaceResources.WorkspaceCanvasCreateDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceResources.WorkspaceResourcePatchDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceResources.WorkspaceResourceRefDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceBranchCreatedDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceForkCreatedDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceSessionCreateDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceSessionCreatedDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceThreadRenameDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceSessions.WorkspaceTurnCutDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceThreadPlacementDTO;
-import fun.fengwk.kkstudio.workspace.WorkspaceTreeService.WorkspaceTreeDTO;
+import fun.fengwk.kkstudio.workspace.ChatSpaceService;
+import fun.fengwk.kkstudio.workspace.FolderService;
+import fun.fengwk.kkstudio.workspace.WorkspaceInput;
+import fun.fengwk.kkstudio.workspace.WorkspaceResources;
+import fun.fengwk.kkstudio.workspace.WorkspaceSessions;
+import fun.fengwk.kkstudio.workspace.WorkspaceTreeService;
+import fun.fengwk.kkstudio.workspace.dto.BranchCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.CanvasCreateDTO;
+import fun.fengwk.kkstudio.workspace.dto.ChatSpaceCreateDTO;
+import fun.fengwk.kkstudio.workspace.dto.ChatSpaceDTO;
+import fun.fengwk.kkstudio.workspace.dto.ChatSpacePatchDTO;
+import fun.fengwk.kkstudio.workspace.dto.FolderCreateDTO;
+import fun.fengwk.kkstudio.workspace.dto.FolderCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.FolderPatchDTO;
+import fun.fengwk.kkstudio.workspace.dto.ForkCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.ResourcePatchDTO;
+import fun.fengwk.kkstudio.workspace.dto.ResourceRefDTO;
+import fun.fengwk.kkstudio.workspace.dto.SessionCreateDTO;
+import fun.fengwk.kkstudio.workspace.dto.SessionCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.ThreadRenameDTO;
+import fun.fengwk.kkstudio.workspace.dto.TurnCutDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceResourceKind;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadPlacementDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceTreeDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceTreeVersionDTO;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,84 +64,28 @@ public class WorkspaceController {
     this.sessions = sessions;
   }
 
-  public record ChatSpaceSummaryDTO(
-      UUID id,
-      String title,
-      @Nullable Instant archivedAt,
-      String version,
-      @Nullable String defaultAgentName,
-      @Nullable UUID defaultEnvironmentId,
-      boolean defaultYoloEnabled) {
-    static ChatSpaceSummaryDTO of(ChatSpaceService.Space space) {
-      return new ChatSpaceSummaryDTO(
-          space.id(),
-          space.title(),
-          space.archivedAt() == null ? null : space.archivedAt().toInstant(),
-          Long.toString(space.version()),
-          space.defaultAgentName(),
-          space.defaultEnvironmentId(),
-          space.defaultYoloEnabled());
-    }
-  }
-
-  public record ChatSpaceCreateDTO(
-      String title,
-      String rootFolderName,
-      @Nullable String defaultAgentName,
-      @Nullable UUID defaultEnvironmentId,
-      @Nullable Boolean defaultYoloEnabled) {}
-
-  public static final class ChatSpacePatchDTO {
-    public String expectedVersion;
-    public @Nullable String title;
-    public @Nullable Boolean archived;
-    public @Nullable Boolean defaultYoloEnabled;
-    public @Nullable String defaultAgentName;
-    public @Nullable UUID defaultEnvironmentId;
-    private ChatSpaceService.Change<String> agent;
-    private ChatSpaceService.Change<UUID> environment;
-
-    @JsonSetter("defaultAgentName")
-    public void setDefaultAgentName(@Nullable String value) {
-      defaultAgentName = value;
-      agent = new ChatSpaceService.Change<>(value);
-    }
-
-    @JsonSetter("defaultEnvironmentId")
-    public void setDefaultEnvironmentId(@Nullable UUID value) {
-      defaultEnvironmentId = value;
-      environment = new ChatSpaceService.Change<>(value);
-    }
-  }
-
-  public record WorkspaceFolderCreateDTO(
-      @Nullable UUID parentId, String name, String expectedTreeVersion) {}
-
-  public record WorkspaceFolderPatchDTO(
-      @Nullable String name,
-      @Nullable UUID parentId,
-      @Nullable UUID beforeId,
-      @Nullable String expectedTreeVersion) {}
-
-  public record WorkspaceFolderCreatedDTO(UUID id, String treeVersion) {}
-
-  public record WorkspaceTreeVersionDTO(String treeVersion) {
-    static WorkspaceTreeVersionDTO of(long version) {
-      return new WorkspaceTreeVersionDTO(Long.toString(version));
-    }
+  private static ChatSpaceDTO toDto(ChatSpaceService.Space space) {
+    return new ChatSpaceDTO(
+        space.id(),
+        space.title(),
+        space.archivedAt() == null ? null : space.archivedAt().toInstant(),
+        Long.toString(space.version()),
+        space.defaultAgentName(),
+        space.defaultEnvironmentId(),
+        space.defaultYoloEnabled());
   }
 
   @GetMapping
-  public List<ChatSpaceSummaryDTO> list(StudioPrincipal actor) {
-    return spaces.list(actor).stream().map(ChatSpaceSummaryDTO::of).toList();
+  public List<ChatSpaceDTO> list(StudioPrincipal actor) {
+    return spaces.list(actor).stream().map(WorkspaceController::toDto).toList();
   }
 
   @PostMapping
-  public ChatSpaceSummaryDTO create(
+  public ChatSpaceDTO create(
       StudioPrincipal actor,
       @RequestHeader("Idempotency-Key") String key,
       @RequestBody ChatSpaceCreateDTO request) {
-    return ChatSpaceSummaryDTO.of(
+    return toDto(
         spaces.create(
             actor,
             WorkspaceInput.uuid(key),
@@ -143,26 +98,30 @@ public class WorkspaceController {
   }
 
   @PatchMapping("/{spaceId}")
-  public ChatSpaceSummaryDTO patch(
+  public ChatSpaceDTO patch(
       StudioPrincipal actor, @PathVariable UUID spaceId, @RequestBody ChatSpacePatchDTO request) {
-    if (request.title == null
-        && request.archived == null
-        && request.agent == null
-        && request.environment == null
-        && request.defaultYoloEnabled == null) {
+    if (request.title() == null
+        && request.archived() == null
+        && !request.hasDefaultAgentName()
+        && !request.hasDefaultEnvironmentId()
+        && request.defaultYoloEnabled() == null) {
       throw WorkspaceInput.invalid("At least one space change is required");
     }
-    return ChatSpaceSummaryDTO.of(
+    return toDto(
         spaces.patch(
             actor,
             spaceId,
             new ChatSpaceService.Patch(
-                WorkspaceInput.version(request.expectedVersion),
-                request.title,
-                request.archived,
-                request.agent,
-                request.environment,
-                request.defaultYoloEnabled)));
+                WorkspaceInput.version(request.expectedVersion()),
+                request.title(),
+                request.archived(),
+                request.hasDefaultAgentName()
+                    ? new ChatSpaceService.Change<>(request.defaultAgentName())
+                    : null,
+                request.hasDefaultEnvironmentId()
+                    ? new ChatSpaceService.Change<>(request.defaultEnvironmentId())
+                    : null,
+                request.defaultYoloEnabled())));
   }
 
   @GetMapping("/{spaceId}/tree")
@@ -171,11 +130,11 @@ public class WorkspaceController {
   }
 
   @PostMapping("/{spaceId}/folders")
-  public WorkspaceFolderCreatedDTO createFolder(
+  public FolderCreatedDTO createFolder(
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestBody WorkspaceFolderCreateDTO request) {
+      @RequestBody FolderCreateDTO request) {
     var result =
         folders.create(
             actor,
@@ -185,7 +144,7 @@ public class WorkspaceController {
                 request.parentId(),
                 request.name(),
                 WorkspaceInput.version(request.expectedTreeVersion())));
-    return new WorkspaceFolderCreatedDTO(result.id(), Long.toString(result.treeVersion()));
+    return new FolderCreatedDTO(result.id(), Long.toString(result.treeVersion()));
   }
 
   @PatchMapping("/{spaceId}/folders/{folderId}")
@@ -193,7 +152,7 @@ public class WorkspaceController {
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @PathVariable UUID folderId,
-      @RequestBody WorkspaceFolderPatchDTO request) {
+      @RequestBody FolderPatchDTO request) {
     if (request.name() != null) {
       if (request.expectedTreeVersion() != null
           || request.parentId() != null
@@ -226,18 +185,27 @@ public class WorkspaceController {
   public WorkspaceTreeVersionDTO patchResource(
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
-      @PathVariable Kind kind,
+      @PathVariable WorkspaceResourceKind kind,
       @PathVariable UUID id,
-      @RequestBody WorkspaceResourcePatchDTO request) {
-    return WorkspaceTreeVersionDTO.of(resources.patch(actor, spaceId, kind, id, request));
+      @RequestBody ResourcePatchDTO request) {
+    return WorkspaceTreeVersionDTO.of(
+        resources.patch(
+            actor,
+            spaceId,
+            switch (kind) {
+              case SESSION -> Kind.SESSION;
+              case CANVAS -> Kind.CANVAS;
+            },
+            id,
+            request));
   }
 
   @PostMapping("/{spaceId}/canvases")
-  public WorkspaceResourceRefDTO createCanvas(
+  public ResourceRefDTO createCanvas(
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestBody WorkspaceCanvasCreateDTO request) {
+      @RequestBody CanvasCreateDTO request) {
     return resources.createCanvas(actor, spaceId, WorkspaceInput.uuid(key), request);
   }
 
@@ -258,31 +226,31 @@ public class WorkspaceController {
   }
 
   @PostMapping("/{spaceId}/sessions")
-  public WorkspaceSessionCreatedDTO createSession(
+  public SessionCreatedDTO createSession(
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestBody WorkspaceSessionCreateDTO request) {
+      @RequestBody SessionCreateDTO request) {
     return sessions.create(actor, spaceId, WorkspaceInput.uuid(key), request);
   }
 
   @PostMapping("/{spaceId}/sessions/{id}/branches")
-  public WorkspaceBranchCreatedDTO branch(
+  public BranchCreatedDTO branch(
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @PathVariable UUID id,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestBody WorkspaceTurnCutDTO request) {
+      @RequestBody TurnCutDTO request) {
     return sessions.branch(actor, spaceId, id, WorkspaceInput.uuid(key), request);
   }
 
   @PostMapping("/{spaceId}/sessions/{id}/forks")
-  public WorkspaceForkCreatedDTO fork(
+  public ForkCreatedDTO fork(
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @PathVariable UUID id,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestBody WorkspaceTurnCutDTO request) {
+      @RequestBody TurnCutDTO request) {
     return sessions.fork(actor, spaceId, id, WorkspaceInput.uuid(key), request);
   }
 
@@ -297,7 +265,7 @@ public class WorkspaceController {
       StudioPrincipal actor,
       @PathVariable UUID spaceId,
       @PathVariable UUID id,
-      @RequestBody WorkspaceThreadRenameDTO request) {
+      @RequestBody ThreadRenameDTO request) {
     return sessions.rename(actor, spaceId, id, request);
   }
 

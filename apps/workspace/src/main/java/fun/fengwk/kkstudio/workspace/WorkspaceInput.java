@@ -4,10 +4,10 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.UUID;
 
-final class WorkspaceInput {
+public final class WorkspaceInput {
   private WorkspaceInput() {}
 
-  static long version(String value) {
+  public static long version(String value) {
     try {
       long number = Long.parseLong(value);
       if (number >= 0 && Long.toString(number).equals(value)) {
@@ -19,7 +19,7 @@ final class WorkspaceInput {
     throw invalid("Expected a nonnegative version");
   }
 
-  static UUID uuid(String value) {
+  public static UUID uuid(String value) {
     try {
       UUID parsed = UUID.fromString(value);
       if (parsed.toString().equals(value)) {
@@ -38,7 +38,7 @@ final class WorkspaceInput {
     return value;
   }
 
-  static DomainException invalid(String message) {
+  public static DomainException invalid(String message) {
     return DomainException.validationReason("INVALID_ARGUMENT", message);
   }
 }

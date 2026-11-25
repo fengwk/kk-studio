@@ -15,8 +15,15 @@ import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery;
 import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery.PublicThread;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceFolderDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceResourceDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceResourceKind;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadPlacementDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadState;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadStateReason;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceTreeDTO;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -47,34 +54,6 @@ public class WorkspaceTreeService {
     this.canvases = canvases;
     this.jdbc = jdbc;
   }
-
-  public record WorkspaceTreeDTO(String treeVersion, List<WorkspaceFolderNodeDTO> folders) {}
-
-  public record WorkspaceFolderNodeDTO(
-      UUID id,
-      String name,
-      List<WorkspaceFolderNodeDTO> children,
-      List<WorkspaceResourceNodeDTO> resources) {}
-
-  public record WorkspaceResourceNodeDTO(
-      Kind kind, UUID id, String title, @Nullable List<WorkspaceThreadSummaryDTO> threads) {}
-
-  public record WorkspaceThreadSummaryDTO(
-      UUID id,
-      String title,
-      ThreadStatus.State state,
-      ThreadStatus.@Nullable Reason reason,
-      String version,
-      Instant lastActivityAt) {}
-
-  public record WorkspaceThreadPlacementDTO(
-      UUID sessionId,
-      String sessionTitle,
-      UUID folderId,
-      String title,
-      ThreadStatus.State state,
-      ThreadStatus.@Nullable Reason reason,
-      String version) {}
 
   private record FolderRow(UUID id, UUID parentId, String name) {}
 
@@ -117,29 +96,28 @@ public class WorkspaceTreeService {
     var byRoot =
         facts.stream()
             .collect(Collectors.toMap(ExecutionRootFacts::rootThreadId, Function.identity()));
-    var bySession = new HashMap<UUID, List<WorkspaceThreadSummaryDTO>>();
+    var bySession = new HashMap<UUID, List<WorkspaceThreadDTO>>();
     for (var thread : threads) {
       var root = byRoot.get(thread.rootId());
       var status = ThreadStatus.project(root);
       bySession
           .computeIfAbsent(thread.sessionId(), ignored -> new ArrayList<>())
           .add(
-              new WorkspaceThreadSummaryDTO(
+              new WorkspaceThreadDTO(
                   thread.id(),
                   thread.title(),
-                  status.state(),
-                  status.reason(),
+                  wireState(status.state()),
+                  wireReason(status.reason()),
                   Long.toString(thread.version()),
                   root.lastActivityAt()));
     }
-    var nodes = new HashMap<UUID, WorkspaceFolderNodeDTO>();
+    var nodes = new HashMap<UUID, WorkspaceFolderDTO>();
     for (var folder : folders) {
       nodes.put(
           folder.id(),
-          new WorkspaceFolderNodeDTO(
-              folder.id(), folder.name(), new ArrayList<>(), new ArrayList<>()));
+          new WorkspaceFolderDTO(folder.id(), folder.name(), new ArrayList<>(), new ArrayList<>()));
     }
-    var roots = new ArrayList<WorkspaceFolderNodeDTO>();
+    var roots = new ArrayList<WorkspaceFolderDTO>();
     for (var folder : folders) {
       (folder.parentId() == null ? roots : nodes.get(folder.parentId()).children())
           .add(nodes.get(folder.id()));
@@ -150,8 +128,8 @@ public class WorkspaceTreeService {
           .get(edge.folderId())
           .resources()
           .add(
-              new WorkspaceResourceNodeDTO(
-                  edge.kind(),
+              new WorkspaceResourceDTO(
+                  session ? WorkspaceResourceKind.SESSION : WorkspaceResourceKind.CANVAS,
                   edge.id(),
                   session ? titles.get(edge.id()) : canvasTitles.get(edge.id()),
                   session ? bySession.getOrDefault(edge.id(), List.of()) : null));
@@ -177,8 +155,26 @@ public class WorkspaceTreeService {
         title,
         edge.folderId(),
         thread.title(),
-        status.state(),
-        status.reason(),
+        wireState(status.state()),
+        wireReason(status.reason()),
         Long.toString(thread.version()));
+  }
+
+  private static WorkspaceThreadState wireState(ThreadStatus.State state) {
+    return switch (state) {
+      case NEEDS_YOU -> WorkspaceThreadState.NEEDS_YOU;
+      case RUNNING -> WorkspaceThreadState.RUNNING;
+      case WAITING -> WorkspaceThreadState.WAITING;
+      case FAILED -> WorkspaceThreadState.FAILED;
+      case IDLE -> WorkspaceThreadState.IDLE;
+    };
+  }
+
+  private static @Nullable WorkspaceThreadStateReason wireReason(
+      ThreadStatus.@Nullable Reason reason) {
+    return switch (reason) {
+      case null -> null;
+      case STOPPED -> WorkspaceThreadStateReason.STOPPED;
+    };
   }
 }

@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.workspace;
 
-import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery;
 import fun.fengwk.kkstudio.platform.harness.store.HarnessPlacementQuery.PublicThread;
@@ -27,6 +26,13 @@ import fun.fengwk.kkstudio.platform.orchestration.IdleThreadOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.ResourceOwnership.Kind;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionInitialSettings;
+import fun.fengwk.kkstudio.workspace.dto.BranchCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.ForkCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.SessionCreateDTO;
+import fun.fengwk.kkstudio.workspace.dto.SessionCreatedDTO;
+import fun.fengwk.kkstudio.workspace.dto.ThreadRenameDTO;
+import fun.fengwk.kkstudio.workspace.dto.TurnCutDTO;
+import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadPlacementDTO;
 
 import java.util.List;
 import java.util.UUID;
@@ -64,34 +70,16 @@ public class WorkspaceSessions {
     this.settings = settings;
   }
 
-  public record WorkspaceSessionCreateDTO(
-      UUID folderId,
-      List<HarnessUserMessageContentDTO> message,
-      @Nullable HarnessModelSelectionDTO modelSelection,
-      @Nullable UUID environmentId,
-      @Nullable Boolean yoloEnabled) {}
-
-  public record WorkspaceSessionCreatedDTO(
-      UUID sessionId, UUID threadId, UUID commandId, String treeVersion) {}
-
-  public record WorkspaceTurnCutDTO(UUID sourceThreadId, UUID turnEndEntryId, String title) {}
-
-  public record WorkspaceBranchCreatedDTO(UUID sessionId, UUID threadId) {}
-
-  public record WorkspaceForkCreatedDTO(UUID sessionId, UUID threadId, String treeVersion) {}
-
-  public record WorkspaceThreadRenameDTO(String title, String expectedVersion) {}
-
   @Transactional
-  public WorkspaceSessionCreatedDTO create(
-      StudioPrincipal actor, UUID spaceId, UUID key, WorkspaceSessionCreateDTO request) {
+  public SessionCreatedDTO create(
+      StudioPrincipal actor, UUID spaceId, UUID key, SessionCreateDTO request) {
     var space = spaces.lock(actor, spaceId);
     UUID session = ChatSpaceService.derivedId("session", spaceId, key);
     UUID thread = ChatSpaceService.derivedId("main", spaceId, key);
     String hash = WorkspacePlacements.fingerprint(request);
     var replay = placements.replay(spaceId, session, hash);
     if (replay.isPresent()) {
-      return new WorkspaceSessionCreatedDTO(
+      return new SessionCreatedDTO(
           session,
           thread,
           replay.get().initialCommandId(),
@@ -133,13 +121,12 @@ public class WorkspaceSessions {
         hash,
         space.treeVersion() + 1,
         command);
-    return new WorkspaceSessionCreatedDTO(
-        session, thread, command, Long.toString(spaces.advance(spaceId)));
+    return new SessionCreatedDTO(session, thread, command, Long.toString(spaces.advance(spaceId)));
   }
 
   @Transactional
-  public WorkspaceBranchCreatedDTO branch(
-      StudioPrincipal actor, UUID space, UUID session, UUID key, WorkspaceTurnCutDTO request) {
+  public BranchCreatedDTO branch(
+      StudioPrincipal actor, UUID space, UUID session, UUID key, TurnCutDTO request) {
     spaces.lock(actor, space);
     placements.require(space, session, Kind.SESSION);
     UUID thread = ChatSpaceService.derivedId("branch", session, key);
@@ -157,20 +144,19 @@ public class WorkspaceSessions {
     } catch (DomainException ex) {
       throw creationConflict(ex);
     }
-    return new WorkspaceBranchCreatedDTO(session, thread);
+    return new BranchCreatedDTO(session, thread);
   }
 
   @Transactional
-  public WorkspaceForkCreatedDTO fork(
-      StudioPrincipal actor, UUID spaceId, UUID session, UUID key, WorkspaceTurnCutDTO request) {
+  public ForkCreatedDTO fork(
+      StudioPrincipal actor, UUID spaceId, UUID session, UUID key, TurnCutDTO request) {
     var space = spaces.lock(actor, spaceId);
     UUID fork = ChatSpaceService.derivedId("fork-session", session, key);
     UUID thread = ChatSpaceService.derivedId("fork-main", session, key);
     String hash = WorkspacePlacements.fingerprint(request);
     var replay = placements.replay(spaceId, fork, hash);
     if (replay.isPresent()) {
-      return new WorkspaceForkCreatedDTO(
-          fork, thread, replay.get().createdTreeVersion().toString());
+      return new ForkCreatedDTO(fork, thread, replay.get().createdTreeVersion().toString());
     }
     var edge = placements.require(spaceId, session, Kind.SESSION);
     requireSource(session, request.sourceThreadId());
@@ -193,12 +179,13 @@ public class WorkspaceSessions {
         hash,
         space.treeVersion() + 1,
         null);
-    return new WorkspaceForkCreatedDTO(fork, thread, Long.toString(spaces.advance(spaceId)));
+    return new ForkCreatedDTO(fork, thread, Long.toString(spaces.advance(spaceId)));
   }
 
-  @Transactional
-  public WorkspaceTreeService.WorkspaceThreadPlacementDTO rename(
-      StudioPrincipal actor, UUID space, UUID id, WorkspaceThreadRenameDTO request) {
+  // The response includes execution facts in the same transaction as the rename.
+  @Transactional(isolation = Isolation.REPEATABLE_READ)
+  public WorkspaceThreadPlacementDTO rename(
+      StudioPrincipal actor, UUID space, UUID id, ThreadRenameDTO request) {
     spaces.lock(actor, space);
     requireThread(space, id);
     try {

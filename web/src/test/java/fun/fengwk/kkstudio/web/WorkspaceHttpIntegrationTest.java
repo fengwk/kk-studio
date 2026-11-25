@@ -118,7 +118,11 @@ class WorkspaceHttpIntegrationTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.title").value("Renamed"));
     assertAgentInUse();
-    mvc.perform(write(patch(space), key, "{\"expectedVersion\":\"0\",\"defaultAgentName\":null}"))
+    mvc.perform(
+            write(patch(space), key, "{\"expectedVersion\":\"0\",\"title\":\"Renamed workspace\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.defaultAgentName").value("default-assistant"));
+    mvc.perform(write(patch(space), key, "{\"expectedVersion\":\"1\",\"defaultAgentName\":null}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.defaultAgentName").doesNotExist());
     assertAgentInUse();
