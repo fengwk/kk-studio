@@ -6,10 +6,50 @@
   flex-direction: column;
 }
 
+.turn-cut-dialog {
+  width: min(440px, calc(100vw - var(--space-4) * 2));
+  background: var(--surface);
+  overflow: auto;
+}
+
+.turn-cut-form {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.turn-cut-form h2 {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.turn-cut-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.turn-cut-field > label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.turn-cut-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
 .thread-draft-notice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4) 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.thread-draft-notice[role='alert'] {
+  color: var(--danger);
 }

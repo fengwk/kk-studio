@@ -94,7 +94,7 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
       {t(agents.data.length ? 'ai.runtime.draft.defaultAgentMissing' : 'ai.chat.noAgents')}
       {agents.data.length > 0
         ? <Button variant="secondary" onClick={openSpaceSettings}>{t('ai.runtime.draft.spaceSettings')}</Button>
-        : user?.role === 'ADMIN' && <Link to="/settings/agents">{t('ai.runtime.draft.agentSettings')}</Link>}
+        : user?.role === 'ADMIN' && <Link className="btn-secondary" to="/settings/agents">{t('ai.runtime.draft.agentSettings')}</Link>}
     </div>
   const actionError = retryBody ? null : send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
     ? t('ai.runtime.draft.invalidFolder')
