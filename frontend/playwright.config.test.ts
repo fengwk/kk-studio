@@ -60,6 +60,7 @@ describe('playwright projects inventory', () => {
     'compaction',
     'subagent-tree',
     'mutation-review',
+    'account-settings',
     'tool-card',
   ]
 
@@ -86,6 +87,7 @@ describe('playwright projects inventory', () => {
     expect(byName.compaction.outputDir).toBe('../reports/compaction')
     expect(byName['subagent-tree'].outputDir).toBe('../reports/subagent-tree')
     expect(byName['tool-card'].outputDir).toBe('../reports/tool-card')
+    expect(byName['account-settings'].outputDir).toBe('../reports/browser/account-settings')
     expect(byName['tool-card'].timeout).toBe(120000)
   })
 
@@ -109,6 +111,7 @@ describe('test file matching coverage and exclusivity', () => {
     if (pattern === '**/environment-install.pw.ts' || pattern === 'environment-install.pw.ts') {
       return filename === 'environment-install.pw.ts'
     }
+    if (pattern === '**/account-settings.pw.ts') return filename === 'account-settings.pw.ts'
     if (pattern === '**/tool-card.pw.ts' || pattern === 'tool-card.pw.ts') {
       return filename === 'tool-card.pw.ts'
     }
@@ -155,7 +158,7 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(49)
+    expect(allTestFiles.length).toBe(50)
     expect(allTestFiles).toContain('shared-ui-visual.pw.ts')
     expect(allTestFiles).toContain('workbench-not-found.pw.ts')
     expect(allTestFiles).toContain('canvas-editor.pw.ts')
@@ -251,7 +254,7 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('workbench-not-found-harness')
     expect(keys).toContain('questionnaire-card-harness')
     expect(keys).toContain('canvas-editor-harness')
-    expect(keys.length).toBe(41)
+    expect(keys.length).toBe(42)
   })
 
   // 验证静态构建目标与 MPA 模式

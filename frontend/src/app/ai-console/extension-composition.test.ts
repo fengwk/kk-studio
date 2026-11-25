@@ -2,51 +2,32 @@ import { describe, expect, it } from 'vitest'
 import { applicationContributions } from '@/app/application-contributions'
 import { aiExtension } from '@/app/ai-console/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
-import { settingsExtension } from '@/features/settings/settings-extension'
 
 describe('AI extension composition', () => {
-  it('registers default and lazy feature routes through independent extensions', () => {
+  it('registers chat routes through the AI extension', () => {
     expect(aiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['ai.chats', 'chats'],
       ['ai.chat-workspace', 'chats/:chatId'],
       ['ai.thread-workspace', 'threads/:threadId'],
-      ['ai.agents', 'agents'],
-      ['ai.models', 'models'],
-      ['ai.providers', 'providers'],
-      ['ai.skill-packages', 'skill-packages'],
-      ['ai.environments', 'environments'],
-      ['ai.mcp-servers', 'mcp-servers'],
     ])
     expect(aiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
       'ai.create-chat',
       'ai.resource-editor',
       'ai.delete-resource',
     ])
-    // task renderer 必须通过 extension 注册（rendererKey = contribution id），
-    // MessageList 不做 name switch；展开/收起由宿主外壳统一负责，contribution 只声明 renderer 与 id。
+    // task renderer 通过 extension 注册，rendererKey 与 contribution id 一致。
     expect(aiExtension.toolRenderers?.map((renderer) => renderer.id)).toEqual(['task'])
     expect(aiExtension.toolRenderers?.[0]?.component).toBeTypeOf('function')
     expect(canvasExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['canvas.home', 'canvas'],
       ['canvas.editor', 'canvas/:canvasId'],
     ])
-    // Settings 是独立 extension，不塞进 aiExtension。
-    expect(settingsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
-      ['settings.page', 'settings'],
-    ])
     expect(applicationContributions.pages.map((page) => page.id)).toEqual([
       'ai.chats',
       'ai.chat-workspace',
       'ai.thread-workspace',
-      'ai.agents',
-      'ai.models',
-      'ai.providers',
-      'ai.skill-packages',
-      'ai.environments',
-      'ai.mcp-servers',
       'canvas.home',
       'canvas.editor',
-      'settings.page',
     ])
     expect(applicationContributions.dialogs.map((dialog) => dialog.id)).toEqual(
       aiExtension.dialogs!.map((dialog) => dialog.id),
@@ -59,9 +40,6 @@ describe('AI extension composition', () => {
     )
     expect(applicationContributions.pages.find((page) => page.id === 'canvas.editor')?.component).toBe(
       canvasExtension.pages?.[1].component,
-    )
-    expect(applicationContributions.pages.find((page) => page.id === 'settings.page')?.component).toBe(
-      settingsExtension.pages?.[0].component,
     )
   })
 })

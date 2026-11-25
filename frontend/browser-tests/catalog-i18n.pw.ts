@@ -70,27 +70,6 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await expect(effortInput).toHaveValue('high')
   })
 
-  test('Ai Navigation: Skill Package tab localized to 技能包 in zh-CN and Skill Package in en-US', async ({
-    page,
-  }) => {
-    await page.goto('/browser-tests/catalog-i18n-harness.html')
-    await page.click('#tab-nav-btn')
-
-    // 默认 zh-CN：二级导航中必须是“技能包”
-    const skillPkgLink = page.getByRole('link', { name: '技能包' })
-    await expect(skillPkgLink).toBeVisible()
-
-    // 切换至 en-US
-    await page.click('#toggle-locale-btn')
-    const skillPkgEnLink = page.getByRole('link', { name: 'Skill Package' })
-    await expect(skillPkgEnLink).toBeVisible()
-    await expect(page.getByRole('link', { name: '技能包' })).toHaveCount(0)
-
-    // 切回 zh-CN
-    await page.click('#toggle-locale-btn')
-    await expect(page.getByRole('link', { name: '技能包' })).toBeVisible()
-  })
-
   test('Skill Packages Page: zh-CN & en-US cards, status pills, labels, modal fields and cancel/delete interpolation', async ({
     page,
   }) => {

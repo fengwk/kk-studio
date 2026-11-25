@@ -1,7 +1,7 @@
 import { AgentsPanel } from '@/features/catalog/AiConsolePanels'
 import { CatalogRuntime } from '@/features/catalog/CatalogRuntime'
 import { useCatalogRuntime } from '@/features/catalog/CatalogRuntimeContext'
-import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
+import { ResourcePageLayout } from '@/shared/ui/cards/ResourcePageLayout'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 
 export function AgentsPage({ children }: ExtensionComponentProps) {
@@ -20,7 +20,7 @@ function AgentsResourcePanel() {
 function AgentsFrame({ children }: ExtensionComponentProps) {
   const controller = useCatalogRuntime()
   return (
-    <AiConsoleFrame
+    <ResourcePageLayout
       search={controller.search}
       onSearchChange={controller.setSearch}
       busy={controller.busy}
@@ -30,6 +30,6 @@ function AgentsFrame({ children }: ExtensionComponentProps) {
       content={<AgentsResourcePanel />}
     >
       {children}
-    </AiConsoleFrame>
+    </ResourcePageLayout>
   )
 }

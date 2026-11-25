@@ -1,17 +1,9 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
 import { ApiError } from '@/shared/api/client'
 import { setLocale } from '@/shared/i18n'
-
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => null,
-}))
-
-beforeEach(() => {
-  act(() => setLocale('zh-CN'))
-})
 
 afterEach(() => {
   act(() => setLocale('zh-CN'))

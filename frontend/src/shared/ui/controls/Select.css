@@ -42,6 +42,8 @@
   white-space: nowrap;
 }
 
+.ui-select-trigger[data-touch] { min-height: var(--touch-target); }
+
 .ui-select-trigger:hover:not(:disabled) {
   background: var(--control-hover);
 }

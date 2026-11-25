@@ -15,6 +15,23 @@
   transition: background var(--duration-fast);
 }
 
+.create-card[data-compact] {
+  min-height: 0;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: start;
+}
+
+.create-card[data-compact] .create-card-icon {
+  width: var(--control-h);
+  height: var(--control-h);
+  flex-basis: var(--control-h);
+}
+
+.create-card[data-compact] .create-card-text { margin: 0; }
+
 .create-card:hover:not(:disabled) {
   background: var(--hover);
 }

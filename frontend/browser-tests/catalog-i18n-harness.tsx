@@ -5,7 +5,6 @@ import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import { useI18n, setLocale } from '@/shared/i18n'
-import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { ModelForm } from '@/features/catalog/AiModelResourceForm'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
@@ -169,7 +168,7 @@ export function ModelFormDemo() {
 
 export function HarnessApp() {
   const { locale, setLocale } = useI18n()
-  const [tab, setTab] = useState<'model' | 'skills' | 'nav'>('model')
+  const [tab, setTab] = useState<'model' | 'skills'>('model')
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -200,26 +199,12 @@ export function HarnessApp() {
             >
               Skill Packages
             </Button>
-            <Button
-              type="button"
-              id="tab-nav-btn"
-              variant={tab === 'nav' ? 'primary' : 'secondary'}
-              onClick={() => setTab('nav')}
-            >
-              Ai Navigation
-            </Button>
           </div>
         </div>
 
         <main>
           {tab === 'model' && <ModelFormDemo />}
           {tab === 'skills' && <SkillPackagesPage />}
-          {tab === 'nav' && (
-            <div style={{ padding: '24px' }}>
-              <h2>Navigation Demo</h2>
-              <AiNavigation />
-            </div>
-          )}
         </main>
       </MemoryRouter>
     </QueryClientProvider>

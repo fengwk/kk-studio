@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
+import { ResourcePageLayout } from '@/shared/ui/cards/ResourcePageLayout'
 import { useI18n } from '@/shared/i18n'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
@@ -77,7 +77,7 @@ export function SkillPackagesPage() {
   )
 
   return (
-    <AiConsoleFrame
+    <ResourcePageLayout
       search={search}
       onSearchChange={setSearch}
       busy={packagesQuery.isLoading}
@@ -118,6 +118,6 @@ export function SkillPackagesPage() {
           }}
         />
       )}
-    </AiConsoleFrame>
+    </ResourcePageLayout>
   )
 }

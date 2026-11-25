@@ -24,10 +24,6 @@ vi.mock('@/features/catalog/mcp-server-service', () => ({
   },
 }))
 
-vi.mock('@/app/ai-console/AiNavigation', () => ({
-  AiNavigation: () => null,
-}))
-
 const SEEDED_AT = 1784505600000
 const EDIT_NAME = 'srv_edit'
 const EDIT_TITLE = `编辑 MCP 服务：${EDIT_NAME}`

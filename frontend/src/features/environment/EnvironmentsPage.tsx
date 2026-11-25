@@ -27,7 +27,6 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import { useEnvironmentCardActions } from '@/features/environment/useEnvironmentCardActions'
@@ -183,7 +182,6 @@ export function EnvironmentsPage() {
   return (
     <section className="screen active">
       <div className="subbar environment-toolbar">
-        <AiNavigation />
         <SearchField
           value={search}
           onChange={setSearch}

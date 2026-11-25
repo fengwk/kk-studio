@@ -566,13 +566,15 @@ Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 
 
 闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，以容器宽度与 720px 的较小值做紧凑排版，按该排版宽度重绘和缓存；SVG 裁到图形范围并与正文左对齐。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
 
-Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动，
+应用根通过 `GET /api/auth/me` 判断登录状态。HTTP `NOT_AUTHENTICATED` 或事件连接关闭码 `4001` 触发原地重新登录；同一账号保留草稿，其它账号整页重新加载。工作区通过 `useAccount` 读取账号，使用 `AccountMenu` 展示头像、修改密码和退出入口；有未发送内容时传入 `hasUnsentContent`。
+
+设置通过 `/settings/:section` 打开。普通用户只有本地偏好；管理员另可管理 Harness 资源、用户、插件及系统配置。系统配置分组由 settings schema 驱动，
 未编辑或改回编辑基线时，表单跟随最近读取的服务端设置。编辑后，完整聚合与首次编辑时所见版本一起提交（`expectedVersion`），
 后台回读不覆盖草稿，也不推进它的提交版本；重置则丢弃草稿并显示最近读取的值。权限与 apply timing 按封闭类型渲染。
 
 ### 配置同步
 
-“高级”之后的“同步”页签提供导入和导出，不使用系统设置的保存/重置按钮。
+“同步”分类提供导入和导出，不使用系统设置的保存/重置按钮。
 导出默认全选，支持逐项选择并展示自动包含的依赖；请求只提交用户直接选择的条目，
 最终依赖由服务端按当前配置补齐。下载固定为 `kk-studio-config.yaml`，始终包含所需凭据。
 导入读取 YAML 后先检查，成功才打开确认弹窗，分开展示将新增、将覆盖及将跳过的配置。
@@ -586,7 +588,7 @@ Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动
 
 ### Plugin 设置
 
-`/settings` 的静态 Plugins 页签挂载
+`/settings/plugins` 挂载
 [`PluginsTab`](../../frontend/src/features/extensions/PluginsTab.tsx)，调用 `/api/platform/plugins`。
 卡片展示已安装 Plugin 的身份与版本、配置应用状态、能力、region、认证状态和刷新摘要。
 认证 contract 当前为 DEEP_LINK：选 region、打开官方链接、粘贴 callback、提交后清空 password 输入、
@@ -606,7 +608,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 资源列表采用“标题与搜索 → 新建卡和资源卡”。AI 列表把搜索放在子导航右侧；环境搜索按名称或 ID 筛选卡片，不影响运行状态刷新或已打开的管理弹窗。环境卡片用本地化文字展示连接状态。项目、画布与待处理页共用左对齐标题的页头，右侧放适用的搜索与页面操作，待处理计数紧随标题。列表不添加营销副标题或没有数据来源的预览图。卡片只呈现识别资源和作出下一步决定所需的信息，标识符与版本保留在诊断和并发协议，不占主视觉。
 
-设置页签使用页面可用宽度，不受表单正文列宽限制。窄屏可横向滚动页签栏，页签文字不省略。
+设置分类在桌面左侧显示，窄屏则通过返回箭头旁的选择器切换。返回箭头回到进入设置前的位置，直接打开设置时回到 `/`。
 
 工作区采用单层内部头部：“返回入口 → 当前对象 → 必要操作”。看板、画布和对话不重复应用导航头。查看详情、调试或只读执行时，标题与操作反映当前可见对象，不借用隐藏对象的身份。加载失败仍须能返回入口。
 
