@@ -4,7 +4,7 @@
 // no request is intercepted, mocked or fulfilled.
 //
 // Protocol (stdin): the first line is the JSON configuration:
-//   {playwrightModule, baseUrl, environmentId, browserSessionId, workspaceDirectory,
+//   {playwrightModule, baseUrl, accountCookie, environmentId, browserSessionId, workspaceDirectory,
 //    browserTempDirectory, entryUrl, viewId, bindingEpoch, scenario?, expectedTheme?}
 // later lines are {"continue":true} for synchronization; the refresh-preserves-dirty scenario
 // additionally accepts {"navigate":{"entryUrl":"..."}} after the IndexedDB backup is committed.
@@ -80,6 +80,7 @@ function parseConfig(raw) {
   const keys = [
     'playwrightModule',
     'baseUrl',
+    'accountCookie',
     'environmentId',
     'browserSessionId',
     'workspaceDirectory',
@@ -93,9 +94,20 @@ function parseConfig(raw) {
       throw namedError('ConfigurationError')
     }
   }
+  const cookieSeparator = config.accountCookie.indexOf('=')
+  if (cookieSeparator <= 0 || cookieSeparator === config.accountCookie.length - 1) {
+    throw namedError('ConfigurationError')
+  }
   return {
     playwrightModule: resolve(config.playwrightModule),
     baseUrl: config.baseUrl,
+    accountCookie: {
+      name: config.accountCookie.slice(0, cookieSeparator),
+      value: config.accountCookie.slice(cookieSeparator + 1),
+      url: config.baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
     environmentId: config.environmentId,
     browserSessionId: config.browserSessionId,
     workspaceDirectory: resolve(config.workspaceDirectory),
@@ -472,6 +484,7 @@ async function run(config, lines) {
     })
 
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+    await context.addCookies([config.accountCookie])
     const page = await context.newPage()
     if (config.scenario === 'configuration') {
       await page.emulateMedia({ colorScheme: 'light' })

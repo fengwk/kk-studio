@@ -35,21 +35,10 @@ import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
-import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -144,8 +133,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   @Autowired private IdeBootstrapTicketService bootstrapTickets;
 
-  @Autowired private HarnessCommandAcceptanceOrchestrator commandAcceptance;
-
   @Autowired private StorageUploadService storageUploadService;
 
   @Autowired private InMemoryS3StorageService s3Storage;
@@ -156,7 +143,30 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Qualifier("localEnvironmentIdeService")
   private EnvironmentIdeServiceImpl localIdeService;
 
-  private final OkHttpClient browser = new OkHttpClient.Builder().followRedirects(false).build();
+  private final OkHttpClient browser =
+      new OkHttpClient.Builder()
+          .followRedirects(false)
+          .addInterceptor(
+              chain -> {
+                Request request = chain.request();
+                if (!request.url().toString().startsWith(baseUrl() + "/")) {
+                  throw new IOException("IDE acceptance requests must target the test Studio");
+                }
+                // Keep the view cookie separate from the account session shared with Chromium.
+                String viewCookie = request.header("Cookie");
+                Request.Builder authenticated =
+                    request
+                        .newBuilder()
+                        .header(
+                            "Cookie",
+                            adminCookieHeader() + (viewCookie == null ? "" : "; " + viewCookie));
+                if (!"GET".equals(request.method())
+                    || "websocket".equals(request.header("Upgrade"))) {
+                  authenticated.header("Origin", baseUrl());
+                }
+                return chain.proceed(authenticated.build());
+              })
+          .build();
 
   private ProductionDaemonFixture daemon;
 
@@ -392,34 +402,41 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Order(12)
   void opensSessionAttachmentAsReadOnlyVirtualWorkbenchContent() throws Exception {
     byte[] attachment = "Résumé — 東京 🚀 — café".getBytes(StandardCharsets.UTF_8);
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
+    StorageUploadTestSupport uploads =
+        new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc);
+    String uploadPath = "/api/platform/storage/uploads";
     String uploadId =
-        new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc)
-            .completeUpload("source.txt", attachment);
-    UUID userId =
-        jdbc.queryForObject(
-            "select owner_user_id from storage_upload where id = ?",
-            UUID.class,
-            UUID.fromString(uploadId));
-    commandAcceptance.createSession(
-        userId,
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewRootSession(
-                sessionId,
-                threadId,
-                new BranchSettings(
-                    "default-assistant",
-                    BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
-                    null),
-                false),
-            List.of(
-                new NewThreadCommand(
-                    new UserMessageCommandPayload(
-                        new AgentMessage(
-                            AgentMessageRole.USER,
-                            List.of(new AttachmentMessageContent(UUID.fromString(uploadId))))),
-                    UUID.randomUUID()))));
+        postJson(
+                uploadPath,
+                """
+                {"filename":"source.txt","mediaType":"text/plain","sizeBytes":"%d","sha256":"%s"}
+                """
+                    .formatted(attachment.length, uploads.sha256Hex(attachment)),
+                201)
+            .get("id")
+            .asText();
+    uploads.putUploadContent(uploadId, attachment, "text/plain");
+    postJson(uploadPath + "/" + uploadId + "/complete", "", 200);
+    String spaceId =
+        postJson(
+                "/api/chat-spaces",
+                """
+                {"title":"IDE attachment","rootFolderName":"Root","defaultAgentName":"default-assistant"}
+                """,
+                200)
+            .get("id")
+            .asText();
+    UUID sessionId =
+        UUID.fromString(
+            postJson(
+                    "/api/chat-spaces/" + spaceId + "/sessions",
+                    """
+                    {"message":[{"type":"ATTACHMENT","uploadId":"%s"}]}
+                    """
+                        .formatted(uploadId),
+                    200)
+                .get("sessionId")
+                .asText());
     UUID resourceId =
         jdbc.queryForObject(
             "select blob_id from session_blob_ref where session_id = ?", UUID.class, sessionId);
@@ -445,6 +462,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           Map.ofEntries(
               Map.entry("playwrightModule", playwright.toString()),
               Map.entry("baseUrl", baseUrl()),
+              Map.entry("accountCookie", adminCookieHeader()),
               Map.entry("environmentId", environmentId),
               Map.entry("browserSessionId", browserSessionId.toString()),
               Map.entry("workspaceDirectory", workspace.toString()),
@@ -764,6 +782,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
               playwright.toString(),
               "baseUrl",
               baseUrl(),
+              "accountCookie",
+              adminCookieHeader(),
               "environmentId",
               environmentId,
               "browserSessionId",
@@ -955,15 +975,17 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       browserDriver = BrowserDriver.start(node, recordsDir());
       browserDriver.send(
           Map.ofEntries(
-              Map.entry("playwrightModule", playwright.toString()), Map.entry("baseUrl", baseUrl()),
+              Map.entry("playwrightModule", playwright.toString()),
+              Map.entry("baseUrl", baseUrl()),
+              Map.entry("accountCookie", adminCookieHeader()),
               Map.entry("environmentId", environmentId),
-                  Map.entry("browserSessionId", browserSessionId.toString()),
+              Map.entry("browserSessionId", browserSessionId.toString()),
               Map.entry("workspaceDirectory", workspace.toString()),
-                  Map.entry("browserTempDirectory", browserTempDir.toString()),
+              Map.entry("browserTempDirectory", browserTempDir.toString()),
               Map.entry("entryUrl", opened.path("entryUrl").asText()),
-                  Map.entry("viewId", viewId.toString()),
+              Map.entry("viewId", viewId.toString()),
               Map.entry("bindingEpoch", Long.toString(epoch)),
-                  Map.entry("scenario", "dirty-close")));
+              Map.entry("scenario", "dirty-close")));
       browserDriver.await("workbench-ready");
       browserDriver.await("editor-ready");
       String binding =
@@ -1204,6 +1226,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           Map.ofEntries(
               Map.entry("playwrightModule", playwright.toString()),
               Map.entry("baseUrl", baseUrl()),
+              Map.entry("accountCookie", adminCookieHeader()),
               Map.entry("environmentId", environmentId),
               Map.entry("browserSessionId", browserSessionId.toString()),
               Map.entry("workspaceDirectory", workspace.toString()),
@@ -1321,7 +1344,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
                 + suffix()
                 + "\",\"daemonConfig\":{\"studioUrl\":\""
                 + baseUrl()
-                + "\"}}");
+                + "\"}}",
+            201);
     JsonNode card = created;
     String environmentId = card.path("id").asText();
     String registrationToken = card.path("registrationToken").asText();
@@ -1380,6 +1404,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           Map.ofEntries(
               Map.entry("playwrightModule", playwright.toString()),
               Map.entry("baseUrl", baseUrl()),
+              Map.entry("accountCookie", adminCookieHeader()),
               Map.entry("environmentId", environmentId),
               Map.entry("browserSessionId", browserSessionId.toString()),
               Map.entry("workspaceDirectory", workspace.toString()),
@@ -1989,7 +2014,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             new Request.Builder()
                 .url(webSocketUrl("/ide/" + environmentId + "/" + viewId + "/"))
                 .header("Cookie", "kk_ide_session=" + cookieValue)
-                .header("Origin", baseUrl())
                 .build(),
             session);
     try {
@@ -2040,18 +2064,19 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  private JsonNode postJson(String path, String body) throws IOException {
+  private JsonNode postJson(String path, String body, int expectedStatus) throws IOException {
     Response response =
         browser
             .newCall(
                 new Request.Builder()
                     .url(baseUrl() + path)
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
                     .post(RequestBody.create(body, JSON))
                     .build())
             .execute();
     try (response) {
       String text = response.body().string();
-      assertEquals(201, response.code(), "creating the environment must succeed: " + text);
+      assertEquals(expectedStatus, response.code(), "POST " + path + ": " + text);
       return JsonMapper.builder().build().readTree(text);
     }
   }
