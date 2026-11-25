@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  archiveWorkspaceSpace,
   createWorkspaceBranch,
   createWorkspaceFork,
   createWorkspaceSpace,
   createWorkspaceSession,
   deleteWorkspaceSession,
+  getWorkspaceTree,
 } from '../lib/harness.mjs'
 import { cid } from '../lib/http.mjs'
 
@@ -146,4 +148,54 @@ test('workspace creation helpers reject malformed identities before HTTP', async
     title: 'fork',
   }), /canonical UUID/)
   assert.equal(calls, 0)
+})
+
+test('workspace space archive clears defaults and skips archiving the sole active space', async () => {
+  // Test intent: temporary UI spaces must release agent/env defaults and never violate LAST_ACTIVE_CHAT_SPACE.
+  const spaceId = cid()
+  const otherSpaceId = cid()
+  const calls = []
+  const makeCtx = (spaces) => ({
+    async call(method, path, body) {
+      calls.push({ method, path, body })
+      if (method === 'GET' && path === '/api/chat-spaces') return { status: 200, json: spaces }
+      if (method === 'PATCH') {
+        return { status: 200, json: { id: spaceId, version: String(BigInt(body.expectedVersion) + 1n) } }
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    },
+  })
+
+  await archiveWorkspaceSpace(makeCtx([
+    { id: spaceId, version: '4', defaultAgentName: 'temp-agent', defaultEnvironmentId: null, archivedAt: null },
+    { id: otherSpaceId, version: '1', defaultAgentName: null, defaultEnvironmentId: null, archivedAt: null },
+  ]), spaceId)
+  assert.deepEqual(calls.map(({ method, body }) => [method, body]), [
+    ['GET', undefined],
+    ['PATCH', { expectedVersion: '4', defaultAgentName: null, defaultEnvironmentId: null }],
+    ['PATCH', { expectedVersion: '5', archived: true }],
+  ])
+
+  calls.length = 0
+  await archiveWorkspaceSpace(makeCtx([
+    { id: spaceId, version: '7', defaultAgentName: 'temp-agent', defaultEnvironmentId: null, archivedAt: null },
+  ]), spaceId)
+  assert.deepEqual(calls.map(({ method, body }) => [method, body]), [
+    ['GET', undefined],
+    ['PATCH', { expectedVersion: '7', defaultAgentName: null, defaultEnvironmentId: null }],
+  ])
+})
+
+test('getWorkspaceTree validates UUID and returns the workspace folder tree', async () => {
+  const spaceId = cid()
+  const tree = { treeVersion: '3', folders: [{ id: cid(), name: 'E2E', resources: [], children: [] }] }
+  const ctx = {
+    async call(method, path) {
+      assert.equal(method, 'GET')
+      assert.equal(path, `/api/chat-spaces/${spaceId}/tree`)
+      return { status: 200, json: tree }
+    },
+  }
+  assert.deepEqual(await getWorkspaceTree(ctx, spaceId), tree)
+  await assert.rejects(getWorkspaceTree(ctx, 'bad-id'), /canonical UUID/)
 })
