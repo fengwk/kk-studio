@@ -1,10 +1,8 @@
 import { aiExtension } from '@/app/ai-console/ai-extension.definition'
-import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import type {
   ApplicationContributions,
   DialogContribution,
   OverlayContribution,
-  PageContribution,
   ToolRendererContribution,
   TrustedReactExtension,
 } from '@/platform/extensions/types'
@@ -16,7 +14,6 @@ import type {
 export function composeApplicationContributions(
   extensions: readonly TrustedReactExtension[],
 ): ApplicationContributions {
-  const pages: PageContribution[] = []
   const dialogs: DialogContribution[] = []
   const overlays: OverlayContribution[] = []
   const toolRenderers = new Map<string, ToolRendererContribution>()
@@ -27,7 +24,6 @@ export function composeApplicationContributions(
       throw new Error(`Duplicate extension id: ${extension.id}`)
     }
     extensionIds.add(extension.id)
-    appendUnique('pages', pages, extension.pages)
     appendUnique('dialogs', dialogs, extension.dialogs)
     appendUnique('overlays', overlays, extension.overlays)
     for (const renderer of extension.toolRenderers ?? []) {
@@ -39,7 +35,6 @@ export function composeApplicationContributions(
   }
 
   return {
-    pages: Object.freeze(pages),
     dialogs: Object.freeze(dialogs),
     overlays: Object.freeze(overlays),
     toolRenderers: readonlyMap(toolRenderers),
@@ -77,7 +72,4 @@ function appendUnique<T extends { id: string }>(
   }
 }
 
-export const applicationContributions = composeApplicationContributions([
-  aiExtension,
-  canvasExtension,
-])
+export const applicationContributions = composeApplicationContributions([aiExtension])

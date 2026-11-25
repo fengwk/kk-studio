@@ -1,27 +1,7 @@
 import type { ComponentType, ReactNode } from 'react'
-import type { TranslationKey } from '@/shared/i18n'
 
 export interface ExtensionComponentProps {
   children?: ReactNode
-}
-
-interface PageNavItem {
-  label: string
-  labelKey?: TranslationKey
-  order?: number
-}
-
-type PageWorkspacePredicate =
-  | boolean
-  | ((params: Record<string, string | undefined>) => boolean)
-
-export interface PageContribution {
-  id: string
-  path: string
-  component: ComponentType<ExtensionComponentProps>
-  navGroup?: string
-  navItem?: PageNavItem
-  workspace?: PageWorkspacePredicate
 }
 
 export interface DialogContribution {
@@ -89,7 +69,6 @@ export interface ToolRendererContribution {
  */
 export interface TrustedReactExtension {
   id: string
-  pages?: PageContribution[]
   dialogs?: DialogContribution[]
   overlays?: OverlayContribution[]
   toolRenderers?: ToolRendererContribution[]
@@ -97,7 +76,6 @@ export interface TrustedReactExtension {
 
 /** 应用组合根一次性产出的只读 contribution 表。 */
 export interface ApplicationContributions {
-  readonly pages: readonly PageContribution[]
   readonly dialogs: readonly DialogContribution[]
   readonly overlays: readonly OverlayContribution[]
   readonly toolRenderers: ReadonlyMap<string, ToolRendererContribution>

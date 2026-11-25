@@ -176,12 +176,6 @@
   "src/features/thread/thread-state.css": {
     "spacing": 2
   },
-  "src/platform/shell/app-shell.css": {
-    "spacing": 22
-  },
-  "src/platform/shell/list-page-header.css": {
-    "spacing": 1
-  },
   "src/shared/ui/cards/cards.css": {
     "spacing": 10
   },
