@@ -32,6 +32,31 @@ test.describe('Mermaid rendering and sanitization', () => {
     await expect(svg).toContainText('hello')
   })
 
+  test('keeps the top label inside a frameless Mermaid radar chart', async ({ page }, info) => {
+    const svg = await renderDiagram(page, [
+      'radar-beta',
+      'axis a[Top], b[Right], c[Bottom], d[Left]',
+      'curve c1[Current]{4, 3, 2, 1}',
+    ].join('\n'))
+    const topLabel = svg.getByText('Top', { exact: true })
+    await expect(topLabel).toBeVisible()
+    expect((await topLabel.boundingBox())!.y).toBeGreaterThanOrEqual((await svg.boundingBox())!.y)
+    await page.locator('.md-mermaid-shell').screenshot({ path: info.outputPath('mermaid-valid.png') })
+  })
+
+  test('keeps the source and shows the syntax error location and fix', async ({ page }, info) => {
+    const source = 'flowchart TD\nA -->'
+    await page.goto(`${HARNESS}?mermaid=${encodeURIComponent(source)}&locale=zh-CN`)
+    await expect(page.locator('.md-mermaid svg')).toHaveCount(0)
+    const code = page.locator('code.language-mermaid')
+    const error = page.locator('.md-mermaid-error')
+    await expect(code).toHaveText(source)
+    await expect(error).toHaveText('无法渲染此图。第 2 行：连线后面缺少节点。在连线运算符后写节点 id。')
+    await code.scrollIntoViewIfNeeded()
+    await error.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: info.outputPath('mermaid-invalid.png') })
+  })
+
   for (const locale of ['zh-CN', 'en-US']) {
     for (const width of [390, 1440]) {
       test(`places Mermaid copy above the diagram in ${locale} at ${width}px`, async ({ page }, info) => {
