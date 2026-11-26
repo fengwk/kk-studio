@@ -20,29 +20,6 @@ type CachedViz =
 type RenderFailure = { kind: 'failure'; detail?: string; line?: number }
 type RenderOutcome = CachedViz | RenderFailure
 
-/**
- * KChart 暗色 Terminal 主题换成应用调色板。KChart 只接受具体颜色，每个值重复旁注 token 的 palette 色值；
- * 调色板没有对应项的角色沿用 Terminal：中间层级的文字灰、粉/紫色 classDef 映射到的紫色和数据系列色。
- */
-const PALETTE_ROLES = {
-  bg: '#0d0f0e', // --stage-bg：对话区背景，图直接画在上面
-  surface: '#101412', // --bg
-  surface2: '#202723', // --surface-raised：节点填充
-  line: '#2b342f', // --border
-  line2: '#355344', // --palette-moss-700：节点描边
-  fg1: '#edf2ed', // --fg
-  fg3: '#9aa59d', // --fg-muted
-  accent: '#71e79a', // --accent
-  ok: '#7fa38c', // --palette-moss-300：与 accent 区分，甘特图的已完成与关键任务才不同色
-  warn: '#f3ae67', // --warning
-  danger: '#f08585', // --danger
-  info: '#77c7f5', // --info
-  ext: '#9aa59d', // --fg-muted
-}
-/** 与 --font 相同的字体栈：测量和绘制使用同一字体。 */
-const FONT_FAMILY =
-  'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif'
-
 const MAX_LAYOUT_WIDTH = 720
 let rendererPromise: Promise<Renderer> | null = null
 const vizCache = new Map<string, CachedViz>()
@@ -54,22 +31,62 @@ const SVG_REFERENCE_SELECTOR = SVG_REFERENCE_ATTRIBUTES.map((name) =>
 
 function loadRenderer(): Promise<Renderer> {
   rendererPromise ??= import('@fengwk/kchart').then((kchart) => {
-    const base = kchart.themes.terminal
-    const theme: Theme = {
-      ...base,
-      ...PALETTE_ROLES,
-      id: 'kk-studio',
-      fontFamily: FONT_FAMILY,
-      style: { ...base.style, radius: 8, smallRadius: 6 },
-    }
-    return { kchart, theme, measure: canvasMeasure() }
+    const context = document.createElement('canvas').getContext('2d')
+    return { kchart, theme: readTheme(kchart.themes.terminal, context), measure: canvasMeasure(context) }
   })
   return rendererPromise
 }
 
+/** 只覆盖应用已有的语义角色；数据系列等其余角色沿用 Terminal。 */
+function readTheme(base: Theme, context: CanvasRenderingContext2D | null): Theme {
+  const styles = getComputedStyle(document.documentElement)
+  const token = (name: string) => styles.getPropertyValue(name).trim()
+  const color = (name: string) => {
+    const value = token(name)
+    if (/^#[\da-f]{6}$/i.test(value)) {
+      return value
+    }
+    // KChart 只接受 #RRGGBB。让浏览器把 color-mix 等不透明 CSS 色转换成 sRGB。
+    if (context) {
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = 'transparent'
+      context.fillStyle = value
+      context.fillRect(0, 0, 1, 1)
+      const [r, g, b, alpha] = context.getImageData(0, 0, 1, 1).data
+      if (alpha === 255) {
+        return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`
+      }
+    }
+    throw new Error(`KChart requires an opaque color for ${name}`)
+  }
+  const muted = color('--fg-muted')
+  return {
+    ...base,
+    id: 'kk-studio',
+    bg: color('--stage-bg'),
+    surface: color('--bg'),
+    surface2: color('--surface-raised'),
+    line: color('--border'),
+    line2: color('--border-accent'),
+    fg1: color('--fg'),
+    fg3: muted,
+    accent: color('--accent'),
+    ok: color('--success-muted'),
+    warn: color('--warning'),
+    danger: color('--danger'),
+    info: color('--info'),
+    ext: muted,
+    fontFamily: token('--font'),
+    style: {
+      ...base.style,
+      radius: Number.parseFloat(token('--radius-md')),
+      smallRadius: Number.parseFloat(token('--radius-sm')),
+    },
+  }
+}
+
 /** 按浏览器实际字形宽度折行和定框。 */
-function canvasMeasure(): Measure | undefined {
-  const context = document.createElement('canvas').getContext('2d')
+function canvasMeasure(context: CanvasRenderingContext2D | null): Measure | undefined {
   if (!context) {
     return undefined
   }

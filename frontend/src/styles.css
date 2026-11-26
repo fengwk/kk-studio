@@ -67,6 +67,7 @@
   /* Border */
   --border: var(--palette-ink-700);
   --border-hover: var(--palette-ink-600);
+  --border-accent: var(--palette-moss-700);
   --border-glass: color-mix(in srgb, var(--palette-white) 10%, transparent);
 
   /* Accent and focus */
@@ -79,6 +80,7 @@
 
   /* Status */
   --success: var(--palette-green-400);
+  --success-muted: var(--palette-moss-300);
   --warning: var(--palette-amber-400);
   --warning-soft: color-mix(in srgb, var(--palette-amber-400) 16%, transparent);
   --warning-border: color-mix(in srgb, var(--palette-amber-400) 35%, transparent);

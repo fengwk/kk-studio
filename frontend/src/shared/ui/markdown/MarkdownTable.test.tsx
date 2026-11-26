@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installVizThemeFixture } from './viz-theme.test-fixture'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
 import { readMarkdownTableSource } from '@/shared/ui/markdown/markdown-table-source'
@@ -23,6 +24,8 @@ const SECOND_TABLE = ['| two | table |', '| --- | --- |', '| 1 | 2 |'].join('\n'
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
 const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, 'execCommand')
+
+installVizThemeFixture()
 
 beforeEach(() => {
   kchart.diagram.mockReset()

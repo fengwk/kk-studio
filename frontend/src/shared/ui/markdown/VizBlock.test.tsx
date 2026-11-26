@@ -8,6 +8,7 @@ import type {
   RenderResult,
   Scene,
 } from '@fengwk/kchart'
+import { installVizThemeFixture } from './viz-theme.test-fixture'
 
 type DiagramResult = RenderResult<DiagramDiagnostic>
 type AttachTarget = Parameters<typeof import('@fengwk/kchart').attach>[0]
@@ -16,7 +17,7 @@ const kchart = vi.hoisted(() => ({
   render: vi.fn<(spec: ChartSpec, options: RenderOptions) => Promise<RenderResult>>(),
   diagram: vi.fn<(source: string, options: DiagramOptions) => Promise<DiagramResult>>(),
   attach: vi.fn<(svg: AttachTarget, spec?: ChartSpec) => Promise<() => void>>(),
-  themes: { terminal: { id: 'terminal', fg2: '#bdd7c4', style: { radius: 0, smallRadius: 0, soft: 0.12 } } },
+  themes: { terminal: { id: 'terminal', fg2: '#bdd7c4', tones: ['#aa7755'], style: { radius: 0, smallRadius: 0, soft: 0.12 } } },
 }))
 
 vi.mock('@fengwk/kchart', () => kchart)
@@ -45,6 +46,8 @@ const DATA_TABLE = {
   ],
 }
 
+installVizThemeFixture()
+
 beforeEach(() => {
   vi.resetModules()
   kchart.render.mockReset()
@@ -70,7 +73,7 @@ afterEach(() => {
 
 describe('VizBlock', () => {
   it('renders a structure diagram with syntax, compact layout and the app theme', async () => {
-    // test-setup 的 ResizeObserver 立即报告 1200px；主题以 Terminal 为底、应用调色板覆盖，测量走 canvas。
+    // 用不同于应用默认值的 token 验证浏览器读取，且 Terminal 的系列色和其余样式不被覆盖。
     const { VizBlock } = await loadVizBlock()
     const view = render(<VizBlock syntax="mermaid" code="  graph TD; A-->B  " />)
     await expectSvg(view.container, 'graph TD; A-->B')
@@ -83,9 +86,18 @@ describe('VizBlock', () => {
       width: 720,
       compact: true,
       frame: false,
-      theme: { id: 'kk-studio', fg1: '#edf2ed', fg2: '#bdd7c4', style: { radius: 8, smallRadius: 6, soft: 0.12 } },
+      theme: {
+        id: 'kk-studio',
+        bg: '#101010', surface: '#202020', surface2: '#303030',
+        line: '#404040', line2: '#505050',
+        fg1: '#f0e0d0', fg2: '#bdd7c4', fg3: '#b0a090',
+        accent: '#80dd90', ok: '#88bb88', warn: '#ffbb66', danger: '#ff8888', info: '#88ccff', ext: '#b0a090',
+        fontFamily: '"Fixture Sans"',
+        tones: kchart.themes.terminal.tones,
+        style: { radius: 11, smallRadius: 7, soft: 0.12 },
+      },
     })
-    expect(options.measure?.('abc', 13, 400, 'Inter')).toBe(21)
+    expect(options.measure?.('abc', 13, 400, '"Fixture Sans"')).toBe(21)
   })
 
   it.each(['layers', 'blocks', 'swimlane'] as const)('routes %s sources through diagram with that syntax', async (syntax) => {
