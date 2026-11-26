@@ -21,6 +21,7 @@ export interface CanvasDurabilityRecordedCall {
 }
 
 export interface CanvasDurabilityBuildOptions {
+  viewSlot: number
   canvasId?: string
   initialRevision?: string
 }
@@ -32,7 +33,7 @@ export interface CanvasDurabilityHarnessApi {
   sessionId: () => string
   readSessionStorageId: () => string | null
   replaceSessionStorageId: (id: string) => void
-  buildQueue: (options?: CanvasDurabilityBuildOptions) => CanvasCommandQueue
+  buildQueue: (options: CanvasDurabilityBuildOptions) => CanvasCommandQueue
   enqueue: (
     commands: CanvasCommandDTO[],
   ) => Promise<{ ok: true; revision: string } | { ok: false; errorName: string; errorMessage: string }>
@@ -45,6 +46,7 @@ export interface CanvasDurabilityHarnessApi {
   calls: () => CanvasDurabilityRecordedCall[]
   clearCalls: () => void
   listPersistedOperations: (
+    viewSlot: number,
     canvasId?: string,
   ) => Promise<Array<{ id: string; idempotencyKey: string; commands: CanvasCommandDTO[]; sequence: number }>>
   getStorageErrors: () => string[]
@@ -141,17 +143,18 @@ function replaceSessionStorageId(id: string): void {
   }
 }
 
-function buildQueue(options?: CanvasDurabilityBuildOptions): CanvasCommandQueue {
-  if (options?.canvasId) {
+function buildQueue(options: CanvasDurabilityBuildOptions): CanvasCommandQueue {
+  if (options.canvasId) {
     currentCanvasId = options.canvasId
   }
-  if (options?.initialRevision) {
+  if (options.initialRevision) {
     currentRevision = options.initialRevision
   }
 
   const initialSnapshot = buildAuthoritativeSnapshot(currentCanvasId, currentRevision)
 
   queue = new CanvasCommandQueue(currentCanvasId, {
+    viewSlot: options.viewSlot,
     initialSnapshot,
     apply: async (_canvasId, body) => {
       recordedCalls.push({
@@ -180,10 +183,10 @@ async function enqueue(
   commands: CanvasCommandDTO[],
 ): Promise<{ ok: true; revision: string } | { ok: false; errorName: string; errorMessage: string }> {
   if (!queue) {
-    buildQueue()
+    throw new Error('Build a queue with an explicit view slot first')
   }
   try {
-    const snapshot = await queue!.enqueue(commands)
+    const snapshot = await queue.enqueue(commands)
     return { ok: true, revision: snapshot.document.revision }
   } catch (error: unknown) {
     const err = error as Error | undefined
@@ -202,9 +205,9 @@ async function recover(): Promise<{
   applyCalls: CanvasDurabilityRecordedCall[]
 }> {
   if (!queue) {
-    buildQueue()
+    throw new Error('Build a queue with an explicit view slot first')
   }
-  const result = await queue!.recover()
+  const result = await queue.recover()
   return {
     replayed: result.replayed,
     conflicted: result.conflicted,
@@ -214,10 +217,11 @@ async function recover(): Promise<{
 }
 
 async function listPersistedOperations(
+  viewSlot: number,
   canvasId?: string,
 ): Promise<Array<{ id: string; idempotencyKey: string; commands: CanvasCommandDTO[]; sequence: number }>> {
   const cid = canvasId ?? currentCanvasId
-  const store = createCanvasOperationStore(cid)
+  const store = createCanvasOperationStore(cid, { viewSlot })
   const list = await store.list()
   return list.map((op) => ({
     id: op.id,

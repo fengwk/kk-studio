@@ -5,7 +5,7 @@ import { saveCanvasViewport, type StoredCanvasViewport } from '@/features/canvas
 export const CANVAS_VIEWPORT_PERSIST_INTERVAL_MS = 200
 
 interface PendingViewport {
-  canvasId: string
+  viewKey: string
   viewport: StoredCanvasViewport
 }
 
@@ -21,15 +21,15 @@ function sameViewport(left: StoredCanvasViewport, right: StoredCanvasViewport): 
  * 因此「最后一次平移」不会丢。打开画布时的视口来自存档，视为已落盘，不回写。
  */
 export function useCanvasViewportPersistence(
-  canvasId: string,
+  viewKey: string,
   viewport: StoredCanvasViewport,
 ): void {
   const pendingRef = useRef<PendingViewport | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastFlushAtRef = useRef(0)
   /** 已经在该画布存储里的视口：用于跳过无意义的重复写入。 */
-  const persistedRef = useRef<{ canvasId: string | null; viewport: StoredCanvasViewport | null }>({
-    canvasId: null,
+  const persistedRef = useRef<{ viewKey: string | null; viewport: StoredCanvasViewport | null }>({
+    viewKey: null,
     viewport: null,
   })
 
@@ -45,25 +45,25 @@ export function useCanvasViewportPersistence(
     }
     const persisted = persistedRef.current
     if (
-      persisted.canvasId === pending.canvasId
+      persisted.viewKey === pending.viewKey
       && persisted.viewport
       && sameViewport(persisted.viewport, pending.viewport)
     ) {
       return
     }
-    saveCanvasViewport(pending.canvasId, pending.viewport)
-    persistedRef.current = { canvasId: pending.canvasId, viewport: pending.viewport }
+    saveCanvasViewport(pending.viewKey, pending.viewport)
+    persistedRef.current = { viewKey: pending.viewKey, viewport: pending.viewport }
     lastFlushAtRef.current = Date.now()
   }, [])
 
   useEffect(() => {
-    if (persistedRef.current.canvasId !== canvasId) {
+    if (persistedRef.current.viewKey !== viewKey) {
       // 进入/切换画布：先把上一个画布的待写值落盘，再把当前视口当作既有存档。
       flush()
-      persistedRef.current = { canvasId, viewport }
+      persistedRef.current = { viewKey, viewport }
       return
     }
-    pendingRef.current = { canvasId, viewport }
+    pendingRef.current = { viewKey, viewport }
     const elapsed = Date.now() - lastFlushAtRef.current
     if (elapsed >= CANVAS_VIEWPORT_PERSIST_INTERVAL_MS) {
       flush()
@@ -72,7 +72,7 @@ export function useCanvasViewportPersistence(
     if (timerRef.current === null) {
       timerRef.current = setTimeout(flush, CANVAS_VIEWPORT_PERSIST_INTERVAL_MS - elapsed)
     }
-  }, [canvasId, flush, viewport])
+  }, [viewKey, flush, viewport])
 
   // 卸载时把最后一个待写值落盘。
   useEffect(() => () => {

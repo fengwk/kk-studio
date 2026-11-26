@@ -78,14 +78,14 @@ function assertSessionWritable(): void {
   }
 }
 
-function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions): ResolvedScope {
+function resolveScope(canvasId: string, options: CanvasLocalStoreOptions): ResolvedScope {
   assertSessionWritable()
-  const userId = options?.userId ?? getCurrentUserId()
-  const editingSessionId = options?.editingSessionId ?? getEditingSessionId()
+  const userId = options.userId ?? getCurrentUserId()
+  const editingSessionId = options.editingSessionId ?? getEditingSessionId()
   return {
     userId,
     editingSessionId,
-    sessionKey: buildSessionKey(userId, canvasId, editingSessionId, options?.viewId),
+    sessionKey: buildSessionKey(userId, canvasId, editingSessionId, options.viewSlot),
   }
 }
 
@@ -122,7 +122,7 @@ function declareUnavailable(): CanvasStorageUnavailableError {
  */
 export async function saveCanvasOperation(
   operation: CanvasPendingOperation,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<void> {
   assertSessionWritable()
   const factory = resolveIdbFactory(options)
@@ -165,7 +165,7 @@ export async function saveCanvasOperation(
 /** 删除一个待确认操作（ACK 或确定冲突终态）。必须等待 `tx.oncomplete`。 */
 export async function deleteCanvasOperation(
   operationId: string,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<void> {
   assertSessionWritable()
   const factory = resolveIdbFactory(options)
@@ -209,7 +209,7 @@ export async function deleteCanvasOperation(
 /** 按原始提交顺序（sequence 升序）加载当前会话 / 画布下的全部待确认操作。 */
 export async function loadCanvasOperations(
   canvasId: string,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<CanvasPendingOperation[]> {
   const scope = resolveScope(canvasId, options)
   const factory = resolveIdbFactory(options)
@@ -260,7 +260,7 @@ function compareSequence(left: CanvasPendingOperation, right: CanvasPendingOpera
  */
 export function createCanvasOperationStore(
   canvasId: string,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): CanvasPendingOperationStore {
   const scope = resolveScope(canvasId, options)
   const scopedOptions: CanvasLocalStoreOptions = {
@@ -281,14 +281,14 @@ export function buildPendingOperation(input: {
   canvasId: string
   userId: string
   editingSessionId: string
-  viewId?: string
+  viewSlot: number
   idempotencyKey: string
   commands: CanvasCommandDTO[]
   ack?: CanvasDraftAck[]
   sequence: number
   createdAt: number
 }): CanvasPendingOperation {
-  const sessionKey = buildSessionKey(input.userId, input.canvasId, input.editingSessionId, input.viewId)
+  const sessionKey = buildSessionKey(input.userId, input.canvasId, input.editingSessionId, input.viewSlot)
   return {
     id: `${sessionKey}:${input.idempotencyKey}`,
     userId: input.userId,

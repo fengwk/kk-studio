@@ -4,10 +4,10 @@ import type { CanvasLocalState } from '@/features/canvas/types'
 import { hasStoredCanvasViewport, type StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 
 export function useCanvasEditorViewState(
-  canvasId: string,
+  viewKey: string,
   setState: Dispatch<SetStateAction<CanvasLocalState>>,
 ) {
-  const [initialFitPending, setInitialFitPending] = useState(() => !hasStoredCanvasViewport(canvasId))
+  const [initialFitPending, setInitialFitPending] = useState(() => !hasStoredCanvasViewport(viewKey))
 
   // 视口落盘在提交后执行；状态 updater 不写存储。
   const setViewport = useCallback((viewport: StoredCanvasViewport) => {

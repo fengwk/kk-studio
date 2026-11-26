@@ -4,9 +4,8 @@ import { CanvasRuntimeProvider } from './CanvasRuntimeContext'
 import { canvasViewKey } from './canvas-view-key'
 import './canvas.css'
 
-export function CanvasWorkbench({ canvasId, viewSlot }: { canvasId: string; viewSlot?: number }) {
-  const viewId = viewSlot?.toString()
-  return <CanvasRuntimeProvider key={canvasViewKey(canvasId, viewId)} canvasId={canvasId} viewId={viewId}>
+export function CanvasWorkbench({ canvasId, viewSlot }: { canvasId: string; viewSlot: number }) {
+  return <CanvasRuntimeProvider key={canvasViewKey(canvasId, viewSlot)} canvasId={canvasId} viewSlot={viewSlot}>
     <div className="canvas-feature canvas-workbench">
       <CanvasEditor />
       <CanvasOverlays />

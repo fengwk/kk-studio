@@ -62,7 +62,7 @@ export interface CanvasCommandQueueOptions {
   operationStore?: CanvasPendingOperationStore
   userId?: string
   editingSessionId?: string
-  viewId?: string
+  viewSlot: number
   /**
    * ACK 回调 Promise 契约：必须先 await 持久 draft generation ACK 清理成功，再 remove operation。
    * 必须实际等 IDB tx complete，顺序不能反。
@@ -112,7 +112,7 @@ export class CanvasCommandQueue {
   private readonly store: CanvasPendingOperationStore
   private readonly userId: string
   private readonly editingSessionId: string
-  private readonly viewId?: string
+  private readonly viewSlot: number
   private readonly onDraftAcks?: (acks: CanvasDraftAck[]) => Promise<void>
 
   constructor(
@@ -126,12 +126,12 @@ export class CanvasCommandQueue {
     this.onSnapshot = options.onSnapshot
     this.userId = options.userId ?? getCurrentUserId()
     this.editingSessionId = options.editingSessionId ?? getEditingSessionId()
-    this.viewId = options.viewId
+    this.viewSlot = options.viewSlot
     this.onDraftAcks = options.onDraftAcks
     this.store = options.operationStore ?? createCanvasOperationStore(canvasId, {
       userId: this.userId,
       editingSessionId: this.editingSessionId,
-      viewId: this.viewId,
+      viewSlot: this.viewSlot,
     })
   }
 
@@ -226,7 +226,7 @@ export class CanvasCommandQueue {
       canvasId: this.canvasId,
       userId: this.userId,
       editingSessionId: this.editingSessionId,
-      viewId: this.viewId,
+      viewSlot: this.viewSlot,
       idempotencyKey: payload.idempotencyKey,
       commands: payload.commands,
       ack: [...payload.ack],

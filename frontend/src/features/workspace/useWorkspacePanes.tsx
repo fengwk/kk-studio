@@ -4,17 +4,17 @@ import { useI18n } from '@/shared/i18n'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import type { TreeRow } from './resource-tree'
 import { bindBeside, bindPane, canOpenDirectly, newDraft, reconcileBindings, sameTarget } from './pane-bindings'
-import { isPaneTarget, type PaneRendererProps, type PaneRenderers, type PaneTarget } from './pane-target'
+import { isPaneTarget, type PaneOpenTarget, type PaneRendererProps, type PaneRenderers, type PaneTarget } from './pane-target'
 import { closePane, paneIds, usePaneState, type PaneState, type Rect } from './panes'
 
-export type OpenTarget = (target: PaneTarget, anchor?: HTMLElement | null) => void
+export type OpenTarget = (target: PaneOpenTarget, anchor?: HTMLElement | null) => void
 
 type Bindings = PaneState<PaneTarget>
 function targetKey(target: PaneTarget) {
   switch (target.kind) {
     case 'draft': return `draft:${target.draftId}`
     case 'thread': return `thread:${target.threadId}`
-    case 'canvas': return `canvas:${target.canvasId}:${target.viewSlot ?? ''}`
+    case 'canvas': return `canvas:${target.canvasId}:${target.viewSlot}`
     case 'vscode': return `vscode:${target.environmentId}:${target.viewId}`
   }
 }
@@ -41,7 +41,7 @@ export function useWorkspacePanes({ userId, space, rows, renderers, closeView, o
   const [busy, setBusy] = useState(false)
   const locking = useRef(false)
   const [unsent, setUnsent] = useState<Readonly<Record<string, string>>>({})
-  const [pick, setPick] = useState<{ target: PaneTarget; anchor?: HTMLElement | null }>()
+  const [pick, setPick] = useState<{ target: PaneOpenTarget; anchor?: HTMLElement | null }>()
   const [confirm, setConfirm] = useState<{ run: () => void }>()
   const bounds = useRef<Rect>({ x: 0, y: 0, width: 0, height: 0 })
   const onSizeChange = useCallback((box: Rect) => { bounds.current = box }, [])
@@ -53,7 +53,7 @@ export function useWorkspacePanes({ userId, space, rows, renderers, closeView, o
     return current !== undefined && unsent[id] === targetKey(current)
   }
 
-  function transition(id: string, update: (previous: Bindings) => Bindings, next?: PaneTarget, replacementAlreadyAuthorized = false) {
+  function transition(id: string, update: (previous: Bindings) => Bindings, next?: PaneOpenTarget, replacementAlreadyAuthorized = false) {
     if (locking.current) return
     const current = state.bindings[id]
     if (next && sameTarget(current, next)) {

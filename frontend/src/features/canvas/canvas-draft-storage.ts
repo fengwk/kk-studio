@@ -45,16 +45,16 @@ interface CanvasDraftRecord {
   updatedAt: number
 }
 
-function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions) {
+function resolveScope(canvasId: string, options: CanvasLocalStoreOptions) {
   if (isSessionReloading()) {
     throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
   }
-  const userId = options?.userId ?? getCurrentUserId()
-  const editingSessionId = options?.editingSessionId ?? getEditingSessionId()
+  const userId = options.userId ?? getCurrentUserId()
+  const editingSessionId = options.editingSessionId ?? getEditingSessionId()
   return {
     userId,
     editingSessionId,
-    sessionKey: buildSessionKey(userId, canvasId, editingSessionId, options?.viewId),
+    sessionKey: buildSessionKey(userId, canvasId, editingSessionId, options.viewSlot),
   }
 }
 
@@ -88,7 +88,7 @@ function noticeUnavailable(): void {
  */
 export async function loadCanvasDrafts(
   canvasId: string,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<Record<string, CanvasNodeDraft>> {
   const scope = resolveScope(canvasId, options)
   const factory = resolveIdbFactory(options)
@@ -143,7 +143,7 @@ export async function saveCanvasDraft(
   canvasId: string,
   nodeId: string,
   draft: CanvasNodeDraft,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<void> {
   const scope = resolveScope(canvasId, options)
   const record: CanvasDraftRecord = {
@@ -203,7 +203,7 @@ export async function saveCanvasDraft(
 export async function deleteCanvasDraft(
   canvasId: string,
   nodeId: string,
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<void> {
   const scope = resolveScope(canvasId, options)
   const id = `${scope.sessionKey}:${nodeId}`
@@ -254,7 +254,7 @@ export async function deleteCanvasDraft(
 export async function ackCanvasDrafts(
   canvasId: string,
   acks: CanvasDraftAck[],
-  options?: CanvasLocalStoreOptions,
+  options: CanvasLocalStoreOptions,
 ): Promise<void> {
   if (acks.length === 0) {
     return

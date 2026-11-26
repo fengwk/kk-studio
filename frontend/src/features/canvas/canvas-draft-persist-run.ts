@@ -30,7 +30,7 @@ function diffDrafts(
 export interface DraftPersistenceRun {
   /** 落盘目标画布。 */
   canvasId: string
-  viewId?: string
+  viewSlot: number
   /** 当前任务是否仍属同一挂载实例与 epoch；false 时后续写入必须放弃。 */
   isCurrentTask: () => boolean
   baselineDrafts: Record<string, CanvasNodeDraft>
@@ -53,7 +53,7 @@ export interface DraftPersistResult {
  * 绝不把旧画布的写入推进到新画布的基线里。首次失败即中断（后续任务会重新计算差集）。
  */
 export async function persistDraftDiff(run: DraftPersistenceRun): Promise<DraftPersistResult> {
-  const { canvasId, viewId, isCurrentTask, baselineDrafts, targetDrafts, onWriteStarted, onError } = run
+  const { canvasId, viewSlot, isCurrentTask, baselineDrafts, targetDrafts, onWriteStarted, onError } = run
   const { toSave, toDelete } = diffDrafts(baselineDrafts, targetDrafts)
   const hasChanges = toSave.length > 0 || toDelete.length > 0
   if (!hasChanges) {
@@ -61,18 +61,18 @@ export async function persistDraftDiff(run: DraftPersistenceRun): Promise<DraftP
   }
 
   onWriteStarted()
-  const saved = await writeDrafts(canvasId, viewId, toSave, baselineDrafts, isCurrentTask, onError)
+  const saved = await writeDrafts(canvasId, viewSlot, toSave, baselineDrafts, isCurrentTask, onError)
   if (saved !== 'completed') {
     return { hasChanges, outcome: saved }
   }
-  const removed = await removeDrafts(canvasId, viewId, toDelete, baselineDrafts, isCurrentTask, onError)
+  const removed = await removeDrafts(canvasId, viewSlot, toDelete, baselineDrafts, isCurrentTask, onError)
   return { hasChanges, outcome: removed }
 }
 
 /** 逐条写入新草稿；已成功的条目立刻推进基线，避免重复写入。 */
 async function writeDrafts(
   canvasId: string,
-  viewId: string | undefined,
+  viewSlot: number,
   toSave: Array<[string, CanvasNodeDraft]>,
   baselineDrafts: Record<string, CanvasNodeDraft>,
   isCurrentTask: () => boolean,
@@ -83,7 +83,7 @@ async function writeDrafts(
       return 'abandoned'
     }
     try {
-      await saveCanvasDraft(canvasId, nodeId, draft, { viewId })
+      await saveCanvasDraft(canvasId, nodeId, draft, { viewSlot })
       baselineDrafts[nodeId] = draft
     } catch (err) {
       onError(err)
@@ -96,7 +96,7 @@ async function writeDrafts(
 /** 逐条删除基线中已消失的草稿。 */
 async function removeDrafts(
   canvasId: string,
-  viewId: string | undefined,
+  viewSlot: number,
   toDelete: string[],
   baselineDrafts: Record<string, CanvasNodeDraft>,
   isCurrentTask: () => boolean,
@@ -107,7 +107,7 @@ async function removeDrafts(
       return 'abandoned'
     }
     try {
-      await deleteCanvasDraft(canvasId, nodeId, { viewId })
+      await deleteCanvasDraft(canvasId, nodeId, { viewSlot })
       delete baselineDrafts[nodeId]
     } catch (err) {
       onError(err)

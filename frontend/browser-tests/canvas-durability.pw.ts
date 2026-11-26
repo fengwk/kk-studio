@@ -21,7 +21,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
     // 1. 设置网络异常模式并构建队列
     await page.evaluate(() => {
       window.__canvasDurability.setMode('network-error')
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
 
     // 2. 入队重命名命令 -> 预期网络失败，但已持久化至 IndexedDB
@@ -36,7 +36,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 3. 断言 IndexedDB 中存在 1 条待确认操作，记录其 idempotencyKey 与 commands
     const persistedBefore = await page.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedBefore).toHaveLength(1)
     const originalKey = persistedBefore[0].idempotencyKey
@@ -55,7 +55,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
     // 5. 刷新后在正常网络模式 (mode: 'ok') 下构建队列并执行 recover()
     await page.evaluate(() => {
       window.__canvasDurability.setMode('ok')
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
 
     const recoverRes = await page.evaluate(() => window.__canvasDurability.recover())
@@ -70,7 +70,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 7. 重放成功并 settle 后，IndexedDB 中该操作已被移除
     const persistedAfter = await page.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedAfter).toHaveLength(0)
   })
@@ -86,7 +86,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     await pageA.evaluate(() => {
       window.__canvasDurability.setMode('network-error')
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
     const sessionA = await pageA.evaluate(() => window.__canvasDurability.sessionId())
 
@@ -97,7 +97,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
     expect(enqueueRes.ok).toBe(false)
 
     const persistedA = await pageA.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedA).toHaveLength(1)
 
@@ -108,7 +108,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 绝不调用 resetData 避免清空 A 的持久化记录
     await pageB.evaluate(() => {
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
     const sessionB = await pageB.evaluate(() => window.__canvasDurability.sessionId())
 
@@ -117,7 +117,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 4. 断言 B 的会话下无法检索到 A 的待确认操作 (无跨会话重放)
     const persistedB = await pageB.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedB).toHaveLength(0)
 
@@ -127,7 +127,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 5. 确认 A 的操作依然完整保留
     const persistedAStill = await pageA.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedAStill).toHaveLength(1)
   })
@@ -143,7 +143,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     await pageA.evaluate(() => {
       window.__canvasDurability.setMode('network-error')
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
     const sessionA = await pageA.evaluate(() => window.__canvasDurability.sessionId())
 
@@ -153,7 +153,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
     )
 
     const persistedA = await pageA.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedA).toHaveLength(1)
 
@@ -168,7 +168,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 3. 标签页 B 构建队列并获取会话 ID
     await pageB.evaluate(() => {
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
     const sessionB = await pageB.evaluate(() => window.__canvasDurability.sessionId())
 
@@ -177,7 +177,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 5. 断言 B 无法恢复 A 的操作
     const persistedB = await pageB.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedB).toHaveLength(0)
 
@@ -189,7 +189,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
     expect(sessionAAfter).toBe(sessionA)
 
     const persistedAAfter = await pageA.evaluate(() =>
-      window.__canvasDurability.listPersistedOperations(),
+      window.__canvasDurability.listPersistedOperations(0),
     )
     expect(persistedAAfter).toHaveLength(1)
   })
@@ -221,7 +221,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 2. 构建队列并入队操作
     await page.evaluate(() => {
-      window.__canvasDurability.buildQueue()
+      window.__canvasDurability.buildQueue({ viewSlot: 0 })
     })
 
     const enqueueRes = await page.evaluate(

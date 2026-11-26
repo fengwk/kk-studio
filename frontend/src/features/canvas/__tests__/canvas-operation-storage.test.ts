@@ -36,10 +36,12 @@ function operation(
   sequence: number,
   idempotencyKey: string,
   name: string,
+  viewSlot: number,
   editingSessionId = 'tab-1',
 ): CanvasPendingOperation {
   return buildPendingOperation({
     canvasId: CANVAS_ID,
+    viewSlot,
     userId: 'user-1',
     editingSessionId,
     idempotencyKey,
@@ -53,18 +55,21 @@ function operation(
 describe('Canvas 待确认操作持久化 (operation store)', () => {
   it('按冻结顺序持久化与加载，并与草稿记录完全分离', async () => {
     const idbFactory = createMockIDBFactory()
-    await saveCanvasOperation(operation(2, KEY_2, 'second'), {
+    await saveCanvasOperation(operation(2, KEY_2, 'second', 0), {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })
-    await saveCanvasOperation(operation(1, KEY_1, 'first'), {
+    await saveCanvasOperation(operation(1, KEY_1, 'first', 0), {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })
 
     const loaded = await loadCanvasOperations(CANVAS_ID, {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -78,11 +83,12 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
 
   it('删除单个待确认操作后恢复结果为空', async () => {
     const idbFactory = createMockIDBFactory()
-    const saved = operation(1, KEY_1, 'first')
-    await saveCanvasOperation(saved, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
-    await deleteCanvasOperation(saved.id, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
+    const saved = operation(1, KEY_1, 'first', 0)
+    await saveCanvasOperation(saved, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
+    await deleteCanvasOperation(saved.id, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
 
     const loaded = await loadCanvasOperations(CANVAS_ID, {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -92,13 +98,15 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
 
   it('不同编辑会话（标签页）严格隔离待确认操作', async () => {
     const idbFactory = createMockIDBFactory()
-    await saveCanvasOperation(operation(1, KEY_1, 'first', 'tab-1'), {
+    await saveCanvasOperation(operation(1, KEY_1, 'first', 0, 'tab-1'), {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })
 
     const otherTab = await loadCanvasOperations(CANVAS_ID, {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-2',
@@ -106,12 +114,24 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     expect(otherTab).toHaveLength(0)
   })
 
+  it('不同 view slot 严格隔离待确认操作', async () => {
+    const idbFactory = createMockIDBFactory()
+    const saved = operation(1, KEY_1, 'first', 0, 'tab-1')
+    await saveCanvasOperation(saved, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
+
+    expect(await loadCanvasOperations(CANVAS_ID, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+      .toEqual([saved])
+    expect(await loadCanvasOperations(CANVAS_ID, { viewSlot: 1, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+      .toEqual([])
+  })
+
   it('事务 abort 时 reject 并上报存储异常，绝不假装落盘成功', async () => {
     const idbFactory = createMockIDBFactory({ shouldAbortTransaction: true })
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
 
-    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), {
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first', 0), {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -127,13 +147,15 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
 
-    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), {
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first', 0), {
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toMatchObject({ name: 'CanvasStorageUnavailableError' })
 
     // 同一会话内只告警一次，避免刷屏。
     await expect(loadCanvasOperations(CANVAS_ID, {
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toMatchObject({ name: 'CanvasStorageUnavailableError' })
@@ -148,13 +170,15 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const unsubscribe = onCanvasStorageError(onError)
 
     const openFailure = createMockIDBFactory({ shouldFailOpen: true })
-    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), {
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first', 0), {
       idbFactory: openFailure,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toThrow()
     await expect(loadCanvasOperations(CANVAS_ID, {
       idbFactory: openFailure,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toThrow()
@@ -163,6 +187,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const readFailure = createMockIDBFactory({ shouldFailGetAll: true })
     await expect(loadCanvasOperations(CANVAS_ID, {
       idbFactory: readFailure,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toThrow()
@@ -170,6 +195,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const deleteFailure = createMockIDBFactory({ shouldFailDelete: true })
     await expect(deleteCanvasOperation('missing-id', {
       idbFactory: deleteFailure,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toThrow()
@@ -177,6 +203,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     // 不可用时没有可落盘内容，删除是幂等空操作。
     Object.defineProperty(window, 'indexedDB', { configurable: true, writable: true, value: undefined })
     await expect(deleteCanvasOperation('missing-id', {
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).resolves.toBeUndefined()
@@ -186,10 +213,10 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
   it('事务 error / abort、事务创建失败与提交失败都 reject 并上报', async () => {
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
-    const scoped = { userId: 'user-1', editingSessionId: 'tab-1' }
+    const scoped = { viewSlot: 0, userId: 'user-1', editingSessionId: 'tab-1' }
 
     const txError = createMockIDBFactory({ shouldFailTransaction: true })
-    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), { ...scoped, idbFactory: txError }))
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first', 0), { ...scoped, idbFactory: txError }))
       .rejects.toThrow()
     await expect(deleteCanvasOperation('op-1', { ...scoped, idbFactory: txError })).rejects.toThrow()
     await loadCanvasOperations(CANVAS_ID, { ...scoped, idbFactory: txError })
@@ -198,13 +225,13 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     await expect(deleteCanvasOperation('op-1', { ...scoped, idbFactory: abortFactory })).rejects.toThrow()
 
     const createFailure = createMockIDBFactory({ shouldFailTransactionCreate: true })
-    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), { ...scoped, idbFactory: createFailure }))
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first', 0), { ...scoped, idbFactory: createFailure }))
       .rejects.toThrow()
     await expect(deleteCanvasOperation('op-1', { ...scoped, idbFactory: createFailure })).rejects.toThrow()
     await expect(loadCanvasOperations(CANVAS_ID, { ...scoped, idbFactory: createFailure })).rejects.toThrow()
 
     const putFailure = createMockIDBFactory({ shouldFailRequest: true })
-    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), { ...scoped, idbFactory: putFailure }))
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first', 0), { ...scoped, idbFactory: putFailure }))
       .rejects.toThrow()
 
     expect(onError).toHaveBeenCalled()
@@ -214,10 +241,11 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
 
   it('sequence 相同时按 createdAt 稳定排序，未显式指定 ack 时为空数组', async () => {
     const idbFactory = createMockIDBFactory()
-    const scoped = { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }
+    const scoped = { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }
 
     const later = buildPendingOperation({
       canvasId: CANVAS_ID,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
       idempotencyKey: KEY_LATER,
@@ -227,6 +255,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     })
     const earlier = buildPendingOperation({
       canvasId: CANVAS_ID,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
       idempotencyKey: KEY_EARLIER,
@@ -245,13 +274,13 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
 
   it('未知字段不影响读取与重放', async () => {
     const idbFactory = createMockIDBFactory()
-    const scoped = { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }
+    const scoped = { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }
     const recordWithUnknownFields = {
-      id: `user-1:${CANVAS_ID}:tab-1:record-key`,
+      id: `user-1:${CANVAS_ID}/0:tab-1:record-key`,
       userId: 'user-1',
       canvasId: CANVAS_ID,
       editingSessionId: 'tab-1',
-      sessionKey: `user-1:${CANVAS_ID}:tab-1`,
+      sessionKey: `user-1:${CANVAS_ID}/0:tab-1`,
       idempotencyKey: 'record-key',
       commands: [renameCommand('node-1')],
       unknownExtraField: 'ignored-value',
@@ -273,11 +302,12 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     // 测试意图：bfcache 重载时存储入口全部拒绝，并保留原会话已存记录。
     resetEditingSessionForTests()
     const idbFactory = createMockIDBFactory()
-    const validOp = operation(1, KEY_PERSISTED_1, 'initial-state', 'tab-1')
+    const validOp = operation(1, KEY_PERSISTED_1, 'initial-state', 0, 'tab-1')
 
     // 1. 在正常状态下预先写入一条合法记录
-    await saveCanvasOperation(validOp, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
+    await saveCanvasOperation(validOp, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
     const initialList = await loadCanvasOperations(CANVAS_ID, {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -287,6 +317,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
 
     // 2. 在正常状态下创建 store 实例
     const store = createCanvasOperationStore(CANVAS_ID, {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -308,7 +339,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     handlePageshow({ persisted: true })
 
     // 4. 测试已建 store 调用 save/remove/list 均拒绝
-    const newOp = operation(2, KEY_PERSISTED_2, 'polluting-state', 'tab-1')
+    const newOp = operation(2, KEY_PERSISTED_2, 'polluting-state', 0, 'tab-1')
 
     await expect(store.save(newOp)).rejects.toThrow(CanvasStorageUnavailableError)
     await expect(store.remove(validOp.id)).rejects.toThrow(CanvasStorageUnavailableError)
@@ -317,6 +348,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     // 5. 测试 sessionReloading 期间新建 store 亦直接拒创
     expect(() =>
       createCanvasOperationStore(CANVAS_ID, {
+        viewSlot: 0,
         idbFactory,
         userId: 'user-1',
         editingSessionId: 'tab-1',
@@ -324,16 +356,17 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     ).toThrow(CanvasStorageUnavailableError)
 
     // 6. 测试独立函数 saveCanvasOperation / deleteCanvasOperation / loadCanvasOperations 亦全部 fail-closed
-    await expect(saveCanvasOperation(newOp, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+    await expect(saveCanvasOperation(newOp, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
       .rejects.toThrow(CanvasStorageUnavailableError)
-    await expect(deleteCanvasOperation(validOp.id, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+    await expect(deleteCanvasOperation(validOp.id, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
       .rejects.toThrow(CanvasStorageUnavailableError)
-    await expect(loadCanvasOperations(CANVAS_ID, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+    await expect(loadCanvasOperations(CANVAS_ID, { viewSlot: 0, idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
       .rejects.toThrow(CanvasStorageUnavailableError)
 
     // 7. 恢复会话后验证旧记录未被污染或误删除
     resetEditingSessionForTests()
     const verifyList = await loadCanvasOperations(CANVAS_ID, {
+      viewSlot: 0,
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',

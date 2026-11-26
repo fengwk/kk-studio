@@ -10,7 +10,7 @@ import { createMockIDBFactory } from '@/test-support/mock-idb'
 describe('Canvas 本地持久化公共基座', () => {
   it('解析 IDBFactory：优先显式传入，其次 window.indexedDB，缺失时为 null', () => {
     const explicit = createMockIDBFactory()
-    expect(resolveIdbFactory({ idbFactory: explicit })).toBe(explicit)
+    expect(resolveIdbFactory({ viewSlot: 0, idbFactory: explicit })).toBe(explicit)
 
     const globalFactory = createMockIDBFactory()
     Object.defineProperty(window, 'indexedDB', { configurable: true, writable: true, value: globalFactory })
@@ -48,7 +48,10 @@ describe('Canvas 本地持久化公共基座', () => {
     unsubscribe()
   })
 
-  it('会话键由登录身份、画布与编辑会话组成', () => {
-    expect(buildSessionKey('user-1', 'canvas-1', 'tab-1')).toBe('user-1:canvas-1:tab-1')
+  it('会话键包含登录身份、画布、view slot 与编辑会话，且不保留旧命名空间', () => {
+    expect(buildSessionKey('user-1', 'canvas-1', 'tab-1', 0)).toBe('user-1:canvas-1/0:tab-1')
+    expect(buildSessionKey('user-1', 'canvas-1', 'tab-1', 1)).toBe('user-1:canvas-1/1:tab-1')
+    expect(buildSessionKey('user-1', 'canvas-1', 'tab-1', 0)).not.toBe('user-1:canvas-1:tab-1')
+    expect(buildSessionKey('user-1', 'canvas-1', 'tab-1', 0)).not.toBe(buildSessionKey('user-1', 'canvas-1', 'tab-1', 1))
   })
 })

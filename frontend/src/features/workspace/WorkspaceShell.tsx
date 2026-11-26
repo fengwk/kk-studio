@@ -13,7 +13,7 @@ import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 import { CanvasCreationDialog } from './CanvasCreationDialog'
 import { isTreeVersionConflict } from './workspace-action-retry'
 import { newDraft } from './pane-bindings'
-import type { PaneRenderers, PaneTarget } from './pane-target'
+import type { PaneRenderers, PaneOpenTarget } from './pane-target'
 import { PaneLayout } from './panes'
 import { workspaceKeys } from './queries'
 import { indexRows, treeRows, type TreeDrop, type TreeRow } from './resource-tree'
@@ -134,7 +134,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
     if (!threadId && !canvasId) { consumed.current = ''; return }
     if (consumed.current === link.search || (threadId && !canvasId && threadLink.isFetching)) return
     consumed.current = link.search
-    const target: PaneTarget | undefined = threadId && !canvasId && threadLink.data && !threadLink.isError
+    const target: PaneOpenTarget | undefined = threadId && !canvasId && threadLink.data && !threadLink.isError
       ? { kind: 'thread', threadId }
       : canvasId && !threadId && index.get(canvasId)?.kind === 'canvas' ? { kind: 'canvas', canvasId } : undefined
     if (target) openPane(target)
@@ -143,7 +143,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   }, [canvasId, index, link, openPane, report, t, threadId, threadLink.data, threadLink.isError, threadLink.isFetching])
 
   function closeDrawer() { restoreDrawerFocus.current = true; setDrawer(false) }
-  function open(target: PaneTarget, anchor?: HTMLElement | null) {
+  function open(target: PaneOpenTarget, anchor?: HTMLElement | null) {
     // The picker or opened pane owns focus; the trigger is only the picker's return target.
     if (drawer) setDrawer(false)
     panes.open(target, drawer ? narrowTrigger.current : anchor)

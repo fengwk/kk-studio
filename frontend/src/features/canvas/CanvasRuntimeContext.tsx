@@ -6,15 +6,15 @@ export const CanvasRuntimeContext = createContext<CanvasController | null>(null)
 
 interface CanvasRuntimeProviderProps extends PropsWithChildren {
   canvasId: string
-  viewId?: string
+  viewSlot: number
 }
 
 export function CanvasRuntimeProvider({
   children,
   canvasId,
-  viewId,
+  viewSlot,
 }: CanvasRuntimeProviderProps) {
-  const controller = useCanvasController(canvasId, viewId)
+  const controller = useCanvasController(canvasId, viewSlot)
   return (
     <CanvasRuntimeContext.Provider value={controller}>
       {children}

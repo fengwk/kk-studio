@@ -8,30 +8,30 @@ export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 0, y: 0, zoom:
 export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 2
 
-function canvasViewportStorageKey(canvasId: string): string {
-  return `kk-studio.canvas.viewport:${canvasId}`
+function canvasViewportStorageKey(viewKey: string): string {
+  return `kk-studio.canvas.viewport:${viewKey}`
 }
 
 export function hasStoredCanvasViewport(
-  canvasId: string,
+  viewKey: string,
   storage: Pick<Storage, 'getItem'> = localStorage,
 ): boolean {
-  return readCanvasViewport(canvasId, storage) !== null
+  return readCanvasViewport(viewKey, storage) !== null
 }
 
 export function loadCanvasViewport(
-  canvasId: string,
+  viewKey: string,
   storage: Pick<Storage, 'getItem'> = localStorage,
 ): StoredCanvasViewport {
-  return readCanvasViewport(canvasId, storage) ?? { ...DEFAULT_CANVAS_VIEWPORT }
+  return readCanvasViewport(viewKey, storage) ?? { ...DEFAULT_CANVAS_VIEWPORT }
 }
 
 function readCanvasViewport(
-  canvasId: string,
+  viewKey: string,
   storage: Pick<Storage, 'getItem'>,
 ): StoredCanvasViewport | null {
   try {
-    const raw = storage.getItem(canvasViewportStorageKey(canvasId))
+    const raw = storage.getItem(canvasViewportStorageKey(viewKey))
     if (!raw) {
       return null
     }
@@ -54,7 +54,7 @@ function readCanvasViewport(
 }
 
 export function saveCanvasViewport(
-  canvasId: string,
+  viewKey: string,
   viewport: StoredCanvasViewport,
   storage: Pick<Storage, 'setItem'> = localStorage,
 ): void {
@@ -66,7 +66,7 @@ export function saveCanvasViewport(
     return
   }
   storage.setItem(
-    canvasViewportStorageKey(canvasId),
+    canvasViewportStorageKey(viewKey),
     JSON.stringify({
       x: viewport.x,
       y: viewport.y,
