@@ -759,7 +759,7 @@ export const resourcesCatalog = {
   'ai.catalog.form.modelCapabilitiesLoading': { 'en-US': 'Loading model options…', 'zh-CN': '正在加载模型选项…' },
   'ai.catalog.form.modelCapabilitiesUnavailable': { 'en-US': 'Could not load prompt cache options', 'zh-CN': '无法加载提示缓存选项' },
   'ai.catalog.form.retryModelCapabilities': { 'en-US': 'Retry loading cache options', 'zh-CN': '重试加载缓存选项' },
-  'ai.catalog.form.promptCacheLongUnavailable': { 'en-US': 'The saved extended retention is no longer supported.', 'zh-CN': '此模型已不支持保存的延长留存档位。' },
+  'ai.catalog.form.promptCacheRetentionUnavailable': { 'en-US': 'The saved retention differs from this model’s canonical default.', 'zh-CN': '已保存的档位与此模型的规范默认档位不同。' },
   'ai.catalog.form.usePromptCacheDefault': { 'en-US': 'Use server default ({{retention}})', 'zh-CN': '使用服务端默认档位（{{retention}}）' },
   'ai.catalog.form.promptCacheRetentionSelect': { 'en-US': 'Select a supported option', 'zh-CN': '选择支持的选项' },
   'ai.catalog.form.promptCacheOptionTtl': { 'en-US': '{{seconds}} seconds', 'zh-CN': '{{seconds}} 秒' },

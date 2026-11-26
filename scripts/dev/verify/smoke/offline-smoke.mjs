@@ -220,7 +220,7 @@ export async function createStubCatalog({ jsonCall }) {
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
       pricing: null,
       defaultVariant: 'default',
-      variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+      variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
     },
   })
   await jsonCall('POST', '/api/platform/agents', {

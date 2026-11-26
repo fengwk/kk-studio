@@ -270,32 +270,6 @@ public class ModelService {
     return provider;
   }
 
-  /** 校验每个 Variant 的提示缓存留存档位是否被所属 Provider 的类型支持。 模型保存与配置导入共用此校验，确保不支持时给出一致的 validation 错误。 */
-  public static void validateVariantRetentions(
-      String providerName, ProviderType providerType, ModelConfigDTO config) {
-    Set<PromptCacheRetention> supported =
-        Objects.requireNonNull(providerType, "providerType").promptCacheRetentions();
-    for (ModelVariantDTO variant : config.getVariants()) {
-      PromptCacheRetention retention = variant.getPromptCacheRetention();
-      if (retention == null) {
-        throw DomainException.validation(
-            RESOURCE, "promptCacheRetention is required for variant: " + variant.getId());
-      }
-      if (!supported.contains(retention)) {
-        throw DomainException.validation(
-            RESOURCE,
-            "provider "
-                + providerName
-                + " ("
-                + providerType.wireValue()
-                + ") does not support prompt cache retention "
-                + retention
-                + " for variant: "
-                + variant.getId());
-      }
-    }
-  }
-
   /** Validates cache intents with the same protocol/endpoint/model decision used by Config Sync. */
   public static void validateVariantCapabilities(
       String providerName,
@@ -303,18 +277,23 @@ public class ModelService {
       String endpoint,
       String modelId,
       ModelConfigDTO config) {
-    validateVariantRetentions(providerName, providerType, config);
     PromptCacheCapabilities capabilities =
         PromptCacheCapabilities.resolve(providerType, endpoint, modelId);
     for (ModelVariantDTO variant : config.getVariants()) {
       PromptCacheRetention retention = variant.getPromptCacheRetention();
-      // Legacy NONE/SHORT values remain saveable when the selector cannot offer them.
-      if (retention == PromptCacheRetention.LONG && !capabilities.supports(retention)) {
+      if (retention == null) {
+        throw DomainException.validation(
+            RESOURCE, "promptCacheRetention is required for variant: " + variant.getId());
+      }
+      if (!capabilities.supports(retention)
+          && !(capabilities.options().isEmpty() && retention == capabilities.defaultRetention())) {
         throw DomainException.validation(
             RESOURCE,
             "provider "
                 + providerName
-                + " does not support prompt cache retention LONG for model "
+                + " does not support prompt cache retention "
+                + retention
+                + " for model "
                 + modelId
                 + " variant: "
                 + variant.getId());

@@ -900,7 +900,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
           reasoning: false,
           inputModalities: ['TEXT'],
         },
-        variants: [{ id: 'default', promptCacheRetention: 'SHORT' }, { id: 'review', promptCacheRetention: 'SHORT' }],
+        variants: [{ id: 'default', promptCacheRetention: 'NONE' }, { id: 'review', promptCacheRetention: 'NONE' }],
       }),
     })
     assert(modelResponse.status === 201, `create usage model: ${JSON.stringify(modelResponse)}`)
@@ -1017,7 +1017,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           reasoning: false,
           inputModalities: ['TEXT'],
         },
-        variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+        variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
       }),
     })
     assert(modelResponse.status === 201, `create task model: ${JSON.stringify(modelResponse)}`)
@@ -1167,7 +1167,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           reasoning: false,
           inputModalities: ['TEXT'],
         },
-        variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+        variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
       }),
     })
     assert(modelResponse.status === 201, `create tool-card model: ${JSON.stringify(modelResponse)}`)

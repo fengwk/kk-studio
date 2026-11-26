@@ -68,7 +68,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
   @Autowired private ConfigSyncService configSyncService;
 
   @Test
-  public void resolvesDraftCacheCapabilitiesAndRejectsUnsupportedLongRetention() {
+  public void validatesCacheRetentionAgainstOptionsAndCanonicalDefault() {
     String suffix = Long.toString(System.nanoTime());
     ProviderCreateDTO providerDTO = new ProviderCreateDTO();
     providerDTO.setName("cache-capability-provider-" + suffix);
@@ -87,29 +87,68 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
         capabilities.getPromptCacheOptions().stream()
             .anyMatch(option -> option.getRetention() == PromptCacheRetention.LONG));
 
-    SingleModelCreateDTO model = model(providerDTO.getName(), "unsupported-cache-model-" + suffix);
-    model.setModelId("gpt-5.6");
-    model.getConfig().getVariants().getFirst().setPromptCacheRetention(PromptCacheRetention.LONG);
-    assertThrows(DomainException.class, () -> agentModelService.createModel(model));
-
-    SingleModelCreateDTO legacyShort =
-        model(providerDTO.getName(), "legacy-short-cache-model-" + suffix);
-    legacyShort
+    SingleModelCreateDTO shortModel =
+        model(providerDTO.getName(), "supported-cache-model-" + suffix);
+    shortModel.setModelId("gpt-5.6");
+    shortModel
         .getConfig()
         .getVariants()
         .getFirst()
         .setPromptCacheRetention(PromptCacheRetention.SHORT);
-    assertInstanceOf(SingleModelDTO.class, agentModelService.createModel(legacyShort));
+    ModelDTO created = agentModelService.createModel(shortModel);
+    assertInstanceOf(SingleModelDTO.class, created);
 
-    SingleModelCreateDTO legacyLong =
-        model(providerDTO.getName(), "legacy-long-cache-model-" + suffix);
-    legacyLong.setModelId("gpt-5.5");
-    legacyLong
+    SingleModelCreateDTO unsupportedLong =
+        model(providerDTO.getName(), "unsupported-cache-model-" + suffix);
+    unsupportedLong.setModelId("gpt-5.6");
+    unsupportedLong
         .getConfig()
         .getVariants()
         .getFirst()
         .setPromptCacheRetention(PromptCacheRetention.LONG);
-    assertInstanceOf(SingleModelDTO.class, agentModelService.createModel(legacyLong));
+    assertThrows(DomainException.class, () -> agentModelService.createModel(unsupportedLong));
+
+    SingleModelUpdateDTO update = modelUpdate(created, created.getName(), null);
+    update.getConfig().getVariants().getFirst().setPromptCacheRetention(PromptCacheRetention.LONG);
+    assertThrows(
+        DomainException.class, () -> agentModelService.updateModel(created.getName(), update));
+
+    SingleModelCreateDTO supportedLegacyLong =
+        model(providerDTO.getName(), "supported-long-cache-model-" + suffix);
+    supportedLegacyLong.setModelId("gpt-5.5");
+    supportedLegacyLong
+        .getConfig()
+        .getVariants()
+        .getFirst()
+        .setPromptCacheRetention(PromptCacheRetention.LONG);
+    assertInstanceOf(SingleModelDTO.class, agentModelService.createModel(supportedLegacyLong));
+
+    ProviderCreateDTO managedProvider = new ProviderCreateDTO();
+    managedProvider.setName("managed-cache-provider-" + suffix);
+    // Compatible Chat permits SHORT at the protocol level but has no configurable options.
+    managedProvider.setProviderType(ProviderType.OPENAI);
+    managedProvider.setBaseUrl("https://chat.example.invalid/v1");
+    agentProviderService.createProvider(managedProvider);
+    ModelCapabilitiesDTO managedCapabilities =
+        agentModelService.capabilities(managedProvider.getName(), "gpt-5.6");
+    assertTrue(managedCapabilities.getPromptCacheOptions().isEmpty());
+    assertEquals(PromptCacheRetention.NONE, managedCapabilities.getDefaultPromptCacheRetention());
+
+    SingleModelCreateDTO canonicalDefault =
+        model(managedProvider.getName(), "canonical-cache-model-" + suffix);
+    assertInstanceOf(SingleModelDTO.class, agentModelService.createModel(canonicalDefault));
+    SingleModelCreateDTO nonDefault =
+        model(managedProvider.getName(), "nondefault-cache-model-" + suffix);
+    nonDefault
+        .getConfig()
+        .getVariants()
+        .getFirst()
+        .setPromptCacheRetention(PromptCacheRetention.SHORT);
+    assertThrows(DomainException.class, () -> agentModelService.createModel(nonDefault));
+    SingleModelCreateDTO missingRetention =
+        model(managedProvider.getName(), "missing-cache-model-" + suffix);
+    missingRetention.getConfig().getVariants().getFirst().setPromptCacheRetention(null);
+    assertThrows(DomainException.class, () -> agentModelService.createModel(missingRetention));
   }
 
   @Test

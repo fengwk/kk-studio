@@ -995,7 +995,7 @@ async function createWorkspaceHoldingQueueFixture(
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [{ id: 'default', promptCacheRetention: 'SHORT' }, { id: 'review', promptCacheRetention: 'SHORT' }],
+          variants: [{ id: 'default', promptCacheRetention: 'NONE' }, { id: 'review', promptCacheRetention: 'NONE' }],
         }),
       },
     )
