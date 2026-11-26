@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -8,7 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import jakarta.servlet.ServletException;
@@ -32,6 +37,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.ssl.DefaultSslBundleRegistry;
 import org.springframework.boot.ssl.SslBundle;
@@ -44,6 +51,7 @@ import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeConfiguration;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.account.StudioAccountService;
 import fun.fengwk.kkstudio.platform.account.StudioBrowserSession;
 import fun.fengwk.kkstudio.platform.account.StudioOriginPolicy;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
@@ -140,6 +148,10 @@ class IdeGatewayJettyIntegrationTest {
   private static IdeDataViewAuthorizer authorizer;
   private static IdeBrowserSessionHandler sessionHandler;
   private static IdeClusterClient clusterClient;
+  private static StudioAccountService accounts;
+  private static IdeStudioSessionMonitor ownerSessions;
+  private static IdeStudioSessionMonitor ingressSessions;
+  private static final AtomicReference<String> internalCookie = new AtomicReference<>();
 
   private static SslBundles sslBundles;
   private static int tlsOwnerPort;
@@ -151,6 +163,11 @@ class IdeGatewayJettyIntegrationTest {
 
   @BeforeAll
   static void startServers() throws Exception {
+    accounts = mock(StudioAccountService.class);
+    // Legacy tunnel fixtures inject a principal without a Studio cookie.
+    when(accounts.authenticate(null)).thenReturn(Optional.of(PRINCIPAL));
+    ownerSessions = new IdeStudioSessionMonitor(accounts);
+    ingressSessions = new IdeStudioSessionMonitor(accounts);
     httpClient = HttpClient.newHttpClient();
     wsClient = new WebSocketCoreClient();
     wsClient.start();
@@ -188,6 +205,7 @@ class IdeGatewayJettyIntegrationTest {
     // 2. Start Node 2 (Owner)
     node2Server = new Server();
     ServerConnector node2Connector = new ServerConnector(node2Server);
+    node2Connector.setHost("127.0.0.1");
     node2Connector.setPort(0);
     node2Server.addConnector(node2Connector);
 
@@ -201,7 +219,12 @@ class IdeGatewayJettyIntegrationTest {
         new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
     IdeGatewayDataPlane node2DataPlane =
         new IdeGatewayDataPlane(
-            node2ClusterRegistry, ownerTunnels, authorizer, sessionHandler, node2Forwarder);
+            node2ClusterRegistry,
+            ownerTunnels,
+            authorizer,
+            sessionHandler,
+            node2Forwarder,
+            ownerSessions);
 
     ServletContextHandler node2Context = new ServletContextHandler();
     node2Context.setContextPath("/");
@@ -215,6 +238,7 @@ class IdeGatewayJettyIntegrationTest {
     // 3. Start Node 1 (Remote Forwarder)
     node1Server = new Server();
     ServerConnector node1Connector = new ServerConnector(node1Server);
+    node1Connector.setHost("127.0.0.1");
     node1Connector.setPort(0);
     node1Server.addConnector(node1Connector);
 
@@ -232,7 +256,12 @@ class IdeGatewayJettyIntegrationTest {
         new SessionIdeDataViewAuthorizer(new IdeBrowserSessionRegistry(), snapshots, transport);
     IdeGatewayDataPlane node1DataPlane =
         new IdeGatewayDataPlane(
-            node1ClusterRegistry, ownerTunnels, nonOwnerAuthorizer, sessionHandler, node1Forwarder);
+            node1ClusterRegistry,
+            ownerTunnels,
+            nonOwnerAuthorizer,
+            sessionHandler,
+            node1Forwarder,
+            ingressSessions);
 
     ServletContextHandler node1Context = new ServletContextHandler();
     node1Context.setContextPath("/");
@@ -388,6 +417,93 @@ class IdeGatewayJettyIntegrationTest {
     assertEquals("echo-test", echo.getPayloadAsUTF8());
 
     session.close(1000, "normal", Callback.NOOP);
+  }
+
+  /** Both public ingress paths close the same browser tunnel on the next auth check. */
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void studioLogoutClosesUpgradedBrowserTunnel(boolean remote) throws Exception {
+    String token = UUID.randomUUID().toString();
+    AtomicBoolean signedIn = new AtomicBoolean(true);
+    when(accounts.authenticate(token))
+        .thenAnswer(invocation -> signedIn.get() ? Optional.of(PRINCIPAL) : Optional.empty());
+    internalCookie.set(null);
+    CompletableFuture<SimpleTunnelExchange> accepted = new CompletableFuture<>();
+    ownerTunnels.setTunnel(
+        new SimpleEnvironmentTunnel(
+            IDENTITY,
+            req -> {
+              throw new UnsupportedOperationException();
+            },
+            req -> {
+              SimpleTunnelExchange exchange = new SimpleTunnelExchange(req);
+              accepted.complete(exchange);
+              exchange.respond(
+                  new TunnelExchange.Response(
+                      200, Map.of("Sec-WebSocket-Accept", List.of(computeAcceptHeader(req)))));
+              return exchange;
+            }));
+
+    int port = remote ? node1Port : node2Port;
+    TestFrameHandler handler = new TestFrameHandler();
+    CoreClientUpgradeRequest request =
+        CoreClientUpgradeRequest.from(
+            wsClient,
+            URI.create("ws://127.0.0.1:" + port + "/ide/" + ENV + "/" + VIEW + "/ws-terminal"),
+            handler);
+    request.headers(
+        h -> {
+          h.add("Origin", "http://127.0.0.1:" + port);
+          h.add(
+              "Cookie",
+              IdeGatewayConstants.SESSION_COOKIE_NAME
+                  + "="
+                  + sessionCookie
+                  + "; "
+                  + StudioBrowserSession.COOKIE
+                  + "="
+                  + token);
+        });
+    CoreSession session = request.sendAsync().get(5, TimeUnit.SECONDS);
+    SimpleTunnelExchange exchange = accepted.get(5, TimeUnit.SECONDS);
+    try {
+      session.sendFrame(new Frame(OpCode.TEXT, "ready"), Callback.NOOP, false);
+      assertNotNull(exchange.peer().read().toCompletableFuture().get(5, TimeUnit.SECONDS));
+      if (remote) {
+        assertEquals(
+            IdeGatewayConstants.SESSION_COOKIE_NAME + "=" + sessionCookie, internalCookie.get());
+        ownerSessions.tick();
+        verify(accounts)
+            .authenticate(token); // Only the public handshake, not the internal upgrade.
+      }
+      IdeStudioSessionMonitor monitor = remote ? ingressSessions : ownerSessions;
+      monitor.tick();
+      verify(accounts, times(2)).authenticate(token);
+      exchange
+          .peer()
+          .write(serverTextFrame("still signed in"))
+          .toCompletableFuture()
+          .get(5, TimeUnit.SECONDS);
+      Frame reply = handler.nextFrame(5, TimeUnit.SECONDS);
+      assertNotNull(reply);
+      assertEquals("still signed in", reply.getPayloadAsUTF8());
+
+      signedIn.set(false);
+      monitor.tick();
+      handler.closedFuture.get(5, TimeUnit.SECONDS);
+      assertNull(exchange.peer().read().toCompletableFuture().get(5, TimeUnit.SECONDS));
+      await()
+          .atMost(5, TimeUnit.SECONDS)
+          .untilAsserted(
+              () -> {
+                clearInvocations(accounts);
+                monitor.tick();
+                verify(accounts, never()).authenticate(token);
+              });
+    } finally {
+      exchange.close();
+      session.abort();
+    }
   }
 
   @Test
@@ -1094,7 +1210,17 @@ class IdeGatewayJettyIntegrationTest {
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp)
         throws ServletException, IOException {
-      req.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL);
+      String token = StudioBrowserSession.token(req);
+      if (token != null) {
+        var principal = accounts.authenticate(token);
+        if (principal.isEmpty()) {
+          resp.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+          return;
+        }
+        req.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, principal.get());
+      } else {
+        req.setAttribute(StudioBrowserSession.PRINCIPAL_ATTRIBUTE, PRINCIPAL);
+      }
       String uri = req.getRequestURI();
       String prefix = "/ide/";
       if (!uri.startsWith(prefix)) {
@@ -1151,6 +1277,7 @@ class IdeGatewayJettyIntegrationTest {
         return;
       }
       UUID viewId = UUID.fromString(viewIdStr);
+      internalCookie.set(req.getHeader("Cookie"));
       HttpServletRequest forwarded = IdeForwardedRequest.of(req, rawPathAndQuery);
       forwarded.setAttribute(
           IdeGatewayConstants.INTERNAL_USER_ID_ATTRIBUTE, UUID.fromString(userId));

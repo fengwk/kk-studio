@@ -43,19 +43,22 @@ public class IdeGatewayDataPlane {
   private final IdeDataViewAuthorizer viewAuthorizer;
   private final IdeBrowserSessionHandler browserSessionHandler;
   private final IdeRemoteDataPlaneForwarder remoteForwarder;
+  private final IdeStudioSessionMonitor sessionMonitor;
 
   public IdeGatewayDataPlane(
       ClusterNodeRegistry clusterNodeRegistry,
       EnvironmentTunnels environmentTunnels,
       IdeDataViewAuthorizer viewAuthorizer,
       IdeBrowserSessionHandler browserSessionHandler,
-      IdeRemoteDataPlaneForwarder remoteForwarder) {
+      IdeRemoteDataPlaneForwarder remoteForwarder,
+      IdeStudioSessionMonitor sessionMonitor) {
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.environmentTunnels = Objects.requireNonNull(environmentTunnels, "environmentTunnels");
     this.viewAuthorizer = Objects.requireNonNull(viewAuthorizer, "viewAuthorizer");
     this.browserSessionHandler =
         Objects.requireNonNull(browserSessionHandler, "browserSessionHandler");
     this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
+    this.sessionMonitor = Objects.requireNonNull(sessionMonitor, "sessionMonitor");
   }
 
   /**
@@ -107,8 +110,13 @@ public class IdeGatewayDataPlane {
       return;
     }
 
+    if (isWs) {
+      request.setAttribute(
+          IdeStudioSessionMonitor.LISTENER_ATTRIBUTE,
+          sessionMonitor.listener(StudioBrowserSession.token(request), principal.userId()));
+    }
     if (!route.get().local()) {
-      if (StudioOriginPolicy.isWebSocketUpgrade(request)) {
+      if (isWs) {
         remoteForwarder.forwardWebSocket(
             request, response, route.get(), environmentId, viewId, rawPathAndQuery);
       } else {
