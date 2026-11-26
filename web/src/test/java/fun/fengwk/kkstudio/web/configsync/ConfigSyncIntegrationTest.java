@@ -301,6 +301,88 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     checkRejected(badPermission);
   }
 
+  /** Provider-only 改址不能使现存模型的 LONG 档位失效；联合改址并把模型改为 SHORT 则应被接受。 */
+  @Test
+  void providerOnlyEndpointChangeIsRejectedButJointModelChangeIsAccepted() throws Exception {
+    String suffix = unique();
+    String provider = "pc_provider_" + suffix;
+    String model = "pc_model_" + suffix;
+    String originalEndpoint = "https://api.openai.com/v1";
+    String proxyEndpoint = "https://proxy.example/v1";
+
+    importYaml(providerModelYaml(provider, model, originalEndpoint, PromptCacheRetention.LONG));
+    assertEquals(originalEndpoint, findProvider(provider).path("baseUrl").asText());
+    assertEquals(PromptCacheRetention.LONG.name(), storedModelRetention(provider, model));
+
+    String providerOnlyChange = providerEndpointYaml(provider, proxyEndpoint);
+    checkRejected(providerOnlyChange);
+    assertEquals(
+        originalEndpoint,
+        findProvider(provider).path("baseUrl").asText(),
+        "a rejected check must not persist the endpoint change");
+    assertEquals(PromptCacheRetention.LONG.name(), storedModelRetention(provider, model));
+
+    // 执行入口也必须重新检查最终 Provider/Model 状态，不能只依赖先前 check。
+    importRejected(providerOnlyChange, true);
+    assertEquals(
+        originalEndpoint,
+        findProvider(provider).path("baseUrl").asText(),
+        "a rejected import must leave the provider unchanged");
+    assertEquals(PromptCacheRetention.LONG.name(), storedModelRetention(provider, model));
+
+    String jointChange =
+        providerModelYaml(provider, model, proxyEndpoint, PromptCacheRetention.SHORT);
+    checkData(jointChange);
+    assertEquals(
+        originalEndpoint,
+        findProvider(provider).path("baseUrl").asText(),
+        "check must remain read-only even for an accepted joint change");
+
+    String skippedModelChange =
+        yamlDocument(
+            Map.of(
+                "providers", List.of(providerEndpointEntry(provider, proxyEndpoint)),
+                "models",
+                    List.of(
+                        cacheModelEntry("missing_" + suffix, model, PromptCacheRetention.SHORT))));
+    checkRejected(skippedModelChange);
+    importRejected(skippedModelChange, true);
+
+    importYaml(jointChange);
+    assertEquals(proxyEndpoint, findProvider(provider).path("baseUrl").asText());
+    assertEquals(PromptCacheRetention.SHORT.name(), storedModelRetention(provider, model));
+  }
+
+  /** 写事务重新校验计划后才保存的模型，并回滚先前写入。 */
+  @Test
+  void applyRechecksModelsAddedAfterPlanningAndRollsBack() throws Exception {
+    String suffix = unique();
+    String provider = "pc_stale_" + suffix;
+    String model = "pc_late_" + suffix;
+    String earlier = "pc_earlier_" + suffix;
+    String original = "https://api.openai.com/v1";
+    String proxy = "https://proxy.example/v1";
+    importYaml(providerEndpointYaml(provider, original));
+    ConfigSyncPlan plan =
+        planner.plan(
+            parser.parse(
+                yamlDocument(
+                    Map.of(
+                        "providers",
+                        List.of(
+                            providerEndpointEntry(earlier, original),
+                            providerEndpointEntry(provider, proxy))))));
+    importYaml(providerModelYaml(provider, model, original, PromptCacheRetention.LONG));
+
+    DomainException rejected =
+        assertThrows(DomainException.class, () -> applier.apply(plan, List.of(), Set.of()));
+    assertTrue(rejected.getMessage().contains("LONG"));
+    assertFalse(rejected.getMessage().contains(proxy));
+    assertNull(findProvider(earlier));
+    assertEquals(original, findProvider(provider).path("baseUrl").asText());
+    assertEquals(PromptCacheRetention.LONG.name(), storedModelRetention(provider, model));
+  }
+
   /** 预检查拒绝 Environment token 冲突且零写入。 */
   @Test
   void checkEndpointRejectsEnvironmentTokenConflict() throws Exception {
@@ -1395,6 +1477,45 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private static String yamlDocument(Map<String, Object> document) {
     return new ConfigSyncYaml().dump(document);
+  }
+
+  private String storedModelRetention(String providerName, String modelName) throws Exception {
+    JsonNode model = findModel(providerName, modelName);
+    assertNotNull(model, "model must remain persisted: " + modelName);
+    return model.path("config").path("variants").get(0).path("promptCacheRetention").asText();
+  }
+
+  private static String providerEndpointYaml(String provider, String endpoint) {
+    return yamlDocument(Map.of("providers", List.of(providerEndpointEntry(provider, endpoint))));
+  }
+
+  private static Map<String, Object> providerEndpointEntry(String provider, String endpoint) {
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("name", provider);
+    entry.put("providerType", "openai_responses");
+    entry.put("baseUrl", endpoint);
+    return entry;
+  }
+
+  private static String providerModelYaml(
+      String provider, String model, String endpoint, PromptCacheRetention retention) {
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("providers", List.of(providerEndpointEntry(provider, endpoint)));
+    document.put("models", List.of(cacheModelEntry(provider, model, retention)));
+    return yamlDocument(document);
+  }
+
+  private static Map<String, Object> cacheModelEntry(
+      String provider, String model, PromptCacheRetention retention) {
+    ModelConfigDTO config = modelConfig("{}", "1.25");
+    config.getVariants().getFirst().setPromptCacheRetention(retention);
+    Map<String, Object> modelEntry = new LinkedHashMap<>();
+    modelEntry.put("kind", "MODEL");
+    modelEntry.put("providerName", provider);
+    modelEntry.put("name", model);
+    modelEntry.put("modelId", "gpt-5.5");
+    modelEntry.put("config", configYaml(config));
+    return modelEntry;
   }
 
   /** 单一 "default" variant 的模型 config 之外，按需构造只声明文件内 variant 的 config。 */

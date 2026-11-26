@@ -40,6 +40,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 在一个数据库事务内落地 {@link ConfigSyncPlan}。
@@ -109,8 +110,11 @@ public class ConfigSyncApplier {
       List<PreparedGitImport> preparedSkills,
       Set<String> confirmedPluginCredentialResets) {
     lockImport();
-    applyProviders(plan.providers());
-    applyModels(plan.models());
+    Map<String, Model> lockedModels = lockExistingSingleModels(plan.models());
+    Set<String> plannedModels =
+        plan.models().stream().map(ConfigSyncParser.ModelSpec::name).collect(Collectors.toSet());
+    applyProviders(plan.providers(), plannedModels);
+    applyModels(plan.models(), lockedModels);
     for (PreparedGitImport skill : preparedSkills) {
       skillCatalogService.publishPreparedGitImport(skill);
     }
@@ -141,16 +145,32 @@ public class ConfigSyncApplier {
         .single();
   }
 
-  private void applyProviders(List<ConfigSyncParser.ProviderSpec> providers) {
+  /** 先锁实际计划写入的单模型，再锁 Provider，与 ModelService 的锁序一致。 */
+  private Map<String, Model> lockExistingSingleModels(List<ConfigSyncParser.ModelSpec> models) {
+    Map<String, Model> existing = new HashMap<>();
+    models.stream()
+        .filter(spec -> spec.properties() instanceof SingleModelCreateDTO)
+        .map(ConfigSyncParser.ModelSpec::name)
+        .sorted()
+        .forEach(name -> existing.put(name, modelRepository.getByNameForUpdate(name)));
+    return existing;
+  }
+
+  private void applyProviders(
+      List<ConfigSyncParser.ProviderSpec> providers, Set<String> plannedModels) {
     for (ConfigSyncParser.ProviderSpec spec : providers) {
       // 导入是恢复文件业务事实：凭据为 null 表示清空而非沿用旧值；同名不同类型在写入时拒绝。
-      providerService.importProvider(spec.properties());
+      providerService.importProvider(spec.properties(), plannedModels);
     }
   }
 
-  private void applyModels(List<ConfigSyncParser.ModelSpec> models) {
+  private void applyModels(
+      List<ConfigSyncParser.ModelSpec> models, Map<String, Model> lockedModels) {
     for (ConfigSyncParser.ModelSpec spec : models) {
-      Model existing = modelRepository.getByName(spec.name());
+      Model existing =
+          lockedModels.containsKey(spec.name())
+              ? lockedModels.get(spec.name())
+              : modelRepository.getByName(spec.name());
       if (existing == null) {
         modelService.createModel(spec.properties());
       } else {

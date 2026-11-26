@@ -108,7 +108,9 @@ final class ConfigSyncFixtures {
           mock(ProviderRepository.class),
           PROVIDER_CONFIG_CODEC,
           EDITABLE_SUPPORT,
-          mock(ProviderModelDiscovery.class));
+          mock(ProviderModelDiscovery.class),
+          mock(ModelRepository.class),
+          MODEL_CONFIG_PARSER);
 
   /** 真实 {@code ModelService.validateImport}：纯静态校验，仓储以 mock 占位。 */
   static final ModelService MODEL_SERVICE =

@@ -11,14 +11,19 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelTestData;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.Arrays;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -31,6 +36,8 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private ProviderService providerService;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private ProviderRepository providerRepository;
+  @Autowired private ModelService modelService;
 
   @Test
   public void shouldEnforceGlobalNameAndRedactCredential() {
@@ -69,6 +76,46 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     assertEquals(name, recreated.getName());
     providerService.deleteProvider(name, recreated.getVersion());
     assertThrows(DomainException.class, () -> providerService.deleteProvider(name, 0L));
+  }
+
+  /** 普通 PUT 和导入写入都不能让一个仍保留的模型配置失效。 */
+  @Test
+  void rejectsEndpointChangeThatInvalidatesStoredModel() {
+    String name = "provider-cache-" + System.nanoTime();
+    String original = "https://api.openai.com/v1";
+    String proxy = "https://proxy.example/v1";
+    ProviderCreateDTO spec = provider(name, "original-test-value");
+    spec.setProviderType(ProviderType.OPENAI_RESPONSES);
+    spec.setBaseUrl(original);
+    ProviderDTO created = providerService.createProvider(spec);
+    SingleModelCreateDTO model = new SingleModelCreateDTO();
+    model.setName(name + "-model");
+    model.setProviderName(name);
+    model.setModelId("gpt-5.5");
+    ModelTestData.executable(model);
+    model.getConfig().getVariants().getFirst().setPromptCacheRetention(PromptCacheRetention.LONG);
+    var storedModel = modelService.createModel(model);
+
+    ProviderUpdateDTO change = update(SecretUpdate.clear(), created.getVersion());
+    change.setBaseUrl(proxy);
+    DomainException error =
+        assertThrows(DomainException.class, () -> providerService.updateProvider(name, change));
+    assertTrue(error.getMessage().contains("LONG"));
+    assertFalse(error.getMessage().contains(proxy));
+    spec.setBaseUrl(proxy);
+    spec.setCredential(null);
+    assertThrows(DomainException.class, () -> providerService.importProvider(spec, Set.of()));
+    Provider unchanged = providerRepository.getByName(name);
+    assertEquals(original, unchanged.baseUrl());
+    assertEquals(created.getVersion(), unchanged.version());
+    assertTrue("original-test-value".equals(unchanged.credential()));
+
+    change.setBaseUrl(" " + original + " ");
+    change.setCredential(SecretUpdate.keep());
+    ProviderDTO updated = providerService.updateProvider(name, change);
+    assertEquals(original, updated.getBaseUrl());
+    modelService.deleteModel(model.getName(), storedModel.getVersion());
+    providerService.deleteProvider(name, updated.getVersion());
   }
 
   /** 更新用 SecretUpdate 三态：KEEP 保留、CLEAR 清除、SET 覆盖。 */

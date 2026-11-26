@@ -175,6 +175,15 @@ class ConfigSyncApplierTest {
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 
+  private static ConfigSyncParser.ModelSpec modelSpec(String name) {
+    SingleModelCreateDTO properties = new SingleModelCreateDTO();
+    properties.setProviderName("provider");
+    properties.setName(name);
+    properties.setModelId("gpt");
+    properties.setConfig(ConfigSyncFixtures.modelConfig());
+    return new ConfigSyncParser.ModelSpec(name, ModelKind.MODEL, properties);
+  }
+
   @Test
   void agentTwoStageWriteResolvesCyclicSubagents() {
     Agent existingA = Agent.builder().name("a").version(0L).build();
@@ -225,14 +234,23 @@ class ConfigSyncApplierTest {
   }
 
   @Test
-  void providersAreImportedViaExplicitUpsertCommand() {
-    ConfigSyncParser.ProviderSpec created = providerSpec("new");
-    ConfigSyncParser.ProviderSpec existing = providerSpec("old");
+  void existingPlannedModelsAreLockedBeforeProvidersAndTheirNamesArePassed() {
+    ConfigSyncParser.ProviderSpec provider = providerSpec("provider");
+    ConfigSyncParser.ModelSpec zeta = modelSpec("zeta");
+    ConfigSyncParser.ModelSpec alpha = modelSpec("alpha");
+    when(modelRepository.getByNameForUpdate("alpha"))
+        .thenReturn(
+            Model.builder()
+                .kind(ModelKind.MODEL)
+                .providerName("provider")
+                .name("alpha")
+                .version(1L)
+                .build());
 
     applier.apply(
         plan(
-            List.of(created, existing),
-            List.of(),
+            List.of(provider),
+            List.of(zeta, alpha),
             List.of(),
             List.of(),
             List.of(),
@@ -241,16 +259,14 @@ class ConfigSyncApplierTest {
         List.of(),
         Set.of());
 
-    // 导入使用显式 upsert 命令恢复文件事实，不区分 create/update，不读取 repository 判断存在性。
-    // 固定导入锁必须先于任何资源 upsert：否则互逆数组顺序仍会先拿到互逆行锁。
-    InOrder order = Mockito.inOrder(jdbcClient, providerService);
+    // 模型行锁必须先于 Provider 行锁，并仅把计划写入的单模型名传给 Provider 导入。
+    InOrder order = Mockito.inOrder(jdbcClient, modelRepository, providerService);
     order.verify(jdbcClient).sql(contains("pg_advisory_xact_lock"));
-    order.verify(providerService).importProvider(created.properties());
-    order.verify(providerService).importProvider(existing.properties());
+    order.verify(modelRepository).getByNameForUpdate("alpha");
+    order.verify(modelRepository).getByNameForUpdate("zeta");
+    order.verify(providerService).importProvider(provider.properties(), Set.of("alpha", "zeta"));
     verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
     verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
-    verify(providerService).importProvider(created.properties());
-    verify(providerService).importProvider(existing.properties());
     verify(providerService, never()).createProvider(any());
     verify(providerService, never()).updateProvider(any(), any());
   }
@@ -311,7 +327,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void modelImportCreatesNewModel() {
-    when(modelRepository.getByName("m")).thenReturn(null);
+    when(modelRepository.getByNameForUpdate("m")).thenReturn(null);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
     properties.setName("m");
@@ -612,7 +628,7 @@ class ConfigSyncApplierTest {
   void existingModelIsUpdatedWithExistingVersionCas() {
     Model existing =
         Model.builder().kind(ModelKind.MODEL).providerName("p").name("m").version(4L).build();
-    when(modelRepository.getByName("m")).thenReturn(existing);
+    when(modelRepository.getByNameForUpdate("m")).thenReturn(existing);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
     properties.setName("m");

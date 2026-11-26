@@ -172,7 +172,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
     // provider 服务是唯一真实库写入的替身：只在同一事务内真插一行 provider，用于证明它随插件失败一起回滚。
     providerService = mock(ProviderService.class);
-    when(providerService.importProvider(any()))
+    when(providerService.importProvider(any(), any()))
         .thenAnswer(
             invocation -> {
               jdbcClient
