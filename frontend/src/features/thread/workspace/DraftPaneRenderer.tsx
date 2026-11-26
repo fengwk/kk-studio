@@ -10,10 +10,11 @@ import { ThreadPanel, ThreadStatusFooter } from '@/features/thread/runtime/threa
 import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-commands'
 import type { PaneRendererProps } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
-import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
+import { ApiError, apiErrorDetail, isConflictReason, request } from '@/shared/api/client'
 import type { HarnessModelSelectionDTO, SessionCreateDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
 import { clearSessionSend, loadSessionSend, saveSessionSend, type SessionSendRecord } from './session-send-record'
 import { useComposerModels } from './useComposerModels'
@@ -38,14 +39,14 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   const scope = `workspace-draft:${target.draftId}`
   const [stored, setStored] = useState(() => {
     try {
-      return { record: loadSessionSend(storageKey, target.draftId), unreadable: false }
+      return { record: loadSessionSend(storageKey), unreadable: false }
     } catch {
       return { record: null, unreadable: true }
     }
   })
   const [storageError, setStorageError] = useState<string | null>(null)
   const sending = useRef(false)
-  const retryRecord = stored.record && !stored.record.value.rejected ? stored.record : null
+  const retryRecord = !stored.unreadable && stored.record && !stored.record.value.rejected ? stored.record : null
   const [parts, changeParts] = usePaneDraft(scope, onUnsentChange, retryRecord != null)
   const [model, setModel] = useState<HarnessModelSelectionDTO>()
   const [environmentName, setEnvironmentName] = useState<string | null>(null)
@@ -85,12 +86,16 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     retry: false,
     networkMode: 'always',
     onError: (error, record) => {
-      // 只有应用明确拒绝这份请求才解锁；鉴权失败或幂等冲突不能否定此前已受理。
-      if (!(error instanceof ApiError) || error.status !== 400 || error.code !== 'validation') return
+      // 键冲突明确拒绝了当前请求体；鉴权失败和其他未知结果仍须原样重放。
+      const conflicted = isConflictReason(error, 'IDEMPOTENCY_KEY_REUSED')
+      if (!conflicted && (!(error instanceof ApiError) || error.status !== 400 || error.code !== 'validation')) return
       try {
-        const rejected = saveSessionSend(storageKey, target.draftId, record, { ...record.value, rejected: true })
+        const { key, body } = record.value
+        const rejected = saveSessionSend(storageKey, record,
+          conflicted ? { key, body, rejected: true, conflicted: true } : { key, body, rejected: true })
         setStored({ record: rejected, unreadable: false })
       } catch {
+        if (conflicted) setStored({ record, unreadable: true })
         setStorageError(t('ai.runtime.action.storageClearFailed'))
       }
     },
@@ -107,17 +112,18 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
 
   const locked = send.isPending || retryRecord != null
   function submit(body?: SessionCreateDTO) {
-    if (sending.current || send.isPending) return
+    if (sending.current || send.isPending || stored.unreadable) return
     let record: SessionSendRecord
     try {
       if (retryRecord) {
-        if (loadSessionSend(storageKey, target.draftId)?.raw !== retryRecord.raw) {
+        if (loadSessionSend(storageKey)?.raw !== retryRecord.raw) {
           throw new Error('Session send record changed')
         }
         record = retryRecord
       } else {
         if (!body) return
-        record = saveSessionSend(storageKey, target.draftId, stored.record, { key: target.draftId, body, rejected: false })
+        const key = stored.record?.value.conflicted ? createUuid() : stored.record?.value.key ?? target.draftId
+        record = saveSessionSend(storageKey, stored.record, { key, body, rejected: false })
         setStored({ record, unreadable: false })
       }
     } catch {
@@ -154,8 +160,9 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
         ? <Button variant="secondary" onClick={openSpaceSettings}>{t('ai.runtime.draft.spaceSettings')}</Button>
         : user?.role === 'ADMIN' && <Link className="btn-secondary" to="/settings/agents">{t('ai.runtime.draft.agentSettings')}</Link>}
     </div>
-  const actionError = (stored.unreadable ? t('ai.runtime.action.storageFailed') : storageError) ?? (
-    retryRecord ? null : send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
+  const conflicted = stored.record?.value.conflicted || isConflictReason(send.error, 'IDEMPOTENCY_KEY_REUSED')
+  const actionError = storageError ?? (stored.unreadable ? t('ai.runtime.action.storageFailed') : null) ?? (
+    retryRecord || conflicted ? null : send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
       ? t('ai.runtime.draft.invalidFolder')
       : send.error ? apiErrorDetail(send.error) ?? send.error.message : null
   )
@@ -163,7 +170,10 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   return <ThreadPanel
     transcript={{ messages: [], queuedMessages: [], loading: false, error: null, bodyRef }}
     activity={{ working: false, actionError, onDismissActionError: () => { setStorageError(null); if (!sending.current) send.reset() } }}
-    controls={<RootThreadControlArea rootThreadId={null} messages={[]} queuedMessages={[]} notice={notice}
+    controls={<RootThreadControlArea rootThreadId={null} messages={[]} queuedMessages={[]} notice={<>
+      {conflicted && <div className="thread-draft-notice" role="alert">{t('ai.runtime.draft.sendConflict')}</div>}
+      {notice}
+    </>}
       composer={{
         parts,
         pending: send.isPending,

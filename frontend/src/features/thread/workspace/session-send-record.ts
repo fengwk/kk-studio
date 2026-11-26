@@ -1,8 +1,11 @@
 import { isImageTier } from '@/features/thread/runtime/state/thread-message-validation'
 import type { SessionCreateDTO } from '@/shared/api/generated/contracts'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { hasExactKeys, isRecord, nonBlank } from '@/shared/lib/value'
 
-type SessionSend = { key: string; body: SessionCreateDTO; rejected: boolean }
+type SessionSend = { key: string; body: SessionCreateDTO } & (
+  { rejected: boolean; conflicted?: never } | { rejected: true; conflicted: true }
+)
 export type SessionSendRecord = { value: SessionSend; raw: string }
 
 function isMessagePart(value: unknown): boolean {
@@ -18,9 +21,15 @@ function isMessagePart(value: unknown): boolean {
     && nonBlank(value.blobId) && nonBlank(value.name) && (value.preview == null || typeof value.preview === 'string')
 }
 
-function isSessionSend(value: unknown, draftId: string): value is SessionSend {
-  if (!isRecord(value) || !hasExactKeys(value, ['key', 'body', 'rejected'])
-    || value.key !== draftId || typeof value.rejected !== 'boolean' || !isRecord(value.body)) return false
+function isSessionSend(value: unknown): value is SessionSend {
+  if (!isRecord(value) || !isCanonicalUuid(value.key)
+    || typeof value.rejected !== 'boolean' || !isRecord(value.body)) return false
+  const keys = ['key', 'body', 'rejected']
+  if (Object.hasOwn(value, 'conflicted')) {
+    if (value.conflicted !== true || !value.rejected) return false
+    keys.push('conflicted')
+  }
+  if (!hasExactKeys(value, keys)) return false
   const { body } = value
   const { message, folderId, environmentId, modelSelection, yoloEnabled } = body
   return Object.keys(body).every((key) => ['message', 'folderId', 'environmentId', 'modelSelection', 'yoloEnabled'].includes(key))
@@ -32,18 +41,18 @@ function isSessionSend(value: unknown, draftId: string): value is SessionSend {
       && (modelSelection.variant == null || typeof modelSelection.variant === 'string')))
 }
 
-export function loadSessionSend(storageKey: string, draftId: string): SessionSendRecord | null {
+export function loadSessionSend(storageKey: string): SessionSendRecord | null {
   const raw = sessionStorage.getItem(storageKey)
   if (raw == null) return null
   const value: unknown = JSON.parse(raw)
-  if (!isSessionSend(value, draftId)) throw new Error('Invalid session send record')
+  if (!isSessionSend(value)) throw new Error('Invalid session send record')
   return { value, raw }
 }
 
 export function saveSessionSend(
-  storageKey: string, draftId: string, previous: SessionSendRecord | null, value: SessionSend,
+  storageKey: string, previous: SessionSendRecord | null, value: SessionSend,
 ): SessionSendRecord {
-  if (!isSessionSend(value, draftId) || sessionStorage.getItem(storageKey) !== (previous?.raw ?? null)) {
+  if (!isSessionSend(value) || sessionStorage.getItem(storageKey) !== (previous?.raw ?? null)) {
     throw new Error('Cannot replace session send record')
   }
   const raw = JSON.stringify(value)
