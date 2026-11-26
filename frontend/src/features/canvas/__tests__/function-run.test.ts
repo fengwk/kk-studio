@@ -325,35 +325,34 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
       .toBe(attemptAfter408?.request.requestId)
   })
 
-  it('未知错误/网络中断重试：重试必须采用原冻结 requestId 与 requestDTO，绝不生成新 key', async () => {
+  it('响应丢失后重试遇到 401，登录后仍提交同一冻结请求', async () => {
     cleanupTestStorage()
-    const calls: CanvasFunctionRunRequestDTO[] = []
+    const unauthorized = new ApiError('login required', 401, 'unauthorized', undefined, 'NOT_AUTHENTICATED')
+    const start = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
+      .mockRejectedValueOnce(new Error('Response lost'))
+      .mockRejectedValueOnce(unauthorized)
+      .mockImplementationOnce(async (_cid, _nid, request) => run(request.requestId, 'RUNNING', 'QUEUED'))
+    start.mockClear()
+    vi.spyOn(canvasApi, 'getCanvasFunctionRun')
+      .mockRejectedValueOnce(new Error('Reconciliation unreachable'))
+      .mockRejectedValueOnce(unauthorized)
+    const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
+    const { result } = setupHook({ flushFunctionConfig })
+    const startRun = () => act(async () => { await result.current.startFunctionRun(nodeId) })
 
-    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
-      calls.push(req)
-      throw new Error('Network error / connection dropped')
-    })
-    vi.spyOn(canvasApi, 'getCanvasFunctionRun').mockRejectedValue(
-      new Error('Reconciliation unreachable'),
-    )
+    await startRun()
+    const frozen = loadPendingFunctionRun(canvasId, nodeId)
+    expect(frozen?.request).toEqual(start.mock.calls[0][2])
 
-    const { result } = setupHook()
+    // POST/对账均未认证不代表初次运行未启动，不自动重提或刷新配置。
+    await startRun()
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toEqual(frozen)
 
-    // 第一次尝试：失败
-    await act(async () => {
-      await result.current.startFunctionRun(nodeId)
-    })
-    expect(calls).toHaveLength(1)
-    const firstRequestId = calls[0]?.requestId
-    expect(firstRequestId).toBeTruthy()
-
-    // 第二次重试（模拟用户点击重试或页面重入重试）：必须原样复用 firstRequestId
-    await act(async () => {
-      await result.current.startFunctionRun(nodeId)
-    })
-    expect(calls).toHaveLength(2)
-    expect(calls[1]?.requestId).toBe(firstRequestId)
-    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(firstRequestId)
+    await startRun()
+    expect(start.mock.calls).toEqual(Array.from({ length: 3 }, () => [canvasId, nodeId, frozen?.request]))
+    expect(flushFunctionConfig).toHaveBeenCalledTimes(1)
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
   })
 
   it('存储异常 fail-closed：localStorage.setItem 失败阻断请求，startCanvasFunctionRun 严格调用 0 次', async () => {

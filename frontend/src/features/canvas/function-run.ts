@@ -384,9 +384,9 @@ async function submitStartAttempt(context: {
 function isTerminalClientError(error: unknown): boolean {
   if (error instanceof ApiError) {
     const status = error.status
-    // 408 (Request Timeout) 与 429 (Too Many Requests) 是非终态可重试状态
-    // 403 (Forbidden), 409 (Conflict) 及其他 4xx (400, 404, 422 等) 属于不可重试的终态客户端错误
-    return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429
+    // 401 不否定之前可能已被接受的请求；与 408、429 一样保留原请求供恢复。
+    return typeof status === 'number' && status >= 400 && status < 500
+      && status !== 401 && status !== 408 && status !== 429
   }
   return false
 }

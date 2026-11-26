@@ -90,7 +90,10 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     onError: (error, record) => {
       // 键冲突明确拒绝了当前请求体；鉴权失败和其他未知结果仍须原样重放。
       const conflicted = isConflictReason(error, 'IDEMPOTENCY_KEY_REUSED')
-      if (!conflicted && (!(error instanceof ApiError) || error.status !== 400 || error.code !== 'validation')) return
+      // 非应用 400 也会得到客户端回退的 validation code，须有应用字段才允许纠正。
+      const validationRejected = error instanceof ApiError && error.status === 400 && error.code === 'validation'
+        && Boolean(error.reason?.trim() || error.detail?.trim())
+      if (!conflicted && !validationRejected) return
       try {
         const { key, body } = record.value
         const rejected = saveSessionSend(storageKey, record,

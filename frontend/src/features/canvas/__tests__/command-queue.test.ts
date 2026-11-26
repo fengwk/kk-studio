@@ -328,7 +328,7 @@ describe('CanvasCommandQueue', () => {
 
     const first = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'one' }])
     const second = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'two' }])
-    await expect(first).rejects.toThrow('network down')
+    await expect(first).rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'network down' } })
     await expect(second).rejects.toThrow('Canvas command queue is blocked')
     expect(store.saved.size).toBe(2)
 
@@ -360,6 +360,76 @@ describe('CanvasCommandQueue', () => {
     ])
     // 重放成功后清除持久记录，避免重复提交。
     expect(store.saved.size).toBe(0)
+  })
+
+  it.each([401, 408, 429])('POST 重放收到 %i 时仍保留原冻结操作', async (status) => {
+    const { saved, store } = createFakeOperationStore()
+    const commands = [deleteCommand()]
+    const idempotencyKey = 'aaaaaaaa-0000-4000-8000-000000000031'
+    const apply = vi.fn()
+      .mockRejectedValueOnce(new ApiError('response lost'))
+      .mockRejectedValueOnce(new ApiError('retry unavailable', status))
+      .mockResolvedValueOnce(advancePatch(2))
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
+      initialSnapshot: snapshot(1),
+      apply,
+      createCommandId: () => idempotencyKey,
+      operationStore: store,
+    })
+
+    await expect(queue.enqueue(commands)).rejects.toBeInstanceOf(CanvasQueueBlockedError)
+    const frozen = [...saved.values()]
+    expect(frozen).toHaveLength(1)
+    // 当前 HTTP 失败不能否定首次可能已被接受的请求。
+    await expect(queue.recover()).resolves.toMatchObject({ replayed: 0, failed: 1 })
+    expect(queue.isBlocked()).toBe(true)
+    expect(store.remove).not.toHaveBeenCalled()
+    expect([...saved.values()]).toEqual(frozen)
+
+    await expect(queue.recover()).resolves.toMatchObject({ replayed: 1, failed: 0 })
+    expect(apply.mock.calls).toEqual(Array.from({ length: 3 }, () => [
+      CANVAS_ID, { idempotencyKey, commands }, { signal: undefined },
+    ]))
+    expect(queue.isBlocked()).toBe(false)
+    expect(saved.size).toBe(0)
+  })
+
+  it.each([404, 409])('POST 已返回回执，快照 GET %i 不能结算命令', async (status) => {
+    const { saved, store } = createFakeOperationStore()
+    const commands = [deleteCommand()]
+    const idempotencyKey = 'aaaaaaaa-0000-4000-8000-000000000032'
+    const apply = vi.fn().mockResolvedValue(advancePatch(9))
+    const refetchError = new ApiError('snapshot unavailable', status)
+    const refetch = vi.fn().mockRejectedValue(refetchError)
+    const onDraftAcks = vi.fn()
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch,
+      createCommandId: () => idempotencyKey,
+      operationStore: store,
+      onDraftAcks,
+    })
+    const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
+
+    // revision 缺口触发 GET；即使回读的 HTTP 状态像终态 POST 拒绝，也必须停在原操作。
+    await expect(queue.enqueue(commands, { ack }))
+      .rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: refetchError })
+    await expect(queue.recover()).resolves.toEqual({ replayed: 0, conflicted: 0, failed: 1, ackedDrafts: [] })
+    expect(queue.isBlocked()).toBe(true)
+    expect(store.remove).not.toHaveBeenCalled()
+    expect(saved.size).toBe(1)
+    expect(onDraftAcks).not.toHaveBeenCalled()
+
+    refetch.mockResolvedValueOnce(snapshot(9))
+    await expect(queue.recover()).resolves.toMatchObject({ replayed: 1, ackedDrafts: ack })
+    expect(apply.mock.calls).toEqual(Array.from({ length: 3 }, () => [
+      CANVAS_ID, { idempotencyKey, commands }, { signal: undefined },
+    ]))
+    expect(onDraftAcks).toHaveBeenCalledExactlyOnceWith(ack)
+    expect(saved.size).toBe(0)
   })
 
   it('语义 409 是终态：清除该操作且绝不盲重放', async () => {
@@ -400,7 +470,7 @@ describe('CanvasCommandQueue', () => {
       operationStore: store.store,
     })
 
-    await expect(queue.enqueue([deleteCommand()])).rejects.toThrow('server error')
+    await expect(queue.enqueue([deleteCommand()])).rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'server error' } })
     expect(store.saved.size).toBe(1)
     expect(store.store.remove).not.toHaveBeenCalled()
   })
@@ -422,7 +492,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     await queue.enqueue([deleteCommand()])
-    await expect(queue.enqueue([deleteCommand()])).rejects.toThrow('network down')
+    await expect(queue.enqueue([deleteCommand()])).rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'network down' } })
 
     // 成功那笔被清除，失败那笔仍在待重放集合中。
     expect([...store.saved.keys()]).toEqual([
@@ -485,7 +555,7 @@ describe('CanvasCommandQueue', () => {
     const first = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'opA' }])
     const second = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'opA', name: 'opB' }])
 
-    await expect(first).rejects.toThrow('network down')
+    await expect(first).rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'network down' } })
     const secondErr = await second.catch((err) => err)
     expect(secondErr).toBeInstanceOf(CanvasQueueBlockedError)
     expect(secondErr.retryable).toBe(true)
@@ -528,7 +598,7 @@ describe('CanvasCommandQueue', () => {
 
     const pA = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }])
     const pB = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'B' }])
-    await expect(pA).rejects.toThrow('server unavailable')
+    await expect(pA).rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'server unavailable' } })
     await expect(pB).rejects.toBeInstanceOf(CanvasQueueBlockedError)
     expect(queue.isBlocked()).toBe(true)
 
@@ -808,7 +878,7 @@ describe('CanvasCommandQueue', () => {
     // 先入队 A 和 B
     const pA = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }])
     const pB = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'B' }])
-    await expect(pA).rejects.toThrow('network down')
+    await expect(pA).rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'network down' } })
     await expect(pB).rejects.toBeInstanceOf(CanvasQueueBlockedError)
 
     expect(queue.isBlocked()).toBe(true)
@@ -1161,7 +1231,7 @@ describe('CanvasCommandQueue', () => {
 
     const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
     await expect(queue.enqueue([deleteCommand()], { ack }))
-      .rejects.toThrow('IndexedDB draft ACK transaction aborted')
+      .rejects.toMatchObject({ name: 'CanvasQueueBlockedError', cause: { message: 'IndexedDB draft ACK transaction aborted' } })
 
     // 关键断言：草稿 ACK 失败时，底层 operation 绝未被删除，仍留在持久化 store 中
     expect(store.remove).not.toHaveBeenCalled()

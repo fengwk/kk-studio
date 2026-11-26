@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -177,6 +177,8 @@ describe('DraftPaneRenderer', () => {
     new ApiError('network lost', 0, 'network_error'),
     new ApiError('timed out', undefined, 'timeout'),
     new ApiError('unavailable', 503),
+    // 非应用 400 在 client 中只有 HTTP fallback code，不代表业务明确拒绝。
+    new ApiError('generic bad request', 400, 'validation'),
     // A generic 409 (or the same reason at another status) is not a proven key conflict.
     new ApiError('other conflict', 409, 'conflict', undefined, 'OTHER_CONFLICT'),
     new ApiError('proxy failure', 502, undefined, undefined, 'IDEMPOTENCY_KEY_REUSED'),
@@ -190,7 +192,7 @@ describe('DraftPaneRenderer', () => {
       if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') {
         sessionCall += 1
         if (sessionCall === 1) throw failure
-        if (sessionCall === 2) throw new ApiError('invalid folder', 400, 'validation', undefined, 'INVALID_FOLDER')
+        if (sessionCall === 2) throw new ApiError('invalid folder', 400, 'validation', undefined, 'INVALID_FOLDER', 'Folder is unavailable')
         return { sessionId: 'sess-2', threadId: 'thread-recovered', commandId: 'cmd-2', treeVersion: '2' }
       }
       if (endpoint === 'GET /api/harness/threads/{threadId}/snapshot') return { version: '1', thread: { threadId: 'thread-recovered' }, entries: [] }
@@ -202,7 +204,7 @@ describe('DraftPaneRenderer', () => {
     await user.type(editor, 'Test retry')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // Network failure renders retry alert and locks editor
+    // 未获明确回执时锁定编辑，只允许重放原请求。
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('未收到发送结果')
     const frozen = sessionStorage.getItem(sendStorageKey)
@@ -211,11 +213,21 @@ describe('DraftPaneRenderer', () => {
 
     // A definite rejection unlocks editing without removing the record before success.
     await waitFor(() => expect(screen.getByText('此目录已不可用。请选择其他目录后再发送。')).toBeInTheDocument())
-    expect(JSON.parse(sessionStorage.getItem(sendStorageKey)!)).toMatchObject({ rejected: true })
+    const posts = mockedRequest.mock.calls.filter(([endpoint]) => endpoint === 'POST /api/chat-spaces/{spaceId}/sessions')
+    expect(posts).toHaveLength(2)
+    expect(posts[1]).toEqual(posts[0])
+    expect(JSON.parse(sessionStorage.getItem(sendStorageKey)!)).toEqual({ ...JSON.parse(frozen!), rejected: true })
 
-    // Third attempt succeeds
-    fireEvent.keyDown(editor, { key: 'Enter' })
+    await user.type(editor, ' corrected')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-recovered' }))
+    const corrected = mockedRequest.mock.calls.filter(([endpoint]) => endpoint === 'POST /api/chat-spaces/{spaceId}/sessions')
+    expect(corrected).toHaveLength(3)
+    expect(corrected[2]).toEqual([
+      'POST /api/chat-spaces/{spaceId}/sessions',
+      expect.objectContaining({ body: expect.objectContaining({ message: [{ type: 'TEXT', text: 'Test retry corrected' }] }) }),
+      { idempotencyKey: draftId },
+    ])
   })
 
   // The frozen key can be the original draft ID or one rotated after a confirmed conflict.
