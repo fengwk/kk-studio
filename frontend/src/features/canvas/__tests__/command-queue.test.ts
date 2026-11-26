@@ -67,6 +67,7 @@ describe('CanvasCommandQueue', () => {
       return advancePatch(currentRevision)
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(7),
       apply,
       refetch: vi.fn(),
@@ -92,6 +93,7 @@ describe('CanvasCommandQueue', () => {
     const refetch = vi.fn().mockResolvedValue(snapshot(12))
     const revisions: string[] = []
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(10),
       apply,
       refetch,
@@ -117,6 +119,7 @@ describe('CanvasCommandQueue', () => {
       .mockRejectedValueOnce(new ApiError('bad request', 400))
       .mockResolvedValueOnce(advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -135,6 +138,7 @@ describe('CanvasCommandQueue', () => {
       .mockReturnValue('aaaaaaaa-0000-4000-8000-000000000005')
     const apply = vi.fn().mockResolvedValue(advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -153,6 +157,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn()
     const initial = snapshot(5)
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: initial,
       apply,
       refetch: vi.fn(),
@@ -164,6 +169,7 @@ describe('CanvasCommandQueue', () => {
 
   it('does not regress to a stale query snapshot but accepts equal-version runtime updates', () => {
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(8),
       apply: vi.fn(),
       refetch: vi.fn(),
@@ -187,6 +193,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn(async () => advancePatch(2, []))
     const refetch = vi.fn().mockResolvedValue(snapshot(4))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch,
@@ -204,6 +211,7 @@ describe('CanvasCommandQueue', () => {
     const hugeNext = '9007199254740993'
     const apply = vi.fn(async () => advancePatch(hugeNext))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(huge),
       apply,
       refetch: vi.fn(),
@@ -222,6 +230,7 @@ describe('CanvasCommandQueue', () => {
     const store = createFakeOperationStore()
     const apply = vi.fn(async () => advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -262,6 +271,7 @@ describe('CanvasCommandQueue', () => {
     }
     const apply = vi.fn(async () => advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -287,6 +297,7 @@ describe('CanvasCommandQueue', () => {
     }
     const failingApply = vi.fn()
     const failingQueue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: failingApply,
       refetch: vi.fn(),
@@ -305,6 +316,7 @@ describe('CanvasCommandQueue', () => {
       throw new ApiError('network down')
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: failingApply,
       refetch: vi.fn(),
@@ -327,6 +339,7 @@ describe('CanvasCommandQueue', () => {
       return advancePatch(1 + replayed.length)
     })
     const reloaded = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: recoverApply,
       refetch: vi.fn(),
@@ -355,6 +368,7 @@ describe('CanvasCommandQueue', () => {
       throw new ApiError('conflict', 409, 'CANVAS_CONFLICT', { conflicts: [] })
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn().mockResolvedValue(snapshot(9)),
@@ -378,6 +392,7 @@ describe('CanvasCommandQueue', () => {
       throw new ApiError('server error', 503)
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -396,6 +411,7 @@ describe('CanvasCommandQueue', () => {
       .mockResolvedValueOnce(advancePatch(2))
       .mockRejectedValueOnce(new ApiError('network down'))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -418,6 +434,7 @@ describe('CanvasCommandQueue', () => {
     const refetch = vi.fn().mockResolvedValue(snapshot(9))
     const apply = vi.fn(async () => advancePatch(9))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(5),
       apply,
       refetch,
@@ -433,6 +450,7 @@ describe('CanvasCommandQueue', () => {
     // 连续 revision 直接应用增量 patch，无需 refetch。
     const applyNext = vi.fn(async () => advancePatch(11))
     const contiguous = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(10),
       apply: applyNext,
       refetch: vi.fn(),
@@ -454,6 +472,7 @@ describe('CanvasCommandQueue', () => {
       return advancePatch(2)
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -496,6 +515,7 @@ describe('CanvasCommandQueue', () => {
       return advancePatch(applyRequests.length + 1)
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -546,11 +566,11 @@ describe('CanvasCommandQueue', () => {
     // 必须立即 break 停下，绝不尝试处理和发送后项 B，且保持队列 blocked。
     const store = createFakeOperationStore()
     const opA: CanvasPendingOperation = {
-      id: 'user:canvas:session:key-a',
+      id: 'user:canvas/0:session:key-a',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c1',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
       ack: [],
@@ -558,11 +578,11 @@ describe('CanvasCommandQueue', () => {
       createdAt: 1000,
     }
     const opB: CanvasPendingOperation = {
-      id: 'user:canvas:session:key-b',
+      id: 'user:canvas/0:session:key-b',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c2',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'B' }],
       ack: [],
@@ -574,6 +594,7 @@ describe('CanvasCommandQueue', () => {
 
     const apply = vi.fn().mockRejectedValue(new ApiError('network down'))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -599,11 +620,11 @@ describe('CanvasCommandQueue', () => {
     // 意图：验证 recover() 的并发 singleflight 机制以及失败后允许再次调用的契约。
     const store = createFakeOperationStore()
     const op: CanvasPendingOperation = {
-      id: 'user:canvas:session:key-d',
+      id: 'user:canvas/0:session:key-d',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000d1',
       commands: [deleteCommand()],
       ack: [],
@@ -633,6 +654,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -675,6 +697,7 @@ describe('CanvasCommandQueue', () => {
     }
     const apply = vi.fn()
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -695,11 +718,11 @@ describe('CanvasCommandQueue', () => {
     // 应执行 settle 移除该操作，并允许循环继续处理后续的待确认操作。
     const store = createFakeOperationStore()
     const op409: CanvasPendingOperation = {
-      id: 'user:canvas:session:k1',
+      id: 'user:canvas/0:session:k1',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e1',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'conflict' }],
       ack: [],
@@ -707,11 +730,11 @@ describe('CanvasCommandQueue', () => {
       createdAt: 1000,
     }
     const op400: CanvasPendingOperation = {
-      id: 'user:canvas:session:k2',
+      id: 'user:canvas/0:session:k2',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e2',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'bad' }],
       ack: [],
@@ -719,11 +742,11 @@ describe('CanvasCommandQueue', () => {
       createdAt: 2000,
     }
     const opOk: CanvasPendingOperation = {
-      id: 'user:canvas:session:k3',
+      id: 'user:canvas/0:session:k3',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e3',
       commands: [deleteCommand()],
       ack: [{ nodeId: NODE_ID, field: 'text', generation: 2 }],
@@ -745,6 +768,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn().mockResolvedValue(snapshot(4)),
@@ -773,6 +797,7 @@ describe('CanvasCommandQueue', () => {
 
     const apply = vi.fn().mockRejectedValue(new ApiError('network down'))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -806,11 +831,11 @@ describe('CanvasCommandQueue', () => {
     // B 分配到的持久序列号必须严格大于 A (B.sequence > A.sequence = 5)，且 reload 恢复时绝不发生 B 越过 A 越序发送。
     const storeMap = new Map<string, CanvasPendingOperation>()
     const opA: CanvasPendingOperation = {
-      id: 'user:canvas:session:key-old-a',
+      id: 'user:canvas/0:session:key-old-a',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
       ack: [],
@@ -851,6 +876,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -899,6 +925,7 @@ describe('CanvasCommandQueue', () => {
       return advancePatch(reloadApplyCalls.length + 1)
     })
     const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: reloadApply,
       refetch: vi.fn(),
@@ -923,11 +950,11 @@ describe('CanvasCommandQueue', () => {
     // 绝不能错误获得 6 排在 C 前面。
     const storeMap = new Map<string, CanvasPendingOperation>()
     const opA: CanvasPendingOperation = {
-      id: 'user:canvas:session:key-old-a',
+      id: 'user:canvas/0:session:key-old-a',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
       ack: [],
@@ -935,11 +962,11 @@ describe('CanvasCommandQueue', () => {
       createdAt: 1000,
     }
     const opC: CanvasPendingOperation = {
-      id: 'user:canvas:session:key-old-c',
+      id: 'user:canvas/0:session:key-old-c',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c9',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'C' }],
       ack: [],
@@ -981,6 +1008,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -1015,6 +1043,7 @@ describe('CanvasCommandQueue', () => {
     // 模拟 reload 重放，验证三者严格保序 A (5) -> C (9) -> B (10)
     const reloadCalls: ApplyCanvasCommandsRequestDTO[] = []
     const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: vi.fn().mockImplementation(async (_canvasId, req: ApplyCanvasCommandsRequestDTO) => {
         reloadCalls.push(req)
@@ -1056,6 +1085,7 @@ describe('CanvasCommandQueue', () => {
     }
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: vi.fn(),
       refetch: vi.fn(),
@@ -1097,6 +1127,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: vi.fn(async () => advancePatch(2)),
       refetch: vi.fn(),
@@ -1120,6 +1151,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: vi.fn(async () => advancePatch(2)),
       refetch: vi.fn(),
@@ -1141,6 +1173,7 @@ describe('CanvasCommandQueue', () => {
     const onDraftAcks = vi.fn(async () => undefined)
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: vi.fn().mockRejectedValue(new ApiError('conflict', 409, 'CANVAS_CONFLICT')),
       refetch: vi.fn().mockResolvedValue(snapshot(2)),
@@ -1173,6 +1206,7 @@ describe('CanvasCommandQueue', () => {
 
     const initialCommands: CanvasCommandDTO[] = [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name: 'after' }]
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply: vi.fn(async () => advancePatch(2)),
       refetch: vi.fn(),
@@ -1203,6 +1237,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(2),
       apply: recoverApply,
       refetch: vi.fn(),
@@ -1224,11 +1259,11 @@ describe('CanvasCommandQueue', () => {
   it('未知字段不影响读取与重放', async () => {
     const store = createFakeOperationStore()
     const opWithExtraFields = {
-      id: 'user:canvas:session:k-extra',
+      id: 'user:canvas/0:session:k-extra',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
-      sessionKey: 'user:canvas:session',
+      sessionKey: 'user:canvas/0:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-000000000099',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'old', name: 'recovered' }],
       extraAuditInfo: { origin: 'unknown' },
@@ -1245,6 +1280,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
+      viewSlot: 0,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),

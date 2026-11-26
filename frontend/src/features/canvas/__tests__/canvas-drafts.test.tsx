@@ -58,6 +58,7 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
 
     await saveCanvasDraft(CANVAS_ID, NODE_A, draft, {
       idbFactory,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })
@@ -65,6 +66,7 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     // 同一编辑会话可以读取到保存的草稿
     const loadedSession1 = await loadCanvasDrafts(CANVAS_ID, {
       idbFactory,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })
@@ -79,10 +81,25 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     // 不同编辑会话（另一标签页）相互隔离，不相互覆盖
     const loadedSession2 = await loadCanvasDrafts(CANVAS_ID, {
       idbFactory,
+      viewSlot: 0,
       userId: 'user-1',
       editingSessionId: 'tab-2',
     })
     expect(loadedSession2[NODE_A]).toBeUndefined()
+  })
+
+  it('isolates drafts by explicit view slot', async () => {
+    const idbFactory = createMockIDBFactory()
+    const draft: CanvasNodeDraft = {
+      generation: 1,
+      updatedAt: Date.now(),
+      position: { x: 50, y: 60 },
+    }
+
+    await saveCanvasDraft(CANVAS_ID, NODE_A, draft, { viewSlot: 0, idbFactory })
+
+    expect((await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory }))[NODE_A]).toEqual(draft)
+    expect((await loadCanvasDrafts(CANVAS_ID, { viewSlot: 1, idbFactory }))[NODE_A]).toBeUndefined()
   })
 
   it('notifies storage error listeners when IndexedDB transaction fails', async () => {
@@ -96,7 +113,7 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
       position: { x: 50, y: 60 },
     }
 
-    await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { idbFactory }))
+    await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { viewSlot: 0, idbFactory }))
       .rejects.toThrow()
 
     expect(onError).toHaveBeenCalled()
@@ -175,19 +192,19 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
 
   it('deletes draft and clears session drafts from storage cleanly', async () => {
     const idbFactory = createMockIDBFactory()
-    await saveCanvasDraft(CANVAS_ID, NODE_A, { generation: 1, updatedAt: Date.now(), position: { x: 1, y: 1 } }, { idbFactory })
-    await saveCanvasDraft(CANVAS_ID, NODE_B, { generation: 1, updatedAt: Date.now(), position: { x: 2, y: 2 } }, { idbFactory })
+    await saveCanvasDraft(CANVAS_ID, NODE_A, { generation: 1, updatedAt: Date.now(), position: { x: 1, y: 1 } }, { viewSlot: 0, idbFactory })
+    await saveCanvasDraft(CANVAS_ID, NODE_B, { generation: 1, updatedAt: Date.now(), position: { x: 2, y: 2 } }, { viewSlot: 0, idbFactory })
 
-    let loaded = await loadCanvasDrafts(CANVAS_ID, { idbFactory })
+    let loaded = await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory })
     expect(Object.keys(loaded)).toHaveLength(2)
 
-    await deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory })
-    loaded = await loadCanvasDrafts(CANVAS_ID, { idbFactory })
+    await deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0, idbFactory })
+    loaded = await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory })
     expect(loaded[NODE_A]).toBeUndefined()
     expect(loaded[NODE_B]).toBeDefined()
 
-    await deleteCanvasDraft(CANVAS_ID, NODE_B, { idbFactory })
-    loaded = await loadCanvasDrafts(CANVAS_ID, { idbFactory })
+    await deleteCanvasDraft(CANVAS_ID, NODE_B, { viewSlot: 0, idbFactory })
+    loaded = await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory })
     expect(Object.keys(loaded)).toHaveLength(0)
   })
 
@@ -196,22 +213,22 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
 
-    await saveCanvasDraft(CANVAS_ID, NODE_A, { generation: 1, updatedAt: Date.now(), position: { x: 1, y: 1 } })
-    await saveCanvasDraft(CANVAS_ID, NODE_B, { generation: 1, updatedAt: Date.now(), position: { x: 2, y: 2 } })
+    await saveCanvasDraft(CANVAS_ID, NODE_A, { generation: 1, updatedAt: Date.now(), position: { x: 1, y: 1 } }, { viewSlot: 0 })
+    await saveCanvasDraft(CANVAS_ID, NODE_B, { generation: 1, updatedAt: Date.now(), position: { x: 2, y: 2 } }, { viewSlot: 0 })
 
     // 同一会话只告警一次，明确表示未落盘。
     expect(onError).toHaveBeenCalledTimes(1)
     expect((onError.mock.calls[0]?.[0] as Error).name).toBe('CanvasStorageUnavailableError')
 
-    let loaded = await loadCanvasDrafts(CANVAS_ID)
+    let loaded = await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0 })
     expect(Object.keys(loaded).sort()).toEqual([NODE_A, NODE_B].sort())
 
-    await deleteCanvasDraft(CANVAS_ID, NODE_A)
-    loaded = await loadCanvasDrafts(CANVAS_ID)
+    await deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0 })
+    loaded = await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0 })
     expect(Object.keys(loaded)).toEqual([NODE_B])
 
-    await deleteCanvasDraft(CANVAS_ID, NODE_B)
-    loaded = await loadCanvasDrafts(CANVAS_ID)
+    await deleteCanvasDraft(CANVAS_ID, NODE_B, { viewSlot: 0 })
+    loaded = await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0 })
     expect(Object.keys(loaded)).toHaveLength(0)
     unsubscribe()
   })
@@ -221,26 +238,26 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
 
-    await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: openFailure })).rejects.toThrow()
-    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: openFailure })).rejects.toThrow()
+    await expect(loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory: openFailure })).rejects.toThrow()
+    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0, idbFactory: openFailure })).rejects.toThrow()
     expect(onError).toHaveBeenCalled()
 
     const readFailure = createMockIDBFactory({ shouldFailGetAll: true })
-    await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: readFailure })).rejects.toThrow()
+    await expect(loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory: readFailure })).rejects.toThrow()
 
     const deleteFailure = createMockIDBFactory({ shouldFailDelete: true })
-    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: deleteFailure })).rejects.toThrow()
+    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0, idbFactory: deleteFailure })).rejects.toThrow()
 
     // 会话内多条草稿的读取失败（getAll）同样 reject 并上报。
     const getAllFailure = createMockIDBFactory({ shouldFailGetAll: true })
-    await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: getAllFailure })).rejects.toThrow()
+    await expect(loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory: getAllFailure })).rejects.toThrow()
 
     const putFailure = createMockIDBFactory({ shouldFailRequest: true })
     await expect(saveCanvasDraft(
       CANVAS_ID,
       NODE_A,
       { generation: 1, updatedAt: Date.now(), position: { x: 1, y: 1 } },
-      { idbFactory: putFailure },
+      { viewSlot: 0, idbFactory: putFailure },
     )).rejects.toThrow()
     unsubscribe()
   })
@@ -251,18 +268,18 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     const draft = { generation: 1, updatedAt: Date.now(), position: { x: 1, y: 1 } }
 
     const txError = createMockIDBFactory({ shouldFailTransaction: true })
-    await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { idbFactory: txError })).rejects.toThrow()
-    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: txError })).rejects.toThrow()
+    await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { viewSlot: 0, idbFactory: txError })).rejects.toThrow()
+    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0, idbFactory: txError })).rejects.toThrow()
     // 加载在 request.onsuccess 时已 resolve；随后的 tx.onerror 只负责上报，不应产生未处理拒绝。
-    await loadCanvasDrafts(CANVAS_ID, { idbFactory: txError })
+    await loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory: txError })
 
     const abortFactory = createMockIDBFactory({ shouldAbortTransaction: true })
-    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: abortFactory })).rejects.toThrow()
+    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0, idbFactory: abortFactory })).rejects.toThrow()
 
     const createFailure = createMockIDBFactory({ shouldFailTransactionCreate: true })
-    await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { idbFactory: createFailure })).rejects.toThrow()
-    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: createFailure })).rejects.toThrow()
-    await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: createFailure })).rejects.toThrow()
+    await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { viewSlot: 0, idbFactory: createFailure })).rejects.toThrow()
+    await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { viewSlot: 0, idbFactory: createFailure })).rejects.toThrow()
+    await expect(loadCanvasDrafts(CANVAS_ID, { viewSlot: 0, idbFactory: createFailure })).rejects.toThrow()
 
     expect(onError).toHaveBeenCalled()
     // 等待 mock 事务的延迟回调，确保错误分支确实执行。

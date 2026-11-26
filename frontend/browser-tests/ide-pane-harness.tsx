@@ -7,7 +7,8 @@ import { setLocale } from '@/shared/i18n'
 import { PaneLayout } from '@/features/workspace/panes/PaneLayout'
 import { splitPane, closePane, swapPanes, paneIds } from '@/features/workspace/panes/model'
 import { usePaneState } from '@/features/workspace/panes/usePaneState'
-import { isPaneTarget, type PaneTarget } from '@/features/workspace/pane-target'
+import { bindPane } from '@/features/workspace/pane-bindings'
+import { isPaneTarget, type PaneOpenTarget } from '@/features/workspace/pane-target'
 import { IdeWorkspaceProvider } from '@/features/environment/ide/IdeWorkspaceProvider'
 import { VsCodePaneRenderer } from '@/features/environment/ide/VsCodePaneRenderer'
 import { IdePaneCloseContext } from '@/features/environment/ide/ide-pane-close'
@@ -39,9 +40,8 @@ function PaneHarness() {
       return { ...current, bindings }
     }),
   }), [setState])
-  const bind = (id: string, target: PaneTarget) => setState(current => ({ ...current, focusedPaneId: id,
-    bindings: { ...current.bindings, [id]: target } }))
-  const open = (target: PaneTarget) => {
+  const bind = (id: string, target: PaneOpenTarget) => setState(current => bindPane(current, id, target))
+  const open = (target: PaneOpenTarget) => {
     const existing = paneIds(state.layout).find(id => {
       const bound = state.bindings[id]
       return target.kind === 'vscode' && bound?.kind === 'vscode' && bound.viewId === target.viewId
@@ -49,12 +49,12 @@ function PaneHarness() {
     if (existing) setState(current => ({ ...current, focusedPaneId: existing }))
     else bind(state.focusedPaneId, target)
   }
-  const openBeside = (id: string, target: PaneTarget) => setState(current => {
+  const openBeside = (id: string, target: PaneOpenTarget) => setState(current => {
     const empty = paneIds(current.layout).find(pane => pane !== id && current.bindings[pane] == null)
     const next = empty ? current : splitPane(current, id, 'X')
     if (!empty && next === current) return current
     const destination = empty ?? next.focusedPaneId
-    return { ...next, focusedPaneId: destination, bindings: { ...next.bindings, [destination]: target } }
+    return bindPane(next, destination, target)
   })
   async function closeIde() {
     const target = state.bindings[state.focusedPaneId]

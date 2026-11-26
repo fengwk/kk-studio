@@ -187,12 +187,12 @@ view 绑定（`PaneTarget`）与布局，不复制 Thread、draft 或执行状�
 会作废迟到意图，后台 Snapshot 更新不会再次抢焦点。
 已计划但尚未执行的 Composer 聚焦也在 pane 失去 workspace 焦点时取消。
 本地快照按 `(userId, spaceId)` 保存布局、各窗格的 `PaneTarget` 绑定、目录展开与侧栏宽度；
-与当前槽位或格式不兼容的旧快照整份丢弃并回到默认单草稿状态，
-不迁移其中的布局与目标。服务端已保存的对话与画布仍保留在当前空间的目录树与状态视图中，点击即经打开流程恢复到目标窗格。
+无效的布局快照回到默认单草稿状态。有效布局中的缺失或无效绑定显示为新会话草稿；
+同一画布槽位重复绑定时，仅保留布局顺序中的第一个绑定。服务端已保存的对话与画布仍可从当前空间打开。
 
 `PaneTarget` 有四种状态：`draft`（新会话草稿，携带 `draftId` 与可选 `folderId`）、
 `thread`（既有 Thread，携带 `threadId`）、
-`canvas`（画布，携带 `canvasId`）与 `vscode`（受管环境 IDE 视图，携带 `environmentId` 与 `viewId`）。
+`canvas`（画布视图，携带 `canvasId` 与 `viewSlot`）与 `vscode`（受管环境 IDE 视图，携带 `environmentId` 与 `viewId`）。
 新会话草稿使用空间默认 Agent 与模型、变体、环境及 YOLO 配置；已有 Session 固定 Agent，
 仅执行根 Thread 可调整模型、变体、环境与 YOLO，子任务 Thread 只读。
 配置差异按 `SET_EXECUTION` → `SET_ENVIRONMENT`
@@ -335,7 +335,7 @@ Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结
 
 ## Canvas 编辑与上传
 
-从目录菜单新建画布，确认名称后写入当前空间和目录，再选择打开窗格。取消选择窗格不会删除已创建的画布；打开已有画布不做写入。同一 Canvas 可在多个窗格打开，共用文档快照；各视图有自己的选区、视口、草稿和待确认命令。关闭后再次打开会使用空闲视图槽位，保留的草稿和命令按槽位恢复，不改变其它已打开视图。
+从目录菜单新建画布，确认名称后写入当前空间和目录，再选择打开窗格。取消选择窗格不会删除已创建的画布；打开已有画布不做写入。同一 Canvas 可在多个窗格打开，共用文档快照；各视图有自己的选区、视口、草稿和待确认命令。打开请求只指定画布；绑定新视图时分配该画布最小的空闲槽位（0–7），不改变其它已打开的视图。刷新恢复布局中已绑定的槽位；关闭后再次使用同一槽位会恢复该槽位保留的本地数据。
 空画布提供与左侧“+”相同的添加入口，说明如何添加资源和运行 Function，添加首个节点后引导消失。
 
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
@@ -347,7 +347,7 @@ Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结
 由删除触发的保存也使用点击时的函数基线；只有从该基线连续确认的自有保存值可以推进删除的函数基线，远端变更仍由 CAS 裁决。
 保存失败或画布切换时停止后续删除；删除期间不为目标节点接收新的函数草稿。
 
-草稿和命令按 userId、Canvas、编辑会话及视图槽位分开；当前本地存储的 userId 为固定 anonymous，服务端仍按账号校验画布归属。主视图沿用无槽位的存储键。
+草稿、待确认命令与视口统一使用 `canvasId/slot` 区分视图；草稿和命令另按用户与编辑会话隔离。当前本地存储的 userId 为固定 anonymous，服务端仍按账号校验画布归属。
 IndexedDB 草稿 ACK 物理完成后才删除持久 operation，草稿保存与 ACK 共用序列化链；
 generation 防止旧响应清除新输入，卸载围栏保护底层存储。
 “已保存”要求 command、draft 均无 pending 且无 storageError。

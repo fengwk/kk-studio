@@ -5,7 +5,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import type { ChatSpaceDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
 import { setLocale } from '@/shared/i18n'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
-import type { PaneRenderers, PaneTarget } from './pane-target'
+import type { PaneOpenTarget, PaneRenderers } from './pane-target'
 import { isPaneTarget } from './pane-target'
 import { workspaceKeys } from './queries'
 import type { TreeRow } from './resource-tree'
@@ -134,7 +134,7 @@ describe('pane-target and workspace-api', () => {
     expect(isPaneTarget({ kind: 'draft', draftId: 'bad' })).toBe(false)
     expect(isPaneTarget({ kind: 'thread', threadId: id(1) })).toBe(true)
     expect(isPaneTarget({ kind: 'thread', threadId: id(1), extra: 1 })).toBe(false)
-    expect(isPaneTarget({ kind: 'canvas', canvasId: id(1) })).toBe(true)
+    expect(isPaneTarget({ kind: 'canvas', canvasId: id(1), viewSlot: 0 })).toBe(true)
     expect(isPaneTarget({ kind: 'vscode', environmentId: id(1), viewId: id(2) })).toBe(true)
     expect(isPaneTarget({ kind: 'vscode', environmentId: id(1), viewId: 'nope' })).toBe(false)
   })
@@ -201,7 +201,7 @@ describe('WorkspaceShell', () => {
     const closeView = overrides.closeView ?? vi.fn(async () => true)
     const consume = overrides.consume ?? vi.fn()
     let removeViewFn: ((viewId: string) => void) | undefined
-    let envHelpers: { open: (t: PaneTarget) => void; findOpenView: (e: string) => string | undefined } | undefined
+    let envHelpers: { open: (t: PaneOpenTarget) => void; findOpenView: (e: string) => string | undefined } | undefined
 
     const view = render(
       <QueryClientProvider client={queryClient}>
@@ -248,6 +248,26 @@ describe('WorkspaceShell', () => {
       getEnvHelpers: () => envHelpers,
     }
   }
+
+  it('does not render a second Canvas pane for a duplicate persisted scope', async () => {
+    // Restore through the workspace, where bindings are reconciled before pane content mounts.
+    const first = id(60), second = id(61)
+    const target = { kind: 'canvas', canvasId: canvas1Id, viewSlot: 0 }
+    localStorage.setItem(`workspace-panes:${JSON.stringify([userId, spaceId])}`, JSON.stringify({
+      version: 1,
+      layout: { splitId: id(62), axis: 'X', ratio: 0.5, first: { paneId: first }, second: { paneId: second } },
+      focusedPaneId: first,
+      bindings: { [first]: target, [second]: target },
+    }))
+    vi.mocked(fetch).mockImplementation(async input => {
+      const path = new URL(String(input), 'http://localhost').pathname
+      return path === `/api/chat-spaces/${spaceId}/tree` ? jsonResponse(makeTree()) : jsonResponse({}, 404)
+    })
+
+    renderShell()
+    expect(await screen.findByTestId(`canvas-${canvas1Id}`)).toBeInTheDocument()
+    expect(screen.getByText('Draft root')).toBeInTheDocument()
+  })
 
   it('shows loading and error states before tree loads, and handles space menu, defaults, archive, and space creation', async () => {
     let failTree = true

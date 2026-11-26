@@ -11,14 +11,17 @@ import { MAX_PANES } from './panes/model'
  *   and keys the unsent text; `folderId` is set when the draft was started from a directory,
  *   otherwise the first top-level folder is used when sending.
  * - `thread`: a public Thread of this space.
- * - `canvas`: a Canvas of this space. Omit `viewSlot` for the primary view; additional views use a reusable Canvas-local slot.
+ * - `canvas`: a Canvas of this space with a reusable Canvas-local `viewSlot`.
  * - `vscode`: one VS Code workbench view of an environment.
  */
 export type PaneTarget =
   | { kind: 'draft'; draftId: string; folderId?: string }
   | { kind: 'thread'; threadId: string }
-  | { kind: 'canvas'; canvasId: string; viewSlot?: number }
+  | { kind: 'canvas'; canvasId: string; viewSlot: number }
   | { kind: 'vscode'; environmentId: string; viewId: string }
+
+/** A resource open request; the workspace assigns the Canvas view slot when binding it. */
+export type PaneOpenTarget = Exclude<PaneTarget, { kind: 'canvas' }> | { kind: 'canvas'; canvasId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
 
@@ -32,11 +35,9 @@ export function isPaneTarget(value: unknown): value is PaneTarget {
     case 'thread':
       return hasExactKeys(value, ['kind', 'threadId']) && isCanonicalUuid(value.threadId)
     case 'canvas':
-      return isCanonicalUuid(value.canvasId) && (value.viewSlot === undefined
-        ? hasExactKeys(value, ['kind', 'canvasId'])
-        : hasExactKeys(value, ['kind', 'canvasId', 'viewSlot'])
-          && typeof value.viewSlot === 'number' && Number.isInteger(value.viewSlot)
-          && value.viewSlot >= 1 && value.viewSlot < MAX_PANES)
+      return hasExactKeys(value, ['kind', 'canvasId', 'viewSlot']) && isCanonicalUuid(value.canvasId)
+        && typeof value.viewSlot === 'number' && Number.isInteger(value.viewSlot)
+        && value.viewSlot >= 0 && value.viewSlot < MAX_PANES
     case 'vscode':
       return hasExactKeys(value, ['kind', 'environmentId', 'viewId'])
         && isCanonicalUuid(value.environmentId) && isCanonicalUuid(value.viewId)
@@ -52,11 +53,11 @@ export type PaneRendererProps<T extends PaneTarget> = {
   /** The pane is the focused pane. */
   active: boolean
   /** Replace this pane's target in place: draft → thread after the first message, branch or fork → the new thread. */
-  replace: (next: PaneTarget) => void
+  replace: (next: PaneOpenTarget) => void
   /** Open another target through the workspace open flow (directly, or after the pane picker). */
-  open: (next: PaneTarget, anchor?: HTMLElement | null) => void
+  open: (next: PaneOpenTarget, anchor?: HTMLElement | null) => void
   /** Open another target without replacing this pane: in an empty pane, otherwise in a new pane split from this one. */
-  openBeside: (next: PaneTarget) => void
+  openBeside: (next: PaneOpenTarget) => void
   /** Report whether the pane holds unsent input; the workspace confirms before replacing or closing it. */
   onUnsentChange: (unsent: boolean) => void
   /** Open the space's default configuration (default Agent, environment and permission). */

@@ -1,14 +1,14 @@
 import type { CanvasLocalState } from '@/features/canvas/types'
 import { loadCanvasViewport } from '@/features/canvas/viewport-storage'
 
-export function createInitialCanvasState(canvasId: string): CanvasLocalState {
+export function createInitialCanvasState(viewKey: string): CanvasLocalState {
   return {
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},
     drafts: {},
     storageError: null,
-    viewport: loadCanvasViewport(canvasId),
+    viewport: loadCanvasViewport(viewKey),
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,

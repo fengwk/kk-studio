@@ -4,7 +4,8 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import { AccountProvider } from '@/features/account/AccountProvider'
 import { DraftPaneRenderer, ThreadPaneRenderer } from '@/features/thread/workspace'
-import type { PaneTarget } from '@/features/workspace/pane-target'
+import { bindPane } from '@/features/workspace/pane-bindings'
+import type { PaneOpenTarget, PaneTarget } from '@/features/workspace/pane-target'
 import { PaneLayout } from '@/features/workspace/panes'
 import type { PaneState } from '@/features/workspace/panes/model'
 import { setLocale } from '@/shared/i18n'
@@ -26,7 +27,7 @@ export function Harness() {
   const [fullscreen, setFullscreen] = useState(false)
   const [unsent, setUnsent] = useState(false)
   const [settings, setSettings] = useState(false)
-  const bind = (target: PaneTarget) => setState((current) => ({ ...current, bindings: { [paneId]: target } }))
+  const bind = (target: PaneOpenTarget) => setState(current => bindPane(current, paneId, target))
   return <div style={{ height: '100%' }} data-unsent={unsent} data-settings={settings}>
     <PaneLayout state={state} setState={setState} fullscreen={fullscreen} onFullscreenChange={setFullscreen}
       describePane={(id, target = draft) => {

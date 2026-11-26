@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTextPart, partsToText } from '@/features/thread/composer/composer-parts'
 import { loadThreadDraft, saveThreadDraftParts } from '@/features/thread/runtime/state/thread-draft-store'
 import { ThreadPaneRenderer } from '@/features/thread/workspace'
-import type { PaneTarget } from '@/features/workspace/pane-target'
+import type { PaneOpenTarget } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
@@ -101,12 +101,12 @@ afterEach(() => {
 
 function renderThreadPane({
   threadId = THREAD,
-  replace = vi.fn<(next: PaneTarget) => void>(),
+  replace = vi.fn<(next: PaneOpenTarget) => void>(),
   onUnsentChange = vi.fn<(unsent: boolean) => void>(),
   seedSnapshot = true,
 }: {
   threadId?: string
-  replace?: (next: PaneTarget) => void
+  replace?: (next: PaneOpenTarget) => void
   onUnsentChange?: (unsent: boolean) => void
   seedSnapshot?: boolean
 } = {}) {

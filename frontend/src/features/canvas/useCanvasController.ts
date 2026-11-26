@@ -41,8 +41,8 @@ import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
  * 这些子 hook 接到同一个 {@link useCanvasScope} 作用域上。展示 = 权威快照 + 待确认操作 + 本地草稿。
  * 宿主以画布视图为 key；一个控制器实例只服务一个视图。
  */
-export function useCanvasController(canvasId: string, viewId?: string) {
-  const viewKey = canvasViewKey(canvasId, viewId)
+export function useCanvasController(canvasId: string, viewSlot: number) {
+  const viewKey = canvasViewKey(canvasId, viewSlot)
   const queryClient = useQueryClient()
   const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(viewKey))
   const stage = useCanvasStageSurface()
@@ -86,7 +86,7 @@ export function useCanvasController(canvasId: string, viewId?: string) {
   const draftLayer = useCanvasDraftPersistence({
     scope,
     canvasId,
-    viewId,
+    viewSlot,
     drafts: state.drafts,
     snapshot,
   })
@@ -96,7 +96,7 @@ export function useCanvasController(canvasId: string, viewId?: string) {
     scope,
     queryClient,
     canvasId,
-    viewId,
+    viewSlot,
     snapshot,
     ackDurableDraftsForScope: draftLayer.ackDurableDraftsForScope,
     applyDraftAcks: draftLayer.applyDraftAcks,

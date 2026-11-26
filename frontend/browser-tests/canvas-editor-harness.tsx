@@ -252,7 +252,7 @@ export function CanvasEditorHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <CanvasWorkbench canvasId={CANVAS_ID} />
+        <CanvasWorkbench canvasId={CANVAS_ID} viewSlot={0} />
       </ApplicationEventProvider>
     </QueryClientProvider>
   )

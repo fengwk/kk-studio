@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AccountContext } from '@/features/account/account-context'
 import { DraftPaneRenderer } from '@/features/thread/workspace'
-import type { PaneTarget } from '@/features/workspace/pane-target'
+import type { PaneOpenTarget } from '@/features/workspace/pane-target'
 import { ApiError, request } from '@/shared/api/client'
 import type {
   AgentSummaryDTO,
@@ -42,14 +42,14 @@ function renderDraftPane({
   user = { id: 'u1', username: 'alice', role: 'USER', profile: {} },
   defaultAgentName = 'default-agent' as string | null,
   defaultEnvironmentId = 'env-1' as string | null,
-  replace = vi.fn<(next: PaneTarget) => void>(),
+  replace = vi.fn<(next: PaneOpenTarget) => void>(),
   onUnsentChange = vi.fn<(unsent: boolean) => void>(),
   openSpaceSettings = vi.fn<() => void>(),
 }: {
   user?: StudioAccountDTO | null
   defaultAgentName?: string | null
   defaultEnvironmentId?: string | null
-  replace?: (next: PaneTarget) => void
+  replace?: (next: PaneOpenTarget) => void
   onUnsentChange?: (unsent: boolean) => void
   openSpaceSettings?: () => void
 } = {}) {

@@ -17,7 +17,7 @@ const DEFAULT_ANONYMOUS_USER = 'anonymous'
 export interface CanvasLocalStoreOptions {
   userId?: string
   editingSessionId?: string
-  viewId?: string
+  viewSlot: number
   idbFactory?: IDBFactory
 }
 
@@ -49,8 +49,8 @@ export function resolveIdbFactory(options?: CanvasLocalStoreOptions): IDBFactory
   return null
 }
 
-export function buildSessionKey(userId: string, canvasId: string, editingSessionId: string, viewId?: string): string {
-  return `${userId}:${canvasViewKey(canvasId, viewId)}:${editingSessionId}`
+export function buildSessionKey(userId: string, canvasId: string, editingSessionId: string, viewSlot: number): string {
+  return `${userId}:${canvasViewKey(canvasId, viewSlot)}:${editingSessionId}`
 }
 
 export type CanvasStorageErrorListener = (error: Error) => void
