@@ -3,7 +3,6 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SettingsRoute } from '@/app/SettingsRoute'
 import { AccountContext } from '@/features/account/account-context'
-import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { systemSettingsService } from '@/features/settings/system-settings-service'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { setLocale } from '@/shared/i18n'
@@ -23,9 +22,7 @@ systemSettingsService.update = async (update) => {
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={new QueryClient()}>
     <AccountContext.Provider value={{ user: { id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }, refresh: async () => {}, signOut: async () => {} }}>
-      <BrowserPreferencesProvider>
-        <MemoryRouter initialEntries={['/settings/preferences']}><Routes><Route path="/settings/:section" element={<SettingsRoute />} /></Routes></MemoryRouter>
-      </BrowserPreferencesProvider>
+      <MemoryRouter initialEntries={['/settings/preferences']}><Routes><Route path="/settings/:section" element={<SettingsRoute />} /></Routes></MemoryRouter>
     </AccountContext.Provider>
   </QueryClientProvider>,
 )

@@ -276,9 +276,6 @@ export async function runWorkspaceContractMatrix(ui) {
             `${fixture.provider.name}/${fixture.model.name}`,
             'Default',
             'YOLO',
-            'notify:',
-            'Browser notifications',
-            '浏览器通知',
           ]) {
             assert(!footerText.includes(forbidden), `Footer leaked interactive setting: ${forbidden}`)
           }
@@ -655,38 +652,6 @@ export async function runWorkspaceContractMatrix(ui) {
             await page.unroute(interactionsMatcher, interactionsHandler).catch(() => undefined)
             await page.unroute(approvalMatcher, approvalHandler).catch(() => undefined)
           }
-        },
-      )
-    },
-  )
-
-  await run(
-    'ui.settings.notifications_single_entry',
-    '浏览器通知只在 Settings 暴露唯一开关',
-    async (caseArt) => {
-      await ensureSignedIn?.()
-      await goto('/settings/preferences')
-      const switches = page.getByRole('switch', { name: UI_LABELS.notificationSwitch })
-      await switches.waitFor({ state: 'visible', timeout: 10_000 })
-      assert(await switches.count() === 1, 'Settings must expose exactly one notification switch')
-
-      await withWorkspaceUiFixture(
-        page,
-        () => createWorkspaceDurableHistoryFixture(apiCtx, {
-          title: `e2e-ui-notification-entry-${stamp}`,
-          messages: [`notification entry baseline ${stamp}`],
-        }),
-        async (fixture) => {
-          await bindWorkspaceThreadComposer(page, goto, fixture)
-          const panel = page.locator('.thread-panel')
-          assert(await panel.getByRole('switch').count() === 0, 'Thread panel exposed a notification switch')
-          assert(
-            await panel.locator('.thread-status-footer button').count() === 0,
-            'Thread Footer exposed an interactive notification control',
-          )
-          assert(!(await panel.innerText()).includes('notify:'), 'unsupported notification Footer label remains')
-          await shot(caseArt, 'settings-notification-single-entry')
-          expectNoFatal(pageErrors, consoleErrors)
         },
       )
     },

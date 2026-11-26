@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PropsWithChildren } from 'react'
 import { applicationContributions } from '@/app/application-contributions'
-import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { AccountProvider } from '@/features/account/AccountProvider'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 
@@ -14,9 +13,7 @@ export function AppProviders({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationContributionsProvider contributions={applicationContributions}>
-        <BrowserPreferencesProvider>
-          <AccountProvider>{children}</AccountProvider>
-        </BrowserPreferencesProvider>
+        <AccountProvider>{children}</AccountProvider>
       </ApplicationContributionsProvider>
     </QueryClientProvider>
   )

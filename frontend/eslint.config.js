@@ -9,7 +9,6 @@ import path from 'node:path'
 // New dependencies require review.
 const featureDependencies = {
   settings: [
-    'thread/runtime/state/thread-notifications',
     'extensions/PluginsTab',
     'catalog/agent-capability-candidates',
   ],
