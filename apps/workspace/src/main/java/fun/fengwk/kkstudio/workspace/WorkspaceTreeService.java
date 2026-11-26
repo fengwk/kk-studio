@@ -7,8 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
@@ -37,7 +36,7 @@ public class WorkspaceTreeService {
   private final WorkspacePlacements placements;
   private final HarnessPlacementQuery harness;
   private final ObjectProvider<HarnessRuntime> runtime;
-  private final CanvasQueryService canvases;
+  private final CanvasDocuments canvases;
   private final JdbcClient jdbc;
 
   WorkspaceTreeService(
@@ -45,7 +44,7 @@ public class WorkspaceTreeService {
       WorkspacePlacements placements,
       HarnessPlacementQuery harness,
       ObjectProvider<HarnessRuntime> runtime,
-      CanvasQueryService canvases,
+      CanvasDocuments canvases,
       JdbcClient jdbc) {
     this.spaces = spaces;
     this.placements = placements;
@@ -83,9 +82,7 @@ public class WorkspaceTreeService {
                 Collectors.toMap(
                     HarnessPlacementQuery.SessionTitle::id,
                     HarnessPlacementQuery.SessionTitle::title));
-    var canvasTitles =
-        canvases.findDocuments(canvasIds).stream()
-            .collect(Collectors.toMap(CanvasDocument::id, CanvasDocument::title));
+    var canvasTitles = canvases.findTitles(canvasIds);
     var threads = harness.threads(sessionIds);
     var facts =
         threads.isEmpty()

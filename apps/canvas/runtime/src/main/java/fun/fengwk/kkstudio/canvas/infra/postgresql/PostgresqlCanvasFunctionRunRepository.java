@@ -158,7 +158,7 @@ public class PostgresqlCanvasFunctionRunRepository {
   }
 
   /** 在 document、node 和 Run 之后锁定该节点的 Work（若存在）。 */
-  void lockWork(UUID nodeId) {
+  public void lockWork(UUID nodeId) {
     canvasRunWorkQueue.lock(nodeId);
   }
 

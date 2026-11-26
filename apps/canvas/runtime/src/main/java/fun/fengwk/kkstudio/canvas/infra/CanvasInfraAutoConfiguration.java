@@ -7,7 +7,9 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.ComponentScan.Filter;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.Import;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
@@ -28,6 +30,7 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
           type = FilterType.REGEX,
           pattern = "fun\\.fengwk\\.kkstudio\\.canvas\\.infra\\.platform\\..*")
     })
+@Import(CanvasDocuments.class)
 @EnableConfigurationProperties(CanvasFunctionRuntimeProperties.class)
 @Configuration(proxyBeanMethods = false)
 public class CanvasInfraAutoConfiguration {

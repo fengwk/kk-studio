@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
@@ -60,6 +61,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   private static final UUID USER_ID = UUID.randomUUID();
 
   @Autowired private CanvasCommandService commandService;
+  @Autowired private CanvasDocuments documents;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ApplicationContext context;
   @Autowired private TransactionalCanvasCaller transactionalCaller;
@@ -108,7 +110,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void deleteCanvasRemovesGraphAndReleasesEachBlobEdge() {
     Graph graph = addGraph(CanvasFunctionRunStatus.SUCCEEDED);
-    commandService.deleteCanvas(graph.canvasId(), graph.revision());
+    documents.delete(graph.canvasId(), graph.revision());
     assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L), graphRows(graph));
     assertEquals(0L, refCount(graph.blobId()));
     assertEquals("DELETING", blobState(graph.blobId()));
@@ -123,8 +125,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
     Graph graph = addGraph(status);
     DomainException error =
         assertThrows(
-            DomainException.class,
-            () -> commandService.deleteCanvas(graph.canvasId(), graph.revision()));
+            DomainException.class, () -> documents.delete(graph.canvasId(), graph.revision()));
     assertEquals(DomainErrorCode.CONFLICT, error.code());
     assertEquals("EXECUTION_NOT_SETTLED", error.reason());
     assertGraphIntact(graph, status);
@@ -133,8 +134,8 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   /** 空画布深删除后不留文档行。 */
   @Test
   void deleteEmptyCanvas() {
-    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "empty");
-    commandService.deleteCanvas(canvas.id(), canvas.revision());
+    CanvasDocument canvas = documents.create(UUID.randomUUID(), "empty");
+    documents.delete(canvas.id(), canvas.revision());
     assertEquals(0L, count("canvas_document", "id = ?", canvas.id()));
   }
 
@@ -144,8 +145,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
     Graph graph = addGraph(CanvasFunctionRunStatus.SUCCEEDED);
     DomainException error =
         assertThrows(
-            DomainException.class,
-            () -> commandService.deleteCanvas(graph.canvasId(), graph.revision() - 1));
+            DomainException.class, () -> documents.delete(graph.canvasId(), graph.revision() - 1));
     assertEquals(DomainErrorCode.VERSION_CONFLICT, error.code());
     assertEquals(graph.revision() - 1, error.expectedVersion());
     assertEquals(graph.revision(), error.actualVersion());
@@ -157,8 +157,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   void deleteMissingCanvas() {
     assertEquals(
         DomainErrorCode.NOT_FOUND,
-        assertThrows(DomainException.class, () -> commandService.deleteCanvas(UUID.randomUUID(), 0))
-            .code());
+        assertThrows(DomainException.class, () -> documents.delete(UUID.randomUUID(), 0)).code());
   }
 
   /** 平台适配根显式注册唯一 mapper，Web 无需自行扫描或装配它。 */
@@ -171,7 +170,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void deleteNodeReleasesBoundBlobReference() {
     UUID blobId = insertBlob("ACTIVE", 1L);
-    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "blob-release");
+    CanvasDocument canvas = documents.create(UUID.randomUUID(), "blob-release");
     UUID nodeId = UUID.randomUUID();
     apply(
         canvas,
@@ -190,7 +189,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void failedBlobReleaseRollsBackNodeDeletion() {
     UUID blobId = insertBlob("DELETING", 0L);
-    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "blob-release-failure");
+    CanvasDocument canvas = documents.create(UUID.randomUUID(), "blob-release-failure");
     UUID nodeId = UUID.randomUUID();
     apply(
         canvas,
@@ -215,7 +214,7 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   private Graph addGraph(CanvasFunctionRunStatus status) {
     // Blob 写入端已为两条资源边各持有一次引用。
     UUID blobId = insertBlob("ACTIVE", 2L);
-    CanvasDocument canvas = commandService.createCanvas(UUID.randomUUID(), "graph");
+    CanvasDocument canvas = documents.create(UUID.randomUUID(), "graph");
     UUID source = UUID.randomUUID();
     UUID function = UUID.randomUUID();
     UUID group = UUID.randomUUID();
@@ -347,32 +346,32 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @TestConfiguration(proxyBeanMethods = false)
   static class CallerConfiguration {
     @Bean
-    TransactionalCanvasCaller transactionalCanvasCaller(CanvasCommandService commandService) {
-      return new TransactionalCanvasCaller(commandService);
+    TransactionalCanvasCaller transactionalCanvasCaller(CanvasDocuments documents) {
+      return new TransactionalCanvasCaller(documents);
     }
   }
 
   static class TransactionalCanvasCaller {
-    private final CanvasCommandService commandService;
+    private final CanvasDocuments documents;
 
-    TransactionalCanvasCaller(CanvasCommandService commandService) {
-      this.commandService = commandService;
+    TransactionalCanvasCaller(CanvasDocuments documents) {
+      this.documents = documents;
     }
 
     @Transactional
     public CanvasDocument createAndCommit(String title) {
-      return commandService.createCanvas(UUID.randomUUID(), title);
+      return documents.create(UUID.randomUUID(), title);
     }
 
     @Transactional
     public UUID createAndRollback(String title) {
-      UUID id = commandService.createCanvas(UUID.randomUUID(), title).id();
+      UUID id = documents.create(UUID.randomUUID(), title).id();
       throw new RollbackAfterCreate(id);
     }
 
     @Transactional
     public void deleteAndRollback(UUID canvasId, long revision) {
-      commandService.deleteCanvas(canvasId, revision);
+      documents.delete(canvasId, revision);
       throw new RollbackAfterDelete();
     }
   }

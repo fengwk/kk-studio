@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
@@ -38,6 +39,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   private static final UUID USER_ID = UUID.randomUUID();
 
   @Autowired private CanvasCommandService commandService;
+  @Autowired private CanvasDocuments canvasDocuments;
 
   /** 插入 document 必须在提交时投递 {@code canvasId:0}。 */
   @Test
@@ -126,7 +128,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   @Test
   void commandServiceNotifiesOnCreateAndRealRevisionChange() throws Exception {
     try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
-      CanvasDocument document = commandService.createCanvas(UUID.randomUUID(), "canvas");
+      CanvasDocument document = canvasDocuments.create(UUID.randomUUID(), "canvas");
       UUID canvasId = document.id();
       assertRevisionNotification(listener, canvasId + ":0");
 
