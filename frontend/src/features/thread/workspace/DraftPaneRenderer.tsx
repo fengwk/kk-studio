@@ -8,6 +8,7 @@ import { RootThreadControlArea } from '@/features/thread/runtime/panes/RootThrea
 import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { ThreadPanel, ThreadStatusFooter } from '@/features/thread/runtime/thread-panel'
 import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-commands'
+import { isDefiniteAcceptanceFailure } from '@/features/thread/thread-commands-request'
 import type { PaneRendererProps } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
 import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
@@ -15,6 +16,7 @@ import type { HarnessModelSelectionDTO, SessionCreateDTO } from '@/shared/api/ge
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
+import { clearSessionSend, loadSessionSend, saveSessionSend, type SessionSendRecord } from './session-send-record'
 import { useComposerModels } from './useComposerModels'
 import { usePaneDraft } from './usePaneDraft'
 import './thread-workspace.css'
@@ -23,16 +25,29 @@ type Props = PaneRendererProps<{ kind: 'draft'; draftId: string; folderId?: stri
 const draftCommands = THREAD_COMMANDS.filter(({ id }) => id === 'upload')
 
 export function DraftPaneRenderer(props: Props) {
-  return <DraftPane key={`${props.space.id}:${props.target.draftId}`} {...props} />
+  const { user } = useAccount()
+  if (!user) return null
+  const scope = `workspace-draft:${JSON.stringify([user.id, props.space.id, props.target.draftId])}`
+  return <DraftPane key={scope} {...props} scope={scope} />
 }
 
-function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, target }: Props) {
+function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, target, scope }: Props & { scope: string }) {
   const { t } = useI18n()
   const { user } = useAccount()
   const cache = useQueryClient()
   const bodyRef = useRef<HTMLDivElement>(null)
-  const scope = `workspace-draft:${target.draftId}`
-  const [parts, changeParts] = usePaneDraft(scope, onUnsentChange)
+  const storageKey = `kk-studio.session-send:${scope}`
+  const [stored, setStored] = useState(() => {
+    try {
+      return { record: loadSessionSend(storageKey, target.draftId), unreadable: false }
+    } catch {
+      return { record: null, unreadable: true }
+    }
+  })
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const sending = useRef(false)
+  const retryRecord = stored.record && !stored.record.value.rejected ? stored.record : null
+  const [parts, changeParts] = usePaneDraft(scope, onUnsentChange, retryRecord != null)
   const [model, setModel] = useState<HarnessModelSelectionDTO>()
   const [environmentName, setEnvironmentName] = useState<string | null>(null)
   const [yolo, setYolo] = useState<boolean>()
@@ -53,12 +68,35 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   const yoloEnabled = yolo ?? space.defaultYoloEnabled
 
   const send = useMutation({
-    mutationFn: (body: SessionCreateDTO) => request('POST /api/chat-spaces/{spaceId}/sessions', {
-      path: { spaceId: space.id }, body,
-    }, { idempotencyKey: target.draftId }),
+    mutationFn: async (record: SessionSendRecord) => {
+      const { body, key } = record.value
+      const result = await request('POST /api/chat-spaces/{spaceId}/sessions', {
+        path: { spaceId: space.id }, body,
+      }, { idempotencyKey: key })
+      try {
+        if (clearSessionSend(storageKey, record)) {
+          clearStoredComposerDraft(scope)
+          return { ...result, cleared: true }
+        }
+      } catch {
+        // 保留记录，清理失败时仍可使用同一个键重放。
+      }
+      return { ...result, cleared: false }
+    },
     retry: false,
+    networkMode: 'always',
+    onError: (error, record) => {
+      if (!isDefiniteAcceptanceFailure(error)) return
+      try {
+        // 确定拒绝允许编辑，但只在成功后删除发送记录。
+        const rejected = saveSessionSend(storageKey, target.draftId, record, { ...record.value, rejected: true })
+        setStored({ record: rejected, unreadable: false })
+      } catch {
+        setStorageError(t('ai.runtime.action.storageClearFailed'))
+      }
+    },
+    onSettled: () => { sending.current = false },
     onSuccess: ({ threadId }) => {
-      clearStoredComposerDraft(scope)
       // 接受后读取服务端快照，不制造临时历史；首条命令在快照中是排队项或已物化的消息。
       void cache.prefetchQuery({
         queryKey: queryKeys.threads.snapshot(threadId),
@@ -68,13 +106,34 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     },
   })
 
-  // A lost response may hide a committed session. Retry the submitted body, not the current settings.
-  const retryBody = send.error instanceof ApiError
-    && (send.error.code === 'network_error' || send.error.code === 'timeout') ? send.variables : undefined
-  const locked = send.isPending || retryBody != null
-  function submit(body: SessionCreateDTO) {
-    send.mutate(body, {
-      onSuccess: ({ threadId }) => {
+  const locked = send.isPending || retryRecord != null
+  function submit(body?: SessionCreateDTO) {
+    if (sending.current || send.isPending) return
+    let record: SessionSendRecord
+    try {
+      if (retryRecord) {
+        if (loadSessionSend(storageKey, target.draftId)?.raw !== retryRecord.raw) {
+          throw new Error('Session send record changed')
+        }
+        record = retryRecord
+      } else {
+        if (!body) return
+        record = saveSessionSend(storageKey, target.draftId, stored.record, { key: target.draftId, body, rejected: false })
+        setStored({ record, unreadable: false })
+      }
+    } catch {
+      setStorageError(t('ai.runtime.action.storageFailed'))
+      return
+    }
+    sending.current = true
+    setStorageError(null)
+    send.mutate(record, {
+      onSuccess: ({ threadId, cleared }) => {
+        if (!cleared) {
+          setStorageError(t('ai.runtime.action.storageClearFailed'))
+          return
+        }
+        setStored({ record: null, unreadable: false })
         changeParts([])
         onUnsentChange(false)
         replace({ kind: 'thread', threadId })
@@ -82,9 +141,9 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     })
   }
 
-  const notice = retryBody ? <div className="thread-draft-notice" role="alert">
+  const notice = retryRecord && !send.isPending ? <div className="thread-draft-notice" role="alert">
     {t('ai.runtime.draft.sendUnknown')}
-    <Button variant="secondary" onClick={() => submit(retryBody)}>{t('ai.interaction.retry')}</Button>
+    <Button variant="secondary" onClick={() => submit()}>{t('ai.interaction.retry')}</Button>
   </div> : agents.isError
     ? <div className="thread-draft-notice" role="alert">
       {apiErrorDetail(agents.error) ?? t('shared.requestFailed')}
@@ -96,19 +155,21 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
         ? <Button variant="secondary" onClick={openSpaceSettings}>{t('ai.runtime.draft.spaceSettings')}</Button>
         : user?.role === 'ADMIN' && <Link className="btn-secondary" to="/settings/agents">{t('ai.runtime.draft.agentSettings')}</Link>}
     </div>
-  const actionError = retryBody ? null : send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
-    ? t('ai.runtime.draft.invalidFolder')
-    : send.error ? apiErrorDetail(send.error) ?? send.error.message : null
+  const actionError = (stored.unreadable ? t('ai.runtime.action.storageFailed') : storageError) ?? (
+    retryRecord ? null : send.error instanceof ApiError && (send.error.reason === 'INVALID_FOLDER' || send.error.code === 'INVALID_FOLDER')
+      ? t('ai.runtime.draft.invalidFolder')
+      : send.error ? apiErrorDetail(send.error) ?? send.error.message : null
+  )
 
   return <ThreadPanel
     transcript={{ messages: [], queuedMessages: [], loading: false, error: null, bodyRef }}
-    activity={{ working: false, actionError, onDismissActionError: send.reset }}
+    activity={{ working: false, actionError, onDismissActionError: () => { setStorageError(null); if (!sending.current) send.reset() } }}
     controls={<RootThreadControlArea rootThreadId={null} messages={[]} queuedMessages={[]} notice={notice}
       composer={{
         parts,
         pending: send.isPending,
         disabled: locked,
-        sendDisabled: !agent || agents.isError,
+        sendDisabled: stored.unreadable || !agent || agents.isError,
         focusOnEscape: active,
         scope,
         onPartsChange: changeParts,

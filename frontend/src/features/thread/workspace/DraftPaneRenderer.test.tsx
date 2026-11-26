@@ -22,6 +22,7 @@ vi.mock('@/shared/api/client', async (importOriginal) => {
 })
 
 const mockedRequest = vi.mocked(request)
+const sendStorageKey = 'kk-studio.session-send:workspace-draft:["u1","space-1","draft-1"]'
 
 const READY_AGENTS: AgentSummaryDTO[] = [
   { name: 'default-agent', description: null, modelName: 'gpt-test', variant: 'high', driver: 'builtin' },
@@ -90,15 +91,20 @@ describe('DraftPaneRenderer', () => {
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
   })
 
   it('submits a new session, clears draft, and replaces the pane with the created thread', async () => {
     const user = userEvent.setup()
-    mockedRequest.mockImplementation((async (endpoint: string) => {
+    mockedRequest.mockImplementation((async (endpoint: string, params: { body?: unknown }) => {
       if (endpoint === 'GET /api/platform/agent-summaries') return READY_AGENTS
       if (endpoint === 'GET /api/platform/model-summaries') return READY_MODELS
       if (endpoint === 'GET /api/platform/environment-summaries') return READY_ENVS
-      if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') return { sessionId: 'sess-1', threadId: 'thread-new', commandId: 'cmd-1', treeVersion: '1' }
+      if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') {
+        // The complete wire body and key must already be durable when the request starts.
+        expect(sessionStorage.getItem(sendStorageKey)).toBe(JSON.stringify({ key: 'draft-1', body: params.body, rejected: false }))
+        return { sessionId: 'sess-1', threadId: 'thread-new', commandId: 'cmd-1', treeVersion: '1' }
+      }
       if (endpoint === 'GET /api/harness/threads/{threadId}/snapshot') {
         return { version: '1', thread: { threadId: 'thread-new' }, entries: [] }
       }
@@ -115,6 +121,7 @@ describe('DraftPaneRenderer', () => {
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-new' }))
     expect(onUnsentChange).toHaveBeenCalledWith(false)
+    expect(sessionStorage.getItem(sendStorageKey)).toBeNull()
     expect(mockedRequest).toHaveBeenCalledWith(
       'POST /api/chat-spaces/{spaceId}/sessions',
       expect.objectContaining({
@@ -129,7 +136,36 @@ describe('DraftPaneRenderer', () => {
     )
   })
 
-  it('shows retry banner on network/timeout failure and recovers when retried; shows INVALID_FOLDER error', async () => {
+  it('does not send when saving the replay record fails', async () => {
+    const user = userEvent.setup()
+    mockedRequest.mockImplementation(async (endpoint: string) => {
+      if (endpoint === 'GET /api/platform/agent-summaries') return READY_AGENTS
+      if (endpoint === 'GET /api/platform/model-summaries') return READY_MODELS
+      if (endpoint === 'GET /api/platform/environment-summaries') return READY_ENVS
+      throw new Error(`Unexpected endpoint: ${endpoint}`)
+    })
+    const setItem = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === sessionStorage && key === sendStorageKey) throw new DOMException('Storage full', 'QuotaExceededError')
+      setItem.call(this, key, value)
+    })
+
+    renderDraftPane()
+    const editor = await screen.findByRole('textbox')
+    await user.type(editor, 'Keep this draft')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // A quota error leaves the composer intact and prevents any session POST.
+    expect(await screen.findByText('无法保存发送记录，未发送消息；请重试。')).toBeInTheDocument()
+    expect(editor).toHaveTextContent('Keep this draft')
+    expect(mockedRequest.mock.calls.map(([endpoint]) => endpoint)).not.toContain('POST /api/chat-spaces/{spaceId}/sessions')
+  })
+
+  it.each([
+    new ApiError('network lost', 0, 'network_error'),
+    new ApiError('timed out', undefined, 'timeout'),
+    new ApiError('unavailable', 503),
+  ])('shows retry after $message and unlocks on INVALID_FOLDER', async (failure) => {
     const user = userEvent.setup()
     let sessionCall = 0
     mockedRequest.mockImplementation((async (endpoint: string) => {
@@ -138,7 +174,7 @@ describe('DraftPaneRenderer', () => {
       if (endpoint === 'GET /api/platform/environment-summaries') return READY_ENVS
       if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') {
         sessionCall += 1
-        if (sessionCall === 1) throw new ApiError('network lost', 0, 'network_error')
+        if (sessionCall === 1) throw failure
         if (sessionCall === 2) throw new ApiError('invalid folder', 400, 'INVALID_FOLDER', undefined, 'INVALID_FOLDER')
         return { sessionId: 'sess-2', threadId: 'thread-recovered', commandId: 'cmd-2', treeVersion: '2' }
       }
@@ -156,8 +192,9 @@ describe('DraftPaneRenderer', () => {
     expect(alert).toHaveTextContent('未收到发送结果')
     await user.click(screen.getByRole('button', { name: '重试' }))
 
-    // Second failure is INVALID_FOLDER -> renders localized folder error
+    // A definite rejection unlocks editing without removing the record before success.
     await waitFor(() => expect(screen.getByText('此目录已不可用。请选择其他目录后再发送。')).toBeInTheDocument())
+    expect(JSON.parse(sessionStorage.getItem(sendStorageKey)!)).toMatchObject({ rejected: true })
 
     // Third attempt succeeds
     fireEvent.keyDown(editor, { key: 'Enter' })
