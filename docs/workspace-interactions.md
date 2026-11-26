@@ -1,12 +1,12 @@
-# KK Studio 1.3.0 · 交互与底层链路
+# Workspace 交互与底层链路
 
-每个用户动作只走一条路径。本文按动作说明：前端状态怎样变，调用哪个接口，服务端在哪个事务里改哪些数据，提交后发什么事件，失败时用户看到什么。表结构、字段和错误码定义见[资源工作区重构方案](workspace-design.md)；表中接口的相对路径以 `/api/chat-spaces/{spaceId}` 开头。
+每个用户动作只走一条路径。本文按动作说明前端状态、接口、服务端事务、事件与失败反馈。持久模型和接口边界见[Workspace 产品设计与模型](workspace-design.md)；Chat Space 与其创建、更新数据结构以生成的 `ChatSpaceDTO`、`ChatSpaceCreateDTO`、`ChatSpacePatchDTO` 为准，定义见[生成的接口类型](../frontend/src/shared/api/generated/contracts.ts)。接口相对路径以 `/api/chat-spaces/{spaceId}` 开头。
 
 ## 三类前端状态
 
 | 状态 | 内容 | 保存在 |
 | --- | --- | --- |
-| 布局 | 窗格树、窗格绑定、聚焦窗格、目录展开、侧栏宽度 | 浏览器本地，按用户和空间 ID 分开；不经过服务端 |
+| 布局 | 窗格树、窗格绑定、聚焦窗格、目录展开、侧栏宽度 | 浏览器本地，按用户和空间 ID 分开；不兼容的快照回到默认单窗格，不迁移旧布局 |
 | 草稿 | 新会话和 Thread 输入框里尚未发送的内容 | 窗格内存，可持久化的输入保存在浏览器 |
 | 服务端快照 | 当前用户、空间列表、含 Thread 状态的目录树、定时任务、执行记录页、Thread 快照、画布文档 | 查询缓存；事件只触发重新读取 |
 
@@ -67,6 +67,8 @@
 3. **加载。** Thread 读取 Harness 快照并订阅 `thread`；画布读取文档并订阅 `canvas`；VS Code 先复验环境已就绪且有该功能，再通过现有 IDE 视图绑定打开。
 4. **目录不动。** 打开不改变目录的选中行和展开状态。
 
+工作区以 `PaneTarget` 绑定窗格：`draft`（`draftId`、可选 `folderId`）、`thread`（`threadId`）、`canvas`（`canvasId`、可选 `viewSlot`）或 `vscode`（`environmentId`、`viewId`）。同一 Canvas 的主视图省略 `viewSlot`，附加视图使用槽位 1–7；主视图作为第 0 个视角计数，因此每个 Canvas 最多八个视角。Canvas 将附加槽位转换为字符串 `viewId`，通过 `canvasViewKey(canvasId, viewId)` 统一标识：主视图使用 `canvasId`，附加视图使用 `canvasId/viewId`。不同 Canvas 视角的本地选择、视口、草稿和操作状态按此键隔离。
+
 深链 `?thread=` 先读取 `GET /threads/{id}` 得到所属 Session 和标题；`?canvas=` 在当前目录快照中确认属于该空间。资源不存在时提示不可用，布局不变。资源被删除后，绑定它的窗格在下一次目录对账时回到「新会话」。
 
 窗格里的动作在原窗格继续：发送首条消息、分支和从回合末尾新建会话都不走选择流程。
@@ -75,7 +77,7 @@
 
 **发送首条消息**
 
-- 前端：窗格目标是 `DRAFT{id, folderId}`。发送前保存本次请求，发送期间锁定输入；收到接受回执后打开 `THREAD` 并清除草稿。未收到结果时，在同一标签页刷新仍显示「重试」；不自动重发，手动重试沿用原请求。空间没有可用 Agent 时不能发出新请求：有 Agent 可选时打开空间默认配置；一个也没有时，管理员可打开 Agent 设置，普通用户只看到原因。
+- 前端：窗格目标是 `PaneTarget` 的 `{ kind: 'draft', draftId, folderId? }`。发送前保存本次请求，发送期间锁定输入；收到接受回执后将目标替换为 `{ kind: 'thread', threadId }` 并清除草稿。未收到结果时，在同一标签页刷新仍显示「重试」；不自动重发，手动重试沿用原请求。空间没有可用 Agent 时不能发出新请求：有 Agent 可选时打开空间默认配置；一个也没有时，管理员可打开 Agent 设置，普通用户只看到原因。
 - 接口：`POST /sessions`，初次发送用草稿 ID。若服务端明确返回 `IDEMPOTENCY_KEY_REUSED`，保留输入并恢复编辑；用户再次发送时才生成新键。
 - 事务：锁空间行 → 校验目录属于该空间、默认 Agent 存在 → Harness 创建 Session、ROOT（根设置含 Agent 名称）和 `main` Thread，并接受首条命令 → 写目录边（含 Agent 名称，排在所在目录最上面）→ `tree_version` 加一。Session 标题取首条消息的前 40 个字符。
 - 事件：`tree`；之后正文经 `thread` 订阅推送。
@@ -135,7 +137,7 @@
 
 **新建会话、新建画布**
 
-- 新建会话：打开 `DRAFT{folderId}`，走打开流程，不调用接口；首条消息发送后才创建。
+- 新建会话：打开 `{ kind: 'draft', draftId, folderId? }` pane target，走打开流程，不调用接口；首条消息发送后才创建。
 - 新建画布：名称框确认后调用 `POST /canvases`（`{folderId, title, expectedTreeVersion}`）。事务锁空间行，由 Canvas 创建文档，再在所在目录最上面写目录边，`tree_version` 加一，发 `tree`。创建成功后展开所在目录，然后走打开流程；取消选择窗格时画布仍在目录里。
 
 **移动和排序**
@@ -190,7 +192,7 @@
 - 收到 `schedules` 实时帧（数据 `{scheduleId}`）时，仍在首页则重新读取首页；已经翻页则保持当前页，避免页边界跳动。
 - 点击带 Thread 的记录走打开流程；Thread 已被删除时记录保留并显示「Thread 已删除」。
 
-**自动触发（服务端）**
+**自动触发**
 
 1. Worker 用独立短事务领取到期的唤醒 Work。
 2. 业务事务按所有者 → 空间 → 任务加锁；所有者仍启用时，用数据库时间确认 `enabled`、版本和 `next_due_at`，再复验目标并锁住目标执行闭包。

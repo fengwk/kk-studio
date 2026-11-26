@@ -44,7 +44,6 @@ const documentPaths = [
   'docs/workspace-harness.md',
   'docs/workspace-interactions.md',
   'docs/workspace-ui.md',
-  'docs/workspace-delivery.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
   'docs/operations/development-and-testing.md',

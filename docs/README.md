@@ -13,10 +13,9 @@
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
 | 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
 | 理解 Harness 的架构、库表、模型字段、执行与接口 | [Harness](workspace-harness.md) |
-| 评审产品设计与模型映射 | [产品设计与模型映射](workspace-design.md) |
-| 实现新工作区时核对每个动作的接口、事务和事件 | [交互与底层链路](workspace-interactions.md) |
-| 统一新工作区的颜色、间距、焦点和组件样式 | [视觉语言与组件体系](workspace-ui.md) |
-| 规划新工作区的代码去留、实施顺序和验收 | [保留、重构、删除与交付](workspace-delivery.md) |
+| 理解工作区的产品概念和模型 | [产品设计与模型映射](workspace-design.md) |
+| 核对工作区操作的接口、事务和事件 | [交互与底层链路](workspace-interactions.md) |
+| 修改工作区的颜色、间距、焦点和组件样式 | [视觉语言与组件体系](workspace-ui.md) |
 | 核对 Resource URI、技能内容与 Session 持有关系 | [Platform：Resource URI 与 Session 持有](modules/platform.md#resource-uri-与-session-持有) |
 | 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
@@ -27,19 +26,6 @@
 | 使用 Canvas 资源与 Function | [Canvas](modules/canvas.md) |
 | 核对数据库关系、约束与基线 | [Schema](modules/schema.md)及 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
 | 报告安全漏洞 | [Security Policy](../SECURITY.md) |
-
-## 构建评审 HTML
-
-两份评审文档分别维护 Markdown 源，构建为可独立阅读的 HTML。使用 Node.js 22+，将命令里的 `<html-view 目录>` 替换为本机技能目录，从仓库根目录运行：
-
-```sh
-mkdir -p reports/workspace-review
-htmlview='<html-view 目录>/scripts/htmlview'
-node "$htmlview" doc build docs/workspace-harness.md --out reports/workspace-review/harness-architecture.html --type tech-spec --lang zh-CN
-node "$htmlview" doc build docs/workspace-design.md --out reports/workspace-review/product-design.html --type tech-spec --lang zh-CN
-```
-
-HTML 和截图留在 `reports/`，不入库。构建后对两份 HTML 分别运行 `htmlview audit` 和 `htmlview check`。
 
 ## 按代码区域理解系统
 

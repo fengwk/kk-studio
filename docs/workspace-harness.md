@@ -2,7 +2,7 @@
 
 **Harness 是 Agent 的持久化执行内核。** 输入登记为 Command。Worker 领取 Work，推进模型、工具和子 Agent。Entry 保存历史，Thread 指向执行进度，Invocation 保存调用状态，Work 记录调度时间与租约。进程重启后，Worker 从已提交的记录继续。
 
-## 分层与依赖 {#boundaries}
+## 分层与依赖
 
 ```layers
 ---
@@ -35,7 +35,7 @@ title: 从外部请求到执行事实
 
 `runtime` 依赖 `model` 和 `environment` 的契约，通过 `AgentDriver` 使用具体 Driver。`agent-builtin` 实现该接口。Platform 的目录适配器将 Agent 配置解析为 Builtin 请求；公共 Store 与 Builtin 专用 Store 共用一个 PostgreSQL 事务。
 
-## 库表结构 {#model}
+## 库表结构
 
 `PK` 表示主键，`FK` 表示外键，`?` 表示允许 `NULL`。`timestamptz(3)` 保存毫秒精度时间。
 
@@ -70,7 +70,7 @@ erDiagram
 - **历史树**：同一个 Session 的 Thread 可以共享历史前缀。每条 Thread 的 `EntryPath` 从 `head_entry_id` 沿 `parent_entry_id` 回溯到 `ROOT`，再按正序读取。
 - **执行树**：`parent_thread_id` 连接直接父 Thread，`root_thread_id` 定位整棵树。执行树用于委派、停止和删除，可包含多个 Session。子 Agent 通常拥有独立 Session，压缩子 Thread 与发起者共用 Session。
 
-#### [`harness_session`](../schema/src/main/resources/db/migration/V1__schema.sql#L343)
+#### [`harness_session`](../schema/src/main/resources/db/migration/V1__schema.sql#L344)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -78,7 +78,7 @@ erDiagram
 | `name` | `varchar(256)` | 显示名称 |
 | `created_at` | `timestamptz(3)` | 创建时间 |
 
-#### [`harness_entry`](../schema/src/main/resources/db/migration/V1__schema.sql#L357)
+#### [`harness_entry`](../schema/src/main/resources/db/migration/V1__schema.sql#L358)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -86,13 +86,13 @@ erDiagram
 | `session_id` | `uuid` · FK | 所属 Session |
 | `parent_entry_id` | `uuid`? · FK | 同 Session 的父 Entry；`ROOT` 取 `NULL` |
 | `entry_type` | `varchar(32)` | 节点类型 |
-| `payload` | `jsonb` | [按类型编码的数据](#payloads) |
+| `payload` | `jsonb` | [按类型编码的数据](#模型与字段) |
 | `entry_seq` | `bigint` | 数据库分配的追加序号；用于 Session 历史分页 |
 | `created_at` | `timestamptz(3)` | 创建时间 |
 
 父节点用 `(session_id, parent_entry_id)` 引用同 Session 的 Entry。创建 Session 时写入 `ROOT`；部分唯一索引约束每个 Session 至多一个根节点。
 
-#### [`harness_thread`](../schema/src/main/resources/db/migration/V1__schema.sql#L420)
+#### [`harness_thread`](../schema/src/main/resources/db/migration/V1__schema.sql#L421)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ flowchart TB
 
 Runtime 注册 `THREAD` 和 `TOOL`，Builtin Driver 注册 `MODEL`。实线连接 Thread 的业务记录，虚线指向各 Work 类型的调度目标。
 
-#### [`harness_thread_command`](../schema/src/main/resources/db/migration/V1__schema.sql#L527)
+#### [`harness_thread_command`](../schema/src/main/resources/db/migration/V1__schema.sql#L528)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -152,7 +152,7 @@ Runtime 注册 `THREAD` 和 `TOOL`，Builtin Driver 注册 `MODEL`。实线连�
 
 复合主键为 `(thread_id, sequence)`；`(thread_id, idempotency_key)` 唯一。索引支持按序读取排队命令、按 Stop 请求查询撤销的命令。
 
-#### [`builtin_model_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L1261)
+#### [`builtin_model_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L1262)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -175,7 +175,7 @@ Runtime 注册 `THREAD` 和 `TOOL`，Builtin Driver 注册 `MODEL`。实线连�
 
 Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个已挂接的 `result_entry_id` 唯一。结果物化后清理行；进入工具阶段时保留到批次应用完成。
 
-#### [`harness_tool_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L586)
+#### [`harness_tool_invocation`](../schema/src/main/resources/db/migration/V1__schema.sql#L587)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -197,7 +197,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 `(assistant_entry_id, call_index)` 唯一；同一 Assistant 的调用按顺序形成批次。批次结果写进 Entry 后删除调用行。`WAITING_CHILD` 纳入状态约束与非终态索引；人工待办索引覆盖 `WAITING_APPROVAL` 和 `WAITING_INPUT`。
 
-#### [`durable_work`](../schema/src/main/resources/db/migration/V1__schema.sql#L659)
+#### [`durable_work`](../schema/src/main/resources/db/migration/V1__schema.sql#L660)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -213,7 +213,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 ### 交付、停止与桥接记录
 
-#### [`harness_thread_join`](../schema/src/main/resources/db/migration/V1__schema.sql#L697)
+#### [`harness_thread_join`](../schema/src/main/resources/db/migration/V1__schema.sql#L698)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -223,7 +223,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 | `child_thread_id` | `uuid` · FK | 执行任务的 Thread |
 | `source_command_sequence` | `bigint` · FK | 子 Thread 接受的源命令序号 |
 | `agent` | `varchar(256)` | 本次委派使用的 Agent |
-| `delivery` | `varchar(32)` | [结果交付方式](#subexecution) |
+| `delivery` | `varchar(32)` | [结果交付方式](#委派分支与压缩) |
 | `superseded_by_invocation_id` | `uuid`? · FK | 接替本次委派的新票据 |
 | `max_turns` | `integer`? | 轮数软预算 |
 | `reminder_turn` | `bigint` | 已发出的预算提醒计数 |
@@ -235,7 +235,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 源命令和通知命令分别以子、父的 `(thread_id, sequence)` 引用 Command。回执从固定的源命令、终态与回答坐标重建。
 
-#### [`harness_thread_stop_receipt`](../schema/src/main/resources/db/migration/V1__schema.sql#L770)
+#### [`harness_thread_stop_receipt`](../schema/src/main/resources/db/migration/V1__schema.sql#L771)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -247,7 +247,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 复合主键为 `(thread_id, stop_request_id)`。按 `root_stop_request_id` 汇总原始停止集合，按 Command 表的 `stop_request_id` 查撤销的输入。
 
-#### [`harness_execution_exit`](../schema/src/main/resources/db/migration/V1__schema.sql#L795)
+#### [`harness_execution_exit`](../schema/src/main/resources/db/migration/V1__schema.sql#L796)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -259,14 +259,14 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 | `kind` | `varchar(16)` | `DRIVER` / `TOOL` / `REMOTE` |
 | `parent_execution_id` | `uuid`? · FK | 远端代次所关联的本地执行 |
 | `environment_id` | `uuid`? | 远端执行环境 |
-| `state` | `varchar(32)` | [退出证据状态](#stop) |
+| `state` | `varchar(32)` | [退出证据状态](#停止退出证明与删除) |
 | `registered_at` | `timestamptz(3)` | 登记时间 |
 | `confirmed_at` | `timestamptz(3)`? | 确认退出时间 |
 | `abandoned_at` | `timestamptz(3)`? | 人工放弃确认的时间 |
 
 退出记录按 Thread 查询，并独立于 Invocation 行保留。远端记录关联 Environment 和发起它的本地执行。
 
-#### [`session_blob_ref`](../schema/src/main/resources/db/migration/V1__schema.sql#L865)
+#### [`session_blob_ref`](../schema/src/main/resources/db/migration/V1__schema.sql#L866)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -276,7 +276,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 复合主键为 `(session_id, blob_id)`；两个外键限制被引用行的删除。同一 Session 对同一 Blob 建立一条持有边；复制到新 Session 时为目标登记持有边。
 
-#### [`realtime_subscription`](../schema/src/main/resources/db/migration/V1__schema.sql#L508)
+#### [`realtime_subscription`](../schema/src/main/resources/db/migration/V1__schema.sql#L509)
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -288,7 +288,7 @@ Builtin Driver 持有此表。`(thread_id, turn_start_entry_id)` 唯一，每个
 
 SQL 校验引用、唯一性、枚举和 JSON 容器，Java 值类型与 codec 校验 payload。工具批次在应用层核对 `call_index` 连续、与 Assistant 声明一一对应、归属于同一个开放回合。
 
-## 模型与字段 {#payloads}
+## 模型与字段
 
 ### Entry 和回合文法
 
@@ -353,7 +353,7 @@ Builtin 将冻结规格与 `request_head_entry_id` 对应的历史组装成中�
 
 #### 模型目录与运行时选择
 
-[目录表](../schema/src/main/resources/db/migration/V1__schema.sql#L888) 以逻辑名标识 Agent、Provider 和模型。`model.kind=MODEL` 通过 `provider_name` 关联 Provider，用 `model_id` 向上游请求；`kind=GROUP` 保存有序成员与降级、冷却设置。`model_group_cooldown` 的冷却记录按组、成员、variant 和组配置版本生效。
+[目录表](../schema/src/main/resources/db/migration/V1__schema.sql#L889) 以逻辑名标识 Agent、Provider 和模型。`model.kind=MODEL` 通过 `provider_name` 关联 Provider，用 `model_id` 向上游请求；`kind=GROUP` 保存有序成员与降级、冷却设置。`model_group_cooldown` 的冷却记录按组、成员、variant 和组配置版本生效。
 
 | 模型 | 字段 | 含义 |
 | --- | --- | --- |
@@ -365,7 +365,7 @@ Builtin 将冻结规格与 `request_head_entry_id` 对应的历史组装成中�
 
 模型回合冻结输出预算。读服务用历史用量和查询时的目录费率计算费用。
 
-## 一条输入怎样执行完 {#flow}
+## 一条输入怎样执行完
 
 新 Session 收到一条输入。模型先请求工具，再根据工具结果给出最终答复。`S`、`T`、`M1`、`I1` 和 `E0` 等代称分别代表本次执行中的 UUID。
 
@@ -418,7 +418,7 @@ Provider 完成时，另一个短事务核对有效 claim 与当前 attempt，�
 
 ### TOOL 执行：工具结果先落调用行
 
-TOOL Worker 领取 `(TOOL, I1)`。许可检查和网关准入通过后，短事务先写 `RUNNING, attempt=1` 与退出事实；实际工具在事务外执行。成功结果在另一个短事务写入 `I1.result`、置为 `SUCCEEDED`，请求 `(THREAD, T)` 并完成 TOOL claim。这时 `T.head` 仍可以是 `E4`；退出证明与逻辑结果是各自独立的事实。审批、问卷和子任务在[对应等待状态](#recovery)持久化，条件满足后唤醒。
+TOOL Worker 领取 `(TOOL, I1)`。许可检查和网关准入通过后，短事务先写 `RUNNING, attempt=1` 与退出事实；实际工具在事务外执行。成功结果在另一个短事务写入 `I1.result`、置为 `SUCCEEDED`，请求 `(THREAD, T)` 并完成 TOOL claim。这时 `T.head` 仍可以是 `E4`；退出证明与逻辑结果是各自独立的事实。审批、问卷和子任务在[对应等待状态](#work并发与失败恢复)持久化，条件满足后唤醒。
 
 ### THREAD 应用全批：关闭第一个回合，另开回合
 
@@ -434,7 +434,7 @@ E0 ROOT → E1 SYSTEM → E2 TURN_START(INPUT) → E3 USER
 
 从任意已提交断点判断下一步：`Command=QUEUED` 看 THREAD；`M1=READY/RUNNING` 看 MODEL；`M1` 终态且尚无结果 Entry 看 THREAD；`I1` 等待看相应触发条件；全批已终止看 THREAD；`TURN_END.continueModel=true` 看下一轮规划。每次推进用该阶段的记录恢复。
 
-## Work、并发与失败恢复 {#recovery}
+## Work、并发与失败恢复
 
 ### Work 的两个围栏
 
@@ -478,7 +478,7 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 
 模型生命周期为 `READY / RUNNING / SUCCEEDED / FAILED / CANCELLED / UNKNOWN`；工具在这些状态之外增加 `WAITING_APPROVAL / WAITING_INPUT / WAITING_CHILD`。`UNKNOWN` 结束逻辑调用，记录操作结果不明；外部副作用可能已经发生。退出账本独立记录执行状态，未确认退出仍阻塞收敛。重试策略和流式 checkpoint 详见 [Builtin Driver](modules/harness-agent-builtin.md#model-work-与流式执行)，工具执行入口是 [ToolProcessor](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java)。
 
-## 委派、分支与压缩 {#subexecution}
+## 委派、分支与压缩
 
 ### Join：一次委派的可恢复回执
 
@@ -510,7 +510,7 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 
 触发包括预算预判、Provider 上下文溢出、工具在安全边界请求，以及显式 `compactThread`。自动压缩保留继续义务；前次完成压缩后，下一次自动压缩要求期间已有成功的普通模型回合。显式维护压缩保存摘要后结束本轮工作。详见 [压缩规则](modules/harness-runtime.md#压缩) 与 [历史复制](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/SessionForkCopy.java)。
 
-## 停止、退出证明与删除 {#stop}
+## 停止、退出证明与删除
 
 **Stop 写入执行控制与停止回执。** 首次执行校验 `expectedVersion`，重放按 `stopRequestId` 返回原回执。退出状态由退出账本独立记录。在一个执行树事务内，Runtime 收敛目标及全部后代：保留已提交结果，关闭开放回合，取消待执行命令和调用，清理 Work，写 `STOPPED` 与 Stop 回执。未处理的人工输入可从回执取回；排队系统通知直接写入历史。空闲且无续作义务的封闭路径用 `TURN_START(STOP)` → `ASSISTANT_ERROR(CANCELLED)` → `TURN_END(STOPPED)` 留下边界；待续作则用 `CONTINUATION` 的取消屏障消掉续作义务。提交完成后才向本地执行体发出取消请求。
 
@@ -529,7 +529,7 @@ Join 准入（需要时）→ 执行树（按根排序）→ Session → Thread
 
 **`deleteSessions` 按 Session 深删除。** 它发现并锁定删除范围，复核执行父子边的两端均在范围内；先清 Join 和 Driver 私有记录等 Thread 依赖，再删 Thread，逐 Session 释放 Blob 持有边并删除历史和 Session。调用方的删除门禁和清理回调在同一事务执行。实现见 [StopControl](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StopControl.java)、[退出协议](modules/harness-runtime.md#退出确认与放弃) 和 [SessionDeletion](../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/SessionDeletion.java)。
 
-## 快照与状态 {#thread-read}
+## 快照与状态
 
 ### 一次读取能看见什么
 
@@ -565,7 +565,7 @@ HTTP 的 [ThreadSnapshot DTO](../platform/runtime/src/main/java/fun/fengwk/kkstu
 
 `RUNNING` 覆盖正在推进及等待推进的本地义务。`STOPPED` 可与 `EXIT_PENDING` 同时成立。人工等待和工具结果不明由独立执行事实表达；Join 按自身的收敛条件结算。
 
-## 接口 {#interfaces}
+## 接口
 
 ### Java API 与 SPI
 
@@ -629,7 +629,7 @@ Builtin 单独提供三条查询或追帧接口：
 
 流式 `realtime` 包含模型 delta/checkpoint 和工具 partial，按调用身份、attempt 与流序号关联。checkpoint 在同一 Thread version 内推进。快照超出单帧限制时发送 `snapshot-ref`，客户端经 HTTP 回读；重连、收到 `resync` 或发现流缺口时，以已提交快照为基准重新对账。完整协议在 [事件编解码器](../web/src/main/java/fun/fengwk/kkstudio/web/events/EventFrameCodec.java) 与 [事件通道](modules/web.md)。
 
-## 源码与验证入口 {#references}
+## 源码与验证入口
 
 | 要验证的机制 | 源码或测试 |
 | --- | --- |

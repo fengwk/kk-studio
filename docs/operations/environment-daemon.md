@@ -30,7 +30,7 @@ stdout/stderr。
 
 ## 在 Web 中配置卡片并生成安装命令
 
-1. 在 [Environment](http://localhost:8080/environments) 页面创建卡片并填写配置：
+1. 用管理员账号打开设置中的 [Environment](http://localhost:8080/settings/environments)，创建卡片并填写配置：
    - **名称**：创建后不可变。
    - **备注**：卡片展示与提示词使用，保存后立即生效，不由 Daemon 消费。
    - **Studio 地址（仅 origin）**：例如 `https://studio.example.com`，不要带路径、查询或片段。

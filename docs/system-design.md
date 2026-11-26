@@ -1,8 +1,8 @@
 # 系统设计
 
-`kk-studio` 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
-[`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成，Environment Daemon 把指定主机的
-文件、命令与 LSP 能力接入 Agent，code-server 由 Daemon 托管。
+`kk-studio` 是自托管 AI 工作台，Studio 内建账号与角色负责浏览器登录和授权；每个账号拥有自己的 Chat Space。
+浏览器是工作台前端，Studio 节点由 [`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成。
+Environment Daemon 在其运行主机上提供文件、命令与 LSP 能力，code-server 由 Daemon 托管。Daemon 对主机权限的访问边界由操作系统运行账号决定，不提供文件系统沙箱。
 
 PostgreSQL 保存业务事实与执行权。Thread 与执行树使用 WebSocket 推送权威快照，HTTP 用于首载、历史和缺口恢复；
 其它订阅可用事件提示浏览器回读权威 REST Snapshot。连接中断或通知丢失时按资源恢复，Worker 从持久 Work 接管中断的执行。
@@ -332,7 +332,7 @@ URI 编码与解析、读取鉴权、Session 持有与释放见 [Common：Resour
 
 | 产品 | 模块 | 拥有 | 平台协作 |
 | --- | --- | --- | --- |
-| Workspace | [`apps/workspace`](../apps/workspace/pom.xml) | `chat_space`、`workspace_folder`、`workspace_resource`；`/api/chat-spaces` 控制器与 DTO | 实现 `ResourceOwnership`，提供空间内资源归属与创建管理 |
+| Workspace | [`apps/workspace`](../apps/workspace/pom.xml) | `chat_space`、`workspace_folder`、`workspace_resource`、`workspace_schedule`、`workspace_schedule_run`；`/api/chat-spaces` 控制器与 DTO | 实现 `ResourceOwnership`，提供空间内资源归属与创建管理 |
 | Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；Canvas 文档快照、命令与 Function Run | 资源创建/删除经 Workspace 入口，访问由平台校验归属 |
 | IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
 
@@ -457,7 +457,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
 
 ## 执行权与恢复
 
-全部后台调度共用单一 `durable_work` 邮箱：内核的 `THREAD` 与 `TOOL`、Builtin 的 `MODEL` 与 Canvas 的 `CANVAS_RUN`。到期 Work 经 claim 获得随机 token 与数据库时钟截止点，heartbeat 只续租当前
+全部后台调度共用单一 `durable_work` 邮箱：内核的 `THREAD` 与 `TOOL`、Builtin 的 `MODEL`、Canvas 的 `CANVAS_RUN` 与 Workspace 的 `SCHEDULE`。到期 Work 经 claim 获得随机 token 与数据库时钟截止点，heartbeat 只续租当前
 owner，checkpoint、终态与 reschedule 再次复验执行权。绑定环境的 Work 还要求目标节点持有该 Environment 的 READY
 路由租约。
 
@@ -522,9 +522,9 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 | 段 | 内容 |
 | --- | --- |
 | 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）、图片档位模型视图（`storage_image_model_view`）与对象清理（`storage_object_cleanup`） |
-| 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`） |
+| 2 | 平台内核存储：账号与登录会话（`studio_user`、`login_session`）、环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`） |
 | 3 | 平台 Driver 存储：目录（`provider`、`model`、`agent`、`model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
-| 4 | 产品表：Canvas（`canvas_*`）与 Workspace（`chat_space`、`workspace_folder`、`workspace_resource`） |
+| 4 | 产品表：Canvas（`canvas_*`）与 Workspace（`chat_space`、`workspace_folder`、`workspace_resource`、`workspace_schedule`、`workspace_schedule_run`） |
 
 - 表与 SQL 只由归属模块访问：产品表由产品模块维护，目录、设置、存储、环境与插件由平台维护，`harness_*` 由平台的
   内核存储适配包维护，`builtin_model_invocation` 由平台的 Builtin 适配包维护。
@@ -535,8 +535,9 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 
 ## 部署与安全条件
 
-应用面向可信单用户，登录鉴权由外部入口承担。默认本地栈监听 `127.0.0.1`；局域网或公网部署必须配置 TLS 与访问
-控制；多节点部署的节点间流量另由应用自身强制 HTTPS 并校验证书。Daemon 继承启动用户的主机权限，**没有文件系统沙箱**；插件与 Contributor 也是同进程的可信代码。
+Studio 提供内建账号登录与 ADMIN/USER 授权；浏览器会话使用 `HttpOnly`、`SameSite=Strict` 的 `studio_session` Cookie，写 API 与事件 WebSocket 握手执行精确同源校验。空间按所有者隔离，管理员也不能访问他人空间；账号停用会撤销会话并暂停其启用中的空间定时任务。登录授权不替代部署边界的网络保护。默认本地栈监听 `127.0.0.1`；局域网或公网部署必须配置 TLS 与访问控制。多节点部署的节点间流量由应用强制 HTTPS 并校验证书，HMAC 用于节点身份与防重放。
+
+每个 Environment Daemon 在指定主机上以其服务运行账号执行文件、进程、LSP 与受管 IDE 能力；宿主信息仅用于展示和运行协作，不形成沙箱。同一 Environment 的 Daemon 主机由使用它的 Studio 用户共享，不按 Studio 账号隔离主机文件或进程。Daemon 没有文件系统沙箱，能力所及由服务运行账号的主机权限决定。插件与 Contributor 在 Studio 进程内运行，属于可信代码。
 
 - HTTP 边界严格校验 UUID、cursor、sealed union 与 JSON 形状，拒绝未知或重复字段及错误类型。
 - 资源访问按业务持有关系授权；UUID、URI 与跳转地址只用于定位。Session 资源接口要求该 Session 持有资源引用；本地文件权限与隔离由所选 Environment 在执行入口落实。

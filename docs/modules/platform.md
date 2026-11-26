@@ -17,6 +17,14 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 [`EnvironmentConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentConfiguration.java)
 由上述组件扫描装配，提供默认 UTC 时钟和节点身份；它不是独立的 Boot 自动配置入口。
 
+## Studio 账号与浏览器会话
+
+Studio 在数据库中维护内建账号（`studio_user`）和登录会话（`login_session`），不依赖外部身份提供方。首次安装通过 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD` 初始化用户名 `kkstudio` 的管理员；已存在启用管理员时启动不会重置密码。账号密码长度为 8–128 个字符，测试密码 `kkstudio` 不可用于首次管理员密码。
+
+`POST /api/auth/login` 登录后设置 `studio_session` Cookie，有效期 30 天，属性为 `HttpOnly`、`SameSite=Strict`、`Path=/`，`Secure` 随请求是否为 HTTPS。会话凭证是随机 bearer token，数据库只保存其 SHA-256 摘要；服务端每次请求检查账号启用状态与会话有效期。登出删除当前会话并清除 Cookie；改密保留当前会话、撤销该账号其他会话，管理员重置密码或停用账号会撤销其全部会话。
+
+`StudioAccountFilter` 保护 `/api`、`/ws/events` 与 `/ide`。除登录接口及 Environment 安装/卸载脚本的 GET/HEAD 外均需有效会话；写 API 与 WebSocket 握手要求精确同源，API 响应禁止缓存。`/api/users` 与多数 `/api/platform` 操作要求 ADMIN；用户上传接口以及只读 Agent、Model、Environment 摘要目录不要求管理员角色。账号停用时，该账号启用中的空间定时任务一并暂停。空间始终按 owner 隔离，管理员也不能访问他人空间。
+
 [`PostgresqlPersistenceConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration.java)
 提供 PostgreSQL 异常翻译器，Boot 自动配置的 `JdbcTemplate`、`NamedParameterJdbcTemplate` 和
 `JdbcClient` 共用它。Harness Store 事务核心与实时管道直接使用 `JdbcTemplate`，

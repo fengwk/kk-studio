@@ -1,19 +1,18 @@
-# KK Studio 1.3.0 · 产品设计与模型映射
+# Workspace 产品设计与模型
 
 **侧栏决定打开什么，窗格决定怎么摆。** 用户登录后进入自己的 Chat Space：左侧目录组织会话和画布，底部列出可用环境。Thread、画布和环境里的 VS Code 都进入同一套窗格，可以并排、切换或全屏。设置单独进入，返回时保留工作区。
 
-这是 1.3.0 的设计。当前架构见[系统设计](system-design.md)。1.3.0 以空库初始化，新增账号密码登录，删除 Project/Issue、旧的 Chat 和画布主导航、独立历史树入口与全局待处理页；不保留旧路由、API、表或运行时双写。本文定义产品模型、服务端模型和接口，以下文档展开实现细节：
+[系统设计](system-design.md)描述应用的整体架构。本文说明 Workspace 的产品模型、服务端职责、持久数据与接口。
 
-| 文档 | 回答的问题 |
+| 文档 | 关注点 |
 | --- | --- |
-| [Harness](workspace-harness.md) | 执行内核如何分层，库表与模型有哪些字段，输入如何推进，提供哪些接口？ |
-| [交互与底层链路](workspace-interactions.md) | 每个用户动作改变哪些前端状态，调用什么接口，在哪个事务里改哪些数据，发出什么事件，失败时怎样表现？ |
-| [视觉语言与组件体系](workspace-ui.md) | 颜色、间距、焦点、边框和动效遵守什么规则，由哪些共享组件承载，怎样用门禁防止样式回退？ |
-| [保留、重构、删除与交付](workspace-delivery.md) | 现有代码哪些保留、重写或删除，重写必须保持哪些行为，按什么顺序交付和验收？ |
+| [Harness](workspace-harness.md) | 执行内核、持久模型、命令处理与接口。 |
+| [交互与底层链路](workspace-interactions.md) | 用户动作、前端状态、服务端事务、事件与失败反馈。 |
+| [视觉语言与组件体系](workspace-ui.md) | 色彩、尺寸、焦点、组件样式与视觉检查。 |
 
 ## 一次完整操作
 
-在对话标题栏点「向右拆分」，新窗格默认显示「新会话」。直接输入并发送即可开始对话；也可以点目录里的「1.3.0 工作流」或左下的 VS Code 图标，再选择打开到哪个窗格。点任一窗格标题里的「全屏」可专注当前内容，点「退出全屏」或按 `Esc` 恢复原布局。
+在对话标题栏点「向右拆分」，新窗格默认显示「新会话」。直接输入并发送即可开始对话；也可以点目录里的工作流会话或左下的 VS Code 图标，再选择打开到哪个窗格。点任一窗格标题里的「全屏」可专注当前内容，点「退出全屏」或按 `Esc` 恢复原布局。
 
 ### 目录、状态和定时各做一件事
 
@@ -33,9 +32,9 @@
 
 空间够就并排显示，空间不足才用当前标题切换窗格。单窗格时标题只展示内容名称。移动端左侧打开侧栏，标题右侧是拆分和全屏；拆分按钮为 44×44，菜单只选方向。切换菜单按位置列出所有窗格，也能关闭当前窗格；取消菜单时归还焦点。切换按钮的可访问名称包含窗格字母和标题。
 
-## 产品如何映射到执行模型 {#product-mapping}
+## 产品如何映射到执行模型
 
-**Chat Space 是实体，工作区不是。** [Chat Space 管理模块](#product-persistence)负责归属、目录和定时任务；界面上的工作区是侧栏与窗格的组合。`workspace_id` 指向 `chat_space.id`，不另建 Workspace 实体。Harness 只收到执行所需的身份、历史切点或命令，不认识侧栏和窗格。
+**Chat Space 是实体，工作区不是。** [Chat Space 管理模块](#服务端模型和一致性)负责归属、目录和定时任务；界面上的工作区是侧栏与窗格的组合。`workspace_id` 指向 `chat_space.id`，不另建 Workspace 实体。Harness 只收到执行所需的身份、历史切点或命令，不认识侧栏和窗格。
 
 ```mermaid
 ---
@@ -66,9 +65,9 @@ flowchart TB
 
 ### 资源归属
 
-**Resource 不是 Thread 的新名字，也不是插件存储。** `ChatSpace` 是资源的归属边界。`Folder` 是容器；`Session` 和 `Canvas` 是本版可放入目录的两种 `Resource`；可见 `Thread` 是 Session 内的执行线。未来加 Markdown 可增加一个明确类型及 renderer，不在 1.3.0 增加空白入口、泛型表或新的插件 HTTP SPI。
+`ChatSpace` 是资源的归属边界。`Folder` 是容器；`Session` 和 `Canvas` 是当前可放入目录的资源类型；可见 `Thread` 是 Session 内的执行线。目录资源通过归属关系连接到 Session 或 Canvas，不把执行历史和画布内容复制到工作区模型中。
 
-**ChatSpace 是用户数据的边界。** 每个空间属于一个用户，空间里的目录、会话、Thread、画布、定时任务和附件只对所有者可见，管理员也不例外。工作区接口校验路径中的空间属于当前用户、资源属于该空间，否则一律按不存在处理，深链和事件不会串到别的空间或用户。执行类接口按 Thread 所属空间的所有者授权，见[用户与登录](#accounts)。
+**ChatSpace 是用户数据的边界。** 每个空间属于一个用户，空间里的目录、会话、Thread、画布、定时任务和附件只对所有者可见，管理员也不例外。工作区接口校验路径中的空间属于当前用户、资源属于该空间，否则一律按不存在处理，深链和事件不会串到别的空间或用户。执行类接口按 Thread 所属空间的所有者授权，见[用户与登录](#用户与登录)。
 
 | 类型 | 拥有的事实 | 打开行为 |
 | --- | --- | --- |
@@ -79,50 +78,51 @@ flowchart TB
 | Canvas | 画布文档、图、节点、引用、运行 | 复用现有 Canvas editor runtime。同一画布的各窗格共享按 Canvas ID 驱动的服务器文档，各自有选中项、缩放和平移；并发仍使用 Canvas revision 与 patch。 |
 | 环境视图 | 环境 ID 和具体功能 | 从侧栏底部按环境打开。目前显示 VS Code，不登记为 ChatSpace 的目录资源。 |
 
-**Session 固定 Agent；Thread 可以改变模型、变体和环境，不换 Driver。** Agent 以名称为主键，名称创建后不可修改。创建 Session 时，Agent 名称写入首条 Thread 的根设置，同时记录在目录边上；目录边对 Agent 的 RESTRICT 外键阻止删除仍被使用的 Agent。已有 Thread 的命令不接受更换 Agent，另一个 Agent 用新 Session。Agent 的后续编辑仍按现有运行时解析规则生效，已接受的回合继续执行其冻结计划。1.3.0 只投影现有内置 Driver。设置切换随下一条用户消息接受或在运行时安全点应用；同一 Session 的可见 Thread 共用缓存隔离身份，不用 Thread ID 替代。
+**Session 固定 Agent；Thread 可以改变模型、变体和环境，不换 Driver。** Agent 以名称为主键，名称创建后不可修改。创建 Session 时，Agent 名称写入首条 Thread 的根设置，同时记录在目录边上；目录边对 Agent 的 RESTRICT 外键阻止删除仍被使用的 Agent。已有 Thread 的命令不接受更换 Agent，另一个 Agent 用新 Session。Agent 编辑按运行时规则解析，已接受的回合继续执行其冻结计划。设置切换随下一条用户消息接受或在运行时安全点应用；同一 Session 的可见 Thread 共用缓存隔离身份，不用 Thread ID 替代。
 
 ### 前端路由、布局和草稿
 
 产品只有 `/`、`/chat-spaces/:spaceId`、`/settings/:section` 三类壳层路由。登录是外壳状态，不是路由：未登录时任何地址先显示登录，登录后留在原地址。`/` 跳到最近打开的活跃空间。可分享地址为 `/chat-spaces/:spaceId?thread=:id` 或 `?canvas=:id`，两者互斥。打开前用工作区接口确认资源属于该空间，未知或不属于该空间的资源返回 404；它与点击目录行走同一个 `open`，不会重建布局。设置返回原空间；直接打开设置页时回到最近活跃空间。切换窗格不改变浏览器历史。
 
+[`WorkspaceRoute`](../frontend/src/app/WorkspaceRoute.tsx) 为当前登录用户加载空间，没有空间时提供创建入口，并为 WorkspaceShell 装配 Canvas、VS Code、Thread 和新会话视图。窗格绑定采用 [`PaneTarget`](../frontend/src/features/workspace/pane-target.ts)：
+
 ```ts
-type ResourceRef = { kind: 'SESSION' | 'CANVAS'; id: UUID }
-type Target = { kind: 'THREAD'; sessionId: UUID; id: UUID }
-  | { kind: 'CANVAS'; id: UUID }
-  | { kind: 'DRAFT'; id: UUID; folderId: UUID }
-  | { kind: 'ENVIRONMENT'; environmentId: UUID; view: 'VSCODE' }
-type Layout = { paneId: UUID }
-  | { splitId: UUID; axis: 'X' | 'Y'; ratio: number; first: Layout; second: Layout }
-type PaneBindings = Partial<Record<UUID, Target>>
+type PaneTarget =
+  | { kind: 'draft'; draftId: string; folderId?: string }
+  | { kind: 'thread'; threadId: string }
+  | { kind: 'canvas'; canvasId: string; viewSlot?: number }
+  | { kind: 'vscode'; environmentId: string; viewId: string }
 ```
 
-- **边界**：窗格接收标题、可选操作和内容容器，只处理布局、聚焦与展示。工作区维护 `paneId → Target`，按 `Target` 选择 renderer；无资源绑定时显示可直接输入的「新会话」。资源入口调用 `open(target)`，域运行时不依赖布局、路由或点击来源。
-- **打开**：目录（包括目录菜单里的新建会话和新建画布）、状态、执行记录和环境都用同一套窗格打开流程；窗格里的动作（发送首条消息、分支、从回合末尾新建会话）在原窗格继续。当前窗格未打开资源且没有草稿时直接打开；否则暂时冻结窗格，每个窗格中央显示位置字母，当前窗格高亮。按字母或点击中央按钮选择，`Enter` 选当前窗格，`Esc` 取消；空间不足时显示所有窗格的缩略布局。替换含草稿的新会话前仍须确认。打开不改布局；已在别处打开的 Thread 或同环境同功能移到目标窗格，原窗格回到「新会话」。同一画布可打开独立视角。Thread 草稿与 Thread ID 绑定，未发送的 Session 草稿与窗格绑定。
+Canvas 主视图省略 `viewSlot`；同一画布的附加视图使用可复用槽位 1–7。工作区最多有 8 个 pane，主视图算作第 0 个视角；`0` 不是显式存储的 `viewSlot`。Canvas 将槽位转为字符串 `viewId`，统一使用 `canvasViewKey(canvasId, viewId)` 标识视角：主视图键为 `canvasId`，附加视图为 `canvasId/viewId`。该键用于 Canvas 视角自身的本地状态与持久化。
+
+- **边界**：窗格接收标题、可选操作和内容容器，只处理布局、聚焦与展示。工作区维护 `paneId → PaneTarget`，按 `PaneTarget` 选择 renderer；无资源绑定时显示可直接输入的「新会话」。资源入口调用 `open(target)`，域运行时不依赖布局、路由或点击来源。
+- **打开**：目录（包括目录菜单里的新建会话和新建画布）、状态、执行记录和环境都用同一套窗格打开流程；窗格里的动作（发送首条消息、分支、从回合末尾新建会话）在原窗格继续。当前窗格未打开资源且没有草稿时直接打开；否则暂时冻结窗格，每个窗格中央显示位置字母，当前窗格高亮。按字母或点击中央按钮选择，`Enter` 选当前窗格，`Esc` 取消；空间不足时显示所有窗格的缩略布局。替换含草稿的新会话前仍须确认。打开不改布局；已在别处打开的 Thread 或同环境同功能移到目标窗格，原窗格回到「新会话」。同一画布可打开独立视角：一个主视图和最多七个附加视角（显式槽位 1–7）。Thread 草稿与 Thread ID 绑定，未发送的 Session 草稿与窗格绑定。
 - **拆分**：`split(paneId, axis)` 只增加一个聚焦的窗格，原窗格不变，初始比例为 1/2。桌面点方向立即拆分；窄屏点「拆分窗格」后选方向。新窗格不绑定资源，默认显示新会话。
 - **布局**：最多 8 个叶子。递归计算最小宽高：同轴相加加 1px 分隔线，异轴取较大者，每个叶子 320×240 CSS px。实际可见空间不够时压扁为一个视图，保留原树与比例；窄态仍可逻辑拆分，回到宽态再铺开。宽态在当前叶子放不下两个最小子节点时禁用该方向，给出原因。分隔线拖拽或方向键钳制可见比例，双击回到允许范围内最接近 1/2 的位置。容器尺寸变化只钳制实际展现，不把临时比例写回。
 - **标识、关闭与交换**：多个窗格按显示顺序标为 `A`–`H`，当前窗格的字母有底色。桌面拖字母交换窗格，不交换比例。关闭窗格时用兄弟子树替换父节点，若关闭的是当前窗格，则聚焦兄弟子树的第一个窗格。关闭窗格不删除资源、不停止 Thread；删除资源只解除对应绑定，窗格回到「新会话」。唯一窗格不显示字母或关闭按钮。
 - **全屏**：只在工作区显示当前窗格，暂时隐藏侧栏和其它窗格。标题上的「退出全屏」或 `Esc` 恢复原布局。仅改变显示，不改窗格树、比例、绑定或草稿。切换、全屏和交换时不得重新加载已打开的工作台。
-- **存储**：每浏览器按用户和 ChatSpace 保存布局树、绑定、聚焦 ID、目录展开状态和侧栏宽度。窄屏显示与全屏是临时状态，不另存副本。失效的绑定清除后保留原窗格。草稿文本不随布局同步，不保存到服务端。视图交互状态按 pane ID 留在浏览器，不对其他打开的视图广播选择或滚动。
+- **存储**：每浏览器按用户和 ChatSpace 保存布局树、绑定、聚焦 ID、目录展开状态和侧栏宽度。窄屏显示与全屏是临时状态，不另存副本。失效的绑定清除后保留原窗格。草稿文本不随布局同步，不保存到服务端。Canvas 视角交互状态按统一 `canvasViewKey` 隔离，不向其他视角广播选择或滚动。当前布局快照格式不匹配时丢弃并回到默认单 pane，不迁移旧布局。
 - **键盘**：目录用 roving tabindex。`j/k` 选择，`h/l` 收起、展开或移动到父/子，`r/d` 改名、确认删除；保留方向键、Enter、F2、Delete 和上下文菜单键。改名输入框的可访问名称包含原名称，`Home/End` 留给输入框。标题聚焦时用 `v/s` 向右或向下拆分。输入、下拉、组合输入和无关修饰键照常工作，菜单用自己的方向键。
 - **斜杠命令**：在输入框中键入 `/` 时显示命令，之后只在有匹配时显示；无匹配立即收起，删改回有匹配的文字时自动出现，不移动光标。命令输入只接受以 `/` 开头的单段纯文本，后续空白和路径分隔符都回到普通输入。禁用的匹配项仍显示原因。无匹配的文字和 `/files/workspace/README.md` 这类路径都可正常发送。由 Composer 统一判断；新会话首条消息和已有 Thread 的提交入口不再按开头的 `/` 拒绝正文。`+` 仍可手动打开命令列表。
 
 ### 环境视图和设置
 
-侧栏底部列出全部环境。环境名旁的圆点显示连接状态：绿色就绪、黄色连接中、灰色离线或不可用。只显示当前可执行的操作，使用带名称的图标按钮。每个操作绑定「环境 ID + 功能」，在选定窗格打开对应视图。环境授权和实时可用性沿用 Environment；打开时按对应功能复验。1.3.0 只接 VS Code，VNC 是后续独立功能，不占用当前界面。
+侧栏底部列出全部环境。环境名旁的圆点显示连接状态：绿色就绪、黄色连接中、灰色离线或不可用。只显示当前可执行的操作，使用带名称的图标按钮。每个操作绑定「环境 ID + 功能」，在选定窗格打开对应视图。环境授权和实时可用性沿用 Environment；打开时按对应功能复验。当前环境视图提供 VS Code。
 
 VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流程。一个窗格展示一个工作台，由窗格标题切换，不再叠加 Studio 的 IDE 标签。仅隐藏或全屏时，嵌入宿主保持挂载；不要移动导致 iframe 重载的 DOM 节点。Composer 的 `/files` 打开当前环境的 VS Code，也走同一流程。
 
 - **设置**：侧栏底部是头像和齿轮；展开时头像在齿轮左边，收起时头像在齿轮下面。头像显示用户名首字母，点开只有「修改密码」和「退出登录」。管理员看到全部分类：界面 → 偏好；Harness → Agent、模型、提供商、技能包、环境、MCP 服务；系统 → 常规、用户、插件、AI 运行时、工具与权限、环境默认值、后端网络、存储与媒体、高级、同步。普通用户只看到界面。分类只在桌面左栏或窄屏选择器显示，正文不重复标题；左箭头返回对话。系统设置继续由已有 schema 和聚合版本驱动；保留校验、重置、提交失败及冲突。同步保留选择导出、导入预检和确认流程。全量部署信息放常规，其中的 Studio 版本由前端构建时注入，与项目版本一致；「界面 → 偏好」列出可用快捷键。
 - **共享组件**：使用现有 `Button`、`IconButton`、`ResourceCard/Grid`、`CreateCard`、`StateBlock`、表单和确认弹窗。普通和紧凑按钮采用共享尺寸，触屏关键操作至少 44px。文字按钮常驻底色，只有图标的按钮平时透明；按钮悬停、目录与标签选中用底色，不画装饰边框。文本、选择控件和 Composer 在指针或键盘聚焦时统一使用 `--border` 的 1px 轮廓；普通按钮只在键盘焦点可见时显示轮廓，保留校验错误的语义。卡片 label/value 字号一致，用色与字重分层。只有确有空值含义的字段才显示「无 / 默认」。字段说明只放在标签后的 `?` 提示里，标签和输入之间、输入下方不放常驻说明；不折叠有用的表单段。日期和时间用与下拉框同外观的选择器，不用浏览器原生控件。规则细节见[视觉语言与组件体系](workspace-ui.md)。
-- **编辑器**：Agent 的工具、技能、子 Agent 直接展开；模型费率规则和倍率分段直显，配置 JSON 保持可见。模型默认变体必选。输入上限留空时显示「跟随上下文窗口」；名称、模型 ID 和输入类型只在校验失败时提示。费率时段的时间为 24 小时制；结束时间的小时列末尾有 24，选中即 `24:00`，与同日 `00:00` 区分。修改已生效方案会改变历史费用展示，这条提醒放在「价格方案」后的 `?` 里。Anthropic 的 mid-conversation system message / per-message effort 不作为用户开关：适配器按模型、能力和端点决定，使用现有明确的协议回退。单纯隐藏 UI 不改变现有已保存值、构造或发送路径；在适配器的能力判定与既有策略等价性通过协议测试后，1.3.0 空库契约移除用户可编辑字段。
+- **编辑器**：Agent 的工具、技能、子 Agent 直接展开；模型费率规则和倍率分段直显，配置 JSON 保持可见。模型默认变体必选。输入上限留空时显示「跟随上下文窗口」；名称、模型 ID 和输入类型只在校验失败时提示。费率时段的时间为 24 小时制；结束时间的小时列末尾有 24，选中即 `24:00`，与同日 `00:00` 区分。修改已生效方案会改变历史费用展示，这条提醒放在「价格方案」后的 `?` 里。适配器按模型、能力和端点决定 Anthropic 的 mid-conversation system message 与 per-message effort 行为；该协议选择不作为用户可编辑开关。
 - **环境 / 插件**：环境动作顺序为安装 / 覆盖、管理、编辑、删除；管理直接显示主机、配置与事件，事件消息按当前语言显示。安装覆盖会中断正在执行的调用，须明示；编辑配置不重装。插件仅在配置未应用或应用失败时显示版本差异提示；外部连接状态是独立事实。
 
-## 用户与登录 {#accounts}
+## 用户与登录
 
 **账号密码登录，两种角色，每个 Chat Space 属于一个用户。** 不提供自助注册、单点登录或找回密码；忘记密码由管理员重置。
 
 - **初始管理员**：生产首次启动在数据库事务锁内为新库创建管理员 `kkstudio`，密码由部署者通过 `KK_STUDIO_BOOTSTRAP_ADMIN_PASSWORD` 注入。启动不会修改已有账号；确认能登录后可移除该变量。操作见[部署与运行](operations/deployment.md)。用户只能由管理员在设置 → 系统 → 用户中新建；管理员可以修改任何用户的用户名、密码和角色，也可以禁用或重新启用账号，不删除用户。重置密码只作废旧凭据和既有登录。
-- **账号**：用户名 1–32 个字符，只含小写字母、数字和 `.`、`_`、`-`，以字母或数字开头；全局唯一。空间、上传和登录都引用用户 ID，改名不影响它们，之后用新用户名登录。头像显示用户名首字母的大写。密码 8–128 个字符，只保存加盐的 PBKDF2-HMAC-SHA256 哈希，哈希串带算法标识，以后可以换算法。用户资料存为 JSON 对象，1.3.0 不定义字段。
+- **账号**：用户名 1–32 个字符，只含小写字母、数字和 `.`、`_`、`-`，以字母或数字开头；全局唯一。空间、上传和登录都引用用户 ID，改名不影响它们，之后用新用户名登录。头像显示用户名首字母的大写。密码 8–128 个字符，只保存加盐的 PBKDF2-HMAC-SHA256 哈希，哈希串带算法标识，以后可以换算法。用户资料存为 JSON 对象，由平台账号功能管理。
 - **角色**：管理员（`ADMIN`）和普通用户（`USER`）都使用自己的 Chat Space，以及全局的 Agent、模型和环境（包括 VS Code）。只有管理员能修改 Harness 和系统设置、导入导出配置、管理用户，以及看到和处理插件后台任务；普通用户的设置只有「界面」。至少保留一名启用的管理员。
 - **禁用账号**：禁止登录并作废全部登录 Cookie；定时任务暂停，不再自动触发。已提交的回合不强制停止，空间、历史、附件、任务和执行记录都保留。重新启用账号后可登录，任务保持暂停，由所有者逐个恢复。禁用不赋予管理员读取账号内容的权限。
 - **隔离范围**：用户之间隔离的是 Studio 里的数据。Agent、模型、提供商、技能包、MCP 服务和环境是全局共享的配置；环境是共享机器。工具和 VS Code 能访问 Daemon 运行账号有权读取或修改的文件，不按 Studio 用户隔离。只给可信的人开账号；不要把 Studio 服务的数据、配置和凭据放在这些环境账号可读的位置。
@@ -147,9 +147,9 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 
 **附件只能经由持有它的会话或画布取址。** 不提供凭单个 Blob ID 取址的通用接口。取址同时检查资源归属与 Blob 持有边；两者任一不满足都返回 404。消息只能附带本人的上传；正文里的 `resource://files/<uuid>` 只有在本人的会话、画布或上传已经持有这个文件时才登记，否则按不存在的文件处理。同一个 Blob 可被多份资源持有，不能从 Blob ID 反推唯一所有者。定时任务按所属空间运行，不需要所有者在线。
 
-## 服务端模型和一致性 {#product-persistence}
+## 服务端模型和一致性
 
-工作区由新的 apps/workspace 模块实现，取代 apps/chat。它拥有下表五张表，通过 Harness 编排接口创建、分支和删除 Session，通过 Canvas 运行时创建和删除画布，在同一事务中写领域对象和目录边；提交后不存在没有归属的用户可见会话或画布。内部 Session（插件后台任务）不登记。保留 `harness_session`、`harness_entry`、`harness_thread` 的执行和历史职责及 Canvas 子表；按所有者字符串派发的会话所有权与 Agent 引用扩展点整体删除；Harness、Canvas 和 IDE 的接口改经平台层的一个所有者查询端口授权，由 apps/workspace 唯一实现：给定 Session 或画布，返回所属空间和用户；再由请求所到的领域核对它持有的文件。**不把 `durable_work` 的无外键多态键用于资源所有权。**
+[`apps/workspace`](../apps/workspace) 负责 Chat Space、目录资源与定时任务；[`ChatSpaceService`](../apps/workspace/src/main/java/fun/fengwk/kkstudio/workspace/ChatSpaceService.java) 管理空间读取、创建、更新，并提供空间行锁作为工作区结构变更的锁边界。工作区通过 Harness 编排接口创建、分支和删除 Session，通过 Canvas 运行时创建和删除画布，并在同一事务中写领域对象和目录边。内部 Session（插件后台任务）不登记为用户资源。Harness、Canvas 和 IDE 的授权按资源所属空间和用户校验；文件访问还须由请求所到的领域核对持有边。`durable_work` 用于后台工作调度，不作为资源所有权依据。
 
 | 表 | 字段与约束 |
 | --- | --- |
@@ -163,10 +163,10 @@ VS Code 复用现有的 Daemon 连接、视图绑定、退出确认和释放流�
 
 | 表 | 字段与约束 |
 | --- | --- |
-| `studio_user` | `id uuid PK`、`username varchar(32) UNIQUE`（CHECK 用户名规则）、`password_hash`、`profile jsonb NOT NULL DEFAULT '{}'`（CHECK 为 JSON 对象）、`role`（CHECK 为 `ADMIN` 或 `USER`）、可空 `disabled_at`、`created_at`、`updated_at`。V1 不创建账号；生产启动将部署者提供的初始密码按常规方式哈希后写入。 |
+| `studio_user` | `id uuid PK`、`username varchar(32) UNIQUE`（CHECK 用户名规则）、`password_hash`、`profile jsonb NOT NULL DEFAULT '{}'`（CHECK 为 JSON 对象）、`role`（CHECK 为 `ADMIN` 或 `USER`）、可空 `disabled_at`、`created_at`、`updated_at`。生产启动在无账号的新库中使用部署者提供的初始密码创建管理员账号。 |
 | `login_session` | `token_hash bytea PK`（登录令牌的 SHA-256）、`user_id FK → studio_user ON DELETE CASCADE`、`created_at`、`expires_at`；按 `user_id` 建索引。登录时顺带删除该用户已过期的记录。 |
 
-`storage_upload` 增加 `owner_user_id FK → studio_user RESTRICT`，用户上传预约记录上传者；complete/delete 与资源引用只能作用于本人上传。可信服务端 staging 使用 NULL owner，并且只可由内部 ownerless 调用路径消费，不能作为用户上传的授权旁路。Canvas BLOB 命令的 HTTP 输入是 READY `uploadId`，服务端按已认证用户锁定上传、取权威文件事实并登记 Blob 持有边；持久资源仍保存 `blobId`。
+`storage_upload` 的 `owner_user_id FK → studio_user RESTRICT` 记录用户上传的所有者；complete/delete 与资源引用只能作用于本人上传。可信服务端 staging 使用 NULL owner，并且只可由内部 ownerless 调用路径消费，不能作为用户上传的授权旁路。Canvas BLOB 命令的 HTTP 输入是 READY `uploadId`，服务端按已认证用户锁定上传、取权威文件事实并登记 Blob 持有边；持久资源仍保存 `blobId`。
 
 `position` 为各自同级序列内从 0 起的整数，使用可延迟唯一约束保证批量重排。所有目录结构写按 ChatSpace 行 `FOR UPDATE` 串行，在同一事务内更新两侧顺序、递增 `tree_version`、保留至少一个顶层目录并校验无环；改名不改变结构，不递增 `tree_version`。同一空间内移动只改归属边，历史 ID、Canvas revision、定时目标和深链不变；不能跨空间移动。删除先取 ChatSpace 行锁，再取 Harness 锁。已有 Thread 的发送、停止、审批和问卷回答不取 ChatSpace 锁：发送和停止与删除取同一 Harness 树锁；审批和问卷回答只锁目标 Thread 行，不锁执行根，删除同样锁住闭包内的全部 Thread 行。删除在锁内复验没有待处理命令、交互或执行，晚到的一方失败而不会穿透。运行状态更新不获取空间锁、不改目录顺序。同一 Session 内公开 Thread 名称唯一，分支和改名在 Session 行锁内校验。归档先锁所有者的 `studio_user` 行，再锁空间行，避免并发归档清空该用户的活跃列表；归档只改 `archived_at` 和版本。改变角色或账号启用状态时先取得同一把用户管理事务锁，再锁用户行，保证至少一名启用的管理员。登录签发令牌前在用户行锁内复验启用状态和密码哈希；禁用和重置在同一把用户行锁内撤销登录。
 
@@ -225,25 +225,25 @@ flowchart TB
 
 ## 接口与实时更新
 
-以下为替换后的工作区契约。执行类操作（已有 Thread 的命令批、停止、审批、问卷、快照、压缩）继续用 `/api/harness/threads/{id}` 下的现有接口；Canvas graph 命令、IDE、上传的预约／完成／取消、Provider 和系统设置仍走各自模块的域接口，不把所有写操作塞进通用 Resource API。ID 为 canonical UUID；版本、流序号和金额用现有不丢精度的字符串表法，时间传毫秒。创建和命令提交传 `Idempotency-Key`，重复键与相同内容返回原结果，不同内容返回冲突。
+工作区接口如下，DTO 契约以[生成的接口类型](../frontend/src/shared/api/generated/contracts.ts)为准。执行类操作（已有 Thread 的命令批、停止、审批、问卷、快照、压缩）继续用 `/api/harness/threads/{id}` 下的现有接口；Canvas graph 命令、IDE、上传的预约／完成／取消、Provider 和系统设置仍走各自模块的域接口，不把所有写操作塞进通用 Resource API。ID 为 canonical UUID；版本、流序号和金额用现有不丢精度的字符串表法，时间传毫秒。创建和命令提交传 `Idempotency-Key`，重复键与相同内容返回原结果，不同内容返回冲突。
 
 表中相对路径均以 `/api/chat-spaces/{spaceId}` 开头。删除的预期版本通过查询参数传送，JSON 请求体只用于写入配置和动作。
 
 | 请求 | 最小输入与返回 |
 | --- | --- |
-| `GET/POST /api/chat-spaces` | 列出当前用户的 `ChatSpaceSummary`（含 `id, title, archivedAt, version, defaultAgentName, defaultEnvironmentId, defaultYoloEnabled`）。创建 `{title, rootFolderName, defaultAgentName?, defaultEnvironmentId?, defaultYoloEnabled?}`，所有者为当前用户，同事务建默认目录；界面只要求输入名称，用当前空间的默认配置和当前语言的目录名填充其余字段。 |
+| `GET/POST /api/chat-spaces` | 列出当前用户的 `ChatSpaceDTO`（`id`、`title`、可空毫秒时间戳 `archivedAt`、字符串 `version`、可空 `defaultAgentName` 与 `defaultEnvironmentId`、`defaultYoloEnabled`）。创建 `{title, rootFolderName, defaultAgentName?, defaultEnvironmentId?, defaultYoloEnabled?}`，所有者为当前用户，同事务建默认目录；界面只要求输入名称，用当前空间的默认配置和当前语言的目录名填充其余字段。 |
 | `PATCH /api/chat-spaces/{spaceId}` | 改名、默认配置、归档或恢复，归档传 `archived:true`，恢复传 `false`；均带 `expectedVersion`。 |
-| `GET /tree` | `{treeVersion, folders: FolderNode[]}`；目录节点含 `id,name,children,resources`。资源为 `{kind,id,title,threads?}`，只 `SESSION` 有 `ThreadSummary[]`；含 `id,title,state,reason,version,lastActivityAt`。根目录返回稳定顺序，前端按返回顺序显示，不再排序；只返回公开 Thread。按事务内一致快照构建，Thread 状态来自批量投影，不做 N+1 查询。 |
+| `GET /tree` | 返回 `WorkspaceTreeDTO`（`treeVersion`、`folders`）。目录节点为 `WorkspaceFolderDTO`，包含子目录和 `WorkspaceResourceDTO`；Session 资源包含 `WorkspaceThreadDTO` 列表。根目录返回稳定顺序，前端按返回顺序显示，不再排序；只返回公开 Thread。按事务内一致快照构建，Thread 状态来自批量投影，不做 N+1 查询。 |
 | `POST /folders`；`PATCH/DELETE /folders/{folderId}` | 创建 `{parentId,name,expectedTreeVersion}`，追加到同级目录末尾；改名 `{name}`，移动 `{parentId?,beforeId?,expectedTreeVersion}`，无锚点时追加；删空目录。结构变更返回新 `treeVersion`。 |
 | `PATCH /resources/{kind}/{id}` | 改名 `{title}`；移动 `{folderId?,beforeId?,expectedTreeVersion}`，`beforeId` 指同目录序列，跨目录省略 `beforeId` 时置顶。Session 和 Canvas 标题由所属领域持久化。 |
-| `POST /canvases`；`DELETE /canvases/{canvasId}` | `{folderId,title,expectedTreeVersion}` 创建并返回 `ResourceRef`；删除需 `expectedTreeVersion` 与 `expectedRevision`，避免删除后来写入的内容。图编辑仍用 Canvas revision。 |
-| `POST /sessions` | `{folderId, message, modelSelection?, environmentId?, yoloEnabled?}`；同事务接受首条命令并建目录边；返回 `{sessionId,threadId,commandId,treeVersion}`。保存草稿不调用此接口。它与下一行的分支、复制一起取代通用的 `/api/harness/command-batches` 创建入口。 |
+| `POST /canvases`；`DELETE /canvases/{canvasId}` | `{folderId,title,expectedTreeVersion}` 创建并返回生成的 `ResourceRefDTO`（`kind`、`id`、`treeVersion`）；删除需 `expectedTreeVersion` 与 `expectedRevision`，避免删除后来写入的内容。图编辑仍用 Canvas revision。 |
+| `POST /sessions` | `{folderId, message, modelSelection?, environmentId?, yoloEnabled?}`；同事务接受首条命令并建目录边；返回 `{sessionId,threadId,commandId,treeVersion}`。保存草稿不调用此接口。 |
 | `POST /sessions/{id}/branches`；`POST /sessions/{id}/forks` | `{sourceThreadId,turnEndEntryId,title}`；前者返回同一 Session 的新 Thread，后者返回新 Session 和 Thread。`title` 是名称框确认的分支名或新会话名。定时分支与手动分支用同一事务入口。 |
-| `GET/PATCH/DELETE /threads/{id}`；`DELETE /sessions/{id}` | 读取 `ThreadPlacement {sessionId, sessionTitle, folderId, title, state, reason, version}`，供深链和窗格标题使用；执行快照仍读 Harness 接口。改名带 `expectedVersion`；删除带 `expectedTreeVersion`，对 Thread 带 `expectedVersion`，Session 删除重验全部子执行事实。已有 Thread 的命令批拒绝更换 Agent。 |
-| `GET/POST /schedules`；`PATCH/DELETE /schedules/{id}` | `GET` 列出当前空间任务；`POST` 创建，输入 `ScheduleDraft {title, message, enabled, trigger, timeZone, target}`。`PATCH` 更新或启停，`DELETE` 删除；更新与删除带 `expectedVersion`。`trigger` 是 `{type:'ONCE',localDate,time}` 或 `{type:'REPEAT', frequency, time?,weekday?,minute?,cron?}`，每种只接收用到的字段；`target` 是 `NEW_SESSION {folderId,agentName}`、`BRANCH {sessionId, sourceThreadId, turnEndEntryId}` 或 `CONTINUE {sessionId,threadId}`。`ScheduleDTO` 含 `nextDueAt,version`，不携带执行记录；试算用 `POST /schedules/preview` 返回 `next[]` 而不写入。 |
-| `POST /schedules/{id}/runs` | 手动触发，每次请求携带独立 `Idempotency-Key`；返回本次 `ScheduleRun`，响应不代表模型执行完成，也不推进 `nextDueAt`。 |
-| `GET /schedules/{id}/runs?before={cursor}` | 展开时才查；省略游标取最新五条，`before` 取下一页较早记录，返回 `{items,olderCursor}`。游标是 `(scheduledAt,id)` 的不透明表示，同一任务内严格按该组合倒序，不查总数、不用偏移量。客户端保留本次展开的页游标以返回较新页，收起后丢弃。`ScheduleRun` 含 `id, scheduledAt, startedAt, timeZone, result, reason` 和可选的 `thread:{sessionId,id,title}`；只返回当前空间可读的公开 Thread，点击时仍按统一打开流程复验。未提交的记录显示调度原因；已提交但没有可读 Thread 时不返回链接。 |
-| `GET /api/harness/interactions`（保留） | 带 `rootThreadId` 时返回该根及子执行的待处理审批和问卷；不带时按当前用户可访问的全部空间查询，管理员另含插件后台任务。条目含执行根 ID、标题、最后活动时间及来源；空间来源另带空间 ID 和名称。「待处理」按执行根合并，同根最后一项处理完才移出。 |
+| `GET/PATCH/DELETE /threads/{id}`；`DELETE /sessions/{id}` | 读取生成的 `WorkspaceThreadPlacementDTO`（包含 Session、目录和 Thread 展示及版本信息），供深链和窗格标题使用；执行快照仍读 Harness 接口。改名带 `expectedVersion`；删除带 `expectedTreeVersion`，对 Thread 带 `expectedVersion`，Session 删除重验全部子执行事实。已有 Thread 的命令批拒绝更换 Agent。 |
+| `GET/POST /schedules`；`PATCH/DELETE /schedules/{id}` | `GET` 列出当前空间任务；`POST` 创建，输入生成的 `ScheduleDraftDTO`。`PATCH` 更新或启停，`DELETE` 删除；更新与删除带 `expectedVersion`。`trigger` 是 `{type:'ONCE',localDate,time}` 或 `{type:'REPEAT', frequency, time?,weekday?,minute?,cron?}`，每种只接收用到的字段；`target` 是 `NEW_SESSION {folderId,agentName}`、`BRANCH {sessionId, sourceThreadId, turnEndEntryId}` 或 `CONTINUE {sessionId,threadId}`。`ScheduleDTO` 含 `nextDueAt,version`，不携带执行记录；试算用 `POST /schedules/preview` 返回 `next[]` 而不写入。 |
+| `POST /schedules/{id}/runs` | 手动触发，每次请求携带独立 `Idempotency-Key`；返回本次 `ScheduleRunDTO`，响应不代表模型执行完成，也不推进 `nextDueAt`。 |
+| `GET /schedules/{id}/runs?before={cursor}` | 展开时才查；省略游标取最新五条，`before` 取下一页较早记录，返回 `{items,olderCursor}`。游标是 `(scheduledAt,id)` 的不透明表示，同一任务内严格按该组合倒序，不查总数、不用偏移量。客户端保留本次展开的页游标以返回较新页，收起后丢弃。`ScheduleRunDTO` 含 `id, scheduledAt, startedAt, timeZone, result, reason` 和可选的 `thread:{sessionId,id,title}`；只返回当前空间可读的公开 Thread，点击时仍按统一打开流程复验。未提交的记录显示调度原因；已提交但没有可读 Thread 时不返回链接。 |
+| `GET /api/harness/interactions` | 带 `rootThreadId` 时返回该根及子执行的待处理审批和问卷；不带时按当前用户可访问的全部空间查询，管理员另含插件后台任务。条目含执行根 ID、标题、最后活动时间及来源；空间来源另带空间 ID 和名称。「待处理」按执行根合并，同根最后一项处理完才移出。 |
 
 附件取址用 `/api/harness/sessions/{sessionId}/blobs/{blobId}/download-url`、`preview-url` 和 `/api/canvas/canvases/{canvasId}/blobs/{blobId}/download-url`、`preview-url`，均为 POST。Session 取址校验当前用户对 Session 的资源访问权及 `session_blob_ref` 持有边；Canvas 取址校验 Canvas 归属与该画布对 Blob 的持有边。任一不满足均返回 404，不提供凭 Blob ID 的通用取址。接口继续返回现有格式的 S3 预签名 GET 地址，使用存储设置的默认有效期；新取址每次复验授权，已签发的地址到期前仍可用，不写入历史或日志。插件后台 Session 只有管理员可取址，仍须验证持有边。`GET /api/harness/sessions/{sessionId}/resources/{resourceId}` 为 Markdown 资源链接提供同源预览与下载流，校验 Session 访问权、持有边和 Blob ACTIVE 状态。
 
@@ -270,7 +270,3 @@ flowchart TB
 | 409 | `FOLDER_NOT_EMPTY` / `LAST_ROOT_FOLDER` / `RESOURCE_IN_USE` / `EXECUTION_NOT_SETTLED` | 解释具体目录、公开 Thread 或定时任务；返回安全的 ID/标题供用户打开。Canvas 活跃或未知运行走同一阻塞规则。 |
 
 浏览器沿用 `/ws/events` 的订阅帧，握手时凭登录 cookie 认证。按空间订阅 `{kind:'chat-space', id}`，服务端确认空间属于当前用户后回 `subscribed`。登录后的工作区订阅现有 `interactions` 资源，更新「待处理」；插件后台任务只进入管理员的交互投影。目录结构提交或 Session、Thread、画布改名后发 `tree`（结构变化带新 `treeVersion`）；空间内任一公开 Thread 的版本变化发 `threads`；任务配置或触发记录提交后发送 `schedules`，帧数据为 `{scheduleId}`；空间改名、归档或默认配置变化发 `space{version}`。客户端按空间合并 500ms 内的提示，重拉一份含状态的目录树或对应任务。尚未翻页时同步刷新已展开的首页；开始翻页后保留本次已读的页与游标，后台新增记录不改变页边界，收起再展开可查新首页。Thread 改名或删除时从当前目录快照更新记录的标题和可用链接，不改变分页；点击时仍复验。Thread 正文、Canvas patch 与 IDE 事件沿用原有资源订阅。Event 丢失、重连或版本落后时按服务端最新快照对账，旧版本事件不回退状态。事件送达晚于用户另一次操作时，不抢当前焦点或擅自打开刚创建的资源。
-
-## 交付
-
-代码去留、重写必须保持的行为、实施顺序和验收门禁见[保留、重构、删除与交付](workspace-delivery.md)。两份离线 HTML 从各自的 Markdown 构建，命令见[文档导航](README.md#构建评审-html)。

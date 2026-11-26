@@ -7,7 +7,7 @@ Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测
 
 ## 加载 baseline 与 seed
 
-各 profile 按顺序执行全部 versioned migration，repeatable seed 按 profile 加载：
+各 profile 从唯一的 V1 baseline 初始化结构，再按 profile 加载 repeatable seed：
 
 | profile | Flyway 资源 |
 | --- | --- |
@@ -22,16 +22,16 @@ Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测
 `e2e` 还预置模型目录和受控审批规则，`canvas-test` 则加载测试栈设置。
 [fixture seed](../../schema/src/main/resources/db/seed/fixture/R__fixture_seed.sql)
 只供集成测试显式加载，提供离线 stub Catalog。seed 重复执行保持确定性。
-V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `SystemSettingsTestFixture` 校验 codec 与数据库 seed 一致。
+`system_setting` seed 行是默认聚合的唯一事实源；测试用 `SystemSettingsTestFixture` 校验 codec 与数据库 seed 一致。
 
 ## 数据区域与维护入口
 
 | V1 分段 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
 | 1 共享基础 | storage_blob、storage_upload、storage_image_model_view、storage_object_cleanup：全局内容寻址、上传契约、图片档位模型视图与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
-| 2 平台内核存储 | environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
+| 2 平台内核存储 | `studio_user`、`login_session`；environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
 | 3 平台 Driver 存储 | provider、model（MODEL/GROUP 共用名称空间）、model_group_cooldown、agent、skill_package、skill_package_git_source；plugin_configuration、plugin_credential、plugin_auth_attempt；mcp_server、mcp_tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
-| 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Workspace：chat_space、workspace_folder、workspace_resource | [Canvas](canvas.md)、[Workspace](workspace.md) |
+| 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Workspace：chat_space、workspace_folder、workspace_resource、workspace_schedule、workspace_schedule_run | [Canvas](canvas.md)、[Workspace](workspace.md) |
 
 ```text
 storage_blob
@@ -70,11 +70,11 @@ workspace_resource >-- canvas_document
 ```
 
 `durable_work` 通过 `(target_type, target_id)` 表示各模块的调度目标，目标 ID 不设到具体业务表的外键；
-可选的 `required_environment_id` 引用 Environment。
+可选的 `required_environment_id` 引用 Environment。Workspace 定时任务以 `workspace_schedule` 保存规则、时区、下一次到期时间及 NEW_SESSION/BRANCH/CONTINUE 目标，以 `workspace_schedule_run` 按 occurrence key 记录幂等执行结果；其到期 Work 与租约仍由 `durable_work` 持有。
 Canvas Resource 与 pin 使用同画布外键，Run 保存 requestId，调度与租约保存在 `durable_work`。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
-V1 的 Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.target_type` 只校验
+Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.target_type` 只校验
 `^[A-Z][A-Z0-9_]{0,15}$` 的格式，不枚举各模块的类型常量。
 
 ## 类型与命名
@@ -88,14 +88,14 @@ V1 的 Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.t
 ## 数据库兜底的不变量
 
 实体 UUID 和业务版本由应用生成。复合外键保持 Entry 父链、Thread head、
-Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
+Run 区间和节点资源属于同一聚合；Workspace 文件夹与资源的 position 唯一约束为 `DEFERRABLE INITIALLY DEFERRED`，允许同一事务调整顺序并在提交时检查唯一性。CHECK 约束防御形状，业务授权与转换由 service 决定。
 Agent、Environment 等目录名称的 canonical 化只在应用写入路径完成，数据库只兜底长度、首尾空白与 `/` 等形状约束。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
-Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`values_json` 是 text：
+`login_session.token_hash` 是 bearer token 的 SHA-256 摘要，明文不入库；会话属于 `studio_user`，账号删除时级联删除，账号禁用和会话过期由认证查询拒绝。Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`values_json` 是 text：
 数据库要求严格 JSON object、对象键唯一及最多 65,536 UTF-8 字节。应用按 Schema 校验并补默认值，
 存储规范化的紧凑文本，同时逐值保留大整数、精确小数与超范围指数。秘密只在 `plugin_credential.payload_json` 中，
-替换已存在的凭据时推进 `version`。V4 为每次新建凭据行分配独立的 `generation`，防止旧请求的拒绝回执命中删除后重建的凭据。
+替换已存在的凭据时推进 `version`。每个新建凭据行由数据库分配独立的 `generation`，防止旧请求的拒绝回执命中删除后重建的凭据。
 `plugin_auth_attempt` 每个插件至多一行：prepare 在锁定当前 `plugin_configuration` 行后记录该最新
 `config_version`、region 与过期时刻，并只保存公开 authAttemptId 的摘要。认领时在配置行锁保护下核验版本与有效期，
 将摘要替换为仅服务端持有的 claim 摘要；插件认证 handler 在事务外执行。最终事务再次核验 claim 摘要精确匹配、
@@ -140,9 +140,7 @@ Plugin 配置与凭据写入也在同一事务发出 `plugin_changed`。
 
 ## 修改结构
 
-新增 versioned migration，并同步领域校验、mapper、结构测试与新库安装测试。已发布的 migration 保持不变。
-新环境从空库执行全部 migration；已有环境按历史顺序执行尚未应用的 migration。
-共享环境的 Review、维护窗口、备份保密与恢复步骤以
+当前 Schema 由唯一的 V1 baseline `schema/src/main/resources/db/migration/V1__schema.sql` 定义。数据库初始化、共享环境变更、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
 本模块文档描述最终结构，操作指南负责数据库变更流程。
 需要重建时，通过产品 YAML 同步保留配置，在空库应用当前 Schema 后导入；

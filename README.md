@@ -1,6 +1,6 @@
 # kk-studio
 
-`kk-studio` 是面向可信单用户部署的自托管 AI 工作台。你可以在浏览器中接入模型
+`kk-studio` 是面向可信用户部署的自托管 AI 工作台。你可以在浏览器中接入模型
 Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent 使用本机文件、命令、
 代码检索、LSP、Skill、MCP 和 Subagent。
 
@@ -10,7 +10,7 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 启动 Studio -> Provider -> Model -> Agent -> Chat Space -> Session
                                                         |             |
                                                         |             +-> Thread 执行与分支
-                                                        +-> Branch 选择 Environment（需要主机工具时）
+                                                        +-> Thread 选择 Environment（需要主机工具时）
 ```
 
 > Studio 使用内置用户登录与资源授权。默认本地栈只监听 `127.0.0.1`；部署到局域网或公网前，必须配置 TLS 和访问控制。
@@ -21,7 +21,7 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 | --- | --- |
 | Workspace 与 Agent | Chat Space、目录中的 Session/Canvas 资源、流式对话、历史分支、工具调用，以及可恢复的执行状态 |
 | Model Catalog | 分别管理 Provider、真实模型 ID、上下文限制、能力、Variant、价格与按顺序降级的模型组 |
-| Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills 和 Subagents；运行环境由 Branch 选择 |
+| Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills 和 Subagents；运行环境在 Thread 中选择 |
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
 | MCP | 注册 Streamable HTTP MCP Server，发现其工具并作为 Agent 可选工具执行 |
 | Canvas | 用节点组织文本与媒体，通过资源引用和显式 Function 运行完成裁剪、生成或 ComfyUI 处理 |
@@ -72,16 +72,18 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 
 按下面的顺序配置：
 
-1. 打开 [Provider](http://localhost:8080/providers)，新建 Provider。
+先用管理员账号登录。本地 Compose 栈的登录信息见[本地一键启动栈](deploy/local/README.md)。
+
+1. 打开设置中的 [Provider](http://localhost:8080/settings/providers)，新建 Provider。
    - 选择上游实际使用的协议：`openai`、`openai_responses`、`anthropic` 或 `google`。
    - 填写 Base URL；上游需要认证时再填写 API Key。保存后的密钥不会在 UI 中回显。
-2. 打开 [Model](http://localhost:8080/models)，新建 Model。
+2. 打开 [Model](http://localhost:8080/settings/models)，新建 Model。
    - 选择刚创建的 Provider。
    - `Name` 是 Studio 内的逻辑名称；`Model ID` 必须是上游接口接受的真实模型标识，可先点击
      “从 Provider 拉取模型”再选择。
    - 按上游能力填写上下文、最大输出、输入类型、Tools、Reasoning、Variant 与价格；
      “目录默认参数”可为常见模型一键填入这些值。
-3. 打开 [Agent](http://localhost:8080/agents)，新建 Agent。
+3. 打开 [Agent](http://localhost:8080/settings/agents)，新建 Agent。
    - 选择 Model，填写系统提示词。
    - 第一次对话可以先不配置 Tools、Skills 或 Subagents。
 4. 打开工作区，创建 Chat Space 并在其中创建 Session，发送第一条消息开始对话。
@@ -90,7 +92,7 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 
 ## 让 Agent 使用本机工具
 
-1. 在 [Environment](http://localhost:8080/environments) 页面创建 Environment，并在创建弹窗里填写卡片配置：
+1. 在 [Environment](http://localhost:8080/settings/environments) 页面创建 Environment，并在创建弹窗里填写卡片配置：
    Studio 地址（HTTP(S) origin，不含路径、查询与凭据）、可选的 Bash 可执行文件、备注、LSP servers
    与 Daemon 代理。之后用卡片上的**“编辑配置”**与**“保存配置”**修改；在线 Daemon 会热更新，
    无需重装。
@@ -100,7 +102,7 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
    点击**“复制安装命令”**。命令携带 5 分钟内有效的一次性安装码，到目标主机执行后才会下载含凭据的
    脚本并部署；请勿分享该命令。
 4. Studio 的 Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在工作区
-   的 Branch 设置中选择这个 Environment。Environment 不绑定在 Agent 定义上。
+   的 Thread 设置中选择这个 Environment。Environment 不绑定在 Agent 定义上。
 
 每张 Environment 卡片在主机上是一套独立安装，安装根固定为 `~/.kk-studio/environments/<environmentId>`
 （Windows 为 `%USERPROFILE%\.kk-studio\environments\<environmentId>`），同一用户的其它卡片不受影响。

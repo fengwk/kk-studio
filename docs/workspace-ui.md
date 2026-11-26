@@ -1,12 +1,12 @@
-# KK Studio 1.3.0 · 视觉语言与组件体系
+# Workspace 视觉语言与组件体系
 
-1.3.0 只有一种调性：**深色、扁平、安静**。状态由底色和位置表达；边框只表示真实分组、布局分隔或错误；阴影只给浮在内容上的层。规则落在共享组件里，由样式检查守住，页面不再各自覆盖。产品模型见[资源工作区重构方案](workspace-design.md)。
+界面采用**深色、扁平、安静**的视觉语言。状态由底色和位置表达；边框只表示真实分组、布局分隔或错误；阴影只给浮在内容上的层。共享组件实现一致的规则，[样式检查](../frontend/scripts/check-css.mjs)约束应用样式。产品模型见[Workspace 产品设计与模型](workspace-design.md)。
 
-## 现在的样式由什么组成
+## 样式由什么组成
 
 语义 token 定义在[全局样式](../frontend/src/styles.css)的 `:root`。CSS 使用语义名；KChart 由 Markdown 图表适配读取同一组已生效的值。共享控件在自己的样式中实现外观，业务模块只决定布局和交互。[样式检查](../frontend/scripts/check-css.mjs)把这些规则应用到 CSS 和应用 TypeScript。
 
-焦点由[全局样式](../frontend/src/styles.css)中的一条规则统一绘制：可聚焦元素与输入控件都使用 1px 中性轮廓，组件只通过 `data-ui-focus` 声明自己的焦点形态（行、控件、委托给容器或不绘制）。[焦点环测试](../frontend/src/shared/ui/controls/focus-ring.test.ts)固定这条规则。外观去描边与统一焦点已直接落在全局样式与共享组件自身样式文件中，不再保留覆盖层。
+焦点由[全局样式](../frontend/src/styles.css)中的一条规则统一绘制：可聚焦元素与输入控件都使用 1px 中性轮廓，组件只通过 `data-ui-focus` 声明自己的焦点形态（行、控件、委托给容器或不绘制）。[焦点环测试](../frontend/src/shared/ui/controls/focus-ring.test.ts)固定这条规则。共享组件在各自样式文件中实现外观，不依靠页面覆盖组件样式。
 
 ## 视觉规则
 
@@ -32,30 +32,28 @@
 | 语义 | 全局样式的 `:root` | 表面、文字、边框、强调、状态、阴影、间距、圆角、字号、尺寸、动效和层级。 |
 | 组件 | 组件自己的 CSS 开头 | 只描述该组件独有的尺寸，例如窗格标题高度。 |
 
-语义层补齐当前缺的部分：
+语义层覆盖常用状态、尺寸与交互需要：
 
 - 状态底色 `--hover`（前景色 6% 透明叠加）；次要按钮的常驻底色 `--control` 和按钮、下拉触发器的悬停底色 `--control-hover`，都是白色透明叠加，在页面、卡片、弹窗和费率行上都看得出，也和输入框的深色底区分开；
 - 弹窗表面用 `--surface`，使内嵌的 `--surface-raised` 输入控件无需装饰描边即可保持可见；弹窗内需要独立成块但无装饰描边的分组行、分段槽与预览块（如模型费率行、定时任务分段切换与运行预览）用 `--bg` 沉降底色与弹窗表面区分，同时继续衬托内部的 `--surface-raised` 输入框与 `--control` 按钮；
 - 尺寸 `--control-h`（32px）、`--control-h-compact`（28px）、`--row-h`（28px）、`--touch-target`（44px）；
 - 排版与动效 `--line-height-body`（1.5）、`--ease-standard`；
-- `--focus` 与 `--focus-ring` 改为 `--border`。
-
-删除只为发光、渐变和装饰描边存在的 `--glow-accent`、`--accent-glow`、`--accent-gradient`，以及迁移后不再被引用的 `--accent-border` 和 `--topbar-bg`。
+- 焦点轮廓使用 `--border`，由全局焦点规则统一呈现。
 
 ## 组件负责自己的样式
 
 **每个共享组件拥有一个 CSS 文件，页面只负责摆放。** 页面样式不改写共享组件的类名；需要不同外观时给组件加变体。
 
-保留的共享组件按规则调整：
+共享组件按职责提供当前外观与交互：
 
-| 组件 | 1.3.0 调整 |
+| 组件 | 当前职责与样式 |
 | --- | --- |
-| `Button`（primary / ghost / inline，normal / compact，danger、loading） | ghost 和 inline 合并为次要按钮，常驻 `--control` 底色；危险的次要按钮用 `--danger-soft` 底配红字；「添加…」类动作带 `+` 图标。去掉描边和渐变；悬停、按下只换底色；危险主按钮用 `--danger-strong`。 |
-| `IconButton`（normal / compact） | 无描边，平时透明；行内删除等只有图标的动作都用它，不用文字「×」。窄屏关键操作使用 `--touch-target`。 |
+| `Button`（primary / secondary，normal / compact，danger、loading） | `primary` 与 `secondary` 是按钮的两个变体；`danger` 表示危险操作，`loading` 会显示 spinner、设置 `aria-busy` 并禁用按钮。文字按钮常驻对应底色，危险次要按钮使用 `--danger-soft` 配红字。 |
+| `IconButton`（normal / compact） | 只有图标的操作使用带可访问名称的 `IconButton`；平时透明，窄屏关键操作使用 `--touch-target`。 |
 | `Select`、`SelectMenu` | 触发器悬停 `--control-hover`、展开 `--surface-active`；菜单无描边，有阴影。 |
 | `TextInput`、`TextArea`、`NumberInput`、`TagInput`、`SearchField` | 底色 `--surface-raised`；无错误时边框透明，错误时保留 `--danger` 边框。 |
-| `Checkbox`、`Switch` | 只换成统一的焦点规则。 |
-| `FieldLabel`、`FieldError`、`HelpHint` | `FieldLabel` 增加可选的 `help`，在标签文字后放 `HelpHint`，标签保持单行、同行字段的控件对齐；`HelpHint` 是字段说明的唯一位置，悬停、聚焦或点按时显示。错误 `id` 由控件引用，见规则 11。 |
+| `Checkbox`、`Switch` | 使用统一的焦点规则。 |
+| `FieldLabel`、`FieldError`、`HelpHint` | `FieldLabel` 可接收 `help` 并在标签文字后放置 `HelpHint`，标签保持单行、同行字段的控件对齐；`HelpHint` 是字段说明的唯一位置，悬停、聚焦或点按时显示。错误 `id` 由控件引用，见规则 11。 |
 | `Tabs` | 选中用 `--accent-soft`，无边框。 |
 | `Dialog`、`ConfirmActionModal` | 底色 `--surface`，无边框，用 `--shadow-lg`；弹窗内的无边框分组行、分段槽与预览块用 `--bg` 与弹窗底区分，内部输入控件保持 `--surface-raised`。 |
 | `ResourceCard`、`ResourceGrid`、`ResourceCardSkeleton`、`CreateCard` | 无边框、无阴影，底色 `--surface`；元信息的标签与值同字号，值用 `--fg`。 |
@@ -81,9 +79,9 @@
 
 | 规则 | 落点 |
 | --- | --- |
-| 去掉装饰描边，文字按钮保留底色；字段帮助与标签同排 | `Button`、`CreateCard`、`Tabs`、`FieldLabel`、交互卡片和能力选择器各自的样式 |
+| 装饰描边、文字按钮底色与字段帮助位置 | `Button`、`CreateCard`、`Tabs`、`FieldLabel`、交互卡片和能力选择器各自的样式 |
 | 资源卡、设置卡、徽标、菜单、弹窗和费率行去描边，卡片元信息同字号 | `ResourceCard`、`Badge`、`SelectMenu`、`Dialog`、费率表单 |
-| 焦点色取 `--border` | 全局样式的语义层 |
+| 焦点色使用 `--border` | 全局样式的语义层 |
 | 输入底色、下拉悬停与展开底色、无错误时透明边框 | [下拉样式](../frontend/src/shared/ui/controls/Select.css)、[Composer 样式](../frontend/src/features/thread/runtime/thread-panel/thread-composer.css)、设置输入和拒绝原因输入 |
 | 全局 1px 轮廓 | 全局样式的基础层；同时由 `data-ui-focus` 统一焦点形态 |
 
@@ -98,3 +96,5 @@
 5. 共享组件的类名只能在该组件自己的样式文件中设置样式。
 
 前四条对存量使用基线计数：每个文件记录当前数量，只允许减少，新文件从零开始。第五条直接检查共享样式的归属。视觉验收在 1440、1024、390 和 320px 逐张截图目检，不只看脚本结果。
+
+[Button 组件测试](../frontend/src/shared/ui/controls/Button.test.tsx)验证点击、禁用和加载状态。
