@@ -58,17 +58,22 @@ test('createNodeCall routes by node id and rejects unknown nodes', async () => {
 test('createNodeCall forwards the body as JSON like the single-node path', async () => {
   // Test intent: dual-node routing must not change the httpJson wire contract.
   const seen = []
+  const spaceId = '00000000-0000-4000-8000-000000000001'
+  const requestPath = `/api/chat-spaces/${spaceId}/canvases`
+  const body = { folderId: '00000000-0000-4000-8000-000000000002', title: 't', expectedTreeVersion: '0' }
+  const receipt = { kind: 'CANVAS', id: '00000000-0000-4000-8000-000000000003', treeVersion: '1' }
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url, options) => {
     seen.push({ url, body: options?.body, headers: options?.headers })
-    return new Response('{"id":1}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    return Response.json(receipt)
   }
   try {
     const call = createNodeCall(createBaseUrls('http://a.test', 'http://b.test'))
-    await call('b', 'POST', '/api/canvas/canvases', { title: 't' }, 5000)
-    assert.deepEqual(JSON.parse(seen[0].body), { title: 't' })
+    const result = await call('b', 'POST', requestPath, body, 5000)
+    assert.deepEqual(JSON.parse(seen[0].body), body)
+    assert.deepEqual(result.json, receipt)
     assert.equal(seen[0].headers['Content-Type'], 'application/json')
-    assert.equal(seen[0].url, 'http://b.test/api/canvas/canvases')
+    assert.equal(seen[0].url, `http://b.test${requestPath}`)
   } finally {
     globalThis.fetch = originalFetch
   }
