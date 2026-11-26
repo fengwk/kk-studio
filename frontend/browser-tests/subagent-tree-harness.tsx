@@ -1,40 +1,40 @@
-import { Button } from '@/shared/ui/controls/Button'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { SubagentTreePanel } from '@/features/thread/runtime/panes/SubagentTreePanel'
 import { ActiveThreadTree } from '@/features/thread/runtime/panes/ActiveThreadTree'
 import { projectThreadTree, type ActiveThreadTreeNode } from '@/features/thread/runtime/thread-panel/active-thread-tree'
+import { ThreadPanel } from '@/features/thread/runtime/thread-panel/ThreadPanel'
 import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
-import type { TurnEndOutcome } from '@/shared/api/generated/contracts'
+import { Button } from '@/shared/ui/controls/Button'
 
 setLocale('zh-CN')
+
 const node = (
   threadId: string,
   parentThreadId: string | null,
   agentName: string,
   status: 'RUNNING' | 'WAITING' | 'IDLE' = 'IDLE',
-  executionControl: 'RUNNABLE' | 'STOPPED' = 'RUNNABLE',
-  outcome: TurnEndOutcome | null = null,
 ): ActiveThreadTreeNode => ({
   threadId,
   kind: parentThreadId == null ? 'USER' : 'SUBAGENT',
   parentThreadId,
   agentName,
   name: 'main',
-  executionControl,
-  outcome,
+  executionControl: 'RUNNABLE',
+  outcome: null,
   updatedAt: 1774958400,
   status,
   execution: { driver: 'builtin', settings: { modelName: 'Known-model', variant: 'default' } },
   turnCount: 7,
   toolCallCount: 12,
 })
+
 export function Harness() {
-  const [selected, setSelected] = useState('deep')
+  const [selected, setSelected] = useState('root')
   const [active, setActive] = useState(true)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const projection = projectThreadTree([
     node('root', null, 'Root'),
     node('planner', 'root', 'Planner'),
@@ -44,11 +44,8 @@ export function Harness() {
       'worker',
       'A deliberately long agent identity that must truncate on narrow screens',
       active ? 'RUNNING' : 'IDLE',
-      'RUNNABLE',
-      active ? null : 'COMPLETED',
     ),
-    node('failed', 'root', 'Reviewer', 'IDLE', 'RUNNABLE', 'FAILED'),
-    node('stopped', 'root', 'Explorer', 'IDLE', 'STOPPED', 'STOPPED'),
+    node('finished', 'root', 'Finished task'),
   ])
   const tree = {
     ...projection,
@@ -59,13 +56,25 @@ export function Harness() {
     refreshFailed: false,
     refetch: () => undefined,
   }
+  const transcript = {
+    messages: [],
+    queuedMessages: [],
+    loading: false,
+    error: null,
+    bodyRef,
+    initialScrollTop: null,
+  }
+
   return <MemoryRouter><ThreadNavigationContext.Provider value={setSelected}>
-    <main style={{ maxWidth: 760, margin: '20px auto', padding: 8 }}>
+    <main style={{ width: '100%', maxWidth: 760, height: 'min(800px, 100vh)', margin: '0 auto', padding: 8, boxSizing: 'border-box' }}>
       <Button variant="secondary" onClick={() => setActive(false)}>finish</Button>
       <output aria-label="selected">{selected}</output>
-      <ActiveThreadTree tree={tree} currentThreadId={selected} />
-      <SubagentTreePanel tree={tree} currentThreadId={selected} />
+      <ThreadPanel transcript={transcript} activity={{
+        working: false,
+        widgets: <ActiveThreadTree tree={tree} currentThreadId={selected} />,
+      }} />
     </main>
   </ThreadNavigationContext.Provider></MemoryRouter>
 }
+
 createRoot(document.getElementById('root')!).render(<Harness />)

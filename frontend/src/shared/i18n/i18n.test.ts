@@ -119,7 +119,7 @@ const DYNAMIC_KEY_PREFIXES = [
 ]
 
 const CHAT_DYNAMIC_KEY_PREFIXES = [
-  // SubagentTreePanel.tsx / ThreadTreeRows.tsx: `ai.runtime.agentTree.outcome.${outcome}`
+  // ThreadTreeRows.tsx: `ai.runtime.agentTree.outcome.${outcome}`
   'ai.runtime.agentTree.outcome.',
   // ToolMessageBlock.tsx: `ai.runtime.tool.task.${taskReceipt.status}` / `ai.runtime.tool.${view.executionState}`
   'ai.runtime.tool.',
@@ -134,13 +134,8 @@ const ACTIVE_THREAD_COMMAND_IDS = [
   'yolo',
   'models',
   'stop',
-  'new',
   'upload',
   'debug',
-  'subagent',
-  'shortcuts',
-  'compact',
-  'files',
 ] as const
 
 const THREAD_COMMAND_KEYS = new Set(

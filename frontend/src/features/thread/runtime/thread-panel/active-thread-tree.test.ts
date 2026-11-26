@@ -34,37 +34,37 @@ function node(
 }
 
 describe('projectThreadTree rows', () => {
-  it('deduplicates identical resumed records but keeps same-name executions and history', () => {
+  it('deduplicates identical resumed records but keeps distinct active executions with the same name', () => {
     const a = node('a', 'root', { name: 'main', agentName: 'Explorer', status: 'RUNNING' })
-    const tree = projectThreadTree([node('root', null), a, { ...a }, node('b', 'a', { agentName: 'Explorer', outcome: 'FAILED' })])
-    expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['a', 'b'])
-    expect(tree.rows.map((row) => row.node.threadId)).toEqual(['a'])
-    expect(projectThreadTree([node('root', null), { ...a, status: 'IDLE' }]).historyRows).toHaveLength(1)
+    const b = { ...a, threadId: 'b', parentThreadId: 'a' }
+    expect(activeRows([node('root', null), a, { ...a }, b]).map((row) => row.node.threadId)).toEqual(['a', 'b'])
     expect(projectThreadTree([]).root).toBeNull()
   })
 
   it('never exposes COMPACTION branches in the execution tree', () => {
-    // 压缩分支只从压缩卡进入；即便树响应意外带上它，也不得出现在活跃树或历史行中。
+    // 压缩分支只从压缩卡进入；即便树响应意外带上它，也不得出现在活跃树中。
     const tree = projectThreadTree([
       node('root', null),
-      node('worker', 'root'),
+      node('worker', 'root', { status: 'RUNNING' }),
       node('compaction', 'root', { kind: 'COMPACTION', status: 'RUNNING' }),
     ])
     expect(tree.nodesById.has('compaction')).toBe(false)
-    expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['worker'])
+    expect(tree.rows.map((row) => row.node.threadId)).toEqual(['worker'])
   })
 
   it('sorts each sibling group by active status, time and ID, retaining real connectors', () => {
     const tree = projectThreadTree([
       node('root', null), node('old', 'root', { updatedAt: 0 }),
-      node('z', 'root', { updatedAt: 1775001600000 }),
+      node('z', 'root', { updatedAt: 1775001600000, status: 'RUNNING' }),
       node('a', 'root', { updatedAt: 1775001600000 }),
       node('active', 'root', { status: 'RUNNING' }),
-      node('grand', 'active', { updatedAt: 1767225600000 }),
+      node('grand', 'active', { status: 'WAITING' }),
+      node('nested', 'a', { status: 'WAITING' }),
     ])
-    expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['active', 'grand', 'a', 'z', 'old'])
-    expect(tree.historyRows[1]).toMatchObject({ depth: 1, ancestorContinues: [true], isLast: true })
-    expect(tree.historyRows.at(-1)?.isLast).toBe(true)
+    expect(tree.rows.map((row) => row.node.threadId)).toEqual(['z', 'active', 'grand', 'a', 'nested'])
+    expect(tree.rows[2]).toMatchObject({ depth: 1, ancestorContinues: [true], isLast: true })
+    expect(tree.rows[3]?.isLast).toBe(true)
+    expect(tree.rows[4]?.ancestorContinues).toEqual([false])
     expect(() => projectThreadTree([node('root', null, { updatedAt: Number.NaN })])).toThrow(/updatedAt/)
     expect(() => projectThreadTree([node('root', null), node('x', 'y'), node('y', 'x')])).toThrow(/cycle/)
     expect(() => projectThreadTree([node('root', null), node('other', null)])).toThrow(/root/)
@@ -72,10 +72,10 @@ describe('projectThreadTree rows', () => {
 
   it('orders epoch milliseconds including sub-second differences', () => {
     const tree = projectThreadTree([
-      node('root', null), node('a-older', 'root', { updatedAt: 1774958400000 }),
-      node('z-newer', 'root', { updatedAt: 1774958400125 }),
+      node('root', null), node('a-older', 'root', { updatedAt: 1774958400000, status: 'RUNNING' }),
+      node('z-newer', 'root', { updatedAt: 1774958400125, status: 'RUNNING' }),
     ])
-    expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['z-newer', 'a-older'])
+    expect(tree.rows.map((row) => row.node.threadId)).toEqual(['z-newer', 'a-older'])
   })
 
   it.each([undefined, null, NaN, Infinity, -Infinity, [2026, 4, 1], '', 'invalid'])(

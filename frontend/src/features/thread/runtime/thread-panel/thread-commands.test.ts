@@ -8,13 +8,13 @@ import {
 describe('thread command registry', () => {
   it('contains only commands supported by the thread composer', () => {
     expect(THREAD_COMMANDS.map(({ id }) => id)).toEqual([
-      'yolo', 'models', 'stop', 'new', 'upload', 'debug', 'subagent', 'shortcuts', 'compact', 'files',
+      'yolo', 'models', 'stop', 'upload', 'debug',
     ])
   })
 
   it('filters command names and keywords and strips a slash prefix', () => {
-    expect(filterThreadCommands('/comp').map(({ id }) => id)).toEqual(['compact'])
-    expect(filterThreadCommands('context').map(({ id }) => id)).toEqual(['compact'])
+    expect(filterThreadCommands('/sto').map(({ id }) => id)).toEqual(['stop'])
+    expect(filterThreadCommands('interrupt').map(({ id }) => id)).toEqual(['stop'])
     expect(filterThreadCommands('debug').map(({ id }) => id)).toEqual(['debug'])
     expect(filterThreadCommands('no such command')).toEqual([])
     expect(filterThreadCommands(' ')).toEqual(THREAD_COMMANDS)

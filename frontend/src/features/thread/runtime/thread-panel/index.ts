@@ -8,5 +8,4 @@ export type { ThreadComposerHandle } from '@/features/thread/runtime/thread-pane
 export { ThreadStatusFooter } from '@/features/thread/runtime/thread-panel/ThreadStatusFooter'
 export type { ThreadCommand } from '@/features/thread/runtime/thread-panel/thread-commands'
 export { ThreadEventView } from '@/features/thread/runtime/thread-panel/ThreadEventView'
-export { ThreadShortcutsPanel } from '@/features/thread/runtime/thread-panel/ThreadShortcutsPanel'
 export { useThreadPanelViewState } from '@/features/thread/runtime/thread-panel/useThreadPanelViewState'

@@ -7,7 +7,7 @@ import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
-import { SubagentTreePanel } from '../panes/SubagentTreePanel'
+import { ActiveThreadTree } from '../panes/ActiveThreadTree'
 import { useActiveThreadTree } from './useActiveThreadTree'
 
 const transport = vi.fn()
@@ -22,7 +22,7 @@ function node(threadId: string, parentThreadId: string | null): HarnessThreadTre
     threadId, kind: parentThreadId == null ? 'USER' : 'SUBAGENT', parentThreadId,
     name: 'main', agentName: 'Explorer', execution: { driver: 'builtin', settings: {} },
     updatedAt: 1774958400.125,
-    executionControl: 'RUNNABLE', status: 'IDLE', turnCount: 3, toolCallCount: 5, outcome: 'COMPLETED',
+    executionControl: 'RUNNABLE', status: 'RUNNING', turnCount: 3, toolCallCount: 5, outcome: null,
   }
 }
 function reply(nodes: unknown[]) {
@@ -30,11 +30,11 @@ function reply(nodes: unknown[]) {
     headers: { 'Content-Type': 'application/json' },
   }))
 }
-function Panel() {
+function ActiveTree() {
   const tree = useActiveThreadTree(CHILD)
   return (
     <>
-      <SubagentTreePanel tree={tree} currentThreadId={CHILD} />
+      <ActiveThreadTree tree={tree} currentThreadId={CHILD} />
       <button onClick={tree.refetch}>refresh tree</button>
     </>
   )
@@ -52,9 +52,9 @@ function EnvironmentsHint() {
   return null
 }
 /** 与 RootAgentPane 一致：草稿或非执行根目标把 null 交给执行树 hook，面板整体不渲染。 */
-function BoundTreePanel({ threadId }: { threadId: string | null }) {
+function BoundActiveTree({ threadId }: { threadId: string | null }) {
   const tree = useActiveThreadTree(threadId)
-  return threadId == null ? null : <SubagentTreePanel tree={tree} currentThreadId={threadId} />
+  return threadId == null ? null : <ActiveThreadTree tree={tree} currentThreadId={threadId} />
 }
 /** 同一个 QueryClient 与 socket 上的重复渲染外壳，用于在测试中切换 bound 目标。 */
 function eventHost(client: QueryClient, sockets: FakeWebSocketHarness) {
@@ -66,12 +66,12 @@ function eventHost(client: QueryClient, sockets: FakeWebSocketHarness) {
     </QueryClientProvider>
   )
 }
-function renderPanel({ withEnvironmentsHint = false }: { withEnvironmentsHint?: boolean } = {}) {
+function renderActiveTree({ withEnvironmentsHint = false }: { withEnvironmentsHint?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
   render(eventHost(client, sockets)(
     <>
-      <Panel />
+      <ActiveTree />
       {withEnvironmentsHint ? <EnvironmentsHint /> : null}
     </>,
   ))
@@ -91,7 +91,7 @@ describe('execution tree HTTP Instant contract', () => {
 
   it('uses HTTP for bootstrap then subscribes to the actual root without subscribed reread', async () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('轮次：3 · 工具：5')
     expect(transport).toHaveBeenCalledTimes(1)
@@ -113,7 +113,7 @@ describe('execution tree HTTP Instant contract', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const sockets = new FakeWebSocketHarness()
     const host = eventHost(client, sockets)
-    const { rerender } = render(host(<BoundTreePanel threadId={CHILD} />))
+    const { rerender } = render(host(<BoundActiveTree threadId={CHILD} />))
     await screen.findByRole('link', { name: /Explorer/ })
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -122,12 +122,12 @@ describe('execution tree HTTP Instant contract', () => {
     expect(transport).toHaveBeenCalledTimes(1)
 
     // 离开执行根（草稿目标），并让 TanStack Query 回收该 key：模拟长时间停留在别处。
-    rerender(host(<BoundTreePanel threadId={null} />))
+    rerender(host(<BoundActiveTree threadId={null} />))
     client.removeQueries({ queryKey: ['threads', 'tree', CHILD] })
     await act(async () => { await Promise.resolve() })
 
     // 回到同一个 Thread 必须重新走一次权威 HTTP bootstrap，而不是沿用切换前的 live 标记。
-    rerender(host(<BoundTreePanel threadId={CHILD} />))
+    rerender(host(<BoundActiveTree threadId={CHILD} />))
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
     expect(transport.mock.calls[1][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('轮次：3 · 工具：5')
@@ -141,7 +141,7 @@ describe('execution tree HTTP Instant contract', () => {
     ['array time', [node(ROOT, null), { ...node(CHILD, ROOT), updatedAt: [2026, 3, 31] }]],
   ])('rejects %s HTTP tree without caching or subscribing', async (_, nodes) => {
     reply(nodes as unknown[])
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('alert')
     expect(client.getQueryData(['threads', 'tree', CHILD])).toBeUndefined()
     expect(client.getQueryState(['threads', 'tree', CHILD])?.status).toBe('error')
@@ -154,7 +154,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('applies authoritative tree snapshots directly without an event-triggered GET', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -184,7 +184,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('keeps the cache and reports a malformed-scope snapshot without an HTTP second writer', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -206,7 +206,7 @@ describe('execution tree HTTP Instant contract', () => {
   it.each(['TREE_SNAPSHOT_FAILED', 'RESOURCE_NOT_FOUND'])('reports %s without auto-retry and lets an explicit refresh recover over WS', async (code) => {
     const valid = [node(ROOT, null), node(CHILD, ROOT)]
     reply(valid)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -242,7 +242,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('resubscribes after reconnect and accepts the new scope snapshot without HTTP', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(initial)
     vi.useFakeTimers()
@@ -278,7 +278,7 @@ describe('execution tree HTTP Instant contract', () => {
 
   it('keeps bootstrap failure visible and retries it with HTTP on explicit refetch', async () => {
     reply([])
-    const { client } = renderPanel()
+    const { client } = renderActiveTree()
     await screen.findByRole('alert')
     expect(client.getQueryData(['threads', 'tree', CHILD])).toBeUndefined()
     expect(transport).toHaveBeenCalledTimes(1)
@@ -292,7 +292,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('cancels a stale HTTP response when WS becomes live and keeps the pushed tree', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -329,7 +329,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('reads the oversized tree over HTTP once and keeps accepting later live WS snapshots', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -369,7 +369,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('coalesces repeated overflow notices into at most one trailing read', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -408,7 +408,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('fences an in-flight overflow read so a newer live tree is not overwritten', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -446,7 +446,7 @@ describe('execution tree HTTP Instant contract', () => {
 
   it('fences the old overflow read at subscribe ACK before an immediate new ref', async () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     const resource = { kind: 'thread-tree', id: ROOT } as const
@@ -471,7 +471,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('reports a failed overflow read and recovers on a later explicit refresh', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel()
+    const { client, sockets } = renderActiveTree()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
@@ -511,7 +511,7 @@ describe('execution tree HTTP Instant contract', () => {
     environmentsChanged = 0
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
-    const { client, sockets } = renderPanel({ withEnvironmentsHint: true })
+    const { client, sockets } = renderActiveTree({ withEnvironmentsHint: true })
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(2))

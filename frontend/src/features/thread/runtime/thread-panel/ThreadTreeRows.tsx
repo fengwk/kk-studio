@@ -8,11 +8,10 @@ import { formatThreadStatusLabel } from './thread-status-format'
 import { threadTreeOutcome, type ActiveThreadTreeRow } from './active-thread-tree'
 import './thread-tree.css'
 
-/** 活跃与历史共用只读行；所有身份、状态和计数均来自服务端执行树。 */
-export function ThreadTreeRows({ rows, currentThreadId, compactStatuses = false }: {
+/** 活跃树的只读行；所有身份、状态和计数均来自服务端执行树。 */
+export function ThreadTreeRows({ rows, currentThreadId }: {
   rows: readonly ActiveThreadTreeRow[]
   currentThreadId?: string
-  compactStatuses?: boolean
 }) {
   const { t } = useI18n()
   return (
@@ -41,11 +40,11 @@ export function ThreadTreeRows({ rows, currentThreadId, compactStatuses = false 
                 <strong className="thread-tree-identity ui-list-row-label">{node.agentName}</strong>
                 {node.name !== 'main' && node.name !== node.agentName
                   ? <span className="thread-tree-detail">{node.name}</span> : null}
-                {compactStatuses && node.status === 'RUNNING' ? (
+                {node.status === 'RUNNING' ? (
                   <span className={`thread-tree-status ${statusClass}`} title={formatThreadStatusLabel(node.status, t)} aria-label={formatThreadStatusLabel(node.status, t)}>
                     <LoadingSpinner size={12} decorative className="ui-list-row-running" />
                   </span>
-                ) : compactStatuses && (node.status === 'WAITING' || node.status === 'EXIT_PENDING') ? (
+                ) : node.status === 'WAITING' || node.status === 'EXIT_PENDING' ? (
                   <span className={`thread-tree-status ${statusClass}`} title={formatThreadStatusLabel(node.status, t)} aria-label={formatThreadStatusLabel(node.status, t)}>
                     <Clock3 aria-hidden="true" />
                   </span>

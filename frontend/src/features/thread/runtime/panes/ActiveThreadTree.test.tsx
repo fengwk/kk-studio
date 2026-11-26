@@ -4,7 +4,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActiveThreadTree } from '@/features/thread/runtime/panes/ActiveThreadTree'
-import { SubagentTreePanel } from '@/features/thread/runtime/panes/SubagentTreePanel'
 import { useActiveThreadTree } from '@/features/thread/runtime/queries/useActiveThreadTree'
 import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { harnessService } from '@/shared/api/harness-service'
@@ -47,14 +46,12 @@ function treeNode(
 }
 
 /** 查询由根面板单点持有：测试同样只挂一次 useActiveThreadTree，再交给展示组件。 */
-function TreeHarness({ rootId, currentThreadId, history = false }: { rootId: string; currentThreadId?: string; history?: boolean }) {
+function TreeHarness({ rootId, currentThreadId }: { rootId: string; currentThreadId?: string }) {
   const tree = useActiveThreadTree(rootId)
-  return history
-    ? <SubagentTreePanel tree={tree} currentThreadId={currentThreadId} />
-    : <ActiveThreadTree tree={tree} currentThreadId={currentThreadId} />
+  return <ActiveThreadTree tree={tree} currentThreadId={currentThreadId} />
 }
 
-function renderTree(rootId: string, currentThreadId?: string, history = false) {
+function renderTree(rootId: string, currentThreadId?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
   return {
@@ -64,7 +61,7 @@ function renderTree(rootId: string, currentThreadId?: string, history = false) {
       <QueryClientProvider client={queryClient}>
         <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
-            <TreeHarness rootId={rootId} currentThreadId={currentThreadId} history={history} />
+            <TreeHarness rootId={rootId} currentThreadId={currentThreadId} />
           </MemoryRouter>
         </ApplicationEventProvider>
       </QueryClientProvider>,
@@ -99,63 +96,60 @@ function containerTextAbsent(): boolean {
 }
 
 describe('ActiveThreadTree', () => {
-  it('does not claim empty history while loading or failed, and retries to a genuine empty tree', async () => {
+  it('keeps the initial loading state empty, then retries a failed active tree query', async () => {
     let rejectTree: (reason: Error) => void = () => {}
     vi.mocked(harnessService.getThreadTree).mockReturnValue(new Promise((_, reject) => { rejectTree = reject }))
-    renderTree(ROOT_ID, undefined, true)
-    expect(screen.getByRole('status')).toBeInTheDocument()
-    expect(screen.queryByText('暂无子 Agent 执行')).not.toBeInTheDocument()
+    const { container } = renderTree(ROOT_ID)
+    expect(container.querySelector('.thread-widget-panel')).toBeNull()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
     await act(async () => { rejectTree(new Error('offline')) })
-    expect(await screen.findByRole('alert')).toHaveTextContent('加载失败')
-    expect(screen.queryByText('暂无子 Agent 执行')).not.toBeInTheDocument()
-    vi.mocked(harnessService.getThreadTree).mockResolvedValue([treeNode(ROOT_ID, null, false, 'root')])
+    expect(await screen.findByRole('alert')).toHaveTextContent('Agent 关系加载失败')
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
+    ])
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('暂无子 Agent 执行')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
   })
 
   it('subscribes to the response root from a bound child and reads back its own cached key', async () => {
     const worker = { ...treeNode(WORKER_ID, ROOT_ID, true, 'main'), agentName: 'Explorer', turnCount: 7, toolCallCount: 12 }
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'), worker,
-      { ...treeNode(IDLE_ID, WORKER_ID, false, 'main'), agentName: 'Reviewer', outcome: 'FAILED' },
+      { ...treeNode(IDLE_ID, WORKER_ID, true, 'review'), agentName: 'Reviewer', status: 'WAITING' },
     ])
-    const { sockets, queryClient } = renderTree(WORKER_ID, WORKER_ID, true)
+    const { sockets, queryClient } = renderTree(WORKER_ID, WORKER_ID)
     const link = await screen.findByRole('link', { name: /Explorer/ })
     expect(link).toHaveTextContent('轮次：7 · 工具：12')
-    expect(screen.getByRole('link', { name: /Reviewer/ })).toHaveTextContent('失败')
+    expect(screen.getByRole('link', { name: /Reviewer/ })).toBeInTheDocument()
     expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
       { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ]))
-    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
-      treeNode(ROOT_ID, null, false, 'root'), { ...worker, status: 'IDLE', outcome: 'STOPPED' },
-    ])
+    const stoppedWorker = { ...worker, executionControl: 'STOPPED' as const }
+    const pushed = [treeNode(ROOT_ID, null, false, 'root'), stoppedWorker]
     act(() => socket.emitServer({
       type: 'event',
       resource: { kind: 'thread-tree', id: ROOT_ID },
       name: 'snapshot',
-      data: {
-        nodes: [
-          treeNode(ROOT_ID, null, false, 'root'),
-          { ...worker, status: 'IDLE', outcome: 'STOPPED' },
-        ],
-      },
+      data: { nodes: pushed },
     }))
-    await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('停止'))
+    await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('已停止'))
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     expect(harnessService.getThreadTree).toHaveBeenLastCalledWith(
       WORKER_ID,
       { signal: expect.any(AbortSignal) },
     )
-    expect(queryClient.getQueryData(['threads', 'tree', WORKER_ID])).toBeDefined()
+    expect(queryClient.getQueryData(['threads', 'tree', WORKER_ID])).toEqual(pushed)
     expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toBeUndefined()
   })
 
-  it('retains history on malformed refresh instead of accepting conflicting snapshots', async () => {
-    const worker = treeNode(WORKER_ID, ROOT_ID, false, 'worker')
+  it('retains active rows on malformed refresh instead of accepting conflicting snapshots', async () => {
+    const worker = treeNode(WORKER_ID, ROOT_ID, true, 'worker')
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([treeNode(ROOT_ID, null, false, 'root'), worker])
-    const { queryClient } = renderTree(ROOT_ID, undefined, true)
+    const { queryClient } = renderTree(ROOT_ID)
     await screen.findByRole('link', { name: /worker/ })
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'), worker, { ...worker, turnCount: 99 },

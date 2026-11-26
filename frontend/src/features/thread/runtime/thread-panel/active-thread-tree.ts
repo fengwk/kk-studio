@@ -30,7 +30,7 @@ export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
   }
   const unique = [...nodesById.values()]
   if (unique.length === 0) {
-    return { root: null, nodesById, rows: [], historyRows: [] }
+    return { root: null, nodesById, rows: [] }
   }
   const roots = unique.filter((node) => node.parentThreadId == null)
   if (roots.length !== 1) {
@@ -79,21 +79,17 @@ export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
       cursor = cursor.parentThreadId == null ? undefined : nodesById.get(cursor.parentThreadId)
     }
   }
-  const flatten = (filter?: Set<string>): ActiveThreadTreeRow[] => {
-    const rows: ActiveThreadTreeRow[] = []
-    const visit = (parentId: string, ancestorContinues: boolean[]) => {
-      const siblings = (children.get(parentId) ?? [])
-        .filter((child) => filter == null || filter.has(child.threadId))
-      for (const [index, child] of siblings.entries()) {
-        const isLast = index === siblings.length - 1
-        rows.push({ node: child, depth: ancestorContinues.length, ancestorContinues, isLast })
-        visit(child.threadId, [...ancestorContinues, !isLast])
-      }
+  const rows: ActiveThreadTreeRow[] = []
+  const visit = (parentId: string, ancestorContinues: boolean[]) => {
+    const siblings = (children.get(parentId) ?? []).filter((child) => visible.has(child.threadId))
+    for (const [index, child] of siblings.entries()) {
+      const isLast = index === siblings.length - 1
+      rows.push({ node: child, depth: ancestorContinues.length, ancestorContinues, isLast })
+      visit(child.threadId, [...ancestorContinues, !isLast])
     }
-    visit(root.threadId, [])
-    return rows
   }
-  return { root, nodesById, rows: flatten(visible), historyRows: flatten() }
+  visit(root.threadId, [])
+  return { root, nodesById, rows }
 }
 
 function signature(node: ActiveThreadTreeNode): string {

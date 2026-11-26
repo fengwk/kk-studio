@@ -123,7 +123,7 @@ function ariaOwner(element: Element): Element | null {
 describe('ThreadComposer and commands', () => {
   it('filters the real command registry and preserves caller-provided command behavior', () => {
     expect(THREAD_COMMANDS.map((command) => command.id)).toEqual([
-      'yolo', 'models', 'stop', 'new', 'upload', 'debug', 'subagent', 'shortcuts', 'compact', 'files',
+      'yolo', 'models', 'stop', 'upload', 'debug',
     ])
     expect(filterThreadCommands('yo').map((command) => command.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((command) => command.id)).toEqual(['stop'])
@@ -1493,15 +1493,15 @@ describe('ThreadComposer edge interactions', () => {
   })
 
   it.each([
-    { readOnly: false, expected: 'files' },
-    { readOnly: true, expected: 'compact' },
-  ])('wraps ArrowUp to $expected in the plus palette when the last command is disabled=$readOnly', async ({ readOnly, expected }) => {
+    { disableLast: false, expected: 'debug' },
+    { disableLast: true, expected: 'stop' },
+  ])('wraps ArrowUp to $expected in the plus palette when the last command is disabled=$disableLast', async ({ disableLast, expected }) => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
-    // 禁用末尾命令时，导航应跳过它并落到前一个真实可用命令。
-    const commands = THREAD_COMMANDS.map((command) => ({
+    // 只用派发给宿主的命令，验证回绕与跳过禁用项，不触发本地选择器。
+    const commands = THREAD_COMMANDS.filter(({ id }) => id === 'stop' || id === 'debug').map((command) => ({
       ...command,
-      disabled: readOnly && command.id === 'files',
+      disabled: disableLast && command.id === 'debug',
     }))
     render(<Harness onCommand={onCommand} commands={commands} />)
     await user.click(screen.getByRole('button', { name: '打开命令表' }))

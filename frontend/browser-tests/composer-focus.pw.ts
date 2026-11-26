@@ -424,8 +424,8 @@ for (const vp of BROWSER_VIEWPORTS) {
       await expect(page.locator('.harness-container')).toHaveAttribute('data-command-revision', '1')
       await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(before)
 
-      await palette.locator('button[role="option"]').filter({ hasText: 'files' }).click()
-      await expect(page.locator('#last-command-val')).toHaveText('files')
+      await palette.locator('button[role="option"]').filter({ hasText: 'debug' }).click()
+      await expect(page.locator('#last-command-val')).toHaveText('debug')
       await expect(editor).toHaveText('')
     })
   })
