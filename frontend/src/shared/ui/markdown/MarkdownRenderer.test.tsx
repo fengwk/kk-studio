@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { installVizThemeFixture } from './viz-theme.test-fixture'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 
 const kchart = vi.hoisted(() => ({
@@ -10,6 +11,8 @@ const kchart = vi.hoisted(() => ({
 }))
 
 vi.mock('@fengwk/kchart', () => kchart)
+
+installVizThemeFixture()
 
 beforeEach(() => {
   vi.resetModules()

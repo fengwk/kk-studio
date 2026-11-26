@@ -43,6 +43,18 @@ async function expectCopyAboveFigure(page: Page, svg: ReturnType<Page['locator']
 }
 
 test.describe('Visualization rendering and sanitization', () => {
+  test('renders an opaque color-mix token as a KChart color', async ({ page }) => {
+    // 在图首次渲染前覆盖语义色，使用真实 KChart 校验并查看 SVG 输出。
+    await page.route(`**${HARNESS}?*`, async (route) => {
+      const response = await route.fetch()
+      const body = (await response.text()).replace('</head>',
+        '<style>:root { --fg: color-mix(in srgb, #e0e0e0, #ffffff); }</style></head>')
+      await route.fulfill({ response, body })
+    })
+    const svg = await renderViz(page, 'mermaid', 'flowchart TD\n A[Input] --> B[Output]')
+    await expect(svg.locator('text').filter({ hasText: 'Input' })).toHaveAttribute('fill', '#f0f0f0')
+  })
+
   test('renders HTML labels as plain diagram text', async ({ page }) => {
     // KChart 输出纯 SVG：标签里的 HTML 只保留文字，不会作为元素进入页面。
     const svg = await renderViz(page, 'mermaid', 'flowchart TD\n A["<b>Input</b>"] --> B["Output"]')
