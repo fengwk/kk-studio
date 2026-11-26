@@ -58,7 +58,22 @@ public final class EnvironmentDaemonServer
 
   private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
 
-  private record PendingAdmission(UUID leaseToken, String registrationToken) {}
+  private record PendingAdmission(DaemonAdmission.Admitted ticket, UUID leaseToken) {}
+
+  /** 同一环境串行认领租约、替换票据和注册会话；inventory 只保护会话索引。 */
+  private static final class AdmissionState {
+    private String daemonInstanceId;
+    private PendingAdmission pending;
+
+    private PendingAdmission consume(DaemonAdmission.Admitted ticket) {
+      PendingAdmission current = pending;
+      if (current == null || current.ticket() != ticket) {
+        return null;
+      }
+      pending = null;
+      return current;
+    }
+  }
 
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
@@ -77,10 +92,8 @@ public final class EnvironmentDaemonServer
 
   private final Object inventory = new Object();
   private final Map<EnvironmentId, DaemonConnectionSession> sessions = new HashMap<>();
-  private final Map<EnvironmentId, String> daemonInstances = new HashMap<>();
   private final ConfigSyncCoordinator configSyncs = new ConfigSyncCoordinator();
-  private final Map<DaemonAdmission.Admitted, PendingAdmission> pendingAdmissions =
-      new ConcurrentHashMap<>();
+  private final Map<EnvironmentId, AdmissionState> admissions = new ConcurrentHashMap<>();
   private final AtomicLong connectionGenerations = new AtomicLong();
   private volatile boolean draining;
 
@@ -116,7 +129,6 @@ public final class EnvironmentDaemonServer
       return new DaemonAdmission.RetryLater(Duration.ofSeconds(5));
     }
     String token = handshake.registrationToken();
-    String instanceId = handshake.daemonInstanceId();
     EnvironmentId environmentId = handshake.environmentId();
 
     Optional<DaemonRegistration> registrationOpt =
@@ -125,6 +137,16 @@ public final class EnvironmentDaemonServer
       return new DaemonAdmission.Rejected();
     }
 
+    AdmissionState state =
+        admissions.computeIfAbsent(environmentId, ignored -> new AdmissionState());
+    synchronized (state) {
+      return admit(handshake, state);
+    }
+  }
+
+  private DaemonAdmission admit(DaemonHandshake handshake, AdmissionState state) {
+    EnvironmentId environmentId = handshake.environmentId();
+    String instanceId = handshake.daemonInstanceId();
     DaemonConnectionSession existing = sessionOf(environmentId);
     if (existing != null && existing.isReady()) {
       boolean activeToken;
@@ -139,21 +161,25 @@ public final class EnvironmentDaemonServer
     }
 
     LeaseBindResult bind =
-        leaseStore.tryAcquire(environmentId, token, settings().heartbeatTimeout());
+        leaseStore.tryAcquire(
+            environmentId, handshake.registrationToken(), settings().heartbeatTimeout());
     return switch (bind) {
       case LeaseBindResult.Rejected rejected -> new DaemonAdmission.Rejected();
       case LeaseBindResult.RetryLater retryLater -> new DaemonAdmission.RetryLater(
           Duration.ofSeconds(5));
       case LeaseBindResult.Acquired acquired -> {
+        state.pending = null;
         DaemonConnectionSession previous = sessionOf(environmentId);
         if (previous != null) {
           previous.close();
         }
-        if (replaceDaemonInstance(environmentId, instanceId) != null) {
+        String previousInstance = state.daemonInstanceId;
+        state.daemonInstanceId = instanceId;
+        DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
+        state.pending = new PendingAdmission(admitted, acquired.leaseToken());
+        if (previousInstance != null && !previousInstance.equals(instanceId)) {
           abandonInvocationsForChangedInstance(environmentId);
         }
-        DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
-        pendingAdmissions.put(admitted, new PendingAdmission(acquired.leaseToken(), token));
         yield admitted;
       }
     };
@@ -189,10 +215,17 @@ public final class EnvironmentDaemonServer
   @Override
   public void abandon(DaemonAdmission.Admitted admitted) {
     Objects.requireNonNull(admitted, "admitted");
-    PendingAdmission pending = pendingAdmissions.remove(admitted);
+    AdmissionState state = admissions.get(admitted.environmentId());
+    if (state == null) {
+      return;
+    }
+    PendingAdmission pending;
+    synchronized (state) {
+      pending = state.consume(admitted);
+    }
     if (pending != null) {
       try {
-        leaseStore.disconnect(admitted.environmentId(), pending.leaseToken, Duration.ZERO);
+        leaseStore.disconnect(admitted.environmentId(), pending.leaseToken(), Duration.ZERO);
       } catch (RuntimeException error) {
         LOG.log(
             Level.WARNING,
@@ -209,17 +242,49 @@ public final class EnvironmentDaemonServer
       DaemonAdmission.Admitted admitted, DaemonControlChannel control, EnvironmentTunnel tunnel) {
     Objects.requireNonNull(admitted, "admitted");
     Objects.requireNonNull(control, "control");
-    PendingAdmission pending = pendingAdmissions.remove(admitted);
-    if (pending == null) {
-      throw new IllegalStateException("no active admission found for " + admitted);
+    EnvironmentId environmentId = admitted.environmentId();
+    AdmissionState state = admissions.get(environmentId);
+    if (state == null) {
+      throw new IllegalStateException("no active admission found for " + environmentId);
     }
+    DaemonConnectionSession session;
+    EnvironmentServerSettings currentSettings;
+    synchronized (state) {
+      currentSettings = settings();
+      PendingAdmission pending = state.consume(admitted);
+      if (pending == null) {
+        throw new IllegalStateException("no active admission found for " + environmentId);
+      }
+      session = registerSession(admitted, control, tunnel, pending.leaseToken(), currentSettings);
+    }
+
+    Envelope settingsEnvelope =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SETTINGS)
+            .setEnvironmentId(environmentId.value().toString())
+            .setSettings(settingsMessage(currentSettings))
+            .build();
+    if (!session.offer(settingsEnvelope)) {
+      session.close();
+      return session;
+    }
+    session.sendInitialEnvironmentConfig();
+    return session;
+  }
+
+  private DaemonConnectionSession registerSession(
+      DaemonAdmission.Admitted admitted,
+      DaemonControlChannel control,
+      EnvironmentTunnel tunnel,
+      UUID leaseToken,
+      EnvironmentServerSettings currentSettings) {
     long gen = connectionGenerations.incrementAndGet();
     DaemonConnectionSession session =
         new DaemonConnectionSession(
             gen,
             admitted.environmentId(),
             admitted.daemonInstanceId(),
-            pending.leaseToken,
+            leaseToken,
             control,
             tunnel,
             leaseStore,
@@ -234,24 +299,10 @@ public final class EnvironmentDaemonServer
             ideCoordinator,
             updateCoordinator,
             this::removeSession);
-    EnvironmentServerSettings currentSettings = settings();
     session.initializeSettings(currentSettings);
-
-    Envelope settingsEnvelope =
-        Envelope.newBuilder()
-            .setMessageType(MessageType.SETTINGS)
-            .setEnvironmentId(admitted.environmentId().value().toString())
-            .setSettings(settingsMessage(currentSettings))
-            .build();
-
     synchronized (inventory) {
       sessions.put(admitted.environmentId(), session);
     }
-    if (!session.offer(settingsEnvelope)) {
-      session.close();
-      return session;
-    }
-    session.sendInitialEnvironmentConfig();
     return session;
   }
 
@@ -715,13 +766,6 @@ public final class EnvironmentDaemonServer
   private void removeSession(DaemonConnectionSession session) {
     synchronized (inventory) {
       sessions.remove(session.environmentId(), session);
-    }
-  }
-
-  private String replaceDaemonInstance(EnvironmentId environmentId, String daemonInstanceId) {
-    synchronized (inventory) {
-      String previous = daemonInstances.put(environmentId, daemonInstanceId);
-      return previous == null || previous.equals(daemonInstanceId) ? null : previous;
     }
   }
 
