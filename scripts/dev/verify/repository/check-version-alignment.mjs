@@ -77,7 +77,7 @@ export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackag
   }
   sources['daemon/internal/config/version.go DaemonVersion'] = requiredDaemonVersion(daemonConfig)
   if (tag !== undefined) {
-    if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
+    if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]{1,64}$/.test(tag)) {
       throw new Error(`invalid RELEASE_TAG ${JSON.stringify(tag)}`)
     }
     const tagVersion = tag.slice(1)

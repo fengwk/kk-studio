@@ -40,6 +40,14 @@ test('prepare-release requires a version-matched tag before downloading runtime 
   assert.deepEqual(entries(), before)
 })
 
+test('prepare-release rejects unsafe or oversized tags before staging', () => {
+  for (const tag of ['v', 'v1/2', `v${'a'.repeat(65)}`]) {
+    const result = run([tag, 'linux', 'amd64'])
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /invalid release tag/)
+  }
+})
+
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 test('prepare-release makes identical archive digests for identical staged inputs', async (t) => {
@@ -62,7 +70,8 @@ test('prepare-release makes identical archive digests for identical staged input
   write('LICENSE', 'fixture license\n')
   write('daemon/THIRD_PARTY_NOTICES', 'fixture notices\n')
   write('daemon/ide-extension/extension.cjs', 'fixture extension\n')
-  write('daemon/internal/config/version.go', 'var DaemonVersion = "1.0.0"\n')
+  const version = `1.0.0+${'a'.repeat(58)}` // Exercise '+' at the 64-character limit.
+  write('daemon/internal/config/version.go', `var DaemonVersion = "${version}"\n`)
   write('daemon/runtime-manifest.json', JSON.stringify({
     codeServerVersion: 'fixture',
     codeServer: { 'windows-amd64': {
@@ -74,7 +83,7 @@ test('prepare-release makes identical archive digests for identical staged input
   write('bin/go', '#!/usr/bin/env bash\nset -eu\nwhile [ "$1" != -o ]; do shift; done\nprintf fixture > "$2"\nchmod +x "$2"\n', { mode: 0o755 })
   write('bin/curl', '#!/usr/bin/env bash\nset -eu\nwhile [ "$1" != --output ]; do shift; done\ncp "$FIXTURE_RUNTIME" "$2"\n', { mode: 0o755 })
   const stage = () => {
-    const result = run(['v1.0.0', 'windows', 'amd64'], {
+    const result = run([`v${version}`, 'windows', 'amd64'], {
       KK_STUDIO_REPO_ROOT: fixture,
       GIT_DIR: git.stdout.trim(),
       GO_BIN: path.join(fixture, 'bin/go'),
@@ -83,7 +92,7 @@ test('prepare-release makes identical archive digests for identical staged input
       FIXTURE_RUNTIME: runtime,
     })
     assert.equal(result.status, 0, result.stderr)
-    const name = 'kk-studio-daemon-v1.0.0-windows-amd64.tar.gz'
+    const name = `kk-studio-daemon-v${version}-windows-amd64.tar.gz`
     const output = path.join(fixture, 'daemon/release/windows-amd64', name)
     const bytes = readFileSync(output)
     assert.equal(bytes.readUInt32LE(4), 0, 'gzip must omit the timestamp')
