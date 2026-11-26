@@ -43,16 +43,11 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('yolo', ['auto', 'approve', 'tool']),
   command('models', ['model', 'variant', 'provider', 'switch']),
   command('stop', ['cancel', 'interrupt', 'thread']),
-  command('new', ['blank', 'fresh', 'create', 'session']),
   command('upload', ['attach', 'file', 'image', 'video', 'audio', 'paste']),
   command('debug', ['log', 'audit', 'activity', 'entry', 'conversation', 'inspect']),
-  command('subagent', ['agent', 'tree', 'execution', 'history']),
-  command('shortcuts', ['keys', 'keyboard', 'help', 'hotkeys']),
-  command('compact', ['context', 'tokens', 'summary', 'reduce']),
-  command('files', ['explorer', 'browse', 'directory', 'fs']),
 ]
 
-function command(id: 'yolo' | 'models' | 'stop' | 'new' | 'upload' | 'debug' | 'subagent' | 'shortcuts' | 'compact' | 'files', keywords: string[]): ThreadCommand {
+function command(id: 'yolo' | 'models' | 'stop' | 'upload' | 'debug', keywords: string[]): ThreadCommand {
   return {
     id,
     label: id,

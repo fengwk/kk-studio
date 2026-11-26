@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import type { ThreadCommand } from '@/features/thread/runtime/thread-panel'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { useThreadApprovals } from '@/features/thread/runtime/thread-draft/useThreadApprovals'
 import { useThreadStopOperation } from '@/features/thread/runtime/thread-draft/useThreadStopOperation'
@@ -335,20 +334,6 @@ export function useAgentThreadController(
     setConflict(null)
   }
 
-  function runCommand(command: ThreadCommand) {
-    setActionError(null)
-    switch (command.id) {
-      case 'stop':
-        void stopThread()
-        return
-      case 'compact':
-        void compactThread()
-        return
-      default:
-        setActionError(t('ai.runtime.action.unknownCommand', { command: command.id }))
-    }
-  }
-
   /** 在持久的 Thread snapshot 加载完成前，拦截 mailbox 操作。 */
   function requireBoundThread(actionKey: TranslationKey): boolean {
     if (bound) {
@@ -425,7 +410,6 @@ export function useAgentThreadController(
     stopThread,
     compactThread,
     compactPending: compactMutation.isPending,
-    runCommand,
     decideApproval,
     approvalPending,
     stopPending,

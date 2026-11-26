@@ -152,7 +152,7 @@ export function useActiveThreadTree(boundThreadId: string | null) {
       setSnapshotFailedRootId(null)
     },
   })
-  const { rows, historyRows, nodesById, root } = projection
+  const { rows, nodesById, root } = projection
   const activeCount = useMemo(
     () => rows.reduce((count, row) => (row.node.status !== 'IDLE' ? count + 1 : count), 0),
     [rows],
@@ -174,7 +174,6 @@ export function useActiveThreadTree(boundThreadId: string | null) {
 
   return {
     rows,
-    historyRows,
     root,
     rootThreadId: actualRootThreadId,
     nodesById,

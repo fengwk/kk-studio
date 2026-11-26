@@ -42,7 +42,7 @@ export function ActiveThreadTree({
           </Button>
         </div>
       ) : null}
-      <ThreadTreeRows rows={rows} currentThreadId={currentThreadId} compactStatuses />
+      <ThreadTreeRows rows={rows} currentThreadId={currentThreadId} />
     </ThreadWidgetPanel>
   )
 }

@@ -1750,26 +1750,6 @@ describe('useAgentThreadController', () => {
     })
   })
 
-  it('routes runCommand to stop/compact and reports unknown commands', async () => {
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture()),
-    )
-    vi.mocked(harnessService.compactThread).mockResolvedValue({
-      thread: threadFixture(),
-      turnStartEntryId: 't1',
-      childThreadId: null,
-    })
-    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-    act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: 'stop' }))
-    await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalledTimes(1))
-    act(() => result.current.runCommand({ id: 'compact', label: 'compact', description: 'compact' }))
-    await waitFor(() => expect(harnessService.compactThread).toHaveBeenCalledTimes(1))
-    // 未接管的命令 id 必须给出明确错误，而不是静默。
-    act(() => result.current.runCommand({ id: 'agent', label: 'agent', description: 'agent' }))
-    expect(result.current.actionError).toContain('agent')
-  })
-
   it('guards a late stop success after rebind: invalidates the old thread but never mutates the new panel', async () => {
     let releaseStop: ((result: HarnessThreadStopResultDTO) => void) | null = null
     vi.mocked(harnessService.stopThread).mockImplementation(

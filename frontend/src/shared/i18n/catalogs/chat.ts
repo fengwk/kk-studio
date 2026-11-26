@@ -263,21 +263,9 @@ export const chatCatalog = {
     'en-US': 'Stop the current Thread and restore unprocessed messages',
     'zh-CN': '停止当前 Thread 并恢复尚未处理的消息',
   },
-  'ai.runtime.command.new': {
-    'en-US': 'Start a new Session / Thread',
-    'zh-CN': '新建会话 / Thread',
-  },
   'ai.runtime.command.debug': {
     'en-US': 'Toggle the debug view',
     'zh-CN': '切换调试视图',
-  },
-  'ai.runtime.command.compact': {
-    'en-US': 'Compact the current Thread context',
-    'zh-CN': '压缩当前 Thread 的上下文',
-  },
-  'ai.runtime.command.shortcuts': {
-    'en-US': 'Show keyboard shortcuts',
-    'zh-CN': '查看键盘快捷键',
   },
   'ai.runtime.command.uploadLabel': {
     'en-US': 'upload',
@@ -299,29 +287,9 @@ export const chatCatalog = {
     'en-US': 'stop',
     'zh-CN': 'stop',
   },
-  'ai.runtime.command.newLabel': {
-    'en-US': 'new',
-    'zh-CN': 'new',
-  },
   'ai.runtime.command.debugLabel': {
     'en-US': 'debug',
     'zh-CN': 'debug',
-  },
-  'ai.runtime.command.compactLabel': {
-    'en-US': 'compact',
-    'zh-CN': 'compact',
-  },
-  'ai.runtime.command.shortcutsLabel': {
-    'en-US': 'shortcuts',
-    'zh-CN': 'shortcuts',
-  },
-  'ai.runtime.command.files': {
-    'en-US': 'Open file explorer in workspace',
-    'zh-CN': '在工作区打开文件浏览',
-  },
-  'ai.runtime.command.filesLabel': {
-    'en-US': 'files',
-    'zh-CN': 'files',
   },
   'ai.runtime.childThread.readOnly': {
     'en-US': 'Read-only view',
@@ -427,14 +395,6 @@ export const chatCatalog = {
     'en-US': 'Retry',
     'zh-CN': '重试',
   },
-  'ai.runtime.agentTree.historyTitle': {
-    'en-US': 'Subagent execution',
-    'zh-CN': '子 Agent 执行',
-  },
-  'ai.runtime.agentTree.emptyHistory': {
-    'en-US': 'No subagent executions yet',
-    'zh-CN': '暂无子 Agent 执行',
-  },
   'ai.runtime.agentTree.counts': {
     'en-US': 'turns: {{turns}} · tools: {{tools}}',
     'zh-CN': '轮次：{{turns}} · 工具：{{tools}}',
@@ -454,10 +414,6 @@ export const chatCatalog = {
   'ai.runtime.agentTree.outcome.CANCELLED': {
     'en-US': 'Cancelled',
     'zh-CN': '已取消',
-  },
-  'ai.runtime.shortcuts.title': {
-    'en-US': 'Keyboard shortcuts',
-    'zh-CN': '键盘快捷键',
   },
   'ai.runtime.thread.loading': {
     'en-US': 'Loading conversation…',
@@ -1294,14 +1250,6 @@ export const chatCatalog = {
     'en-US': 'Historical request preview is not supported for this record',
     'zh-CN': '当前记录不支持历史请求预览',
   },
-  'ai.runtime.command.subagentLabel': {
-    'en-US': 'subagent',
-    'zh-CN': 'subagent',
-  },
-  'ai.runtime.command.subagent': {
-    'en-US': 'View all subagent executions',
-    'zh-CN': '查看全部子 Agent 执行',
-  },
   'ai.runtime.debug.inspectorClose': {
     'en-US': 'Close inspector',
     'zh-CN': '关闭检查器',
@@ -1629,10 +1577,6 @@ export const chatCatalog = {
   'ai.runtime.action.threadStateChanged': {
     'en-US': '{{action}}: Thread state changed — {{error}}. Refreshed; please try again',
     'zh-CN': '{{action}}：Thread 状态已变化 — {{error}}。已刷新，请重试',
-  },
-  'ai.runtime.action.unknownCommand': {
-    'en-US': 'Unknown command: {{command}}',
-    'zh-CN': '未知命令：{{command}}',
   },
   'ai.runtime.action.updateYoloFailed': {
     'en-US': 'Failed to update YOLO',
