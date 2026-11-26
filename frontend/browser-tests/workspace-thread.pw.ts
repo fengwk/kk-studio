@@ -34,10 +34,11 @@ async function captureWidths(page: Page, state: string) {
   await page.setViewportSize({ width: 1440, height: 900 })
 }
 
-async function serve(page: Page, { agents = true, admin = false, rejectFolder = false, loseFirstResponse = false } = {}) {
+async function serve(page: Page, { agents = true, admin = false, rejectFolder = false, rejectFirstSession = false, loseFirstResponse = false } = {}) {
   const posts: { path: string; key: string | undefined; body: unknown }[] = []
   const creations = new Map<string, { body: string | null; result: { sessionId: string; threadId: string; commandId: string; treeVersion: string } }>()
   let text = ''
+  let rejectedFirstSession = false
   await page.routeWebSocket('**/ws/events', () => {})
   await page.route('**/api/**', async (route) => {
     const req = route.request()
@@ -54,6 +55,10 @@ async function serve(page: Page, { agents = true, admin = false, rejectFolder = 
       posts.push({ path, key: req.headers()['idempotency-key'], body })
       if (path === `${api}/sessions`) {
         if (rejectFolder) return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'INVALID_FOLDER' }) })
+        if (rejectFirstSession && !rejectedFirstSession) {
+          rejectedFirstSession = true
+          return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'INVALID_REQUEST' }) })
+        }
         const key = req.headers()['idempotency-key']
         const prior = creations.get(key)
         if (prior) {
@@ -196,31 +201,71 @@ for (const scenario of ['available', 'admin', 'user'] as const) {
   })
 }
 
-test('replays the exact first send after the server created the session but the response was lost', async ({ page }) => {
-  const posts = await serve(page, { loseFirstResponse: true })
-  await page.goto(`${harness}?folder=${folderId}`)
-  const pane = page.locator('[data-pane-id]')
-  const paneId = await pane.getAttribute('data-pane-id')
+for (const reload of [false, true]) {
+  test(`replays the exact first send after a lost response ${reload ? 'across reload' : 'on the same page'}`, async ({ page }) => {
+    const posts = await serve(page, { loseFirstResponse: true })
+    await page.goto(`${harness}?folder=${folderId}`)
+    const pane = page.locator('[data-pane-id]')
+    const paneId = await pane.getAttribute('data-pane-id')
+    const editor = page.getByRole('textbox')
+    const message = 'Keep this first message through replay'
+    // This non-default choice is in memory only; rebuilding the body after reload would lose it.
+    await page.getByRole('button', { name: 'Permission mode' }).click()
+    await page.getByRole('option', { name: 'YOLO' }).click()
+    await editor.fill(message)
+    await sendButton(page).click()
+    const alert = page.getByRole('alert')
+    await expect(alert).toContainText('The send result is unknown')
+    await expect(editor).toHaveText(message)
+    await expect(unsent(page)).toHaveAttribute('data-unsent', 'true')
+    await expect(sendButton(page)).toBeDisabled()
+    expect(posts).toHaveLength(1)
+    expect(posts.creations.size).toBe(1)
+    if (reload) {
+      await page.reload()
+      await expect(alert).toContainText('The send result is unknown')
+      await expect(editor).toHaveText(message)
+      await expect(sendButton(page)).toBeDisabled()
+      expect(posts).toHaveLength(1)
+    }
+    await alert.getByRole('button', { name: 'Retry' }).click()
+    await expect(page.getByText('Thread 6', { exact: true })).toBeVisible()
+    await expect(page.getByText(message, { exact: true })).toBeVisible()
+    await expect(pane).toHaveAttribute('data-pane-id', paneId!)
+    await expect(unsent(page)).toHaveAttribute('data-unsent', 'false')
+    expect(posts).toHaveLength(2)
+    expect(posts[0]).toMatchObject({ key: draftId, body: { yoloEnabled: true } })
+    expect(posts[1]).toEqual(posts[0])
+    expect(posts.creations.size).toBe(1)
+  })
+}
+
+test('a determined application rejection allows correcting and resending the first message', async ({ page }) => {
+  const posts = await serve(page, { rejectFirstSession: true })
+  await page.goto(harness)
   const editor = page.getByRole('textbox')
-  const message = 'Keep this first message through replay'
-  await editor.fill(message)
+  await editor.fill('Request the server rejects')
   await sendButton(page).click()
-  const alert = page.getByRole('alert')
-  await expect(alert).toContainText('The send result is unknown')
-  await expect(editor).toHaveText(message)
+  await expect(page.getByRole('alert')).toContainText('Request failed')
+  await expect(editor).toHaveText('Request the server rejects')
   await expect(unsent(page)).toHaveAttribute('data-unsent', 'true')
-  await expect(sendButton(page)).toBeDisabled()
+  await expect(editor).toBeEditable()
   expect(posts).toHaveLength(1)
-  expect(posts.creations.size).toBe(1)
-  await alert.getByRole('button', { name: 'Retry' }).click()
+
+  await page.reload()
+  await expect(editor).toHaveText('Request the server rejects')
+  await expect(editor).toBeEditable()
+  expect(posts).toHaveLength(1)
+  await editor.fill('Corrected first message')
+  await sendButton(page).click()
   await expect(page.getByText('Thread 6', { exact: true })).toBeVisible()
-  await expect(page.getByText(message, { exact: true })).toBeVisible()
-  await expect(pane).toHaveAttribute('data-pane-id', paneId!)
+  await expect(page.getByText('Corrected first message', { exact: true })).toBeVisible()
   await expect(unsent(page)).toHaveAttribute('data-unsent', 'false')
   expect(posts).toHaveLength(2)
+  expect(posts[0].body).toMatchObject({ message: [{ type: 'TEXT', text: 'Request the server rejects' }] })
+  expect(posts[1].body).toMatchObject({ message: [{ type: 'TEXT', text: 'Corrected first message' }] })
   expect(posts[0].key).toBe(draftId)
-  expect(posts[1]).toEqual(posts[0])
-  expect(posts.creations.size).toBe(1)
+  expect(posts[1].key).toBe(draftId)
 })
 
 test('an invalid folder leaves the unsent draft and explains the failure', async ({ page }) => {
