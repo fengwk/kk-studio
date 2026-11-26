@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
+import { PanelLeftOpen } from 'lucide-react'
 import { ApiError, apiErrorDetail } from '@/shared/api/client'
 import type { ChatSpaceDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
@@ -10,7 +10,6 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { NameDialog } from '@/shared/ui/overlays/NameDialog'
-import { Tabs } from '@/shared/ui/controls/Tabs'
 import { newDraft } from './pane-bindings'
 import type { PaneRenderers, PaneTarget } from './pane-target'
 import { PaneLayout } from './panes'
@@ -22,6 +21,7 @@ import { useWorkspaceRealtime } from './useWorkspaceRealtime'
 import { useWorkspacePanes, type OpenTarget } from './useWorkspacePanes'
 import { WorkspaceInbox } from './WorkspaceInbox'
 import { WorkspaceSchedules } from './WorkspaceSchedules'
+import { DEFAULT_SIDEBAR_WIDTH, WorkspaceSidebar } from './WorkspaceSidebar'
 import { WorkspaceStatus, WorkspaceTree } from './WorkspaceTree'
 import { createCanvas, createFolder, createSpace, deleteTreeRow, getSpaceTree, getThreadPlacement, moveTreeRow, patchSpace, readCanvasRevision, renameTreeRow, type TreeDeletion } from './workspace-api'
 import './workspace-shell.css'
@@ -61,10 +61,10 @@ function loadSidebar(key: string): { width: number; expanded?: string[] } {
   try {
     const value = JSON.parse(localStorage.getItem(key) ?? 'null') as { width?: unknown; expanded?: unknown } | null
     if (value && typeof value.width === 'number' && Array.isArray(value.expanded) && value.expanded.every(id => typeof id === 'string')) {
-      return { width: Math.max(200, Math.min(480, value.width)), expanded: value.expanded }
+      return { width: value.width, expanded: value.expanded }
     }
   } catch { /* Local storage may be unavailable. */ }
-  return { width: 264 }
+  return { width: DEFAULT_SIDEBAR_WIDTH }
 }
 
 function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteraction, goToSettings, renderers, account, environments: Environments,
@@ -76,16 +76,12 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   const key = `workspace-sidebar:${JSON.stringify([userId, space.id])}`
   const [stored] = useState(() => loadSidebar(key))
   const [expanded, expand] = useState(() => new Set(stored.expanded ?? roots.map(row => row.id)))
-  const [width, setWidth] = useState(stored.width)
-  const [collapsed, setCollapsed] = useState(false)
   const [drawer, setDrawer] = useState(false)
-  const [tab, setTab] = useState('directory')
   const [notice, setNotice] = useState<{ title: string; detail?: string | null }>()
   const report = useCallback((title: string) => setNotice({ title }), [])
   const [creation, setCreation] = useState<{ kind: 'canvas' | 'space'; parentId?: string; key: string }>()
   const [deletion, setDeletion] = useState<{ row: TreeRow; request: TreeDeletion; busy?: boolean; error?: string }>()
   const [defaults, setDefaults] = useState(false)
-  const resize = useRef<{ x: number; width: number }>(undefined)
   const narrowTrigger = useRef<HTMLButtonElement>(null)
   const drawerClose = useRef<HTMLButtonElement>(null)
   const restoreDrawerFocus = useRef(false)
@@ -115,10 +111,6 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       throw new Error(errorText(error), { cause: error })
     }
   }
-  function setSidebarWidth(value: number) { setWidth(Math.max(200, Math.min(480, value))) }
-  useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify({ width, expanded: [...expanded] })) } catch { /* Keep state in memory. */ }
-  }, [expanded, key, width])
   useLayoutEffect(() => {
     if (drawer) drawerClose.current?.focus()
     else if (restoreDrawerFocus.current) {
@@ -184,10 +176,6 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
         : { kind, id, expectedTreeVersion, expectedVersion: row.thread.version } })
     } else setDeletion({ row, request: { kind, id, expectedTreeVersion } })
   }
-  const footer = (rail: boolean) => <div className="workspace-account" data-rail={rail || undefined}>
-    {account(panes.hasUnsentContent)}
-    <IconButton className="workspace-touch" label={t('workspace.settings')} onClick={goToSettings}><Settings /></IconButton>
-  </div>
   return <div className="workspace-shell" data-fullscreen={fullscreen || undefined} data-drawer={drawer || undefined}
     onKeyDown={event => {
       if (
@@ -201,52 +189,29 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
         closeDrawer()
       }
     }}>
-    {!fullscreen && <>
-      {drawer && <button type="button" className="workspace-drawer-backdrop" tabIndex={-1} aria-label={t('workspace.collapseSidebar')} onClick={closeDrawer} />}
-      <aside className="workspace-sidebar" data-collapsed={collapsed || undefined} style={{ width }}>
-        <div className="workspace-sidebar-head">
-          <SpaceMenu current={space} spaces={spaces} select={selectSpace} create={() => create('space')}
-            settings={() => setDefaults(true)} rename={async (item, title) => { await write(() => patchSpace(item.id, { title, expectedVersion: item.version }), true) }}
-            archive={(item, archived) => void write(() => patchSpace(item.id, { archived, expectedVersion: item.version }), true)
-              .then(() => {
-                if (!archived) selectSpace(item.id)
-                else { const next = spaces.find(candidate => !candidate.archivedAt && candidate.id !== item.id); if (next) selectSpace(next.id) }
-              }).catch((error: Error) => report(error.message))} />
-          <WorkspaceInbox userId={userId} onOpen={(spaceId, threadId) => { if (drawer) closeDrawer(); openInteraction(spaceId, threadId) }} />
-          <IconButton className="workspace-desktop-collapse" label={t('workspace.collapseSidebar')} onClick={() => setCollapsed(true)}><PanelLeftClose /></IconButton>
-          <IconButton ref={drawerClose} className="workspace-mobile-close workspace-touch" label={t('workspace.collapseSidebar')} onClick={closeDrawer}><PanelLeftClose /></IconButton>
-        </div>
-        <Tabs tabs={[
-          { id: 'directory', label: t('workspace.directory') },
-          { id: 'status', label: <span className="workspace-status-tab">{t('workspace.status')}{[...index.values()].some(row => row.kind === 'thread' && row.thread.state === 'NEEDS_YOU') && <i />}</span> },
-          { id: 'schedules', label: t('workspace.schedules') },
-        ]} activeId={tab} onChange={setTab} ariaLabel={t('workspace.sidebar')} className="workspace-tabs" panelClassName="workspace-tab-panel">
-          {tab === 'directory' ? <WorkspaceTree roots={roots} index={index} expanded={expanded} toggle={toggle} open={openRow} create={create}
-            createDirectory={async (name, idempotencyKey, parentId) => {
-              const result = await write(() => createFolder(space.id, { parentId, name, expectedTreeVersion: tree.treeVersion }, idempotencyKey))
-              return result.id
-            }}
-            rename={async (row, name) => { await write<unknown>(() => renameTreeRow(space.id, row, name)) }} remove={remove} move={move} />
-            : tab === 'status' ? <WorkspaceStatus index={index} open={openRow} />
-            : <WorkspaceSchedules space={space} tree={tree} open={open} report={report} />}
-        </Tabs>
-        {Environments && <div className="workspace-environments"><Environments open={open} findOpenView={panes.findOpenView} /></div>}
-        {footer(false)}
-        <div className="workspace-side-resize" role="separator" data-ui-focus="row" aria-label={t('workspace.resizeSidebar')}
-          aria-orientation="vertical" aria-valuemin={200} aria-valuemax={480} aria-valuenow={width} tabIndex={0}
-          onPointerDown={event => { if (event.button === 0) { resize.current = { x: event.clientX, width }; event.currentTarget.setPointerCapture(event.pointerId) } }}
-          onPointerMove={event => { if (resize.current) setSidebarWidth(resize.current.width + event.clientX - resize.current.x) }}
-          onLostPointerCapture={() => { resize.current = undefined }} onDoubleClick={() => setSidebarWidth(264)}
-          onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setSidebarWidth(width + (event.key === 'ArrowLeft' ? -16 : 16)) } }} />
-      </aside>
-      {collapsed && <aside className="workspace-rail">
-        <div className="workspace-rail-top">
-          <IconButton label={t('workspace.expandSidebar')} onClick={() => setCollapsed(false)}><PanelLeftOpen /></IconButton>
-          <WorkspaceInbox userId={userId} onOpen={(spaceId, threadId) => { if (drawer) closeDrawer(); openInteraction(spaceId, threadId) }} />
-        </div>
-        {footer(true)}
-      </aside>}
-    </>}
+    <WorkspaceSidebar fullscreen={fullscreen} storage={{ key, initialWidth: stored.width, expanded }}
+      drawer={{ open: drawer, close: closeDrawer, closeRef: drawerClose }}
+      spaceMenu={<SpaceMenu current={space} spaces={spaces} select={selectSpace} create={() => create('space')}
+        settings={() => setDefaults(true)} rename={async (item, title) => { await write(() => patchSpace(item.id, { title, expectedVersion: item.version }), true) }}
+        archive={(item, archived) => void write(() => patchSpace(item.id, { archived, expectedVersion: item.version }), true)
+          .then(() => {
+            if (!archived) selectSpace(item.id)
+            else { const next = spaces.find(candidate => !candidate.archivedAt && candidate.id !== item.id); if (next) selectSpace(next.id) }
+          }).catch((error: Error) => report(error.message))} />}
+      inbox={<WorkspaceInbox userId={userId} onOpen={(spaceId, threadId) => { if (drawer) closeDrawer(); openInteraction(spaceId, threadId) }} />}
+      needsAttention={[...index.values()].some(row => row.kind === 'thread' && row.thread.state === 'NEEDS_YOU')}
+      panels={{
+        directory: <WorkspaceTree roots={roots} index={index} expanded={expanded} toggle={toggle} open={openRow} create={create}
+          createDirectory={async (name, idempotencyKey, parentId) => {
+            const result = await write(() => createFolder(space.id, { parentId, name, expectedTreeVersion: tree.treeVersion }, idempotencyKey))
+            return result.id
+          }}
+          rename={async (row, name) => { await write<unknown>(() => renameTreeRow(space.id, row, name)) }} remove={remove} move={move} />,
+        status: <WorkspaceStatus index={index} open={openRow} />,
+        schedules: <WorkspaceSchedules space={space} tree={tree} open={open} report={report} />,
+      }}
+      environments={Environments && <Environments open={open} findOpenView={panes.findOpenView} />}
+      account={() => account(panes.hasUnsentContent)} goToSettings={goToSettings} />
     <main className="workspace-main" inert={drawer || undefined}>
       {wrapPanes(<PaneLayout {...panes.layoutProps} activeHeaderLeading={!fullscreen && <div className="workspace-mobile-bar">
         <IconButton ref={narrowTrigger} className="workspace-touch" label={t('workspace.expandSidebar')} onClick={() => setDrawer(true)}><PanelLeftOpen /></IconButton>

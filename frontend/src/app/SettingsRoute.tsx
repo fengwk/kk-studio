@@ -23,6 +23,7 @@ import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { useUnsavedChangesConfirmation } from '@/shared/ui/overlays/useUnsavedChangesConfirmation'
+import '@/shared/ui/layout/list-row.css'
 import '@/features/settings/settings.css'
 import './SettingsRoute.css'
 
@@ -96,7 +97,7 @@ export function SettingsRoute({ reloadPage = () => window.location.reload() }: {
       {back}
       {groups.map((group) => <div key={group.title}>
         <h2>{group.title}</h2>
-        {group.options.map(({ value, label }) => <Link to={`/settings/${value}`} state={location.state} replace key={value} aria-current={value === section ? 'page' : undefined} data-ui-focus="row">{label}</Link>)}
+        {group.options.map(({ value, label }) => <Link to={`/settings/${value}`} state={location.state} replace key={value} aria-current={value === section ? 'page' : undefined} className="ui-list-row" data-ui-focus="row"><span className="ui-list-row-label">{label}</span></Link>)}
       </div>)}
     </nav>
     <div className="settings-route-mobile">
