@@ -21,7 +21,7 @@ function fixture(t) {
   writeFileSync(join(dir, sentinel), 'not owned by this invocation')
   return {
     dir,
-    run: (scenario) => runLibrarySnippet(`
+    run: (scenario, afterBackup = '') => runLibrarySnippet(`
 set -euo pipefail
 umask 077
 ${setup}
@@ -39,6 +39,7 @@ configure_paths
 prepare_work_directory
 ${scenario}
 write_backup
+${afterBackup}
 `, { KK_STUDIO_RESET_DIR: dir }),
     assertEntries: (...names) => {
       assert.deepEqual(readdirSync(dir).sort(), [sentinel, ...names].sort())
@@ -46,6 +47,63 @@ write_backup
     },
   }
 }
+
+const failStageCleanup = `
+rm() {
+  if [ "$#" -eq 3 ] && [ "$1" = -rf ] && [ "$2" = -- ] && [ "$3" = "$BACKUP_STAGE_DIR" ]; then
+    return 23
+  fi
+  command rm "$@"
+}`
+
+const stubReplacement = `
+DB_LOCALE_PROVIDER=libc
+DB_TABLESPACE=pg_default
+DB_CONNECTION_LIMIT=-1
+psql_database() { printf 'SQL: %s\\n' "$3" >&2; }
+database_scalar() { echo 0; }
+createdb() { return "\${CREATE_STATUS:-0}"; }
+`
+
+function assertCleanupFailure(result, dir, assertEntries) {
+  const stages = readdirSync(dir).filter((name) => name.startsWith('.reset-backup.'))
+  assert.equal(stages.length, 1)
+  const [stage] = stages
+  // The path contains spaces: the diagnostic quotes it so it can be identified unambiguously.
+  const quotedPath = join(dir, stage).replaceAll(' ', '\\ ')
+  assert.ok(result.stderr.includes(`cannot clean backup staging directory: ${quotedPath}\n`), result.stderr)
+  assertEntries(dumpName, checksumName, stage)
+  const dump = readFileSync(join(dir, dumpName))
+  assert.equal(dump.toString(), 'fixture data')
+  assert.equal(readFileSync(join(dir, checksumName), 'utf8'),
+    `${createHash('sha256').update(dump).digest('hex')}  ${dumpName}\n`)
+}
+
+test('staging cleanup failure after replacement reports the residual path without undoing the switch', (t) => {
+  const { dir, run, assertEntries } = fixture(t)
+  const result = run(`${failStageCleanup}\n${stubReplacement}\nPAYLOAD='fixture data'`, 'replace_database')
+  assert.equal(result.status, 1, result.stderr)
+  assertCleanupFailure(result, dir, assertEntries)
+  assert.match(result.stderr, /Reset failed after the database was replaced; fixture is empty/)
+  assert.match(result.stderr, /pre-reset database is frozen as fixture_pre_20250102T030405Z/)
+  assert.deepEqual(result.stderr.match(/^SQL: .+$/gm), [
+    'SQL: alter database "fixture" rename to "fixture_pre_20250102T030405Z"',
+    'SQL: alter database "fixture_pre_20250102T030405Z" allow_connections false',
+    'SQL: alter database "fixture__kk_partial_20250102T030405Z" rename to "fixture"',
+  ])
+})
+
+test('staging cleanup failure preserves the original status and rollback before replacement', (t) => {
+  const { dir, run, assertEntries } = fixture(t)
+  const result = run(`${failStageCleanup}\n${stubReplacement}\nPAYLOAD='fixture data' CREATE_STATUS=37`, 'replace_database')
+  assert.equal(result.status, 37, result.stderr)
+  assertCleanupFailure(result, dir, assertEntries)
+  assert.match(result.stderr, /The original database is back in place: fixture/)
+  assert.deepEqual(result.stderr.match(/^SQL: .+$/gm)?.slice(-2), [
+    'SQL: alter database "fixture_pre_20250102T030405Z" allow_connections true',
+    'SQL: alter database "fixture_pre_20250102T030405Z" rename to "fixture"',
+  ])
+})
 
 test('a failed dump removes only the invocation staging directory', (t) => {
   const { run, assertEntries } = fixture(t)
