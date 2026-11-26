@@ -86,7 +86,9 @@ export function SettingsRoute({ reloadPage = () => window.location.reload() }: {
   else if (!editor.draft || !selected) content = <StateBlock title={t('settings.loading')} />
   else content = <div className="settings-section-stack">
     <SettingsToolbar editor={editor} />
-    <SystemSettingsSchemaRenderer schema={{ sections: [selected] }} draft={editor.draft} fieldErrors={editor.fieldErrors} onChange={editor.updateDraft} />
+    <fieldset className="settings-editor-fields" disabled={editor.saving}>
+      <SystemSettingsSchemaRenderer schema={{ sections: [selected] }} draft={editor.draft} fieldErrors={editor.fieldErrors} onChange={editor.updateDraft} />
+    </fieldset>
   </div>
 
   return <main className="settings-route">

@@ -116,6 +116,7 @@ function SchemaField({
           placeholder={field.path === 'backendNetwork.proxyUrl' ? t('settings.field.backendNetwork.proxyUrl.direct') : undefined}
           maxLength={field.max ?? undefined}
           hint={hint}
+          error={error}
           onChange={update}
         />
       )

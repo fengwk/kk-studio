@@ -35,7 +35,6 @@ export function SettingsSwitchRow({
   checked,
   onChange,
   disabled = false,
-  ariaLabel,
   fieldPath,
   nullable = false,
 }: {
@@ -44,7 +43,6 @@ export function SettingsSwitchRow({
   checked: boolean
   onChange: (next: boolean) => void
   disabled?: boolean
-  ariaLabel?: string
   fieldPath?: string
   nullable?: boolean
 }) {
@@ -59,7 +57,7 @@ export function SettingsSwitchRow({
         <strong>{label}</strong>
         {description ? <HelpHint label={t('shared.helpAbout', { topic: label })}>{description}</HelpHint> : null}
       </div>
-      <Switch checked={checked} onChange={onChange} label={ariaLabel ?? label} disabled={disabled} />
+      <Switch checked={checked} onChange={onChange} label={label} disabled={disabled} />
     </div>
   )
 }
@@ -76,6 +74,7 @@ export function SettingsTextField({
   maxLength,
   fieldPath,
   nullable = false,
+  error,
 }: {
   label: string
   value: string
@@ -88,9 +87,11 @@ export function SettingsTextField({
   maxLength?: number
   fieldPath?: string
   nullable?: boolean
+  error?: string
 }) {
   const fieldId = useId()
   const text = description ?? hint
+  const errorId = `${fieldId}-error`
   return (
     <div
       className="settings-field"
@@ -106,8 +107,15 @@ export function SettingsTextField({
         placeholder={placeholder}
         maxLength={maxLength}
         disabled={disabled}
+        invalid={Boolean(error)}
+        aria-describedby={error ? errorId : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
+      {error ? (
+        <span id={errorId} className="settings-field-error" role="alert">
+          {error}
+        </span>
+      ) : null}
     </div>
   )
 }

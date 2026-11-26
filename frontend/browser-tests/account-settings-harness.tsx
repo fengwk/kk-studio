@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client'
 import { HashRouter, Link, Route, Routes, useLocation } from 'react-router'
 import { AccountProvider } from '@/features/account/AccountProvider'
 import { AccountMenu } from '@/features/account/AccountMenu'
-import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { SettingsRoute } from '@/app/SettingsRoute'
 import { request } from '@/shared/api/client'
 import '@/styles.css'
@@ -23,15 +22,13 @@ export function DraftPage() {
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={client}>
-    <BrowserPreferencesProvider>
-      <AccountProvider>
-        <HashRouter>
-          <Routes>
-            <Route path="/settings/:section" element={<SettingsRoute />} />
-            <Route path="/" element={<DraftPage />} />
-          </Routes>
-        </HashRouter>
-      </AccountProvider>
-    </BrowserPreferencesProvider>
+    <AccountProvider>
+      <HashRouter>
+        <Routes>
+          <Route path="/settings/:section" element={<SettingsRoute />} />
+          <Route path="/" element={<DraftPage />} />
+        </Routes>
+      </HashRouter>
+    </AccountProvider>
   </QueryClientProvider>,
 )

@@ -40,7 +40,6 @@ export const UI_LABELS = {
   settingsAllSaved: /^(?:All changes saved|所有更改已保存)$/,
   settingsConflictDialog: /^(?:The data has changed|数据已发生变化)$/,
   settingsReloadLatest: /^(?:Refresh|刷新)$/,
-  notificationSwitch: /^(?:Browser notifications|浏览器通知)$/,
 }
 
 export function previewDialogLabel(name) {

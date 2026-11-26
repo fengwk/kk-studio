@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { systemSettingsService } from '@/features/settings/system-settings-service'
@@ -46,6 +46,7 @@ export function useSystemSettingsEditor(enabled = true) {
     queryFn: () => systemSettingsService.getSchema(),
   })
 
+  const savingRef = useRef(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
@@ -108,9 +109,10 @@ export function useSystemSettingsEditor(enabled = true) {
   })
 
   const save = useCallback(async () => {
-    if (!snapshot) {
+    if (!snapshot || savingRef.current) {
       return
     }
+    savingRef.current = true
     // 每次保存从干净状态开始，呈现本次操作的真实结果。
     setSaveError(null)
     setFieldErrors({})
@@ -124,10 +126,15 @@ export function useSystemSettingsEditor(enabled = true) {
       })
     } catch {
       // 错误已由 mutation onError 写入 UI 状态；这里吞掉避免未处理的 promise 拒绝。
+    } finally {
+      savingRef.current = false
     }
   }, [mutation, snapshot])
 
   const reset = useCallback(() => {
+    if (savingRef.current) {
+      return
+    }
     discardDraft()
     setSaveError(null)
     setFieldErrors({})
@@ -141,6 +148,10 @@ export function useSystemSettingsEditor(enabled = true) {
 
   const updateDraft = useCallback(
     (next: SystemSettingsSectionsDraft) => {
+      // 异步控件可能持有开始保存前的回调，不能依赖该回调捕获的渲染状态。
+      if (savingRef.current) {
+        return
+      }
       setSections(next)
       setFieldErrors({})
     },
@@ -159,17 +170,23 @@ export function useSystemSettingsEditor(enabled = true) {
    * 读取失败时保留现有 draft 与原 baseVersion 并向上抛错，由触发方就地展示。
    */
   const reload = useCallback(async () => {
+    if (savingRef.current) {
+      throw new Error(t('settings.saving'))
+    }
     await queryClient.fetchQuery({
       queryKey: queryKeys.systemSettings.all,
       queryFn: () => systemSettingsService.get(),
       staleTime: 0,
     })
+    if (savingRef.current) {
+      throw new Error(t('settings.saving'))
+    }
     discardDraft()
     setSaveError(null)
     setFieldErrors({})
     setConflict(null)
     setDraftError(null)
-  }, [queryClient, discardDraft])
+  }, [queryClient, discardDraft, t])
 
   // 权威数据缺失（初始加载失败）才视为整页加载错误；draft 存在时后台刷新失败不打断编辑。
   const loadError = useMemo(() => {

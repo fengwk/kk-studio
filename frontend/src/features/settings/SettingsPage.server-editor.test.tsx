@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
+import { useSystemSettingsEditor } from '@/features/settings/useSystemSettingsEditor'
+import type { PropsWithChildren } from 'react'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { SettingsRoute } from '@/app/SettingsRoute'
 import { AccountContext } from '@/features/account/account-context'
@@ -81,15 +82,21 @@ function renderSettings(reloadPage?: () => void, cached?: SystemSettingsDTO) {
   const result = render(
     <QueryClientProvider client={queryClient}>
       <AccountContext.Provider value={{ user: { id: 'admin', username: 'admin', role: 'ADMIN', profile: {} }, refresh: async () => {}, signOut: async () => {} }}>
-        <BrowserPreferencesProvider>
-          <MemoryRouter initialEntries={['/settings/preferences']}>
-            <Routes><Route path="/settings/:section" element={<SettingsRoute reloadPage={reloadPage} />} /></Routes>
-          </MemoryRouter>
-        </BrowserPreferencesProvider>
+        <MemoryRouter initialEntries={['/settings/preferences']}>
+          <Routes><Route path="/settings/:section" element={<SettingsRoute reloadPage={reloadPage} />} /></Routes>
+        </MemoryRouter>
       </AccountContext.Provider>
     </QueryClientProvider>,
   )
   return { queryClient, ...result }
+}
+
+function deferredUpdate() {
+  let reject!: (error: Error) => void
+  const promise = new Promise<SystemSettingsDTO>((_, rejectPromise) => {
+    reject = rejectPromise
+  })
+  return { promise, reject }
 }
 
 async function serverTab(name: string) {
@@ -160,6 +167,77 @@ describe('SettingsPage server editor', () => {
     mocks.getSchema.mockReset()
     mocks.getSchema.mockResolvedValue(makeSettingsSchema())
     mocks.update.mockReset()
+  })
+
+  // 模拟在途请求：输入和重置保持锁定，失败后仅标记服务端指明的字段。
+  it.each([
+    ['代理地址', '代理绕过规则', 'backendNetwork.proxyUrl'],
+    ['代理绕过规则', '代理地址', 'backendNetwork.noProxyHosts'],
+  ])('locks the editor while saving and attaches the error to %s', async (label, otherLabel, path) => {
+    const user = userEvent.setup()
+    mocks.get.mockResolvedValue(makeSettingsDto())
+    const update = deferredUpdate()
+    mocks.update.mockReturnValue(update.promise)
+    renderSettings()
+
+    await user.click(await serverTab('后端网络'))
+    const field = screen.getByLabelText(label)
+    const otherField = screen.getByLabelText(otherLabel)
+    await user.clear(field)
+    await user.type(field, 'invalid')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(field).toBeDisabled()
+    expect(otherField).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重置' })).toBeDisabled()
+    await user.type(field, '-late')
+    expect(field).toHaveValue('invalid')
+
+    const error = `${path} is invalid`
+    await act(async () => {
+      update.reject(new ApiError(error, 400, 'validation', { [path]: error }))
+    })
+    await waitFor(() => expect(field).toBeEnabled())
+    expect(field).toHaveValue('invalid')
+    expect(field).toBeInvalid()
+    expect(field).toHaveAccessibleDescription(error)
+    expect(otherField).toBeValid()
+    expect(otherField).not.toHaveAttribute('aria-describedby')
+    await user.type(field, '-corrected')
+    expect(field).toBeValid()
+    expect(field).not.toHaveAttribute('aria-describedby')
+  })
+
+  // 字段组拦不住旧回调或其他页面发起的重载；控制器仍须保护草稿。
+  it('rejects stale draft changes, reset and reload while saving', async () => {
+    mocks.get.mockResolvedValue(makeSettingsDto())
+    const update = deferredUpdate()
+    mocks.update.mockReturnValue(update.promise)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useSystemSettingsEditor(), {
+      wrapper: ({ children }: PropsWithChildren) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    })
+    await waitFor(() => expect(result.current.draft).not.toBeNull())
+    const baseline = result.current.draft!
+    const submitted = { ...baseline, backendNetwork: { ...baseline.backendNetwork, proxyUrl: 'http://proxy.test:8080' } }
+    act(() => result.current.updateDraft(submitted))
+    const { save, updateDraft, reset, reload } = result.current
+    let saving!: Promise<void>
+    act(() => { saving = save() })
+    await waitFor(() => expect(result.current.saving).toBe(true))
+    act(() => {
+      updateDraft(baseline)
+      reset()
+    })
+    await expect(reload()).rejects.toThrow()
+    expect(mocks.get).toHaveBeenCalledOnce()
+    expect(result.current.draft).toEqual(submitted)
+    await act(async () => {
+      update.reject(new Error('offline'))
+      await saving
+    })
+    expect(result.current.draft).toEqual(submitted)
   })
 
   it('hydrates the authoritative GET aggregate into the section editors', async () => {

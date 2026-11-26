@@ -53,30 +53,6 @@
   color: var(--fg);
 }
 
-.settings-notification-facts {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  font-size: var(--font-size-xs);
-  color: var(--fg-muted);
-}
-
-.settings-enabled-value,
-.settings-permission-value {
-  color: var(--fg);
-  font-weight: 550;
-}
-
-.settings-enabled-value[data-enabled='true'] {
-  color: var(--accent);
-}
-
-.settings-permission-value[data-permission='denied'],
-.settings-permission-value[data-permission='unsupported'] {
-  color: var(--danger);
-}
-
 .settings-hint {
   margin: 0;
   font-size: var(--font-size-xs);
@@ -89,6 +65,13 @@
 }
 
 /* --- System settings tabs + server section editors --- */
+
+.settings-editor-fields {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 
 .settings-section-stack {
   display: flex;
