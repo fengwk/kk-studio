@@ -6,8 +6,7 @@
  *   - var(--x) referencing a custom property that is never declared;
  *   - var(--x, fallback);
  *   - var(--palette-*) outside the token block of src/styles.css;
- *   - color literals (hex, rgb(), hsl(), ...) outside the palette block; TS files may repeat a
- *     palette hex because JS-only consumers (the KChart diagram theme) need concrete colors;
+ *   - color literals (hex, rgb(), hsl(), ...) outside the palette block;
  *   - font sizes off the --font-size-* scale;
  *   - z-index above the local stacking range that is not a --z-* token;
  *   - visual debt rules tracked by a per-file, non-increasing baseline;
@@ -205,10 +204,6 @@ export function checkCss(root, { updateBaseline = false } = {}) {
     })
   }
 
-  const paletteHexes = new Set(
-    [...tokenSource.text.slice(palette[0], palette[1]).matchAll(HEX)].map((m) => m[0].toLowerCase()),
-  )
-
   const declared = new Set()
   for (const { file, text } of sources) {
     const isCss = file.endsWith('.css')
@@ -240,9 +235,6 @@ export function checkCss(root, { updateBaseline = false } = {}) {
     const inPalette = (index) => isTokenFile && index >= palette[0] && index < palette[1]
     for (const m of text.matchAll(HEX)) {
       if (inPalette(m.index)) {
-        continue
-      }
-      if (!isCss && paletteHexes.has(m[0].toLowerCase())) {
         continue
       }
       report(file, text, m.index, 'raw-color', `${m[0]} is outside the palette layer`)

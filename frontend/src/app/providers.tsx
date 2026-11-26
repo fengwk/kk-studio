@@ -8,7 +8,6 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 })
 
-/** IDE 不属于全应用根 Provider；Chat 宿主由 WorkbenchShell 的明确路由组合提供。 */
 export function AppProviders({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>

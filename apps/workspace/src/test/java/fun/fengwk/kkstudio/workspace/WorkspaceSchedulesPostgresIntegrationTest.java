@@ -199,10 +199,13 @@ class WorkspaceSchedulesPostgresIntegrationTest {
               .param("space", space.id())
               .query(UUID.class)
               .single();
-      jdbc.sql("insert into agent (name, config) values ('test-agent', '{}'::jsonb)").update();
+      String agentName = "folder-guard-agent";
+      jdbc.sql("insert into agent (name, config) values (:name, '{}'::jsonb)")
+          .param("name", agentName)
+          .update();
       var target =
           new ScheduleTargetDTO(
-              ScheduleTargetDTO.Type.NEW_SESSION, folder, "test-agent", null, null, null, null);
+              ScheduleTargetDTO.Type.NEW_SESSION, folder, agentName, null, null, null, null);
       var trigger =
           new ScheduleTriggerDTO(Type.REPEAT, Frequency.CRON, null, null, null, null, "* * * * *");
       schedules.create(

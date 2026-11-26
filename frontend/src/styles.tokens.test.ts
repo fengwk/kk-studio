@@ -66,6 +66,12 @@ describe('style gate rules', () => {
     expect(result.output).toContain(`[${rule}]`)
   })
 
+  it('rejects copying a palette color into application TypeScript', () => {
+    const root = fixture('')
+    writeFileSync(join(root, 'src/theme.ts'), "export const background = '#101412'\n")
+    expect(runGate(root).output).toContain('src/theme.ts:1 [raw-color]')
+  })
+
   it('accepts scale tokens, local stacking and semantic colors', () => {
     const css = '.a { color: var(--bg); font-size: var(--font-size-sm); z-index: 2; font: inherit; }'
     expect(runGate(fixture(css)).ok).toBe(true)

@@ -310,7 +310,7 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
 `config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
 能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
-Agent 被其它 Agent 的 subagents、插件普通配置或工作区默认 Agent/Session 执行设置引用时不能删除；Catalog 删除事务检查这些引用并保持并发一致性。
+Agent 被其它 Agent 的 subagents、插件普通配置、Chat Space 默认设置、Session 或定时任务引用时不能删除，返回 `409 RESOURCE_IN_USE`。前两类引用在 Catalog 删除事务内核验；Chat Space、Session 与定时任务由数据库外键约束并发写入。
 
 Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`）或 PUT 的必填
 `SecretUpdate`（`KEEP`/`SET`/`CLEAR`）写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自

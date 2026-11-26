@@ -105,7 +105,7 @@ Reset refused before any change:
 Workflow:
   1. In the product, configure the connection and the agents, then export the settings with
      the product's settings sync.
-  2. Stop application writes for the whole reset.
+  2. Stop application writes for the whole reset. Run only one maintenance operation per target.
   3. Run this script to back up the target and replace it with an empty database.
   4. Apply the current schema with the external schema/Flyway initialization.
   5. Start the product and sync the settings back in.
@@ -141,8 +141,7 @@ configure_paths() {
   CHECKSUM_FILE="$WORK_DIR/${TARGET_DB}_${STAMP}.dump.sha256"
 }
 
-# 新库先在临时名下建完，再改名为目标库名。标识符上限 63 字节，临时名带时间戳，因此既超不出
-# 长度上限，也不会与并发的维护运行冲突。
+# 新库先在带时间戳的临时名下建完，再改名为目标库名；临时名不超过 63 字节。
 partial_database_name() {
   local suffix="__kk_partial_${STAMP}"
   printf '%s%s\n' "${TARGET_DB:0:$((63 - ${#suffix}))}" "$suffix"

@@ -136,6 +136,17 @@ describe('DraftPaneRenderer', () => {
     )
   })
 
+  it('restores the editable draft independently of the first-send record', async () => {
+    mockedRequest.mockResolvedValue([])
+    localStorage.setItem('kk-studio.composer-draft:workspace-draft:draft-1', JSON.stringify({
+      parts: [{ type: 'text', text: 'Previous unsent draft' }],
+    }))
+
+    const { onUnsentChange } = renderDraftPane()
+    expect(await screen.findByRole('textbox')).toHaveTextContent('Previous unsent draft')
+    expect(onUnsentChange).toHaveBeenCalledWith(true)
+  })
+
   it('does not send when saving the replay record fails', async () => {
     const user = userEvent.setup()
     mockedRequest.mockImplementation(async (endpoint: string) => {
@@ -175,7 +186,7 @@ describe('DraftPaneRenderer', () => {
       if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') {
         sessionCall += 1
         if (sessionCall === 1) throw failure
-        if (sessionCall === 2) throw new ApiError('invalid folder', 400, 'INVALID_FOLDER', undefined, 'INVALID_FOLDER')
+        if (sessionCall === 2) throw new ApiError('invalid folder', 400, 'validation', undefined, 'INVALID_FOLDER')
         return { sessionId: 'sess-2', threadId: 'thread-recovered', commandId: 'cmd-2', treeVersion: '2' }
       }
       if (endpoint === 'GET /api/harness/threads/{threadId}/snapshot') return { version: '1', thread: { threadId: 'thread-recovered' }, entries: [] }
@@ -199,6 +210,36 @@ describe('DraftPaneRenderer', () => {
     // Third attempt succeeds
     fireEvent.keyDown(editor, { key: 'Enter' })
     await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-recovered' }))
+  })
+
+  it('keeps a pending first send intact when a retry requires login', async () => {
+    const body = { message: [{ type: 'TEXT', text: 'May already be accepted' }], yoloEnabled: true }
+    const frozen = JSON.stringify({ key: 'draft-1', body, rejected: false })
+    sessionStorage.setItem(sendStorageKey, frozen)
+    const post = vi.fn()
+      .mockRejectedValueOnce(new ApiError('login required', 401, 'unauthorized', undefined, 'NOT_AUTHENTICATED'))
+      .mockResolvedValueOnce({ threadId: 'thread-recovered' })
+    mockedRequest.mockImplementation((async (endpoint: string, params: unknown, options: unknown) => {
+      if (endpoint === 'GET /api/platform/agent-summaries') return READY_AGENTS
+      if (endpoint === 'GET /api/platform/model-summaries') return READY_MODELS
+      if (endpoint === 'GET /api/platform/environment-summaries') return READY_ENVS
+      if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') return post(params, options)
+      throw new Error(`Unexpected endpoint: ${endpoint}`)
+    }) as typeof request)
+
+    const user = userEvent.setup()
+    const { replace } = renderDraftPane()
+    await user.click(await screen.findByRole('button', { name: '重试' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    const retry = await screen.findByRole('button', { name: '重试' })
+    expect(sessionStorage.getItem(sendStorageKey)).toBe(frozen)
+    await user.click(retry)
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-recovered' }))
+    expect(post.mock.calls).toEqual(Array.from({ length: 2 }, () => [
+      { path: { spaceId: 'space-1' }, body }, { idempotencyKey: 'draft-1' },
+    ]))
+    expect(sessionStorage.getItem(sendStorageKey)).toBeNull()
   })
 
   it('handles agent load failure retry, missing default agent, and empty agent list for admin vs user', async () => {

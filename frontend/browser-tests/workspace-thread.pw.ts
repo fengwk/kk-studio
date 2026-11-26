@@ -54,10 +54,10 @@ async function serve(page: Page, { agents = true, admin = false, rejectFolder = 
       const body = req.postDataJSON()
       posts.push({ path, key: req.headers()['idempotency-key'], body })
       if (path === `${api}/sessions`) {
-        if (rejectFolder) return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'INVALID_FOLDER' }) })
+        if (rejectFolder) return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ code: 'validation', reason: 'INVALID_FOLDER' }) })
         if (rejectFirstSession && !rejectedFirstSession) {
           rejectedFirstSession = true
-          return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'INVALID_REQUEST' }) })
+          return route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ code: 'validation', reason: 'INVALID_REQUEST' }) })
         }
         const key = req.headers()['idempotency-key']
         const prior = creations.get(key)

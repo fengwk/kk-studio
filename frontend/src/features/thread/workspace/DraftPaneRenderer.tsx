@@ -8,7 +8,6 @@ import { RootThreadControlArea } from '@/features/thread/runtime/panes/RootThrea
 import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { ThreadPanel, ThreadStatusFooter } from '@/features/thread/runtime/thread-panel'
 import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-commands'
-import { isDefiniteAcceptanceFailure } from '@/features/thread/thread-commands-request'
 import type { PaneRendererProps } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
 import { ApiError, apiErrorDetail, request } from '@/shared/api/client'
@@ -27,16 +26,16 @@ const draftCommands = THREAD_COMMANDS.filter(({ id }) => id === 'upload')
 export function DraftPaneRenderer(props: Props) {
   const { user } = useAccount()
   if (!user) return null
-  const scope = `workspace-draft:${JSON.stringify([user.id, props.space.id, props.target.draftId])}`
-  return <DraftPane key={scope} {...props} scope={scope} />
+  const storageKey = `kk-studio.session-send:workspace-draft:${JSON.stringify([user.id, props.space.id, props.target.draftId])}`
+  return <DraftPane key={storageKey} {...props} storageKey={storageKey} />
 }
 
-function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, target, scope }: Props & { scope: string }) {
+function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, target, storageKey }: Props & { storageKey: string }) {
   const { t } = useI18n()
   const { user } = useAccount()
   const cache = useQueryClient()
   const bodyRef = useRef<HTMLDivElement>(null)
-  const storageKey = `kk-studio.session-send:${scope}`
+  const scope = `workspace-draft:${target.draftId}`
   const [stored, setStored] = useState(() => {
     try {
       return { record: loadSessionSend(storageKey, target.draftId), unreadable: false }
@@ -86,9 +85,9 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
     retry: false,
     networkMode: 'always',
     onError: (error, record) => {
-      if (!isDefiniteAcceptanceFailure(error)) return
+      // 只有应用明确拒绝这份请求才解锁；鉴权失败或幂等冲突不能否定此前已受理。
+      if (!(error instanceof ApiError) || error.status !== 400 || error.code !== 'validation') return
       try {
-        // 确定拒绝允许编辑，但只在成功后删除发送记录。
         const rejected = saveSessionSend(storageKey, target.draftId, record, { ...record.value, rejected: true })
         setStored({ record: rejected, unreadable: false })
       } catch {

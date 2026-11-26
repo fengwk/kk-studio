@@ -4,19 +4,7 @@
 
 ## 现在的样式由什么组成
 
-正式前端有 79 个 CSS 文件、13,268 行，全部使用全局类名。语义 token 只有一个来源：[全局样式](../frontend/src/styles.css)第 9–144 行的 `:root`。[样式检查](../frontend/scripts/check-css.mjs)已经拦住未声明的变量、变量回退值、越层使用调色板、裸颜色、非 token 字号和越界 z-index，所以颜色和字号基本统一。
-
-间距、边框、阴影、焦点和动效还没有约束：
-
-| 现象 | 数量 | 主要所在 |
-| --- | --- | --- |
-| 间距属性写 2px 及以上的裸 px | 763 处，用 `--space-*` 的只有 139 处 | 画布 113、Project 94、对话正文 50、全局 37、设置 36 |
-| `!important` | 25 | 画布 7、代码块 5、消息块 4、全局 4 |
-| 非 `none` 的 `box-shadow` | 40 | 画布 10、控件 7、全局 6 |
-| `transition: all` | 2 | 全局、对话正文 |
-| 边框声明 | 228 | 画布 36、Project 26、控件 14 |
-
-1.3.0 删除的 Project 和旧 Chat 样式含其中 111 处裸 px 间距。
+语义 token 定义在[全局样式](../frontend/src/styles.css)的 `:root`。CSS 使用语义名；KChart 由 Markdown 图表适配读取同一组已生效的值。共享控件在自己的样式中实现外观，业务模块只决定布局和交互。[样式检查](../frontend/scripts/check-css.mjs)把这些规则应用到 CSS 和应用 TypeScript。
 
 焦点由[全局样式](../frontend/src/styles.css)中的一条规则统一绘制：可聚焦元素与输入控件都使用 1px 中性轮廓，组件只通过 `data-ui-focus` 声明自己的焦点形态（行、控件、委托给容器或不绘制）。[焦点环测试](../frontend/src/shared/ui/controls/focus-ring.test.ts)固定这条规则。外观去描边与统一焦点已直接落在全局样式与共享组件自身样式文件中，不再保留覆盖层。
 
@@ -72,22 +60,22 @@
 | `Dialog`、`ConfirmActionModal` | 底色 `--surface`，无边框，用 `--shadow-lg`；弹窗内的无边框分组行、分段槽与预览块用 `--bg` 与弹窗底区分，内部输入控件保持 `--surface-raised`。 |
 | `ResourceCard`、`ResourceGrid`、`ResourceCardSkeleton`、`CreateCard` | 无边框、无阴影，底色 `--surface`；元信息的标签与值同字号，值用 `--fg`。 |
 | `Badge` | 无边框。 |
-| `StateBlock`、`Toast`、`LoadingSpinner` | 不变。 |
+| `StateBlock`、`Toast`、`LoadingSpinner` | 复用共享的空态、失败、提示与加载样式。 |
 
-1.3.0 新增的工作区组件：
+工作区组件：
 
 | 组件 | 用途 |
 | --- | --- |
-| `WorkspaceShell` | 侧栏、收起栏和主区；窄屏时侧栏变为抽屉。 |
-| `ListRow` | 28px 的行：图标位、可省略的名称、尾部（计数、时间或状态）和「…」。目录、状态视图、执行记录、环境列表和设置分类共用；选中只用底色。 |
+| `WorkspaceShell`、`WorkspaceSidebar` | 外壳组织目录与窗格；侧栏管理宽度、折叠和页签，窄屏下由外壳以抽屉呈现。 |
+| [列表行样式](../frontend/src/shared/ui/layout/list-row.css) | 共享行布局和单行省略，供目录、状态、执行记录、环境和设置分类使用。各入口保留自己的按钮、链接、缩进和拖动行为；选中只用底色。 |
 | `Menu` | 操作菜单：方向键、Home/End、字母快捷键，Esc 关闭并归还焦点，Tab 关闭。 |
 | `PaneLayout`、`PaneHeader`、`PanePicker` | 拆分树与分隔线、窗格标题与布局操作、打开时的目标选择层。 |
-| `ThreadStatusIcon` | 五种状态图标；运行中轮转，并尊重减少动态效果。 |
+| `LoadingSpinner` | 目录、状态和执行树的运行标识共用黄色旋转图标；减少动态效果时停转。等待始终静止。 |
 | `NameDialog` | 名称确认：创建 Chat Space，分支和新会话命名。当前 Chat Space 在空间菜单中行内改名。 |
 | `DateInput`、`TimeInput` | 日期和时间选择：触发器与 `Select` 同外观，焦点留在触发器上。日期是月历；时间是时、分两列，费率结束时间的小时列末尾多一项 24，只能配 00 分。需要日期和时间时两者并排。 |
 | `UserAvatar` | 圆形首字母头像；侧栏、收起栏和用户卡片共用。 |
 | `SignInForm` | 登录表单：未登录时整页显示，登录失效时以弹窗复用。 |
-| `ScheduleList`、`ScheduleEditor`、`EnvironmentList` | 侧栏的定时任务和环境入口。 |
+| `WorkspaceSchedules`、`ScheduleEditorDialog`、`EnvironmentList` | 定时任务列表、编辑和环境入口。定时目标与时间由独立字段组件编辑，预览和保存共用同一份草稿。 |
 
 ## 样式规则落点
 
@@ -101,7 +89,7 @@
 
 ## 样式检查
 
-在现有规则之外增加五条：
+样式门禁还检查以下规则：
 
 1. 间距属性只能使用 `var(--space-*)`、`0`、`1px` 或由它们组成的 `calc()`。
 2. `box-shadow` 只能是 `none` 或 `var(--shadow-*)`；`outline` 只在全局焦点规则中设置。
@@ -109,12 +97,4 @@
 4. `!important` 只允许出现在减少动态效果和强制颜色的媒体查询中。
 5. 共享组件的类名只能在该组件自己的样式文件中设置样式。
 
-前四条对存量使用基线计数：每个文件记录当前数量，只允许减少，新文件从零开始；全部清零后改为硬规则。第五条对新组件直接生效。视觉验收在 1440、1024、390 和 320px 逐张截图目检，不只看脚本结果。
-
-## 实施顺序
-
-1. 补齐 token，加入样式检查和基线。
-2. 共享控件按规则改样式；焦点规则进入全局基础层，删除各控件的焦点环与焦点来源判定，改写焦点环测试以断言新规则。
-3. 新工作区组件直接按规则实现，不写裸 px。
-4. 删除 Project、旧 Chat 和 IDE 浮层的样式。
-5. 收敛保留的页面：[画布样式](../frontend/src/features/canvas/canvas.css)（1,651 行）按画布子组件拆分，再依次清理对话正文、设置、交互卡片和工具卡，逐个文件把基线降到零。
+前四条对存量使用基线计数：每个文件记录当前数量，只允许减少，新文件从零开始。第五条直接检查共享样式的归属。视觉验收在 1440、1024、390 和 320px 逐张截图目检，不只看脚本结果。

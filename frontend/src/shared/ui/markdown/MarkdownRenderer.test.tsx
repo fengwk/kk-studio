@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { installVizThemeFixture } from './viz-theme.test-fixture'
+import { installVizThemeFixture } from '@/test-support/viz-theme-fixture'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 
 const kchart = vi.hoisted(() => ({

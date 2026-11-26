@@ -418,7 +418,7 @@ System prompt 的具名段落按名称自然排序：`[agent]` → `[environment
 
 持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson` 保留原文；Provider 的 `rawUsageJson` 只是响应内的文本事实，不进入 durable 历史。厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。
 
-Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。object 判定、精确字段集合与标量原语统一走模型模块的 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)，各 codec 只声明自己的字段集合、错误上下文与值类型语义；持久化身份中的 UUID 经 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析，非 canonical 文本直接拒绝。
+Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。对象判定、精确字段集合与标量原语统一走 Common 的 [`JsonCodecSupport`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/JsonCodecSupport.java)，各 codec 只声明自己的字段集合、错误上下文与值类型语义；持久化身份中的 UUID 经 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析，非 canonical 文本直接拒绝。
 
 平台 HTTP 投影直接承载 codec 定义的 JSON 节点：Entry、队列命令与取消输入的 `payload`，
 工具调用的 `result` / `error` / `approval`、交互的 `approval`，以及 Debug 的

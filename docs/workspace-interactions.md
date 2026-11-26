@@ -75,7 +75,7 @@
 
 **发送首条消息**
 
-- 前端：窗格目标是 `DRAFT{id, folderId}`。发送期间锁定输入并保留文字；成功后目标改为 `THREAD`，草稿清空。空间没有可用 Agent 时发送不可用：有 Agent 可选时，入口打开空间的默认配置；一个都没有时，管理员的入口打开 Agent 设置，普通用户只看到原因。
+- 前端：窗格目标是 `DRAFT{id, folderId}`。发送前保存本次请求，发送期间锁定输入；收到接受回执后打开 `THREAD` 并清除草稿。未收到结果时，在同一标签页刷新仍显示「重试」；不自动重发，手动重试沿用原请求。空间没有可用 Agent 时不能发出新请求：有 Agent 可选时打开空间默认配置；一个也没有时，管理员可打开 Agent 设置，普通用户只看到原因。
 - 接口：`POST /sessions`，`Idempotency-Key` 为草稿 ID。
 - 事务：锁空间行 → 校验目录属于该空间、默认 Agent 存在 → Harness 创建 Session、ROOT（根设置含 Agent 名称）和 `main` Thread，并接受首条命令 → 写目录边（含 Agent 名称，排在所在目录最上面）→ `tree_version` 加一。Session 标题取首条消息的前 40 个字符。
 - 事件：`tree`；之后正文经 `thread` 订阅推送。

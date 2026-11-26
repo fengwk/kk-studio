@@ -32,6 +32,9 @@ HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，�
 - `requireValidJson(json)` 要求非空白且严格合法，接受任意类型的单一 JSON 值（`null`、标量、数组与对象都合法，不做 object 归一化），并把原文原样返回；
 - `requireJsonObject(json)` / `requireJsonObject(json, name)` 额外要求顶层为 object，并把 `null` 或空白规范化为 `"{}"`，第二个参数用于定制异常里的字段名；
 - `readTree` / `write` 提供同一套严格性的树读写；空白文本产生的 MissingNode 被拒绝，JSON 字面量 `null` 仍是合法 NullNode。
+- `strictBuilder` 和 `strictDecimalBuilder` 将通用严格读取规则应用到调用方的 mapper；字节上限、canonical 格式和容错规则仍由各协议决定。
+
+[`JsonCodecSupport`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/JsonCodecSupport.java) 提供对象判定、精确字段集合、标量读取等校验原语。各领域 codec 自己声明字段和值类型，不在 Common 定义协议模型。
 
 [`ToolArguments`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
 

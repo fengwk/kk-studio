@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { installVizThemeFixture } from './viz-theme.test-fixture'
+import { installVizThemeFixture } from '@/test-support/viz-theme-fixture'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
 import { readMarkdownTableSource } from '@/shared/ui/markdown/markdown-table-source'

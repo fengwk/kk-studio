@@ -125,6 +125,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。�
 - `openView` 成功后才用权威快照铸造一次性 bootstrap 票据；票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管工作区路径，短时、消费即删除。`GET` 不生成 entryUrl，也不发票据。
 - 数据面授权由 [`SessionIdeDataViewAuthorizer`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/SessionIdeDataViewAuthorizer.java) 完成：请求须经 Studio 登录认证，并从配置名匹配的 IDE cookie 查询浏览器会话，再要求当前用户与绑定 owner 相同、浏览器会话与绑定相同，且当前 Daemon 进程、OPEN 状态、bindingEpoch 与 workspace 都和唯一权威快照一致。关闭、重绑、过期与实例替换使入口失效；同实例暂断保留 cookie，但不新增授权或续租。
 - 数据流以 `/ide/{viewId}/{bindingEpoch}/...` 进入 Daemon，校验当前 OPEN 绑定后转发到 code-server 的私有路径；绑定 CAS 在途时新流与使用证明不 attach，resume 成功后旧流被中止。
+- 公开 IDE WebSocket 交接给 Jetty 隧道后，[入口节点的会话校验](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/IdeStudioSessionMonitor.java) 每轮间隔 5 秒重新读取 Studio 登录状态；同一登录的多条连接在一轮内共享结果。会话撤销、过期、用户不匹配或校验失败时关闭对应隧道。Studio Cookie 不转发给 owner 节点；关闭浏览器隧道不删除 IDE 视图，不改变 Daemon 的租约回收规则。
 
 每个 browserSession 使用浏览器 Web Locks 做同源独占：刷新复用会话；复制 tab 发现会话已被活页面持有就生成新会话并清空复制来的运行身份，只保留非运行态展示偏好。pagehide 只撤回或暂停使用证明，不删除视图；BFCache pageshow 重新确认锁与权威绑定。Web Locks 不可用时明确报告浏览器能力不足，不退回共享身份或基于本地时间的接管。
 

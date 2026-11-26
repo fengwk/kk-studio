@@ -11,12 +11,13 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 [`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下用 BrowserRouter 包裹
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-QueryClient → ApplicationContributions → BrowserPreferences → Account → ApplicationEvent。
-查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
+QueryClient → ApplicationContributions → Account。账号进入已登录状态后挂载 ApplicationEvent，由共享 manager 管理订阅。
+查询默认关闭自动 retry 与窗口聚焦刷新。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 声明 `/`、`/chat-spaces/:spaceId` 和 `/settings/:section`。登录不改变地址；`/` 进入本浏览器最近访问的活跃空间，或服务端返回的首个活跃空间，不隐式创建资源。
 
 [`WorkspaceRoute`](../../frontend/src/app/WorkspaceRoute.tsx) 将账号菜单（`AccountMenu`）、[`ThreadPaneRenderer`](../../frontend/src/features/thread/workspace/ThreadPaneRenderer.tsx)、[`DraftPaneRenderer`](../../frontend/src/features/thread/workspace/DraftPaneRenderer.tsx)、Canvas（复用 `CanvasWorkbench`）与 [`VsCodePaneRenderer`](../../frontend/src/features/environment/ide/VsCodePaneRenderer.tsx)、IDE 异步关闭守卫（`IdePaneCloseContext` / `IdeWorkspaceProvider`）及 [`EnvironmentList`](../../frontend/src/features/environment/ide/EnvironmentList.tsx) 组装进 [`WorkspaceShell`](../../frontend/src/features/workspace/WorkspaceShell.tsx)。外壳只认识窗格契约（`PaneTarget` / `PaneRendererProps` / `PaneRenderers`）与通用 `PaneLayout`：目录、当前空间状态与定时任务（[`WorkspaceSchedules`](../../frontend/src/features/workspace/WorkspaceSchedules.tsx) 与 [`ScheduleEditorDialog`](../../frontend/src/features/workspace/ScheduleEditorDialog.tsx)）入口、跨空间 [`WorkspaceInbox`](../../frontend/src/features/workspace/WorkspaceInbox.tsx)、环境操作、窗格内替换/openBeside 和 `?thread=` / `?canvas=` 深链共用打开流程（空草稿直接打开，否则弹出目标选择层；替换或关闭含未发送输入的窗格先确认，IDE 视图先等待关闭守卫；已在别处打开的 Thread 或同环境同 viewId 的 VS Code 移到目标窗格并让原窗格回到新会话，Canvas 可多窗格打开）。目录和目录菜单支持行内新建目录、行内改名与桌面原生 / 触屏长按拖拽移动；定时页签通过 `/api/chat-spaces/{spaceId}/schedules*` 管理空间定时任务（`enabled` 独立开关、预览校验、`expectedVersion` 乐观锁与 409 回读保留输入、立即运行只新增运行记录并展开最新记录、单任务内联执行记录游标栈分页及复用外壳打开对应 Thread 且不改目录状态）。窗格布局、目录展开和侧栏宽度以 `(userId, spaceId)` 为键保存在浏览器；窄屏抽屉仅在焦点位于外壳 DOM 内时消费 `Escape`，避免拦截已 portal 弹层的 `Escape`。`chat-space` WebSocket 的 `tree`、`threads`、`space` 与 `schedules` 只经 500ms 合并后失效回读，不直接写入缓存；`WorkspaceInbox` 分页读取无 `rootThreadId` 的 `GET /api/harness/interactions`（排除 `ENVIRONMENT_WAIT`，按 `rootThreadId` 去重并优先 `CHAT_SPACE`），通过全局 `interactions` `changed` 帧刷新，点击切入所属空间并打开对应 Thread。更多工作区设计见 [工作区设计](../workspace-design.md) 与 [工作区交互契约](../workspace-interactions.md)。
+[`WorkspaceSidebar`](../../frontend/src/features/workspace/WorkspaceSidebar.tsx) 负责侧栏尺寸、折叠状态和页签；`WorkspaceShell` 保持目录和窗格的操作边界。全屏卸载侧栏控件但保留侧栏布局，退出全屏时恢复原样。
 i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 按业务领域维护固定前缀。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
 把扩展一次性展开为只读的 dialogs、overlays 与按 id 索引的 toolRenderers；
@@ -212,9 +213,10 @@ view 绑定（`PaneTarget`）与布局，不复制 Thread、draft 或执行状�
 [`ThreadPaneRenderer`](../../frontend/src/features/thread/workspace/ThreadPaneRenderer.tsx) 通过 `useThreadProjection` 读取投影：根 Thread 渲染 [`RootThreadControlArea`](../../frontend/src/features/thread/runtime/panes/RootThreadControlArea.tsx) 与根交互区，子代理查看层由 [`ChildThreadView`](../../frontend/src/features/thread/runtime/panes/ChildThreadView.tsx)（`ConnectedThreadView`）读取自己的投影。
 `ThreadPane` 与命令控制 Hook 只消费必填投影；命令批直接从该投影构建。
 
-命令批在发送前冻结幂等键、payload 与顺序；设置批次还冻结 cursor。
-`pending-request-store` 保存这些未决请求：容器创建按 owner/pane 隔离，既有 Thread 按 threadId 隔离，
-与 IndexedDB 离线草稿分开保存。写入失败中止发送；未知结果保留相同请求供精确重试或显式放弃。
+草稿窗格在首条发送前，把请求体和幂等键保存在当前标签页的 `sessionStorage`，键由用户、Chat Space 和 `draftId` 组成。写入失败则不发送；未知结果锁定编辑，在同一标签页刷新后仍可手动重试，不自动重发。应用明确返回校验失败时允许修正；登录失效不改变未决状态。收到接受回执后清除匹配的记录和输入，并在当前窗格打开新 Thread。
+
+已有 Thread 的命令批在发送前冻结幂等键、payload 与顺序；设置批次还冻结 cursor。
+`pending-request-store` 按 `threadId` 保存未决请求，与 IndexedDB 离线草稿分开。写入失败中止发送；未知结果保留相同请求供精确重试或显式放弃。
 恢复与清理核对 request identity，避免常规路径覆盖其他 Pane 的记录；先读后写并非跨标签页原子操作。
 放弃只清理本地记录，不撤销服务端可能已经接受的请求。
 单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
@@ -500,15 +502,14 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 SVG 裁到图形范围并与正文左对齐。`kchart` 是 JSON 数据图，图上方显示 `scene.heading` 与 `scene.subtitle`，
 图下方显示来源与注释。
 `mermaid`、`layers`、`blocks`、`swimlane` 作为结构图源码交给 KChart，标题由紧凑排版直接画在图中。
-配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。
+主题从浏览器已生效的语义 token 读取颜色、字体和圆角，适配为 KChart 的值；数据系列沿用 KChart Terminal 主题。图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。
 放不下的图保持原尺寸，在图框内横向滚动；无法成图时保留源码，并用纯文本显示首个错误的位置、原因和修复建议。
 标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
 
 应用根通过 `GET /api/auth/me` 判断登录状态。HTTP `NOT_AUTHENTICATED` 或事件连接关闭码 `4001` 触发原地重新登录；同一账号保留草稿，其它账号整页重新加载。工作区通过 `useAccount` 读取账号，使用 `AccountMenu` 展示头像、修改密码和退出入口；有未发送内容时传入 `hasUnsentContent`。
 
-设置通过 `/settings/:section` 打开。普通用户只有本地偏好；管理员另可管理 Harness 资源、用户、插件及系统配置。系统配置分组由 settings schema 驱动，
-未编辑或改回编辑基线时，表单跟随最近读取的服务端设置。编辑后，完整聚合与首次编辑时所见版本一起提交（`expectedVersion`），
-后台回读不覆盖草稿，也不推进它的提交版本；重置则丢弃草稿并显示最近读取的值。权限与 apply timing 按封闭类型渲染。
+设置通过 `/settings/:section` 打开。所有用户都可在「偏好」查看快捷键；管理员另可管理 Harness 资源、用户、插件及系统配置。系统配置分组由 settings schema 驱动。
+未编辑或改回编辑基线时，表单跟随最近读取的服务端设置。编辑后，完整聚合与首次编辑时所见版本一起提交（`expectedVersion`）。保存期间锁定字段和草稿；保存失败保留输入，字段错误显示在对应控件下方。后台回读不覆盖草稿，也不推进它的提交版本；重置丢弃草稿并显示最近读取的值。权限与 apply timing 按封闭类型渲染。
 
 ### 配置同步
 
@@ -591,7 +592,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 | 成功/等待/危险/信息 | `--success` / `--warning` / `--danger` / `--info` 及 soft、border |
 
 没有同义别名，也没有 `var(--x, fallback)`：缺失的 token 应补进 `:root`，而不是在使用处兜底。
-`npm run lint:css`（[`check-css.mjs`](../../frontend/scripts/check-css.mjs)，由 `styles.tokens.test.ts` 随 vitest 执行）扫描 `src` 下的样式与非测试 TS/TSX，拒绝：未声明的自定义属性、fallback、组件中直接使用 `--palette-*`、palette 之外的色值与命名色（TS 中只允许重复 palette 色值，供 KChart 图表主题这类只能吃具体颜色的 JS 消费者）、偏离字号标尺的 `font-size` 与 `font` 简写，以及大于 10 且不是 `--z-*` 的 `z-index`。
+`npm run lint:css`（[`check-css.mjs`](../../frontend/scripts/check-css.mjs)，由 `styles.tokens.test.ts` 随 vitest 执行）扫描 `src` 下的样式与非测试 TS/TSX，拒绝：未声明的自定义属性、fallback、组件中直接使用 `--palette-*`、palette 之外的 CSS 和 TypeScript 色值、CSS 命名色、偏离字号标尺的 `font-size` 与 `font` 简写，以及大于 10 且不是 `--z-*` 的 `z-index`。
 
 ### 颜色与卡片
 

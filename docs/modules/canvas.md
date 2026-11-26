@@ -5,7 +5,7 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | 模块 | 职责 | 依赖 |
 | --- | --- | --- |
 | [`apps/canvas/spi`](../../apps/canvas/spi/) | Canvas Function 能力 SPI：adapter、函数定义与参数 schema、冻结运行计划、执行上下文与严格 JSON 模型 | [Common](common.md)、Jackson 3 流式 API |
-| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Harness Model](harness-model.md)、[Platform Plugin API](platform-plugin-api.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
+| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Platform Plugin API](platform-plugin-api.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
 
 平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。[Canvas DTO](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) 和领域间的映射在 [`CanvasDtoMapper`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它。[Web](web.md) 是组合根，Canvas 自己的 [`CanvasHttpAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasHttpAutoConfiguration.java) 把控制器注册进宿主的 MVC。Canvas 与 Workspace 各自拥有领域数据，跨域数据约束与 ER 关系见 [Schema](schema.md)。
 
@@ -90,7 +90,7 @@ HTTP 的 BLOB 输入使用 READY 上传的 `uploadId`，而 Canvas 领域资源�
 服务端已确认快照 + 待确认操作 + 编辑草稿 = 当前展示
 ```
 
-草稿记录编辑基线与 generation。远端更新只推进确认层，ACK 只清除对应操作和 generation；dirty 输入、编辑器和选择保留。请求发送后冻结 ID、参数与前置条件，网络重试沿用原请求；解决冲突时创建新请求。去重记录与业务修改同事务提交，精确重试返回原接受回执。浏览器草稿、IndexedDB 存储与冲突恢复细节见 [Frontend](frontend.md)。
+草稿记录编辑基线与 generation。远端更新只推进确认层，ACK 只清除对应操作和 generation；dirty 输入、编辑器和选择保留。请求发送后冻结 ID、参数与前置条件，网络重试沿用原请求；解决冲突时创建新请求。去重记录与业务修改同事务提交，精确重试返回原接受回执。浏览器由 [`CanvasWorkbench`](../../frontend/src/features/canvas/CanvasWorkbench.tsx) 按当前窗格的 Canvas ID 挂载编辑器；窗格更换画布时，旧画布的异步结果不能写入新编辑器。草稿、IndexedDB 存储与冲突恢复细节见 [Frontend](frontend.md)。
 
 编辑器头部只呈现画布标题与保存状态：`revision` 属于同步协议与诊断信息，不作为头部版本号展示。空白画布显示不遮挡平移、框选与拖放的引导，说明可以添加资源与 Function 节点、并在选中 Function 节点后运行；引导自带与左侧 `+` 相同的添加入口，加入第一个节点后自动消失。缩略图同样随内容出现：零节点的画布不渲染缩略图，有节点后在舞台右下角提供可平移、可缩放的概览，选中 Function 节点时让位给运行面板；窗口不宽于 1180px 时不显示缩略图，把舞台留给内容。
 自动取景（加入首个节点、适应画布、聚焦选中）左右对称留白，且至少让出左侧浮动的 `+`，窄屏下节点不被它压住。
@@ -99,7 +99,7 @@ HTTP 的 BLOB 输入使用 READY 上传的 `uploadId`，而 Canvas 领域资源�
 
 持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`CanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
 
-`CanvasCommandService.createCanvas(canvasId, title)` 供工作区编排创建带归属的画布，返回文档 ID 和初始 revision；`deleteCanvas(canvasId, expectedRevision)` 由工作区编排调用。两者均加入调用方事务。
+工作区通过 [`CanvasDocuments`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasDocuments.java) 创建、改名、深删除画布及批量读取标题，不访问 Canvas 的持久化类。文档修改加入工作区的目录写事务；画布归属由工作区维护。节点和分组写入仍走画布命令协议。
 
 深删除先锁文档并核对 revision，再按节点 → Run → Work 的顺序加锁。版本不符返回 `VERSION_CONFLICT`；若有 `READY`、`RUNNING` 或 `UNKNOWN` Run，则返回冲突原因 `EXECUTION_NOT_SETTLED`，不删除任何行，也不重新提交任务。删除释放 pin、清理 Run 和 Work、删除资源边及节点（引用随节点参数删除），最后删除组、命令回执与文档。每条 Blob 资源边只释放一次引用，文件对象仍由 Storage 异步回收；任一步失败均回滚。
 

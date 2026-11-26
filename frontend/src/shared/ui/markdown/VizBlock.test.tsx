@@ -8,7 +8,7 @@ import type {
   RenderResult,
   Scene,
 } from '@fengwk/kchart'
-import { installVizThemeFixture } from './viz-theme.test-fixture'
+import { installVizThemeFixture } from '@/test-support/viz-theme-fixture'
 
 type DiagramResult = RenderResult<DiagramDiagnostic>
 type AttachTarget = Parameters<typeof import('@fengwk/kchart').attach>[0]
