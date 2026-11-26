@@ -123,9 +123,9 @@ function ariaOwner(element: Element): Element | null {
 describe('ThreadComposer and commands', () => {
   it('filters the real command registry and preserves caller-provided command behavior', () => {
     expect(THREAD_COMMANDS.map((command) => command.id)).toEqual([
-      'yolo', 'models', 'stop', 'upload', 'debug',
+      'models', 'stop', 'upload', 'debug',
     ])
-    expect(filterThreadCommands('yo').map((command) => command.id)).toEqual(['yolo'])
+    expect(filterThreadCommands('yo')).toEqual([])
     expect(filterThreadCommands('sto').map((command) => command.id)).toEqual(['stop'])
     expect(filterThreadCommands('debug')[0]?.id).toBe('debug')
     expect(filterThreadCommands('', THREAD_COMMANDS).map((command) => command.id)).toEqual(
@@ -280,7 +280,7 @@ describe('ThreadComposer and commands', () => {
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     rerender(
       <ThreadComposer
-        parts={[createTextPart('/yolo')]}
+        parts={[createTextPart('/debug')]}
         pending={false}
         disabled={false}
         onPartsChange={vi.fn()}
@@ -693,13 +693,13 @@ describe('ThreadComposer interactions', () => {
     expect(editor).toHaveAttribute('aria-controls', listbox.id)
     const firstId = editor.getAttribute('aria-activedescendant')
     expect(firstId).toBeTruthy()
-    expect(document.getElementById(firstId!)).toHaveTextContent(/^yolo/)
+    expect(document.getElementById(firstId!)).toHaveTextContent(/^models/)
 
     await user.keyboard('{ArrowDown}')
     const nextId = editor.getAttribute('aria-activedescendant')
     expect(nextId).not.toBe(firstId)
     expect(document.getElementById(nextId!)).toHaveAttribute('aria-selected', 'true')
-    expect(document.getElementById(nextId!)).toHaveTextContent(/^models/)
+    expect(document.getElementById(nextId!)).toHaveTextContent(/^stop/)
 
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('listbox', { name: '命令表' })).not.toBeInTheDocument()
@@ -728,15 +728,13 @@ describe('ThreadComposer interactions', () => {
     expect(screen.getByLabelText('给 AI 发送消息')).toHaveTextContent('/debug')
   })
 
-  it('supports slash mode command execution and Escape close', async () => {
+  it('shows no matching slash command for /yolo', async () => {
     const user = userEvent.setup()
-    const onCommand = vi.fn()
-    render(<InteractionComposer onSubmit={vi.fn()} onCommand={onCommand} />)
-    const editor = screen.getByLabelText('给 AI 发送消息')
-    await user.type(editor, '/yolo')
-    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    await user.keyboard('{Enter}')
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'yolo' }))
+    render(<InteractionComposer onSubmit={vi.fn()} onCommand={vi.fn()} />)
+    await user.type(screen.getByLabelText('给 AI 发送消息'), '/yolo')
+    const listbox = screen.getByRole('listbox', { name: '命令表' })
+    expect(within(listbox).queryByRole('option')).not.toBeInTheDocument()
+    expect(listbox).toHaveTextContent('无匹配命令')
   })
 
   it('executes a model command from the filtered slash palette', async () => {
@@ -1290,7 +1288,7 @@ describe('ThreadCommandPalette', () => {
     const active = document.getElementById(activeId!)
     expect(active).toHaveAttribute('role', 'option')
     expect(active).toHaveAttribute('aria-selected', 'true')
-    expect(active).toHaveTextContent(/^models/)
+    expect(active).toHaveTextContent(/^stop/)
   })
 })
 

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useParams, useSearchParams } from 'react-router'
@@ -6,7 +6,6 @@ import '@/styles.css'
 // 真实 transcript 滚动与卡片布局由产品样式提供；harness 不复制布局。
 import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
-import { CompactionActionsContext } from '@/features/thread/runtime/thread-panel/compaction-actions-context'
 import { CompactionBranchView } from '@/features/thread/runtime/panes/CompactionBranchView'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
@@ -129,26 +128,16 @@ const HARNESS_ENTRIES: HarnessSessionEntryDTO[] = [
 ]
 
 function TranscriptRoute() {
-  const [retries, setRetries] = useState(0)
   const bodyRef = useRef<HTMLDivElement>(null)
   const messages = buildThreadTimeline(HARNESS_ENTRIES, [], []).messages
   useChatTranscriptAutoScroll(bodyRef, undefined, 'compaction-lifecycle-harness')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <output id="retry-count" data-testid="retry-count" hidden>{retries}</output>
-      <CompactionActionsContext.Provider
-        value={{
-          compact: () => setRetries((current) => current + 1),
-          compactPending: false,
-          availability: { status: 'ready', availability: { available: true, disabledReason: null } },
-        }}
-      >
-        <div ref={bodyRef} className="thread-dialogue">
-          <div className="thread-blocks">
-            <MessageList messages={messages} />
-          </div>
+      <div ref={bodyRef} className="thread-dialogue">
+        <div className="thread-blocks">
+          <MessageList messages={messages} />
         </div>
-      </CompactionActionsContext.Provider>
+      </div>
     </div>
   )
 }

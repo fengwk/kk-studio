@@ -194,11 +194,25 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   await expect(cards.nth(2)).toHaveAttribute('data-compaction-state', 'stopped')
   await expect(cards.nth(3)).toHaveAttribute('data-compaction-state', 'running')
 
-  await expect(cards.nth(0)).toContainText('上下文已压缩')
-  await expect(cards.nth(1)).toContainText('上下文压缩失败')
-  await expect(cards.nth(1)).toContainText('摘要因输出上限被截断。')
-  await expect(cards.nth(2)).toContainText('上下文压缩已停止')
-  await expect(cards.nth(2)).toContainText('未生成摘要即被停止。')
+  const compactedCard = cards.nth(0)
+  await expect(compactedCard).toContainText('上下文已压缩')
+  await expect(compactedCard.locator('.thread-disclosure-preview')).toHaveCount(0)
+  await compactedCard.getByRole('button', { name: '展开详情' }).click()
+  await expect(compactedCard.locator('.thread-disclosure-preview')).toContainText('会话摘要')
+  await compactedCard.getByRole('button', { name: '收起详情' }).click()
+
+  const failedCard = cards.nth(1)
+  await expect(failedCard).toContainText('上下文压缩失败')
+  await expect(failedCard).toContainText('摘要因输出上限被截断。')
+  await expect(failedCard.getByRole('link', { name: '查看执行' }))
+    .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000032?afterEntryId=00000000-0000-4000-8000-00000000000a')
+  await expect(failedCard.getByRole('button')).toHaveCount(0)
+
+  const stoppedCard = cards.nth(2)
+  await expect(stoppedCard).toContainText('上下文压缩已停止')
+  await expect(stoppedCard).toContainText('未生成摘要即被停止。')
+  await expect(stoppedCard.getByRole('button')).toHaveCount(0)
+
   await expect(cards.nth(3)).toContainText('正在压缩上下文…')
   await expect(cards.nth(3)).toContainText('正在整理以上内容。')
 
@@ -213,11 +227,6 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
     const retainedBox = await retained.boundingBox()
     return separatorBox != null && retainedBox != null && separatorBox.y < retainedBox.y
   }).toBe(true)
-
-  // 失败卡提供重新压缩；动作由宿主注入，点击后有一次真实提交。
-  const failedCard = page.locator('[data-compaction-state="failed"]')
-  await failedCard.getByRole('button', { name: '重新压缩' }).click()
-  await expect(page.getByTestId('retry-count')).toHaveText('1')
 
   await page.screenshot({ path: test.info().outputPath('compaction-lifecycle-desktop.png'), fullPage: true })
 

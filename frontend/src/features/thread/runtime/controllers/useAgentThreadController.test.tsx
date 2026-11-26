@@ -54,7 +54,6 @@ import type {
   HarnessCancelledInputDTO,
   HarnessSessionEntryDTO,
   HarnessStoppedThreadReceiptDTO,
-  HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
@@ -77,7 +76,6 @@ vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
     acceptThreadCommandBatch: vi.fn(),
-    compactThread: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
   },
@@ -1477,7 +1475,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.actionError).toBe('plain string failure')
   })
 
-  it('no-ops stop and compact before the thread snapshot has loaded', async () => {
+  it('no-ops stop before the thread snapshot has loaded', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(
       new Promise<HarnessThreadSnapshotDTO>(() => undefined),
     )
@@ -1486,10 +1484,6 @@ describe('useAgentThreadController', () => {
       await result.current.stopThread()
     })
     expect(harnessService.stopThread).not.toHaveBeenCalled()
-    await act(async () => {
-      await result.current.compactThread()
-    })
-    expect(harnessService.compactThread).not.toHaveBeenCalled()
     expect(result.current.actionError).toBeNull()
   })
 
@@ -1664,90 +1658,6 @@ describe('useAgentThreadController', () => {
     expect(messagePlan.request).not.toHaveProperty('target')
     expect(messagePlan.request).not.toHaveProperty('expectedHeadEntryId')
     expect(messagePlan.request).not.toHaveProperty('expectedNextCommandSequence')
-  })
-
-  it('runs manual compaction with the snapshot version and clears conflict on success', async () => {
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture()),
-    )
-    vi.mocked(harnessService.compactThread).mockResolvedValue({
-      thread: threadFixture({ version: '1' }),
-      turnStartEntryId: 't1',
-      childThreadId: null,
-    })
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
-    const { result } = renderHook(() => useTestController(THREAD_ID), {
-      wrapper: clientWrapper(client),
-    })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-    await act(async () => {
-      await result.current.compactThread()
-    })
-    expect(harnessService.compactThread).toHaveBeenCalledWith(THREAD_ID, {
-      expectedVersion: '0',
-    })
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
-    )
-    expect(result.current.actionError).toBeNull()
-    invalidateSpy.mockRestore()
-  })
-
-  it('reports compaction unavailability and surfaces 409/non-conflict failures distinctly', async () => {
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture()),
-    )
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
-    // 409：conflict 展示 + 目标 snapshot 失效；draft/错误通道不受影响。
-    vi.mocked(harnessService.compactThread).mockRejectedValueOnce(
-      new ApiError('stale compact version', 409, 'conflict', undefined, 'STALE_VERSION'),
-    )
-    const { result } = renderHook(() => useTestController(THREAD_ID), {
-      wrapper: clientWrapper(client),
-    })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-    await act(async () => {
-      await result.current.compactThread()
-    })
-    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
-    expect(result.current.actionError).toBeNull()
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
-    )
-    act(() => result.current.dismissConflict())
-    expect(result.current.conflict).toBeNull()
-    // 非 conflict 失败：actionError 通道。
-    vi.mocked(harnessService.compactThread).mockRejectedValueOnce(new Error('compact boom'))
-    await act(async () => {
-      await result.current.compactThread()
-    })
-    expect(result.current.actionError).toContain('compact boom')
-    invalidateSpy.mockRestore()
-  })
-
-  it('submits compaction with expectedVersion guarded by server authority', async () => {
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture({ version: '7' })),
-    )
-    vi.mocked(harnessService.compactThread).mockResolvedValueOnce({
-      thread: threadFixture({ version: '8' }),
-      turnStartEntryId: 'turn-8',
-      childThreadId: null,
-    })
-    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-    await act(async () => {
-      await result.current.compactThread()
-    })
-    expect(harnessService.compactThread).toHaveBeenCalledWith(THREAD_ID, {
-      expectedVersion: '7',
-    })
   })
 
   it('guards a late stop success after rebind: invalidates the old thread but never mutates the new panel', async () => {
@@ -2321,9 +2231,9 @@ describe('useAgentThreadController', () => {
     expect(loadBoundPendingMessage(THREAD_ID)).toBeNull()
   })
 
-  it('deferred approval and compaction: late responses after rebind do not pollute new panel state', async () => {
-    // 测试意图：验证 Thread A 发起 approval 或 compaction 操作后切换至 Thread B，
-    // 迟到的失败或成功绝不清除或污染 Thread B 的 conflict 与错误提示
+  it('deferred approval: late responses after rebind do not pollute new panel state', async () => {
+    // 测试意图：验证 Thread A 发起审批后切换至 Thread B，
+    // 迟到的失败绝不清除或污染 Thread B 的 conflict 与错误提示
     const threadA = threadFixture({ threadId: THREAD_ID })
     const threadB = threadFixture({ threadId: THREAD_ID_2 })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
@@ -2361,73 +2271,6 @@ describe('useAgentThreadController', () => {
     // 断言 Thread B 绝不受影响
     expect(result.current.actionError).toBeNull()
     expect(result.current.conflict).toBeNull()
-  })
-
-  it('A -> B -> A switching: stale compact success from epoch 0 does not clear current conflict in epoch 2', async () => {
-    const threadA = threadFixture({ threadId: THREAD_ID })
-    const threadB = threadFixture({ threadId: THREAD_ID_2 })
-    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
-      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
-    })
-
-    let resolveCompactEpoch0!: (res: HarnessThreadCompactResultDTO) => void
-    const compactPromiseEpoch0 = new Promise<HarnessThreadCompactResultDTO>((resolve) => {
-      resolveCompactEpoch0 = resolve
-    })
-
-    let compactCallCount = 0
-    vi.mocked(harnessService.compactThread).mockImplementation(async () => {
-      compactCallCount += 1
-      if (compactCallCount === 1) {
-        return compactPromiseEpoch0
-      }
-      return {
-        thread: threadFixture({ threadId: THREAD_ID, version: '1' }),
-        turnStartEntryId: 't1',
-        childThreadId: null,
-      }
-    })
-
-    const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useTestController(tid),
-      { wrapper, initialProps: { tid: THREAD_ID } },
-    )
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-
-    // 1. Thread A 在 epoch 0 触发 compactThread
-    let compactActionEpoch0!: Promise<void>
-    act(() => {
-      compactActionEpoch0 = result.current.compactThread()
-    })
-    await waitFor(() => expect(harnessService.compactThread).toHaveBeenCalledTimes(1))
-
-    // 2. 切换至 Thread B，再切回 Thread A（进入 epoch 2）
-    rerender({ tid: THREAD_ID_2 })
-    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
-    rerender({ tid: THREAD_ID })
-    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID))
-
-    // 3. 在 epoch 2 制造一个 conflict
-    vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
-      new ApiError('stale conflict', 409, 'conflict', undefined, 'STALE_VERSION'),
-    )
-    await act(async () => {
-      await result.current.decideApproval('inv-conflict', 'ALLOW').catch(() => undefined)
-    })
-    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
-
-    // 4. 此时 epoch 0 的 compact 请求迟到成功返回
-    await act(async () => {
-      resolveCompactEpoch0({
-        thread: threadFixture({ threadId: THREAD_ID, version: '1' }),
-        turnStartEntryId: 't1',
-        childThreadId: null,
-      })
-      await compactActionEpoch0
-    })
-
-    // 5. 关键断言：旧 epoch 0 的 compact success 绝不能清除 epoch 2 当前的 conflict
-    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
   })
 
   it('A -> B -> A switching: stale approval success from epoch 0 does not delete decisionId for epoch 2, so epoch 2 retry retains decisionId2', async () => {

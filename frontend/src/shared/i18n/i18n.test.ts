@@ -130,13 +130,7 @@ const CHAT_DYNAMIC_KEY_PREFIXES = [
 ]
 
 /** thread-commands.ts: `ai.runtime.command.${id}` / `ai.runtime.command.${id}Label` */
-const ACTIVE_THREAD_COMMAND_IDS = [
-  'yolo',
-  'models',
-  'stop',
-  'upload',
-  'debug',
-] as const
+const ACTIVE_THREAD_COMMAND_IDS = ['models', 'stop', 'upload', 'debug'] as const
 
 const THREAD_COMMAND_KEYS = new Set(
   ACTIVE_THREAD_COMMAND_IDS.flatMap((id) => [

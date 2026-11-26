@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { useThreadApprovals } from '@/features/thread/runtime/thread-draft/useThreadApprovals'
 import { useThreadStopOperation } from '@/features/thread/runtime/thread-draft/useThreadStopOperation'
@@ -116,24 +116,6 @@ export function useAgentThreadController(
     setActionError(null)
     setConflict(null)
   }, [threadId])
-
-  const compactMutation = useMutation({
-    mutationFn: ({
-      operationThreadId,
-      expectedVersion,
-      operationEpoch: _operationEpoch,
-    }: {
-      operationThreadId: string
-      expectedVersion: string
-      operationEpoch: number
-    }) => harnessService.compactThread(operationThreadId, { expectedVersion }),
-    onSuccess: async (_result, variables) => {
-      if (isStillBound(variables.operationThreadId, variables.operationEpoch)) {
-        setConflict(null)
-      }
-      await requestThreadSnapshotRefresh(queryClient, applicationEvents, variables.operationThreadId)
-    },
-  })
 
   /**
    * 409 意味着本地 version 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
@@ -367,28 +349,6 @@ export function useAgentThreadController(
     },
   })
 
-  function compactThread(): Promise<void> {
-    if (!thread || !requireBoundThread('ai.runtime.action.compactFailed')) {
-      return Promise.resolve()
-    }
-    setActionError(null)
-    setConflict(null)
-    const operationThreadId = threadId
-    const operationEpoch = bindingEpochRef.current
-    return compactMutation
-      .mutateAsync({
-        operationThreadId,
-        expectedVersion: thread.version,
-        operationEpoch,
-      })
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        if (isStillBound(operationThreadId, operationEpoch)) {
-          reportMutationError(error, 'ai.runtime.action.compactFailed', operationThreadId)
-        }
-      })
-  }
-
   return {
     ...projection,
     messagesLoading: snapshotQuery.isLoading,
@@ -408,8 +368,6 @@ export function useAgentThreadController(
     setDraft,
     submitMessage,
     stopThread,
-    compactThread,
-    compactPending: compactMutation.isPending,
     decideApproval,
     approvalPending,
     stopPending,

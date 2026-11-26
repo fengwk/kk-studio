@@ -219,45 +219,9 @@ export const chatCatalog = {
     'en-US': ' · ↑↓ select · Enter confirm',
     'zh-CN': ' · ↑↓ 选择 · Enter 确认',
   },
-  'ai.runtime.command.disabled.compaction.threadStopped': {
-    'en-US': 'Wait for execution to exit and child tasks to settle before compacting',
-    'zh-CN': '请等待执行退出、子任务结算后再压缩',
-  },
-  'ai.runtime.command.disabled.compaction.threadBusy': {
-    'en-US': 'The Thread is busy; wait for the current turn to finish',
-    'zh-CN': 'Thread 正在执行，请等待当前回合结束',
-  },
-  'ai.runtime.command.disabled.compaction.ownershipBarrier': {
-    'en-US': 'The history crosses another Thread and cannot be compacted',
-    'zh-CN': '历史跨越其他 Thread，无法压缩',
-  },
-  'ai.runtime.command.disabled.compaction.noResolvedContext': {
-    'en-US': 'No compactable context was found',
-    'zh-CN': '没有可用于压缩的上下文',
-  },
-  'ai.runtime.command.disabled.compaction.executionUnsupported': {
-    'en-US': 'Compaction is not supported by the current driver',
-    'zh-CN': '当前驱动不支持压缩',
-  },
-  'ai.runtime.command.disabled.compaction.nothingToCompact': {
-    'en-US': 'There is nothing to compact',
-    'zh-CN': '没有可压缩的内容',
-  },
-  'ai.runtime.command.disabled.compaction.checking': {
-    'en-US': 'Checking compaction availability...',
-    'zh-CN': '正在检查压缩可用性...',
-  },
-  'ai.runtime.command.disabled.compaction.checkFailed': {
-    'en-US': 'Failed to check compaction availability',
-    'zh-CN': '检查压缩可用性失败',
-  },
   'ai.runtime.command.upload': {
     'en-US': 'Upload files',
     'zh-CN': '上传文件',
-  },
-  'ai.runtime.command.yolo': {
-    'en-US': 'Toggle automatic approval of Tool calls',
-    'zh-CN': '切换 YOLO 自动批准工具调用',
   },
   'ai.runtime.command.stop': {
     'en-US': 'Stop the current Thread and restore unprocessed messages',
@@ -274,10 +238,6 @@ export const chatCatalog = {
   'ai.runtime.command.models': {
     'en-US': 'Choose the model and Variant',
     'zh-CN': '选择模型与预设',
-  },
-  'ai.runtime.command.yoloLabel': {
-    'en-US': 'yolo',
-    'zh-CN': 'yolo',
   },
   'ai.runtime.command.modelsLabel': {
     'en-US': 'models',
@@ -1050,14 +1010,6 @@ export const chatCatalog = {
     'en-US': 'View execution',
     'zh-CN': '查看执行',
   },
-  'ai.runtime.entry.compactionRetry': {
-    'en-US': 'Compact again',
-    'zh-CN': '重新压缩',
-  },
-  'ai.runtime.entry.compactionRetryPending': {
-    'en-US': 'Starting a new compaction…',
-    'zh-CN': '正在启动新的压缩…',
-  },
   'ai.runtime.entry.compactionSeparator': {
     'en-US': 'Earlier messages are summarized above',
     'zh-CN': '以上内容已压缩为摘要',
@@ -1609,14 +1561,6 @@ export const chatCatalog = {
   'ai.runtime.action.stopFailed': {
     'en-US': 'Stop failed',
     'zh-CN': '停止失败',
-  },
-  'ai.runtime.action.compactFailed': {
-    'en-US': 'Compaction failed',
-    'zh-CN': '压缩失败',
-  },
-  'ai.runtime.action.compactUnavailable': {
-    'en-US': 'Manual compaction is currently unavailable',
-    'zh-CN': '当前无法手动压缩',
   },
   'ai.runtime.action.abandonedPendingNotice': {
     'en-US': 'The pending message was discarded locally. Commands already accepted by the server are not cancelled, and the message will not be resent automatically.',

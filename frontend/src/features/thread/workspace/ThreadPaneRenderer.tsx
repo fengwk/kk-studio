@@ -30,7 +30,6 @@ import './thread-workspace.css'
 
 type Props = PaneRendererProps<{ kind: 'thread'; threadId: string }>
 const emptyEnvironments: EnvironmentSummaryDTO[] = []
-const commands = THREAD_COMMANDS.filter(({ id }) => ['upload', 'models', 'yolo', 'stop', 'debug'].includes(id))
 
 export function ThreadPaneRenderer(props: Props) {
   return <LoadedPane key={`${props.space.id}:${props.target.threadId}`} {...props} />
@@ -146,7 +145,7 @@ function RootPane({ active, onUnsentChange, projection, environments, replace, s
                   onPartsChange: controller.setDraft,
                   onHistoryPartsChange: (parts) => controller.setDraft(parts, 'history'),
                   onSubmit: (payload, localDraft) => void controller.submitMessage(payload, localDraft),
-                  commands,
+                  commands: THREAD_COMMANDS,
                   onCommand: handleCommand,
                   settings: draft && {
                     models: models.data ?? [],

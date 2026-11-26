@@ -2,10 +2,6 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
-import {
-  CompactionActionsContext,
-  type CompactionActions,
-} from '@/features/thread/runtime/thread-panel/compaction-actions-context'
 import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import type {
   CompactionCardFact,
@@ -51,27 +47,12 @@ function renderCard(text: string, id?: string) {
   return render(<EntryMessageBlock message={compactionMessage(text, id)} />)
 }
 
-/** 压缩卡的动作渲染在真实宿主上下文里：时间线只读卡片 + 根控制面的压缩能力。 */
-function renderWithActions(
-  message: EntryEventDialogueMessage,
-  actions: CompactionActions | null,
-) {
+function renderFactCard(fact: CompactionCardFact, text = '') {
   return render(
     <MemoryRouter>
-      <CompactionActionsContext.Provider value={actions}>
-        <EntryMessageBlock message={message} />
-      </CompactionActionsContext.Provider>
+      <EntryMessageBlock message={compactionCard(fact, text)} />
     </MemoryRouter>,
   )
-}
-
-function readyActions(overrides: Partial<CompactionActions> = {}): CompactionActions {
-  return {
-    compact: vi.fn(),
-    compactPending: false,
-    availability: { status: 'ready', availability: { available: true, disabledReason: null } },
-    ...overrides,
-  }
 }
 
 function previewOf(container: HTMLElement): HTMLElement {
@@ -182,77 +163,58 @@ describe('CompactionEntryBlock', () => {
     expect(container.textContent).toContain('<script>')
   })
   it('opens the execution view from any card that carries a branch thread', () => {
-    const { container } = renderWithActions(compactionCard({
+    const { container } = renderFactCard({
       state: 'compacted',
       childThreadId: 'child-1',
       cutEntryId: 'cut-1',
       errorCode: null,
-    }, 'summary'), null)
+    }, 'summary')
 
     const link = screen.getByRole('link', { name: '查看执行' })
     expect(link).toHaveAttribute('href', '/threads/child-1?afterEntryId=cut-1')
     expect(container.querySelector('[data-compaction-state="compacted"]')).not.toBeNull()
   })
 
-  it('shows the failure reason and retries through the shared manual compaction action', () => {
-    const compact = vi.fn()
-    renderWithActions(compactionCard({
+  it('shows the failure result and keeps the card read-only', () => {
+    renderFactCard({
       state: 'failed',
       childThreadId: 'child-1',
       cutEntryId: 'cut-1',
       errorCode: 'COMPACTION_OUTPUT_TRUNCATED',
-    }), readyActions({ compact }))
+    })
 
     expect(screen.getByText('上下文压缩失败')).toBeInTheDocument()
     expect(screen.getByText('摘要因输出上限被截断。')).toBeInTheDocument()
-    const retry = screen.getByRole('button', { name: '重新压缩' })
-    expect(retry).toBeEnabled()
-    fireEvent.click(retry)
-    expect(compact).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('link', { name: '查看执行' }))
+      .toHaveAttribute('href', '/threads/child-1?afterEntryId=cut-1')
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('offers retry for stopped compactions and reports the unavailable reason', () => {
-    renderWithActions(compactionCard({
+  it('shows the stopped result without a retry action', () => {
+    renderFactCard({
       state: 'stopped',
       childThreadId: null,
       cutEntryId: null,
       errorCode: null,
-    }), readyActions({
-      availability: {
-        status: 'ready',
-        availability: { available: false, disabledReason: 'THREAD_BUSY' },
-      },
-    }))
+    })
 
     expect(screen.getByText('上下文压缩已停止')).toBeInTheDocument()
-    const retry = screen.getByRole('button', { name: '重新压缩' })
-    expect(retry).toBeDisabled()
-    expect(retry).toHaveAttribute('title', 'Thread 正在执行，请等待当前回合结束')
+    expect(screen.getByText('未生成摘要即被停止。')).toBeInTheDocument()
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('does not offer the write action in read-only contexts', () => {
-    renderWithActions(compactionCard({
-      state: 'failed',
-      childThreadId: 'child-1',
-      cutEntryId: 'cut-1',
-      errorCode: 'COMPACTION_FAILED',
-    }), null)
-
-    expect(screen.queryByRole('button', { name: '重新压缩' })).toBeNull()
-    expect(screen.getByRole('link', { name: '查看执行' })).toBeInTheDocument()
-  })
-
-  it('renders the running card without a summary body or retry', () => {
-    const { container } = renderWithActions(compactionCard({
+  it('renders the running card without a summary body', () => {
+    const { container } = renderFactCard({
       state: 'running',
       childThreadId: 'child-1',
       cutEntryId: 'cut-1',
       errorCode: null,
-    }), readyActions())
+    })
 
     expect(screen.getByText('正在压缩上下文…')).toBeInTheDocument()
     expect(screen.getByText('正在整理以上内容。')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '重新压缩' })).toBeNull()
+    expect(screen.getByRole('link', { name: '查看执行' }))
+      .toHaveAttribute('href', '/threads/child-1?afterEntryId=cut-1')
     expect(container.querySelector('.thread-disclosure-toggle')).toBeNull()
   })
 })

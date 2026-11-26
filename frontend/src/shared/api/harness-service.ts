@@ -2,13 +2,10 @@ import { request } from '@/shared/api/client'
 import type {
   HarnessAcceptedCommandsDTO,
   HarnessExecutionAbandonDTO,
-  HarnessManualCompactionDTO,
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
   HarnessProviderRequestPreviewDTO,
   HarnessThreadCommandBatchDTO,
-  HarnessThreadCompactDTO,
-  HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
@@ -25,10 +22,6 @@ interface GetThreadSnapshotOptions {
 }
 
 interface GetThreadTreeOptions {
-  signal?: AbortSignal
-}
-
-interface GetCompactionAvailabilityOptions {
   signal?: AbortSignal
 }
 
@@ -60,16 +53,6 @@ export const harnessService = {
       { signal: options?.signal },
     ),
 
-  getCompactionAvailability: (
-    threadId: string,
-    options?: GetCompactionAvailabilityOptions,
-  ): Promise<HarnessManualCompactionDTO> =>
-    request(
-      'GET /api/harness/threads/{threadId}/compaction-availability',
-      { path: { threadId } },
-      { signal: options?.signal },
-    ),
-
   getThreadTree: (
     threadId: string,
     options?: GetThreadTreeOptions,
@@ -79,15 +62,6 @@ export const harnessService = {
       { path: { threadId } },
       { signal: options?.signal },
     ),
-
-  compactThread: (
-    threadId: string,
-    data: HarnessThreadCompactDTO,
-  ): Promise<HarnessThreadCompactResultDTO> =>
-    request('POST /api/harness/threads/{threadId}/compact', {
-      path: { threadId },
-      body: data,
-    }),
 
   getModelRequestDebug: (
     threadId: string,
