@@ -511,7 +511,7 @@ describe('ActiveThreadTree', () => {
     const runningStatus = runningLink.querySelector('.thread-tree-status')
     expect(runningStatus).toHaveTextContent('')
     expect(runningStatus).toHaveAttribute('aria-label', '运行中')
-    expect(runningStatus?.querySelector('.thread-tree-status-running-icon')).not.toBeNull()
+    expect(runningStatus?.querySelector('.ui-list-row-running .ui-loading-spinner-icon')).not.toBeNull()
     expect(runningStatus).toHaveClass('is-running')
 
     // 异步等待用静态可读图标，避免把非操作状态堆成文字。

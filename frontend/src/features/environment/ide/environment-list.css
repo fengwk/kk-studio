@@ -5,8 +5,6 @@
 }
 
 .environment-list__item {
-  display: flex;
-  align-items: center;
   min-height: var(--row-h);
   gap: var(--space-2);
   padding: 0 var(--space-2);
@@ -22,15 +20,6 @@
 }
 
 .environment-list__status.is-ready { background: var(--success); }
-.environment-list__status.is-connecting { background: var(--warning); }
-
-.environment-list__name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 @media (max-width: 760px) {
   .environment-list__open {

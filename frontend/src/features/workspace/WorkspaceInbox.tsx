@@ -6,6 +6,7 @@ import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
+import '@/shared/ui/layout/list-row.css'
 import { workspaceKeys } from './queries'
 import { getThreadPlacement } from './workspace-api'
 
@@ -64,8 +65,8 @@ export function WorkspaceInbox({ userId, onOpen }: { userId: string; onOpen: (sp
         const thread = placements[index]?.data
         return <button className="workspace-inbox-row" type="button" key={item.rootThreadId} data-ui-focus="row"
           disabled={item.owner.kind !== 'CHAT_SPACE'} onClick={() => { setOpen(false); trigger.current?.focus(); onOpen(item.owner.id, item.rootThreadId) }}>
-          <span className="workspace-row-label" title={thread?.title}>{thread?.title || t('pane.thread')}</span>
-          <span className="workspace-row-label" title={label}>{label}</span>
+          <span className="ui-list-row-label" title={thread?.title}>{thread?.title || t('pane.thread')}</span>
+          <span className="ui-list-row-label" title={label}>{label}</span>
         </button>
       })}
     </div>}

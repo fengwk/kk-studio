@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import { AlertCircle, ChevronRight, Clock, Folder, LoaderCircle, MessageCircle, MoreHorizontal, Plus, Square } from 'lucide-react'
+import { AlertCircle, ChevronRight, Clock, Folder, MessageCircle, MoreHorizontal, Plus, Square } from 'lucide-react'
 import { createUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
+import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
+import '@/shared/ui/layout/list-row.css'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Menu, type MenuItem } from '@/shared/ui/overlays/Menu'
 import { groupThreads, resolveTreeDrop, threadStates, visibleRows, type TreeDrop, type TreeRow } from './resource-tree'
@@ -14,7 +16,8 @@ function RowIcon({ row }: { row: TreeRow }) {
   if (row.kind === 'canvas') return <Square />
   if (row.kind === 'session') return <MessageCircle />
   if (row.kind !== 'thread') return null
-  const Icon = row.thread.state === 'RUNNING' ? LoaderCircle : row.thread.state === 'WAITING' ? Clock : AlertCircle
+  if (row.thread.state === 'RUNNING') return <LoadingSpinner size={14} decorative className="ui-list-row-running" data-thread-state="RUNNING" />
+  const Icon = row.thread.state === 'WAITING' ? Clock : AlertCircle
   return row.thread.state !== 'IDLE' && <Icon data-thread-state={row.thread.state} />
 }
 
@@ -32,11 +35,11 @@ export function WorkspaceStatus({ index, open }: { index: ReadonlyMap<string, Tr
       <h3>{t(stateLabels[state])}</h3>
       {rows.map(row => {
         const session = row.parentId == null ? undefined : index.get(row.parentId)
-        return <button key={row.id} type="button" className="workspace-status-row" data-ui-focus="row"
+        return <button key={row.id} type="button" className="workspace-status-row ui-list-row" data-ui-focus="row"
           onClick={event => open(row, event.currentTarget)}>
           <RowIcon row={row} />
-          <span className="workspace-row-label" title={row.name}>{row.name}</span>
-          {session && <> <span className="workspace-status-session" title={session.name}>{session.name}</span></>}
+          <span className="ui-list-row-label" title={row.name}>{row.name}</span>
+          {session && <> <span className="workspace-status-session ui-list-row-label" title={session.name}>{session.name}</span></>}
         </button>
       })}
     </section>
@@ -152,7 +155,7 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, cr
         const editor = editing?.id === row.id ? editing : undefined
         const movable = !filter.trim() && !editor && row.kind !== 'thread'
         const rowExpanded = row.children.length ? rows[i + 1]?.parentId === row.id : undefined
-        return <div key={row.id} className="workspace-row" role="treeitem" aria-level={row.level} data-ui-focus="row"
+        return <div key={row.id} className="workspace-row ui-list-row" role="treeitem" aria-level={row.level} data-ui-focus="row"
           tabIndex={selected === row ? 0 : -1} aria-selected={selected === row} aria-expanded={rowExpanded}
           aria-label={row.name} data-tree-row={row.id} data-tree-movable={movable || undefined} draggable={movable}
           style={{ '--workspace-level': Math.min(6, row.level - 1) } as CSSProperties}
@@ -177,7 +180,7 @@ export function WorkspaceTree({ roots, index, expanded, toggle, open, create, cr
                 if (event.key === 'Escape' && !editor.pending) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); requestAnimationFrame(() => { if (!editor.newFolder) focus(row.id); else if (row.parentId) focus(row.parentId); else list.current?.previousElementSibling?.querySelector('button')?.focus() }) }
               }} onChange={event => setEditing({ ...editor, value: event.target.value, error: undefined })} />
             {editor.error && <span role="alert" className="workspace-field-error" id={`workspace-error-${row.id}`}>{editor.error}</span>}
-          </form> : <span className="workspace-row-label" title={row.name}>{row.name}</span>}
+          </form> : <span className="ui-list-row-label" title={row.name}>{row.name}</span>}
           {!editor && <div className="workspace-row-menu">
             <IconButton className="workspace-more workspace-touch" label={t('workspace.actions', { name: row.name })} size="compact"
               aria-haspopup="menu" aria-expanded={menu?.id === row.id} tabIndex={-1}

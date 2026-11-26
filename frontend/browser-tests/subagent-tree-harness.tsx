@@ -39,7 +39,14 @@ export function Harness() {
     node('root', null, 'Root'),
     node('planner', 'root', 'Planner'),
     node('worker', 'planner', 'Explorer', active ? 'WAITING' : 'IDLE'),
-    node('deep', 'worker', 'Explorer', active ? 'RUNNING' : 'IDLE', 'RUNNABLE', active ? null : 'COMPLETED'),
+    node(
+      'deep',
+      'worker',
+      'A deliberately long agent identity that must truncate on narrow screens',
+      active ? 'RUNNING' : 'IDLE',
+      'RUNNABLE',
+      active ? null : 'COMPLETED',
+    ),
     node('failed', 'root', 'Reviewer', 'IDLE', 'RUNNABLE', 'FAILED'),
     node('stopped', 'root', 'Explorer', 'IDLE', 'STOPPED', 'STOPPED'),
   ])

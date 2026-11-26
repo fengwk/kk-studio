@@ -1,4 +1,6 @@
 import { CodeXml } from 'lucide-react'
+import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
+import '@/shared/ui/layout/list-row.css'
 import { useI18n } from '@/shared/i18n'
 import { ENVIRONMENT_STATUS_LABEL_KEY, environmentDisplayStatus } from '@/features/environment/environment-utils'
 import { IconButton } from '@/shared/ui/controls/IconButton'
@@ -21,9 +23,9 @@ export function EnvironmentList({ open, findOpenView }: EnvironmentListProps) {
         const available = status === 'READY'
         const connection = t(ENVIRONMENT_STATUS_LABEL_KEY[status])
         return (
-          <div className="environment-list__item" key={environment.id}>
-            <span className={`environment-list__status is-${status.toLowerCase()}`} role="img" aria-label={connection} title={connection} />
-            <span className="environment-list__name" title={environment.name}>{environment.name}</span>
+          <div className="environment-list__item ui-list-row" key={environment.id}>
+            {status === 'CONNECTING' ? <LoadingSpinner size={8} decorative className="ui-list-row-running" role="img" aria-label={connection} title={connection} /> : <span className={`environment-list__status is-${status.toLowerCase()}`} role="img" aria-label={connection} title={connection} />}
+            <span className="ui-list-row-label" title={environment.name}>{environment.name}</span>
             {available && (
               <IconButton
                 className="environment-list__open"
