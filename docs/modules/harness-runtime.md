@@ -208,7 +208,7 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 
 ## Agent Driver
 
-[`AgentDriver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/AgentDriver.java) 是 Runtime 与具体执行后端之间的窄 SPI：Builtin 用它驱动 Studio 进程内的模型调用，进程外的 Agent 后端也以同一契约接入。契约与它使用的中立投影（`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等）同属 `spi.driver`；`LockedDriverState#projection()` 返回的 generation 公开快照定义在 [`api.generation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/generation/)，消费方读快照不需要依赖 SPI。注册、路由与未安装 Driver 替身是实现细节，留在 `runtime.driver`。
+[`AgentDriver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/AgentDriver.java) 是 Runtime 与具体执行后端之间的窄 SPI：Builtin 用它驱动 Studio 进程内的模型调用，进程外的 Agent 后端也以同一契约接入。契约与它使用的中立投影（`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等）同属 `spi.driver`；`LockedDriverState#projection()` 返回的 generation 公开快照定义在 [`api.generation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/generation/)，消费方读快照不需要依赖 SPI。注册与路由是实现细节，留在 `runtime.driver`。
 
 `spi.driver` 也提供供 Driver 和 Runtime 共用的工具构件：[`ToolDeclarationPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/ToolDeclarationPlanner.java) 规划冻结绑定下的工具声明，[`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/ToolOutcomeAppender.java) 将终态工具结果追加到历史。
 
@@ -221,7 +221,7 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 ### 选择与路由
 
 - **执行选择**：[`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/BranchSettings.java) 携带 [`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/ExecutionSelection.java)`(driver, settingsJson)`；接受根设置与 `SET_EXECUTION` 命令时，未注册的 driver 直接拒绝，已注册的由其 `validateSettings` 校验 settings。
-- **注册与路由**：[`DriverRegistry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/DriverRegistry.java) 收集组合根注册的全部 Driver，按 `driver` id 路由。已有 Thread 的 driver 未注册时由 [`UninstalledAgentDriver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/UninstalledAgentDriver.java) 承接：拒绝规划新回合，但 Thread 仍可读取与停止。两者都是 Runtime 内部实现，因此留在 `runtime.driver` 而不进入对外 SPI。
+- **注册与路由**：[`DriverRegistry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/DriverRegistry.java) 收集组合根注册的全部 Driver。Studio Web 当前只装配 Builtin；其他执行后端必须由组合根显式注册。校验执行选择和运行时按 `driver` id 查找共用同一注册表，找不到 Driver 时立即返回 `execution` 校验错误，不把缺失的 Driver 当作空闲状态。
 - **能力**：[`DriverCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/DriverCapabilities.java)`(fork, manualCompaction)`。`fork=false` 时拒绝以该 Driver 的 Thread 为源创建分支或复制会话；`manualCompaction=false` 时手工压缩不可用。Thread 的 Driver 创建后不可变：fork 不能更换 Driver，更换 Driver 需要新建根会话。
 
 ### 方法契约
@@ -449,7 +449,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | `codec` | api 值类型的严格确定性 JSON wire codec 与由此派生的 request hash：`AgentMessageJsonCodec` 定义消息与 durable 内容记录的形态，`ThreadCommandPayloadJsonCodec` 在其上定义 typed command payload 并用 canonical 信封计算 hash，`RealtimeEventJsonCodec` 定义 `api.realtime` 投影事件的 live overlay 形态；`HistoryEntryPayloadJsonCodec` 按 `EntryType` 定义 Entry payload 的 durable 形态（子树委派包私有 `HistoryValueCodecs` 与 `AgentMessageJsonCodec`），`HistoryPayloadMapper` 只做终态 ToolInvocation / history normalization 到 payload 的纯映射；Tool 持久化列与 Daemon 预览共用的 `ToolBindingJsonCodec` / `ToolApprovalJsonCodec` / `ToolEditReviewJsonCodec` 共享 `InvocationJsonSupport` 的严格 JSON 原语，Builtin 的 `ModelRequestSpec` 列 codec 在 harness/agent-builtin；不含状态机、持久化与 mailbox 归约 |
 | `runtime` | 同步控制面 `HarnessRuntime` 与包私有控制事务（接受、停止、手工压缩、人工输入）、spawn、执行树锁与 Session 删除 / fork 复制；守卫锁序，执行状态流转委托 `spi.driver` 契约与 `runtime.processor`；门面只读转发已提交的压缩回合冻结元数据 |
 | `runtime.compaction` | 切分规划、prompt、摘要装配与结果评估、子执行 spawn；规划与评估是纯函数。自动阈值由平台 Turn 解析返回 `CompactionRequired`，溢出与 `compact` 工具排队由 `CompactionGate` 判定，切点由唯一的 `CompactionPlanner` 选择；配置 provider 在 `spi.compaction`，公开值类型在 `api.compaction`。`TokenEstimator` 是不读 Store、不读时钟的 token 估算唯一实现，切分、no-gain 判定、自动压缩阈值与请求估算端口共用它 |
-| `runtime.driver` | Driver 的注册与路由装配：`DriverRegistry` 与未安装 Driver 替身 `UninstalledAgentDriver`；契约在 `spi.driver`，generation 投影在 `api.generation` |
+| `runtime.driver` | Driver 的注册与路由装配：`DriverRegistry`；契约在 `spi.driver`，generation 投影在 `api.generation` |
 | `runtime.execution` | 具体执行代次的窄退出账本：物理句柄与 PREPARED/EXIT_PROOF 两阶段日志、身份登记、单向真实 ACK、显式放弃、旧 PREPARED 的 `OWNER_EXITED` 恢复、跨实例远端退出对账与确认后的 Join 结算推进；证据形状在 `api.execution`，不复制 Invocation 状态机 |
 | `spi.execution` | 本地物理执行端口：`LocalExecutionLifecycle`、`LocalExecutionIdentity`、`LocalExecutionHandle`、`LocalExecutionDrain` 与上一进程恢复结果；Builtin Driver 与 Tool Processor 只经此登记、取消、证明退出和排空，不访问 Driver 私有表 |
 | `runtime.history` | 历史归一化、最终回答判定与 Tool 结果模型内容；Entry payload 的 JSON 编解码与 payload mapper 在 `codec`，值类型（含 `ToolResultMetadata` / `ToolResultReason`）与回合文法校验在 `api.history` |

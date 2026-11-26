@@ -9,7 +9,7 @@
  * fun.fengwk.kkstudio.harness.spi.driver.DriverCommit} 与 {@link
  * fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState} 等。{@link
  * fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState#projection()} 返回的 generation
- * 投影属于公开快照，定义在 {@code fun.fengwk.kkstudio.harness.api.generation}。注册、路由与未安装 Driver 替身属于 Runtime
- * 内部实现，见 {@code fun.fengwk.kkstudio.harness.runtime.driver}。
+ * 投影属于公开快照，定义在 {@code fun.fengwk.kkstudio.harness.api.generation}。注册与路由属于 Runtime 内部实现，见 {@code
+ * fun.fengwk.kkstudio.harness.runtime.driver}。
  */
 package fun.fengwk.kkstudio.harness.spi.driver;

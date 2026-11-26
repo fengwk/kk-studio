@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.UUID;
@@ -23,7 +24,8 @@ class PostgresqlForkContractTest {
   @Test
   void idleForkCopiesHistoryAndReplaysIdempotently() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    HarnessRuntime runtime =
+        new HarnessRuntime(store, new DriverRegistry(new FakeAgentDriver("builtin")), () -> null);
     Baseline baseline = seedThreadBaseline(store);
     UUID cut = stopAtVisibleTurn(runtime, baseline);
     var sourcePath = store.transaction(tx -> tx.entries().loadPath(cut));
@@ -75,7 +77,8 @@ class PostgresqlForkContractTest {
   @Test
   void idleBranchSharesCutWithoutCopyingHistory() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    HarnessRuntime runtime =
+        new HarnessRuntime(store, new DriverRegistry(new FakeAgentDriver("builtin")), () -> null);
     Baseline baseline = seedThreadBaseline(store);
     UUID cut = stopAtVisibleTurn(runtime, baseline);
     UUID threadId = UUID.randomUUID();

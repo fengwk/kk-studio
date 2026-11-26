@@ -26,7 +26,6 @@ import java.util.function.Consumer;
 public final class DriverRegistry implements DriverThreadDeletion {
 
   private final Map<String, AgentDriver> drivers;
-  private final UninstalledAgentDriver uninstalled = new UninstalledAgentDriver();
 
   public DriverRegistry(Collection<AgentDriver> drivers) {
     Objects.requireNonNull(drivers, "drivers");
@@ -53,17 +52,15 @@ public final class DriverRegistry implements DriverThreadDeletion {
   public AgentDriver of(String driverId) {
     Objects.requireNonNull(driverId, "driverId");
     AgentDriver driver = drivers.get(driverId);
-    return driver != null ? driver : uninstalled;
+    if (driver == null) {
+      throw DomainException.validation("execution", "driver is not installed: " + driverId);
+    }
+    return driver;
   }
 
   public void validate(ExecutionSelection selection) {
     Objects.requireNonNull(selection, "selection");
-    AgentDriver driver = drivers.get(selection.driver());
-    if (driver == null) {
-      throw DomainException.validation(
-          "execution", "driver is not installed: " + selection.driver());
-    }
-    driver.validateSettings(selection.settingsJson());
+    of(selection.driver()).validateSettings(selection.settingsJson());
   }
 
   /** 汇总全部 Driver 注册的 Work 处理器；内核 THREAD / TOOL 由组合根另行装配。 */

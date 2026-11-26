@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ExecutionRootFacts;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -32,7 +33,8 @@ class PostgresqlIdleExecutionIntegrationTest {
   @Test
   void branchSharesCutForkCopiesItAndDeletingSourcePreservesSurvivors() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    HarnessRuntime runtime =
+        new HarnessRuntime(store, new DriverRegistry(new FakeAgentDriver("builtin")), () -> null);
     var source = seedThreadBaseline(store);
     UUID cut =
         runtime
@@ -94,7 +96,8 @@ class PostgresqlIdleExecutionIntegrationTest {
   @Test
   void idleCreationReplayReturnsCurrentRowsWithoutSourceOrCopySideEffects() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    HarnessRuntime runtime =
+        new HarnessRuntime(store, new DriverRegistry(new FakeAgentDriver("builtin")), () -> null);
     var source = seedThreadBaseline(store);
     UUID cut =
         runtime
@@ -162,7 +165,8 @@ class PostgresqlIdleExecutionIntegrationTest {
   @Test
   void sessionDeletionRemovesIdleBranchTreeAndExplicitForkWhilePreservingUnrelatedRoot() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    HarnessRuntime runtime = new HarnessRuntime(store, new DriverRegistry(), () -> null);
+    HarnessRuntime runtime =
+        new HarnessRuntime(store, new DriverRegistry(new FakeAgentDriver("builtin")), () -> null);
     var source = seedThreadBaseline(store);
     UUID cut =
         runtime
