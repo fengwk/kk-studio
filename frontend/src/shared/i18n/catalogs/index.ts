@@ -2,7 +2,6 @@ import { accountCatalog } from '@/shared/i18n/catalogs/account'
 import { canvasCatalog } from '@/shared/i18n/catalogs/canvas'
 import { chatCatalog } from '@/shared/i18n/catalogs/chat'
 import { environmentCatalog } from '@/shared/i18n/catalogs/environment'
-import { platformCatalog } from '@/shared/i18n/catalogs/platform'
 import { resourcesCatalog } from '@/shared/i18n/catalogs/resources'
 import { settingsCatalog } from '@/shared/i18n/catalogs/settings'
 import { sharedCatalog } from '@/shared/i18n/catalogs/shared'
@@ -12,7 +11,6 @@ import { workspaceCatalog } from '@/shared/i18n/catalogs/workspace'
 import { workspacePanesCatalog } from '@/shared/i18n/catalogs/workspacePanes'
 
 export const messageCatalog = {
-  ...platformCatalog,
   ...accountCatalog,
   ...sharedCatalog,
   ...chatCatalog,

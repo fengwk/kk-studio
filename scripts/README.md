@@ -25,7 +25,7 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 从 checkout 运行安装脚本只属于开发/CI fixture，用来验证脚本契约，**不是用户安装路径**；安装器
 从不构建，发行归档由发布流程独立生成。Fixture 会替代网络与服务管理命令，不注册真实
 systemd/launchd 服务，测试入口见
-[开发与测试](../docs/operations/development-and-testing.md#daemon-安装与受管更新回归)。
+[开发与测试](../docs/operations/development-and-testing.md#daemon-安装与发行归档回归)。
 
 ## 日常开发
 

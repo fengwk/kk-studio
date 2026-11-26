@@ -266,7 +266,7 @@ npm --prefix frontend run coverage
 | 命令 | 行为 |
 | --- | --- |
 | `run test` | `vitest run`：jsdom 单元与组件测试 |
-| `run test:browser` | Playwright Chromium 全量离线浏览器回归（CI 门禁），运行全部 9 个具名 project |
+| `run test:browser` | Playwright Chromium 全量离线浏览器回归（CI 门禁），运行全部具名 project |
 | `run test:layout` / `run test:pane` | 定向运行 `layout` / `pane` project |
 | `run lint` | `eslint .`：TypeScript、React hooks 与分层 import 规则 |
 | `run typecheck` | `tsc -b`：生产源码与构建配置的严格类型检查 |
@@ -282,7 +282,7 @@ ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、dialog、scrollIntoView 
 
 首次运行先在 `frontend/` 执行 `npx playwright install chromium`。用例位于 `frontend/browser-tests/*.pw.ts` 与
 `*.browser.ts`，[`playwright.config.ts`](../../frontend/playwright.config.ts) 按具名 project 划分（layout、pane、
-install、plugin、composer-editor、compaction、subagent-tree、mutation-review、tool-card）。
+install、plugin、composer-editor、compaction、subagent-tree、mutation-review、account-settings、tool-card）。
 [`vite.browser.config.ts`](../../frontend/vite.browser.config.ts) 把真实组件与全部 harness 以多页模式预构建到
 `reports/browser-site/`，Playwright 通过 `preview:browser` 在 loopback 5174 端口提供静态页面；harness 只使用离线
 fixture，不访问 Backend、数据库或真实模型。

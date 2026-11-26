@@ -308,7 +308,7 @@ async function setupSchedulesHarness(page: Page, dropFirstRunResponse?: Promise<
         return route.fulfill({
           status: 409,
           contentType: 'application/problem+json',
-          body: JSON.stringify({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'Stale version' }),
+          body: JSON.stringify({ code: 'version_conflict', detail: 'Stale version' }),
         })
       }
       expect(body.expectedVersion).toBe(current.version)

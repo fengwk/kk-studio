@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -88,10 +89,14 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 	if resolved, err := ResolveBash(wire.BashExecutable); err == nil {
 		bash = &resolved
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		return DaemonConfig{}, fmt.Errorf("resolve daemon executable: %w", err)
+	}
 	return DaemonConfig{
 		EnvironmentID: env.EnvironmentID, ConfigVersion: int64(env.version), ConfigPath: path, DataDir: dataDir,
 		TokenPath: tokenPath, StudioURL: studio, GatewayURL: gatewayURL(studio), BashExecutable: bash,
-		BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: DistributionDir(executablePath()),
+		BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: filepath.Dir(executable),
 	}, nil
 }
 
@@ -345,14 +350,6 @@ func orderedJSONKeys(data []byte) ([]string, error) {
 		return nil, errors.New("trailing JSON data")
 	}
 	return keys, nil
-}
-
-func executablePath() string {
-	p, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return p
 }
 
 func validateRegistrationTokenFile(path string) error {

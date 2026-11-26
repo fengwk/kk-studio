@@ -177,7 +177,7 @@ test.describe('Theme Loading Polish & ResourceCardSkeleton Browser Verification'
     }
   })
 
-  test('validates AiConsoleFrame state transitions: loading shows skeleton without empty list flash, then reveals data and error', async ({ page }) => {
+  test('validates resource page state transitions: loading shows skeleton without empty list flash, then reveals data and error', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto(HARNESS_URL)
 

@@ -556,7 +556,7 @@ describe('WorkspaceSchedules', () => {
         const body = JSON.parse(String(init?.body)) as { expectedVersion: string; title: string }
         versions.push(body.expectedVersion)
         if (body.expectedVersion !== schedules[0]!.version) {
-          return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'Stale' }, 409)
+          return jsonResponse({ code: 'version_conflict', detail: 'Stale' }, 409)
         }
         schedules[0] = { ...schedules[0]!, title: body.title, version: '3' }
         return jsonResponse(schedules[0])
@@ -565,7 +565,7 @@ describe('WorkspaceSchedules', () => {
         const version = url.searchParams.get('expectedVersion')!
         versions.push(version)
         if (version !== schedules[0]!.version) {
-          return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT' }, 409)
+          return jsonResponse({ code: 'version_conflict' }, 409)
         }
         schedules.splice(0, 1)
         return new Response(null, { status: 204 })
@@ -899,7 +899,7 @@ describe('WorkspaceSchedules', () => {
         return jsonResponse([schedule])
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}` && method === 'PATCH') {
-        return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'stale' }, 409)
+        return jsonResponse({ code: 'version_conflict', detail: 'stale' }, 409)
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}/runs` && method === 'POST') {
         runKeys.push(new Headers(init?.headers).get('idempotency-key'))
@@ -911,7 +911,7 @@ describe('WorkspaceSchedules', () => {
         return jsonResponse({ detail: 'history failed' }, 500)
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}` && method === 'DELETE') {
-        return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'stale' }, 409)
+        return jsonResponse({ code: 'version_conflict', detail: 'stale' }, 409)
       }
       if (url.pathname === '/api/platform/agent-summaries') {
         return jsonResponse([{ name: 'Coder', description: '' }])

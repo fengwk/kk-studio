@@ -37,14 +37,14 @@ describe('i18n runtime', () => {
     const { result } = renderHook(() => useI18n())
 
     expect(result.current.locale).toBe('zh-CN')
-    expect(result.current.t('ai.nav.environments')).toBe('环境')
+    expect(result.current.t('settings.sections.environments')).toBe('环境')
 
     act(() => {
       result.current.setLocale('en-US')
     })
 
     expect(result.current.locale).toBe('en-US')
-    expect(result.current.t('ai.nav.environments')).toBe('Environment')
+    expect(result.current.t('settings.sections.environments')).toBe('Environments')
   })
 
   it('returns a visible deterministic marker for missing messages', () => {

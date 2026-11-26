@@ -101,7 +101,7 @@ HTTP 的 BLOB 输入使用 READY 上传的 `uploadId`，而 Canvas 领域资源�
 
 工作区通过 [`CanvasDocuments`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasDocuments.java) 创建、改名、深删除画布及批量读取标题，不访问 Canvas 的持久化类。文档修改加入工作区的目录写事务；画布归属由工作区维护。节点和分组写入仍走画布命令协议。
 
-深删除先锁文档并核对 revision，再按节点 → Run → Work 的顺序加锁。版本不符返回 `VERSION_CONFLICT`；若有 `READY`、`RUNNING` 或 `UNKNOWN` Run，则返回冲突原因 `EXECUTION_NOT_SETTLED`，不删除任何行，也不重新提交任务。删除释放 pin、清理 Run 和 Work、删除资源边及节点（引用随节点参数删除），最后删除组、命令回执与文档。每条 Blob 资源边只释放一次引用，文件对象仍由 Storage 异步回收；任一步失败均回滚。
+深删除先锁文档并核对 revision，再按节点 → Run → Work 的顺序加锁。版本不符返回 `409`，`code` 为 `version_conflict`；若有 `READY`、`RUNNING` 或 `UNKNOWN` Run，则返回冲突原因 `EXECUTION_NOT_SETTLED`，不删除任何行，也不重新提交任务。删除释放 pin、清理 Run 和 Work、删除资源边及节点（引用随节点参数删除），最后删除组、命令回执与文档。每条 Blob 资源边只释放一次引用，文件对象仍由 Storage 异步回收；任一步失败均回滚。
 
 单独删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。
 

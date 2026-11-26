@@ -1,7 +1,7 @@
 import { ApiError } from '@/shared/api/client'
 import { createUuid } from '@/shared/lib/uuid'
 
-export function isTreeVersionConflict(error: unknown): boolean {
+export function isVersionConflict(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409 && error.code === 'version_conflict'
 }
 
@@ -12,7 +12,7 @@ function isWorkspaceTargetMissing(error: ApiError): boolean {
 // Only application responses known to reject these operations release their original request.
 export function isCreateRejected(failure: unknown): boolean {
   const error = failure instanceof Error ? failure.cause : undefined
-  return error instanceof ApiError && (isTreeVersionConflict(error) || isWorkspaceTargetMissing(error)
+  return error instanceof ApiError && (isVersionConflict(error) || isWorkspaceTargetMissing(error)
     || (error.status === 400 && error.code === 'validation' && Boolean(error.reason || error.detail))
     || (error.status === 409 && (error.reason === 'FOLDER_NAME_EXISTS' || error.reason === 'IDEMPOTENCY_KEY_REUSED')))
 }

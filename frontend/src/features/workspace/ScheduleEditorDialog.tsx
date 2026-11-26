@@ -43,6 +43,7 @@ import {
   patchSchedule,
   previewSchedule,
 } from './workspace-api'
+import { isVersionConflict } from './workspace-action-retry'
 
 type FieldErrorKey =
   | 'title'
@@ -460,7 +461,7 @@ export function ScheduleEditorDialog({
       setHadWriteError(true)
       if (error instanceof ApiError) {
         const reason = error.reason ?? error.code
-        if (error.status === 409 && reason === 'VERSION_CONFLICT') {
+        if (isVersionConflict(error)) {
           await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
           setConflict(true)
           return

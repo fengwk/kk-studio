@@ -5,10 +5,6 @@ export const settingsCatalog = {
     'en-US': 'Loading settings…',
     'zh-CN': '正在加载设置…',
   },
-  'settings.title': {
-    'en-US': 'Settings',
-    'zh-CN': '设置',
-  },
   'settings.groups.interface': {
     'en-US': 'Interface',
     'zh-CN': '界面',
@@ -81,10 +77,6 @@ export const settingsCatalog = {
     'en-US': 'Deployment address',
     'zh-CN': '部署地址',
   },
-  'settings.subtitle': {
-    'en-US': 'Changes take effect as soon as you save. Calls already in progress keep the values they started with.',
-    'zh-CN': '设置保存后立即生效，进行中的调用沿用开始时的值。',
-  },
   'settings.retry': {
     'en-US': 'Retry',
     'zh-CN': '重试',
@@ -108,10 +100,6 @@ export const settingsCatalog = {
   'settings.allSaved': {
     'en-US': 'All changes saved',
     'zh-CN': '所有更改已保存',
-  },
-  'settings.tabs.ariaLabel': {
-    'en-US': 'Settings sections',
-    'zh-CN': '设置分区',
   },
   'settings.tabs.general': {
     'en-US': 'General',

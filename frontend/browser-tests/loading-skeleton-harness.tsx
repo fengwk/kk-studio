@@ -8,7 +8,7 @@ import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
-import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
+import { ResourcePageLayout } from '@/shared/ui/cards/ResourcePageLayout'
 
 /** 与骨架同宽的真实栅格：浏览器断言用它的首行列数作为期望值，而不是写死 6 或某个像素宽度。 */
 function RealGridProbe() {
@@ -101,9 +101,9 @@ export function LoadingSkeletonHarnessApp() {
       </section>
 
       <section>
-        <h2>AiConsoleFrame 加载态/数据态/错误态测试</h2>
+        <h2>资源页面加载、显示和错误状态</h2>
         <div id="console-frame-container" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}>
-          <AiConsoleFrame
+          <ResourcePageLayout
             search=""
             onSearchChange={() => undefined}
             busy={consoleState === 'loading'}

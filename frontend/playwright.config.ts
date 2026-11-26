@@ -4,11 +4,7 @@ import { resolveBrowserPort } from './browser-test-config'
 const browserPort = resolveBrowserPort()
 
 /**
- * KK Studio 前端收敛后的统一 Playwright 浏览器测试配置。
- *
- * 通过具名 projects 划分既有套件（layout / pane / install / plugin / composer-editor /
- * compaction / subagent-tree / mutation-review / tool-card），保留各套件的匹配规则、输出路径、超时与截图策略，
- * 统一在单一 preview 静态基座上运行。
+ * 各 Playwright project 使用独立的匹配规则与报告配置，共用预构建的静态 harness。
  */
 export default defineConfig({
   testDir: './browser-tests',

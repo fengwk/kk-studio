@@ -1,10 +1,6 @@
 import type { LocaleCatalog } from '@/shared/i18n/types'
 
 export const canvasCatalog = {
-  'canvas.loading': {
-    'en-US': 'Loading canvas',
-    'zh-CN': '正在加载画布',
-  },
   'canvas.toast.operationFailed': {
     'en-US': 'The canvas action failed. Try again.',
     'zh-CN': '画布操作失败，请重试。',

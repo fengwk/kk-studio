@@ -197,9 +197,12 @@ func TestLoadOptionalFieldsAndDistributionPaths(t *testing.T) {
 	if got.ConfigVersion != 9 || got.ProxyURL == nil || *got.ProxyURL != "http://proxy.example:8080" || got.BashExecutable == nil || *got.BashExecutable != bash || len(got.LSP) != 1 || got.LSP[0].FirstMatchMarkers[0] != "go.work" {
 		t.Fatalf("optional config fields = %+v", got)
 	}
-	root := t.TempDir()
-	if DistributionDir(filepath.Join(root, "dist", "daemon")) != root || DistributionDir(filepath.Join(root, "bin", "daemon")) != filepath.Join(root, "bin") {
-		t.Fatal("distribution directory resolution returned an unexpected path")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DistributionDir != filepath.Dir(executable) {
+		t.Fatalf("distribution directory = %q; want executable directory", got.DistributionDir)
 	}
 }
 

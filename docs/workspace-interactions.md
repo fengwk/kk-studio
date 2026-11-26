@@ -6,7 +6,7 @@
 
 | 状态 | 内容 | 保存在 |
 | --- | --- | --- |
-| 布局 | 窗格树、窗格绑定、聚焦窗格、目录展开、侧栏宽度 | 浏览器本地，按用户和空间 ID 分开；不兼容的快照回到默认单窗格，不迁移旧布局 |
+| 布局 | 窗格树、窗格绑定、聚焦窗格、目录展开、侧栏宽度 | 浏览器本地，按用户和空间 ID 分开；布局快照无效时使用默认单窗格 |
 | 草稿 | 新会话和 Thread 输入框里尚未发送的内容 | 窗格内存，可持久化的输入保存在浏览器 |
 | 服务端快照 | 当前用户、空间列表、含 Thread 状态的目录树、定时任务、执行记录页、Thread 快照、画布文档 | 查询缓存；事件只触发重新读取 |
 
@@ -67,7 +67,7 @@
 3. **加载。** Thread 读取 Harness 快照并订阅 `thread`；画布读取文档并订阅 `canvas`；VS Code 先复验环境已就绪且有该功能，再通过现有 IDE 视图绑定打开。
 4. **目录不动。** 打开不改变目录的选中行和展开状态。
 
-工作区以 `PaneTarget` 绑定窗格：`draft`（`draftId`、可选 `folderId`）、`thread`（`threadId`）、`canvas`（`canvasId`、可选 `viewSlot`）或 `vscode`（`environmentId`、`viewId`）。同一 Canvas 的主视图省略 `viewSlot`，附加视图使用槽位 1–7；主视图作为第 0 个视角计数，因此每个 Canvas 最多八个视角。Canvas 将附加槽位转换为字符串 `viewId`，通过 `canvasViewKey(canvasId, viewId)` 统一标识：主视图使用 `canvasId`，附加视图使用 `canvasId/viewId`。不同 Canvas 视角的本地选择、视口、草稿和操作状态按此键隔离。
+工作区以 `PaneTarget` 绑定窗格：`draft`（`draftId`、可选 `folderId`）、`thread`（`threadId`）、`canvas`（`canvasId`、数字 `viewSlot`）或 `vscode`（`environmentId`、`viewId`）。同一 Canvas 新开视角时分配最小空闲槽位（0–7）；每个视角用 `canvasId/slot` 隔离选择、视口、草稿和待确认命令。函数运行的未决请求则按 Canvas 和节点共享。
 
 深链 `?thread=` 先读取 `GET /threads/{id}` 得到所属 Session 和标题；`?canvas=` 在当前目录快照中确认属于该空间。资源不存在时提示不可用，布局不变。资源被删除后，绑定它的窗格在下一次目录对账时回到「新会话」。
 
@@ -123,7 +123,7 @@
 - 接口：`DELETE /threads/{id}?expectedTreeVersion=…&expectedVersion=…`；`DELETE /sessions/{id}?expectedTreeVersion=…`。
 - 事务：锁空间行 → 取执行闭包的 Harness 锁（执行树、Session、全部 Thread、命令、Driver、工具、执行）→ 复验已结算、没有待处理交互、没有定时任务引用 → 删除闭包，回收不可达的历史和独占附件引用 → 删除 Session 时一并删除目录边 → `tree_version` 加一。
 - 事件：`tree`。
-- 失败：`EXECUTION_NOT_SETTLED`、`RESOURCE_IN_USE`（列出引用它的定时任务）、`VERSION_CONFLICT`。
+- 失败：`EXECUTION_NOT_SETTLED`、`RESOURCE_IN_USE`（列出引用它的定时任务）或 `code: version_conflict`。
 
 ## 目录
 
@@ -178,7 +178,7 @@
 - 接口：`GET /schedules` 查询当前空间任务；`POST /schedules` 创建；`PATCH /schedules/{id}` 更新（带 `expectedVersion`）。
 - 事务：锁空间行和任务行 → 校验目标（新建位置的目录、Agent，或分支切点、续作 Thread）→ 计算 `next_due_at` → 写入任务和对应的唤醒 Work。
 - 事件：任务配置提交后发送 `schedules`，数据为 `{scheduleId}`。
-- 失败：`INVALID_SCHEDULE`、`VERSION_CONFLICT`。
+- 失败：`INVALID_SCHEDULE` 标出无效配置；`code: version_conflict` 刷新任务列表，保留输入并要求重新确认。
 
 **启停、立即运行和删除**
 

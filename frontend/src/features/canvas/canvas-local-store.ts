@@ -1,8 +1,7 @@
 /**
  * Canvas 本地持久化公共基座 (IndexedDB)
  *
- * 依据 docs/canvas-project.md §2.4：
- * - 本地状态按“登录身份 + 画布 + 编辑会话”隔离，不同用途各自使用独立 object store，
+ * - 本地状态按画布视图与编辑会话隔离，不同用途各自使用独立 object store，
  *   绝不把“待确认操作”塞进草稿记录后再靠可选字段猜测。
  * - 写入必须等待 `transaction.oncomplete` 才算真正落盘；`onabort`/`onerror` 一律上报，
  *   绝不依据 `request.onsuccess` 提前宣称已持久化。

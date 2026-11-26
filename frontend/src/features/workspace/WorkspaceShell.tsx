@@ -11,7 +11,7 @@ import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 import { CanvasCreationDialog } from './CanvasCreationDialog'
-import { isTreeVersionConflict } from './workspace-action-retry'
+import { isVersionConflict } from './workspace-action-retry'
 import { newDraft } from './pane-bindings'
 import type { PaneRenderers, PaneOpenTarget } from './pane-target'
 import { PaneLayout } from './panes'
@@ -29,7 +29,7 @@ import { createCanvas, createFolder, createSpace, deleteTreeRow, getSpaceTree, g
 import './workspace-shell.css'
 
 const workspaceErrors = {
-  version_conflict: 'workspace.versionConflict', VERSION_CONFLICT: 'workspace.versionConflict', FOLDER_NAME_EXISTS: 'workspace.nameExists',
+  FOLDER_NAME_EXISTS: 'workspace.nameExists',
   CHAT_SPACE_TITLE_EXISTS: 'workspace.nameExists', THREAD_NAME_EXISTS: 'workspace.nameExists',
   THREAD_RENAME_RETRY: 'workspace.versionConflict',
   LAST_ACTIVE_CHAT_SPACE: 'workspace.lastSpace', FOLDER_NOT_EMPTY: 'workspace.folderNotEmpty',
@@ -93,6 +93,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   const fullscreen = panes.layoutProps.fullscreen
   const openPane = panes.open
   const errorText = (error: unknown) => {
+    if (isVersionConflict(error)) return t('workspace.versionConflict')
     if (error instanceof ApiError) {
       const reason = error.reason ?? error.code
       if (reason && Object.hasOwn(workspaceErrors, reason)) {
@@ -110,8 +111,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       await refresh(isSpace)
       return result
     } catch (error) {
-      if (isTreeVersionConflict(error) || isConflictReason(error, 'THREAD_RENAME_RETRY')
-        || (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT'))) await refresh(isSpace)
+      if (isVersionConflict(error) || isConflictReason(error, 'THREAD_RENAME_RETRY')) await refresh(isSpace)
       throw new Error(errorText(error), { cause: error })
     }
   }

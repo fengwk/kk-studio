@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
+import { ResourcePageLayout } from './ResourcePageLayout'
 import { ApiError } from '@/shared/api/client'
 import { setLocale } from '@/shared/i18n'
 
@@ -10,10 +10,10 @@ afterEach(() => {
 })
 
 function renderFrame(
-  overrides: Partial<Parameters<typeof AiConsoleFrame>[0]> = {},
+  overrides: Partial<Parameters<typeof ResourcePageLayout>[0]> = {},
 ) {
   return render(
-    <AiConsoleFrame
+    <ResourcePageLayout
       search=""
       onSearchChange={() => {}}
       busy={false}
@@ -25,7 +25,7 @@ function renderFrame(
   )
 }
 
-describe('AiConsoleFrame', () => {
+describe('ResourcePageLayout', () => {
   it('renders the resource content when the primary read succeeds', () => {
     renderFrame()
 

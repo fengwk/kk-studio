@@ -117,21 +117,21 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 ## HTTP 契约
 
 `/api` 后的业务域表达资源归属：`/api/platform` 是目录、环境、设置与存储等平台资源；
-`/api/harness` 是执行事实与控制，`/api/harness/builtin` 是内置 Driver 的接口；
-`/api/chat-spaces` 由 Workspace 管理空间、目录与资源归属；`/api/harness` 提供已归属 Thread 的执行快照与控制；`/api/canvas` 提供 Canvas 文档快照、命令与 Function Run，创建和删除经 `/api/chat-spaces/{spaceId}/canvases`；`/api/ide` 由 IDE 产品提供。
+`/api/harness` 提供执行事实与控制，`/api/harness/builtin` 是内置 Driver 的接口；
+`/api/chat-spaces` 管理空间、目录与资源归属；`/api/canvas` 提供画布快照、命令与 Function Run，画布创建和删除走空间接口；`/api/ide` 管理 IDE 视图。
 浏览器事件与 Daemon 连接分别使用 `/ws/events`、`/ws/daemon`，IDE 数据面使用
 `/ide/{environmentId}/{viewId}/`，节点间接口使用 `/internal`。完整的公开路由及其请求、
 响应类型由生成的 [`ApiRoutes`](../frontend/src/shared/api/generated/contracts.ts) 定义。
 
-JSON 成功响应直接返回资源：通常读取、更新和动作使用 200，创建使用 201，异步受理使用 202，
-无内容使用 204 且不带响应体。下载、HTML 与字节流按各自的传输格式返回。
+JSON 成功响应直接返回结果。常规读取和更新返回 200；平台目录创建用 201、无内容删除用 204，Harness 命令批受理用 202。
+Workspace 创建用 200，目录结构删除用 200 返回新的 `treeVersion`。下载、HTML 与字节流按各自的传输格式返回。
 
 - `Instant` 以 epoch 毫秒整数读写，领域时间字段统一命名为 `createdAt`、`updatedAt`、`occurredAt` 等。
   64 位整数字段在请求与响应中均为规范非负十进制字符串，DTO 使用 `Long` / `long`，由 HTTP 边界统一解析；
   非法值按请求校验错误处理。Provider 超时、MCP `timeoutMillis` 和上传 `sizeBytes` 也遵循此规则。
 - 结构由运行时决定的自由格式 JSON 使用 JSON 节点；多形态 DTO 使用 `type` 区分各变体。
   Harness 的 `execution.settings`、Canvas 的 Function `args` / `argsSchema` 与 Canvas Function 的 `data`
-  都是节点，必须保留原始文本的内容按对应字段契约传输。Harness Entry 的 `payload` 是历史 codec 的 JSON 节点，
+  都是节点，必须保留原始文本的内容按对应字段契约传输。Harness Entry 的 `payload` 使用持久历史编码，
   `/ws/events` 的 realtime 事件由 realtime codec 编码，二者的时间都是毫秒精度 ISO-8601 文本，不套用 DTO 的时间规则。
 - 有界配置集合直接返回数组；无界集合通过 `cursor`、`limit` 读取，响应提供
   `{items, nextCursor}`，末页的 `nextCursor` 为 null。按资源语义返回的树形聚合直接使用数组。
@@ -158,7 +158,8 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 | `not_found` | 404 | 资源不存在 |
 | `version_conflict`、`conflict`、`duplicate`、`in_use`、`unavailable` | 409 | 版本、业务状态、唯一性、引用或依赖可用性冲突 |
 | `upstream_failed` | 502 | 上游请求失败 |
-| `unauthorized` | 401 | 集群内部认证失败 |
+| `unauthorized` | 401 | 登录或集群内部认证失败 |
+| `forbidden` | 403 | 权限不足或来源校验失败 |
 | `internal` | 500 | 未预期错误 |
 
 `conflict` 带 `reason`，客户端据此区分 Harness、Canvas 与 IDE 的不同冲突；环境不可用使用
@@ -256,7 +257,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
   存储视图，`PostgresqlModelTransaction` 只访问 `builtin_model_invocation`（另读 `harness_tool_invocation`），
   通用代码通过 `PostgresqlDriverWorkStorage` 的 `workOwner` 与 `workTargetExists` 做围栏，不认识 Builtin 概念。
 - `durable_work.target_type` 只校验大写格式，类型常量由各模块定义：内核 `THREAD`、`TOOL`，Builtin `MODEL`，
-  Canvas `CANVAS_RUN`。环境亲和性由 Work 类型声明，只有当前节点持有目标 Environment 的 READY
+  Canvas `CANVAS_RUN`，Workspace `SCHEDULE`。环境亲和性由 Work 类型声明，只有当前节点持有目标 Environment 的 READY
   路由租约时该 Work 才可被 claim。
 
 ### 存储与附件

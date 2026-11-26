@@ -6,18 +6,6 @@ export const environmentCatalog = {
     'en-US': 'Workspace IDE',
     'zh-CN': '工作区 IDE',
   },
-  'ai.ide.resize': {
-    'en-US': 'Resize IDE panel',
-    'zh-CN': '调整 IDE 面板宽度',
-  },
-  'ai.ide.toggle': {
-    'en-US': 'Show or collapse IDE',
-    'zh-CN': '显示或收起 IDE',
-  },
-  'ai.ide.collapse': {
-    'en-US': 'Collapse',
-    'zh-CN': '收起',
-  },
   'ai.ide.close': {
     'en-US': 'Close',
     'zh-CN': '关闭',
@@ -25,10 +13,6 @@ export const environmentCatalog = {
   'ai.ide.dismiss': {
     'en-US': 'Dismiss',
     'zh-CN': '忽略',
-  },
-  'ai.ide.environmentSelector': {
-    'en-US': 'Environment',
-    'zh-CN': '环境',
   },
   'ai.ide.connecting': {
     'en-US': 'Connecting to the live event stream...',
@@ -66,19 +50,7 @@ export const environmentCatalog = {
     'en-US': 'Browser storage is unavailable; IDE recovery and last-used state will not persist.',
     'zh-CN': '浏览器存储不可用，IDE 恢复信息与最近使用状态将不会保留。',
   },
-  'ai.ide.openWorkspace': {
-    'en-US': 'Open workspace',
-    'zh-CN': '打开工作区',
-  },
-  'ai.ide.workspaces': {
-    'en-US': 'Workspaces',
-    'zh-CN': '工作区',
-  },
-  'ai.ide.workspace': {
-    'en-US': 'Empty window',
-    'zh-CN': '空窗口',
-  },
-  'ai.ide.recoveryMigrationFailed': {
+  'ai.ide.recoveryUnreadable': {
     'en-US': 'The previous IDE recovery state could not be verified. Its saved history was preserved; do not open a replacement view until you review it.',
     'zh-CN': '无法确认此前的 IDE 恢复状态，已保留原有记录。请先检查恢复记录，再决定是否打开替代视图。',
   },
@@ -162,14 +134,6 @@ export const environmentCatalog = {
     'en-US': 'Failed to open workspace IDE',
     'zh-CN': '打开工作区 IDE 失败',
   },
-  'ai.ide.offline': {
-    'en-US': 'Environment is currently offline',
-    'zh-CN': '环境当前处于离线状态',
-  },
-  'ai.ide.offlineShort': {
-    'en-US': 'Offline',
-    'zh-CN': '离线',
-  },
   'ai.ide.changeDirectoryFailed': {
     'en-US': 'Failed to change directory',
     'zh-CN': '切换目录失败',
@@ -230,10 +194,6 @@ export const environmentCatalog = {
     'en-US': 'Refresh failed · Showing last data',
     'zh-CN': '刷新失败 · 显示上次数据',
   },
-  'ai.environment.diagnostics': {
-    'en-US': 'Diagnostics',
-    'zh-CN': '诊断详情',
-  },
   'ai.environment.lastDaemonVersion': {
     'en-US': 'Last Daemon version',
     'zh-CN': '上次 Daemon 版本',
@@ -281,10 +241,6 @@ export const environmentCatalog = {
   'ai.environment.install.os': {
     'en-US': "Operating system",
     'zh-CN': "操作系统",
-  },
-  'ai.environment.install.title': {
-    'en-US': 'Install/overwrite environment',
-    'zh-CN': '安装/覆盖环境',
   },
   'ai.environment.install.uninstallTitle': {
     'en-US': 'Uninstall environment',
@@ -498,10 +454,6 @@ export const environmentCatalog = {
     'en-US': 'Capabilities',
     'zh-CN': '能力',
   },
-  'ai.environment.userName': {
-    'en-US': 'Process User',
-    'zh-CN': '进程用户',
-  },
   'ai.environment.daemonVersion': {
     'en-US': 'Daemon Version',
     'zh-CN': 'Daemon 版本',
@@ -565,10 +517,6 @@ export const environmentCatalog = {
   'ai.environment.runtime.unreported': {
     'en-US': 'Not reported',
     'zh-CN': '未上报',
-  },
-  'ai.environment.runtime.daemonVersion': {
-    'en-US': 'Daemon Version',
-    'zh-CN': 'Daemon 版本',
   },
   'ai.environment.runtime.operatingSystem': {
     'en-US': 'Operating System',

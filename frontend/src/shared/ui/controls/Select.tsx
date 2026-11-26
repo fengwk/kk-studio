@@ -33,8 +33,7 @@ interface SelectProps {
 }
 
 /**
- * 自定义下拉，视觉与交互对齐 LocaleSelector：圆角菜单、选中勾、键盘导航。
- * 不使用操作系统原生 option 菜单。
+ * 自定义下拉菜单，提供选中状态和键盘导航。
  *
  * <p>本组件只做编排：开关与键盘在 {@link useSelectListbox}，视口定位在
  * {@link useSelectMenuPosition}，菜单本体在 {@link SelectMenu}。

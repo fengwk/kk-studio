@@ -50,7 +50,7 @@ flowchart TB
   space --> schedule["定时任务与执行记录"]
 ```
 
-箭头表示归属或引用，不表示级联删除。Session、Entry 与 Thread 的字段及两棵树见 [Harness 库表结构](workspace-harness.md#model)。窗格绑定保存在浏览器，不是图里的资源归属边。
+箭头表示归属或引用，不表示级联删除。Session、Entry 与 Thread 的字段及两棵树见 [Harness 模型与字段](workspace-harness.md#模型与字段)。窗格绑定保存在浏览器，不是图里的资源归属边。
 
 | 产品动作 | 产品侧改变什么 | Harness 侧改变什么 |
 | --- | --- | --- |
@@ -90,19 +90,19 @@ flowchart TB
 type PaneTarget =
   | { kind: 'draft'; draftId: string; folderId?: string }
   | { kind: 'thread'; threadId: string }
-  | { kind: 'canvas'; canvasId: string; viewSlot?: number }
+  | { kind: 'canvas'; canvasId: string; viewSlot: number }
   | { kind: 'vscode'; environmentId: string; viewId: string }
 ```
 
-Canvas 主视图省略 `viewSlot`；同一画布的附加视图使用可复用槽位 1–7。工作区最多有 8 个 pane，主视图算作第 0 个视角；`0` 不是显式存储的 `viewSlot`。Canvas 将槽位转为字符串 `viewId`，统一使用 `canvasViewKey(canvasId, viewId)` 标识视角：主视图键为 `canvasId`，附加视图为 `canvasId/viewId`。该键用于 Canvas 视角自身的本地状态与持久化。
+Canvas 绑定包含画布 ID 和数字槽位 `viewSlot`（0–7）。打开视角时分配该画布最小的空闲槽位，关闭后可复用；`canvasViewKey(canvasId, viewSlot)` 生成 `canvasId/slot`，用于隔离各视角的本地状态。
 
 - **边界**：窗格接收标题、可选操作和内容容器，只处理布局、聚焦与展示。工作区维护 `paneId → PaneTarget`，按 `PaneTarget` 选择 renderer；无资源绑定时显示可直接输入的「新会话」。资源入口调用 `open(target)`，域运行时不依赖布局、路由或点击来源。
-- **打开**：目录（包括目录菜单里的新建会话和新建画布）、状态、执行记录和环境都用同一套窗格打开流程；窗格里的动作（发送首条消息、分支、从回合末尾新建会话）在原窗格继续。当前窗格未打开资源且没有草稿时直接打开；否则暂时冻结窗格，每个窗格中央显示位置字母，当前窗格高亮。按字母或点击中央按钮选择，`Enter` 选当前窗格，`Esc` 取消；空间不足时显示所有窗格的缩略布局。替换含草稿的新会话前仍须确认。打开不改布局；已在别处打开的 Thread 或同环境同功能移到目标窗格，原窗格回到「新会话」。同一画布可打开独立视角：一个主视图和最多七个附加视角（显式槽位 1–7）。Thread 草稿与 Thread ID 绑定，未发送的 Session 草稿与窗格绑定。
+- **打开**：目录（包括目录菜单里的新建会话和新建画布）、状态、执行记录和环境都用同一套窗格打开流程；窗格里的动作（发送首条消息、分支、从回合末尾新建会话）在原窗格继续。当前窗格未打开资源且没有草稿时直接打开；否则暂时冻结窗格，每个窗格中央显示位置字母，当前窗格高亮。按字母或点击中央按钮选择，`Enter` 选当前窗格，`Esc` 取消；空间不足时显示所有窗格的缩略布局。替换含草稿的新会话前仍须确认。打开不改布局；已在别处打开的 Thread 或同环境同功能移到目标窗格，原窗格回到「新会话」。同一画布可在多个窗格各打开一个独立视角。Thread 草稿与 Thread ID 绑定，未发送的 Session 草稿与窗格绑定。
 - **拆分**：`split(paneId, axis)` 只增加一个聚焦的窗格，原窗格不变，初始比例为 1/2。桌面点方向立即拆分；窄屏点「拆分窗格」后选方向。新窗格不绑定资源，默认显示新会话。
 - **布局**：最多 8 个叶子。递归计算最小宽高：同轴相加加 1px 分隔线，异轴取较大者，每个叶子 320×240 CSS px。实际可见空间不够时压扁为一个视图，保留原树与比例；窄态仍可逻辑拆分，回到宽态再铺开。宽态在当前叶子放不下两个最小子节点时禁用该方向，给出原因。分隔线拖拽或方向键钳制可见比例，双击回到允许范围内最接近 1/2 的位置。容器尺寸变化只钳制实际展现，不把临时比例写回。
 - **标识、关闭与交换**：多个窗格按显示顺序标为 `A`–`H`，当前窗格的字母有底色。桌面拖字母交换窗格，不交换比例。关闭窗格时用兄弟子树替换父节点，若关闭的是当前窗格，则聚焦兄弟子树的第一个窗格。关闭窗格不删除资源、不停止 Thread；删除资源只解除对应绑定，窗格回到「新会话」。唯一窗格不显示字母或关闭按钮。
 - **全屏**：只在工作区显示当前窗格，暂时隐藏侧栏和其它窗格。标题上的「退出全屏」或 `Esc` 恢复原布局。仅改变显示，不改窗格树、比例、绑定或草稿。切换、全屏和交换时不得重新加载已打开的工作台。
-- **存储**：每浏览器按用户和 ChatSpace 保存布局树、绑定、聚焦 ID、目录展开状态和侧栏宽度。窄屏显示与全屏是临时状态，不另存副本。失效的绑定清除后保留原窗格。草稿文本不随布局同步，不保存到服务端。Canvas 视角交互状态按统一 `canvasViewKey` 隔离，不向其他视角广播选择或滚动。当前布局快照格式不匹配时丢弃并回到默认单 pane，不迁移旧布局。
+- **存储**：每浏览器按用户和 ChatSpace 保存布局树、绑定、聚焦 ID、目录展开状态和侧栏宽度。窄屏显示与全屏是临时状态，不另存副本。失效的绑定清除后保留原窗格。草稿文本不随布局同步，不保存到服务端。Canvas 视角不共享选择或滚动位置。布局快照无效时打开默认单窗格；快照内无效的资源绑定只清除该绑定。
 - **键盘**：目录用 roving tabindex。`j/k` 选择，`h/l` 收起、展开或移动到父/子，`r/d` 改名、确认删除；保留方向键、Enter、F2、Delete 和上下文菜单键。改名输入框的可访问名称包含原名称，`Home/End` 留给输入框。标题聚焦时用 `v/s` 向右或向下拆分。输入、下拉、组合输入和无关修饰键照常工作，菜单用自己的方向键。
 - **斜杠命令**：在输入框中键入 `/` 时显示命令，之后只在有匹配时显示；无匹配立即收起，删改回有匹配的文字时自动出现，不移动光标。命令输入只接受以 `/` 开头的单段纯文本，后续空白和路径分隔符都回到普通输入。禁用的匹配项仍显示原因。无匹配的文字和 `/files/workspace/README.md` 这类路径都可正常发送。由 Composer 统一判断；新会话首条消息和已有 Thread 的提交入口不再按开头的 `/` 拒绝正文。`+` 仍可手动打开命令列表。
 
@@ -237,7 +237,7 @@ flowchart TB
 | `POST /folders`；`PATCH/DELETE /folders/{folderId}` | 创建 `{parentId,name,expectedTreeVersion}`，追加到同级目录末尾；改名 `{name}`，移动 `{parentId?,beforeId?,expectedTreeVersion}`，无锚点时追加；删空目录。结构变更返回新 `treeVersion`。 |
 | `PATCH /resources/{kind}/{id}` | 改名 `{title}`；移动 `{folderId?,beforeId?,expectedTreeVersion}`，`beforeId` 指同目录序列，跨目录省略 `beforeId` 时置顶。Session 和 Canvas 标题由所属领域持久化。 |
 | `POST /canvases`；`DELETE /canvases/{canvasId}` | `{folderId,title,expectedTreeVersion}` 创建并返回生成的 `ResourceRefDTO`（`kind`、`id`、`treeVersion`）；删除需 `expectedTreeVersion` 与 `expectedRevision`，避免删除后来写入的内容。图编辑仍用 Canvas revision。 |
-| `POST /sessions` | `{folderId, message, modelSelection?, environmentId?, yoloEnabled?}`；同事务接受首条命令并建目录边；返回 `{sessionId,threadId,commandId,treeVersion}`。保存草稿不调用此接口。 |
+| `POST /sessions` | `{folderId?, message, modelSelection?, environmentId?, yoloEnabled?}`；未指定目录时在空间锁内选第一个顶层目录。同事务接受首条命令并建目录边；返回 `{sessionId,threadId,commandId,treeVersion}`。保存草稿不调用此接口。 |
 | `POST /sessions/{id}/branches`；`POST /sessions/{id}/forks` | `{sourceThreadId,turnEndEntryId,title}`；前者返回同一 Session 的新 Thread，后者返回新 Session 和 Thread。`title` 是名称框确认的分支名或新会话名。定时分支与手动分支用同一事务入口。 |
 | `GET/PATCH/DELETE /threads/{id}`；`DELETE /sessions/{id}` | 读取生成的 `WorkspaceThreadPlacementDTO`（包含 Session、目录和 Thread 展示及版本信息），供深链和窗格标题使用；执行快照仍读 Harness 接口。改名带 `expectedVersion`；删除带 `expectedTreeVersion`，对 Thread 带 `expectedVersion`，Session 删除重验全部子执行事实。已有 Thread 的命令批拒绝更换 Agent。 |
 | `GET/POST /schedules`；`PATCH/DELETE /schedules/{id}` | `GET` 列出当前空间任务；`POST` 创建，输入生成的 `ScheduleDraftDTO`。`PATCH` 更新或启停，`DELETE` 删除；更新与删除带 `expectedVersion`。`trigger` 是 `{type:'ONCE',localDate,time}` 或 `{type:'REPEAT', frequency, time?,weekday?,minute?,cron?}`，每种只接收用到的字段；`target` 是 `NEW_SESSION {folderId,agentName}`、`BRANCH {sessionId, sourceThreadId, turnEndEntryId}` 或 `CONTINUE {sessionId,threadId}`。`ScheduleDTO` 含 `nextDueAt,version`，不携带执行记录；试算用 `POST /schedules/preview` 返回 `next[]` 而不写入。 |
@@ -258,13 +258,14 @@ flowchart TB
 
 错误沿用 `application/problem+json`，HTTP 状态与 `code` 表示大类，`reason` 表示可操作的拒绝原因；详情不作为程序分支：
 
-| 状态 | `reason` | 客户端动作 |
+| 状态 | 错误标识（默认是 `reason`） | 客户端动作 |
 | --- | --- | --- |
 | 404 | `WORKSPACE_NOT_FOUND` / `RESOURCE_NOT_FOUND` | 不泄漏该 ID 是否存在于其它空间或属于其他用户。无法打开时提示资源不可用；已删除的资源解除绑定，保留窗格。 |
 | 400 | `INVALID_FOLDER` / `INVALID_TURN_END` / `INVALID_SCHEDULE` / `INVALID_ARGUMENT` / `WRONG_PASSWORD` | 标到字段；切点必须在指定路径且是真实结束 Entry；修改密码时当前密码错误标在该字段。 |
 | 401 | `NOT_AUTHENTICATED` / `INVALID_CREDENTIALS` | 未登录或登录失效时显示登录；登录失败统一提示用户名或密码错误。 |
-| 403 | `ADMIN_REQUIRED` | 普通用户看不到这些入口；直接打开时回到偏好设置。 |
-| 409 | `VERSION_CONFLICT` / `IDEMPOTENCY_KEY_REUSED` | 重新读取服务端事实，保留当前编辑草稿；不盲重试写命令。 |
+| 403 | `ADMIN_REQUIRED` / `INVALID_ORIGIN` | 普通用户只能访问界面偏好；来源校验失败时请求未执行。 |
+| 409 | `code: version_conflict` / `THREAD_RENAME_RETRY` | 刷新相应列表或目录，保留输入，由用户确认后再提交。 |
+| 409 | `IDEMPOTENCY_KEY_REUSED` | 保留输入、解除请求锁定；用户重新提交时使用新键。 |
 | 409 | `LAST_ACTIVE_CHAT_SPACE` / `CHAT_SPACE_TITLE_EXISTS` / `FOLDER_NAME_EXISTS` / `THREAD_NAME_EXISTS` | 先创建或恢复另一空间再归档；同名时保留输入并换一个名称。 |
 | 409 | `USERNAME_EXISTS` / `LAST_ADMIN` | 用户名重复时保留输入；拒绝降级或禁用最后一名启用的管理员。 |
 | 409 | `FOLDER_NOT_EMPTY` / `LAST_ROOT_FOLDER` / `RESOURCE_IN_USE` / `EXECUTION_NOT_SETTLED` | 解释具体目录、公开 Thread 或定时任务；返回安全的 ID/标题供用户打开。Canvas 活跃或未知运行走同一阻塞规则。 |

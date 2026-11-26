@@ -82,7 +82,7 @@ export interface CanvasCommandRecoveryResult {
 /**
  * Canvas graph 变更按浏览器顺序串行化。
  *
- * durability 契约（docs/canvas-project.md §2.4）：
+ * 命令队列的持久化约定：
  * - 入队瞬间即深拷贝并冻结命令体、idempotencyKey 与编辑基线 revision；
  * - 发送前先把冻结操作写入独立 operation store，且等待事务 complete；
  * - 网络 / 瞬时失败保留冻结操作，重载后按原顺序、原 key、原 body 精确重放（服务端按 key 去重）；

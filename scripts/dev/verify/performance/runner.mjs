@@ -198,8 +198,6 @@ export function nearestRankPercentile(values, percentile) {
   return sorted[Math.max(0, rank - 1)]
 }
 
-export const percentile = nearestRankPercentile
-
 export function summarizeSamples(samples, elapsedSeconds) {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) {
     throw new Error(`elapsedSeconds must be positive: ${elapsedSeconds}`)

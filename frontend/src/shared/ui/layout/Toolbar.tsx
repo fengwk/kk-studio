@@ -5,8 +5,3 @@ import './layout.css'
 export function Toolbar({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return <div className={['ui-toolbar', className].filter(Boolean).join(' ')} {...rest} />
 }
-
-/** 工具条内靠右的动作组。 */
-export function ToolbarActions({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={['ui-toolbar-actions', className].filter(Boolean).join(' ')} {...rest} />
-}

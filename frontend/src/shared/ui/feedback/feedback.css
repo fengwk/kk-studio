@@ -121,17 +121,6 @@
   }
 }
 
-.ui-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-8) 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-sm);
-  text-align: center;
-}
-
 /* 状态块的恢复动作贴在说明下方：状态块自身的边框与配色仍由 styles.css 的 .state-block 定义。 */
 .state-block-action {
   margin-top: var(--space-3);

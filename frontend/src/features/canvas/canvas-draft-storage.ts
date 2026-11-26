@@ -1,7 +1,6 @@
 /**
  * Canvas 草稿持久化存储 (IndexedDB)
  *
- * 依据 docs/canvas-project.md §2.4：
  * - IndexedDB 按登录身份、画布和编辑会话保存已落盘草稿；待确认操作另有独立 store，
  *   草稿记录只承载编辑内容本身，绝不与冻结请求混存。
  * - 多标签页（编辑会话）互不覆盖：不同 tab 拥有独立的 editingSessionId。

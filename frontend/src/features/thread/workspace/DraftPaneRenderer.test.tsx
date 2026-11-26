@@ -10,10 +10,12 @@ import { ApiError, request } from '@/shared/api/client'
 import type {
   AgentSummaryDTO,
   EnvironmentSummaryDTO,
+  HarnessThreadSnapshotDTO,
   ModelSummaryDTO,
   StudioAccountDTO,
 } from '@/shared/api/generated/contracts'
 import { ApplicationEventProvider } from '@/shared/app-events'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 
 vi.mock('@/shared/api/client', async (importOriginal) => {
@@ -37,6 +39,41 @@ const READY_MODELS: ModelSummaryDTO[] = [
 const READY_ENVS: EnvironmentSummaryDTO[] = [
   { id: 'env-1', name: 'local-env', status: 'READY', ready: true, capabilities: [] },
 ]
+
+function createdThreadSnapshot(sessionId: string, threadId: string): HarnessThreadSnapshotDTO {
+  return {
+    version: '1',
+    thread: {
+      threadId,
+      sessionId,
+      rootThreadId: threadId,
+      parentThreadId: null,
+      name: 'main',
+      headEntryId: 'root-entry',
+      yoloEnabled: false,
+      nextCommandSequence: '1',
+      version: '1',
+      status: 'IDLE',
+      executionControl: 'RUNNABLE',
+      branchSettings: {
+        agentName: 'default-agent', execution: { driver: 'builtin', settings: {} }, environmentName: null,
+      },
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    baseEntryId: null,
+    entries: [{
+      entryId: 'root-entry', sessionId, parentEntryId: null,
+      entryType: 'ROOT', payload: {}, createdAt: 0, usageCost: null,
+    }],
+    queuedCommands: [],
+    activeAssistantOutput: null,
+    generationFailures: [],
+    toolInvocations: [],
+    stopReceipts: [],
+    unconfirmedExecutions: [],
+  }
+}
 
 function renderDraftPane({
   user = { id: 'u1', username: 'alice', role: 'USER', profile: {} },
@@ -97,6 +134,7 @@ describe('DraftPaneRenderer', () => {
 
   it('submits a new session, clears draft, and replaces the pane with the created thread', async () => {
     const user = userEvent.setup()
+    const snapshot = createdThreadSnapshot('sess-1', 'thread-new')
     mockedRequest.mockImplementation((async (endpoint: string, params: { body?: unknown }) => {
       if (endpoint === 'GET /api/platform/agent-summaries') return READY_AGENTS
       if (endpoint === 'GET /api/platform/model-summaries') return READY_MODELS
@@ -106,13 +144,11 @@ describe('DraftPaneRenderer', () => {
         expect(sessionStorage.getItem(sendStorageKey)).toBe(JSON.stringify({ key: draftId, body: params.body, rejected: false }))
         return { sessionId: 'sess-1', threadId: 'thread-new', commandId: 'cmd-1', treeVersion: '1' }
       }
-      if (endpoint === 'GET /api/harness/threads/{threadId}/snapshot') {
-        return { version: '1', thread: { threadId: 'thread-new' }, entries: [] }
-      }
+      if (endpoint === 'GET /api/harness/threads/{threadId}') return snapshot
       throw new Error(`Unexpected endpoint: ${endpoint}`)
     }) as unknown as typeof request)
 
-    const { replace, onUnsentChange } = renderDraftPane()
+    const { replace, onUnsentChange, queryClient } = renderDraftPane()
     const editor = await screen.findByRole('textbox')
     await waitFor(() => expect(screen.getByRole('button', { name: '环境' })).toHaveTextContent('local-env'))
 
@@ -123,6 +159,8 @@ describe('DraftPaneRenderer', () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-new' }))
     expect(onUnsentChange).toHaveBeenCalledWith(false)
     expect(sessionStorage.getItem(sendStorageKey)).toBeNull()
+    // Ensure prefetch used the current endpoint and produced a full, cached baseline.
+    await waitFor(() => expect(queryClient.getQueryData(queryKeys.threads.snapshot('thread-new'))).toEqual(snapshot))
     expect(mockedRequest).toHaveBeenCalledWith(
       'POST /api/chat-spaces/{spaceId}/sessions',
       expect.objectContaining({
@@ -195,7 +233,7 @@ describe('DraftPaneRenderer', () => {
         if (sessionCall === 2) throw new ApiError('invalid folder', 400, 'validation', undefined, 'INVALID_FOLDER', 'Folder is unavailable')
         return { sessionId: 'sess-2', threadId: 'thread-recovered', commandId: 'cmd-2', treeVersion: '2' }
       }
-      if (endpoint === 'GET /api/harness/threads/{threadId}/snapshot') return { version: '1', thread: { threadId: 'thread-recovered' }, entries: [] }
+      if (endpoint === 'GET /api/harness/threads/{threadId}') return createdThreadSnapshot('sess-2', 'thread-recovered')
       throw new Error(`Unexpected endpoint: ${endpoint}`)
     }) as unknown as typeof request)
 

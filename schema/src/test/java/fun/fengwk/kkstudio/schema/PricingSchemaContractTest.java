@@ -13,8 +13,8 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
-/** Fresh V1 contract for pricing configuration, without legacy-data migration. */
-class PricingMigrationTest {
+/** Pricing data loaded by the current baseline and fixture seed. */
+class PricingSchemaContractTest {
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =

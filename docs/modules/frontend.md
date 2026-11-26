@@ -341,7 +341,7 @@ Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
 冲突由每条命令的语义前置条件裁决。patch 连续且较新时应用，
 空回执或 revision 缺口回读 Snapshot；语义 409 结算操作并保留草稿供人工恢复，
-网络未知结果、408 和 429 保留原 key/body 并阻塞本视图队列；冲突横幅为可恢复状态提供重试入口。
+未收到确定结果、登录失效或收到 408/429 时保留原 key/body 并阻塞本视图队列；收到回执后回读或落盘确认失败也不清除原请求。冲突横幅为可恢复状态提供重试入口。
 重命名和编辑已有文本节点时冻结对应名称／资源基线；恢复的文本草稿沿用其保存的基线。远端已改动时按冲突处理，只有用户明确选择按最新内容重试才更新基线。
 单删与选区删除在触发时冻结资源、函数与分组成员基线。删除节点前先保存待提交的函数草稿；
 由删除触发的保存也使用点击时的函数基线；只有从该基线连续确认的自有保存值可以推进删除的函数基线，远端变更仍由 CAS 裁决。
@@ -356,7 +356,7 @@ bfcache 恢复时复验 scope 所有权，活标签冲突触发安全 reload。
 添加 Function 或打开已有 Function 的配置时，目录加载、读取失败与目录缺少函数分别反馈；读取失败可就地重试。
 Function 配置使用扁平 args，资源引用为 `{type:'resource',nodeId,index}`。
 复杂 prompt/references 使用完整 JSON 编辑模式；连线前 flush 目标 Function config。
-同一节点的 Function Run 由各窗格共享未决请求，同一页面同时只执行一次该节点的运行控制动作。Run 提交前冻结 requestId 与请求：确定拒绝清理记录，408/429、5xx 或网络断开保留原 attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas](canvas.md#function-run)。
+同一节点的 Function Run 由各窗格共享未决请求，同一页面同时只执行一次该节点的运行控制动作。Run 提交前冻结 requestId 与请求：确定拒绝清理记录，登录失效、408/429、5xx 或网络断开保留原 attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas](canvas.md#function-run)。
 
 上传共用 Worker SHA-256 → reserve → PENDING PUT 或 READY 去重 → complete → 命令消费。
 每个 await 后校验 batch epoch；切换目标或卸载作废整批。已完成上传由服务端过期回收。
@@ -601,7 +601,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 ### 控件、动作与反馈
 
-普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock/EmptyState、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
+普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
 
 Runtime 查看层、执行选择面板、命名与问卷的普通操作复用 Button，文本字段复用 TextInput/TextArea，纯图标动作复用 IconButton；局部样式只保留领域布局与必要密度。工作区使用唯一顶栏呈现当前查看身份，Debug 独占期间在左上提供“关闭 Debug”；子执行最左是“回到父 agent”，取当前执行的直接父身份，不同时显示“回到对话”。Debug 与 subagent 选择只从根输入区命令进入。
 
@@ -622,7 +622,7 @@ Tabs 统一处理图标与文字间距；页签栏放不下时横向滚动，切
 三层 token（palette、语义、组件）在 [`styles.css`](../../frontend/src/styles.css) 的 `:root`，由 `npm run lint:css` 门禁（见上文[Token 分层与门禁](#token-分层与门禁)）；Canvas 样式由 feature 拥有。
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
 Select、Switch、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
-ResourceGrid、ResourceCardSkeleton）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、EmptyState、CreateCard）、
+ResourceGrid、ResourceCardSkeleton）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、CreateCard）、
 data（Badge、Mono/Code、KeyValue）、layout（Panel、Toolbar），
 以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。

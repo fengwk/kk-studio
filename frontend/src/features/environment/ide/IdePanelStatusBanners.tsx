@@ -89,7 +89,7 @@ export function IdePanelStatusBanners({
       ) : null}
       {recoveryError ? (
         <div className="ide-panel-error-banner" role="alert" data-testid="ide-recovery-error">
-          {t('ai.ide.recoveryMigrationFailed')}
+          {t('ai.ide.recoveryUnreadable')}
         </div>
       ) : null}
       {sessionStatus !== 'ready' && sessionStatus !== 'cloned' && sessionStatus !== 'acquiring'

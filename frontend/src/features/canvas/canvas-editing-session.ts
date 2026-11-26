@@ -1,8 +1,7 @@
 /**
  * Canvas 编辑会话身份 (editingSessionId)
  *
- * 依据 docs/canvas-project.md §2.4：
- * - 本地状态按“登录身份 + 画布 + 编辑会话”隔离，多标签页绝不相互覆盖。
+ * - 草稿与待确认命令按画布视图、编辑会话隔离，多标签页不相互覆盖。
  * - 同一标签页的刷新 / 路由切换必须复用同一 editingSessionId，才能恢复未确认操作；
  *   因此身份主流存放在 sessionStorage（标签页独立、刷新保留）。
  * - 复制标签页会连同 sessionStorage 一起复制，复制出的页面绝不能与原页面共享身份：

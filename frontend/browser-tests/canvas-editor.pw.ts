@@ -5,7 +5,7 @@ import path from 'node:path'
 import { expect, test, type Locator, type Page } from './fixture'
 
 /**
- * Canvas 编辑器的真实浏览器回归：真实 CanvasPage + React Flow 舞台 + 共享按钮/菜单，
+ * Canvas 编辑器的真实浏览器回归：真实 CanvasWorkbench + React Flow 舞台 + 共享按钮/菜单，
  * 只在传输层替身后端（见 canvas-editor-harness.tsx）。
  *
  * 断言的是用户可见事实：头部只有标题与保存状态、空画布引导不遮挡舞台交互、

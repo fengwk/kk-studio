@@ -89,12 +89,3 @@ func ResolveBash(command *string) (string, error) {
 	}
 	return ResolveExecutable(value)
 }
-
-// DistributionDir resolves the executable's distribution root, collapsing a final dist directory.
-func DistributionDir(executablePath string) string {
-	dir := filepath.Dir(executablePath)
-	if strings.EqualFold(filepath.Base(dir), "dist") {
-		return filepath.Dir(dir)
-	}
-	return dir
-}

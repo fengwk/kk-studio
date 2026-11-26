@@ -30,6 +30,7 @@ import {
   listSchedules,
   patchSchedule,
 } from './workspace-api'
+import { isVersionConflict } from './workspace-action-retry'
 import '@/shared/ui/layout/list-row.css'
 import './workspace-schedules.css'
 
@@ -235,7 +236,7 @@ export function WorkspaceSchedules({ userId, space, tree, open, report }: Worksp
       })
       await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
     } catch (error) {
-      if (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT')) {
+      if (isVersionConflict(error)) {
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
         report(t('workspace.versionConflict'))
       } else {
@@ -282,7 +283,7 @@ export function WorkspaceSchedules({ userId, space, tree, open, report }: Worksp
       await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
       queueMicrotask(() => document.getElementById(newButtonId)?.focus())
     } catch (error) {
-      if (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT')) {
+      if (isVersionConflict(error)) {
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.schedules(space.id), exact: true })
         setDeleting({ schedule: target, conflict: true })
       } else {
