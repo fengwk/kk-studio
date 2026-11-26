@@ -8,7 +8,7 @@
 #   2. 写一份完整的 custom-format 备份到仓库外（owner-only），并用 pg_restore --list 验证；
 #   3. 把旧库改名为带时间戳的快照库并禁止连接（不删除、也不 kill 任何会话）；
 #   4. 用原 owner/encoding/locale provider/tablespace/connection limit 建一个空库；
-#   5. 任何一步失败都回到「目标库名仍指向原有数据」的状态，或准确报告无法回滚到什么程度。
+#   5. 切换前失败时尝试恢复原库；切换后失败时报告现状，不回滚已完成的切换。
 #
 # 建库阶段先在临时名下把库建完（含连接数限制），最后才改名成目标库名：目标库名要么不存在，
 # 要么已经是一个完整可用的空库，不会短暂暴露一个还没套用连接数限制的新库。
@@ -550,29 +550,32 @@ replace_database() {
 
 on_exit() {
   local status=$?
-  if [ -n "$BACKUP_STAGE_DIR" ]; then
-    rm -rf -- "$BACKUP_STAGE_DIR" || echo "ERROR: cannot clean backup staging directory: $BACKUP_STAGE_DIR" >&2
+  # 清理和诊断不能抢先结束 trap；最终退出码由 status 决定。
+  set +e
+  if [ -n "$BACKUP_STAGE_DIR" ] && ! rm -rf -- "$BACKUP_STAGE_DIR"; then
+    printf 'ERROR: cannot clean backup staging directory: %q\n' "$BACKUP_STAGE_DIR" >&2
+    if [ "$status" -eq 0 ]; then
+      status=1
+    fi
   fi
   if [ "$CLEANUP_STARTED" = true ]; then
     if [ "$status" -ne 0 ]; then
       echo "ERROR: snapshot cleanup stopped after $CLEANUP_DROPPED deletion(s); completed deletions cannot be rolled back." >&2
     fi
-    return
+    exit "$status"
   fi
   if [ "$status" -eq 0 ] || [ "$TARGET_REPLACED" = true ]; then
     if [ "$status" -ne 0 ]; then
       # 变更已经完成，只是后续步骤失败：不再回滚，只报告现状。
-      set +e
       echo "Reset failed after the database was replaced; $TARGET_DB is empty and the" >&2
       echo "pre-reset database is frozen as $SNAPSHOT_DB (full backup: $BACKUP_FILE)." >&2
     fi
-    return
+    exit "$status"
   fi
   if [ "$RENAMED" = false ] && [ -z "$CREATED_DB" ]; then
-    return
+    exit "$status"
   fi
 
-  set +e
   echo "ERROR: reset failed; restoring the pre-reset state" >&2
   if [ -n "$CREATED_DB" ]; then
     # 先清掉本次建出的库，目标库名才会空闲；否则改名回退一定失败。
@@ -593,6 +596,7 @@ on_exit() {
       echo "       and as $BACKUP_FILE" >&2
     fi
   fi
+  exit "$status"
 }
 
 main() {
