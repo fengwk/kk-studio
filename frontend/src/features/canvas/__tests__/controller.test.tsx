@@ -2114,7 +2114,7 @@ describe('useCanvasController real snapshot runtime', () => {
     // 意图：验证当 controller 遇到未知错误使队列 blocked 时，conflictMessage 正确提示重试，
     // 调用 retryRecovery 能完成重放并清除提示。
     vi.mocked(postCanvasCommands)
-      .mockRejectedValueOnce(new ApiError('network down', 503))
+      .mockRejectedValueOnce(new ApiError('network down', undefined, 'network_error'))
       .mockImplementationOnce(async () => diffPatch(snapshot(2)))
 
     const { result } = renderHook(() => useCanvasController(CANVAS_ID, 0), { wrapper: Wrapper })
@@ -2127,11 +2127,9 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.saveTextEditor()
     })
 
-    // 再次尝试保存，此时队列已经被阻塞，抛出 CanvasQueueBlockedError 并设置 conflictMessage
-    await act(async () => {
-      result.current.saveTextEditor()
-    })
+    // 首次失败就显示恢复入口，不需要再次尝试保存。
     await waitFor(() => expect(result.current.state.conflictMessage).toContain('存在未确认操作阻塞队列'))
+    expect(postCanvasCommands).toHaveBeenCalledTimes(1)
 
     // 触发 retryRecovery 恢复
     await act(async () => {

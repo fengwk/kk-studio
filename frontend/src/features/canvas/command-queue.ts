@@ -255,8 +255,9 @@ export class CanvasCommandQueue {
     operation: CanvasPendingOperation,
     signal?: AbortSignal,
   ): Promise<CanvasSnapshotDTO> {
+    let patch: CanvasPatchDTO
     try {
-      const patch = await this.apply(
+      patch = await this.apply(
         this.canvasId,
         {
           idempotencyKey: operation.idempotencyKey,
@@ -264,9 +265,6 @@ export class CanvasCommandQueue {
         },
         { signal },
       )
-      const snapshot = await this.ingestPatch(patch, signal)
-      await this.settle(operation, { clearAcks: true })
-      return snapshot
     } catch (error) {
       if (isCanvasConflict(error)) {
         // 语义冲突是终态：清除该操作，绝不盲重放；草稿与远端内容都保留，交由 UI 明确解决。
@@ -281,10 +279,17 @@ export class CanvasCommandQueue {
       }
       // 网络 / 服务端瞬时失败：保留冻结操作，标记队列阻塞，等待恢复或重载按原 key/body 幂等重放。
       this.markBlocked(error)
-      if (isRetryableClientError(error)) {
-        throw new CanvasQueueBlockedError(undefined, error)
-      }
-      throw error
+      throw new CanvasQueueBlockedError(undefined, error)
+    }
+
+    try {
+      const snapshot = await this.ingestPatch(patch, signal)
+      await this.settle(operation, { clearAcks: true })
+      return snapshot
+    } catch (error) {
+      // POST 已返回回执；同步或草稿 ACK 失败不能视为命令被拒绝。
+      this.markBlocked(error)
+      throw new CanvasQueueBlockedError(undefined, error)
     }
   }
 
@@ -420,16 +425,15 @@ function isCanvasConflict(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 409
 }
 
-function isRetryableClientError(error: unknown): boolean {
-  return error instanceof ApiError && (error.status === 408 || error.status === 429)
-}
-
 function isTerminalClientError(error: unknown): boolean {
   return error instanceof ApiError
     && typeof error.status === 'number'
     && error.status >= 400
     && error.status < 500
-    && !isRetryableClientError(error)
+    // 401 只说明当前请求未认证，不能否定之前可能已被接受的请求。
+    && error.status !== 401
+    && error.status !== 408
+    && error.status !== 429
 }
 
 /** bigint-safe 的“前驱 revision”，仅用于判断 patch 是否与本地快照连续。 */
