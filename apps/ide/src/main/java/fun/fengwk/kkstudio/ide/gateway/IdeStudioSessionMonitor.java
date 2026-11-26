@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.account.StudioAccountService;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -31,12 +33,13 @@ public class IdeStudioSessionMonitor {
 
   @PostConstruct
   void start() {
-    scheduler.scheduleWithFixedDelay(this::tick, 1, 1, TimeUnit.SECONDS);
+    scheduler.scheduleWithFixedDelay(this::tick, 5, 5, TimeUnit.SECONDS);
   }
 
   @PreDestroy
   void stop() {
     scheduler.shutdownNow();
+    active.clear();
   }
 
   Connection.Listener listener(String token, UUID userId) {
@@ -44,8 +47,8 @@ public class IdeStudioSessionMonitor {
       @Override
       public void onOpened(Connection connection) {
         active.put(connection, new Session(token, userId));
-        // Endpoint close may race with Jetty's onOpen callback.
-        if (!connection.getEndPoint().isOpen()) {
+        // Endpoint close or monitor shutdown may race with Jetty's onOpen callback.
+        if (scheduler.isShutdown() || !connection.getEndPoint().isOpen()) {
           active.remove(connection);
         }
       }
@@ -58,9 +61,11 @@ public class IdeStudioSessionMonitor {
   }
 
   void tick() {
+    // Both successful and failed checks are shared only within this scan.
+    Map<Session, Boolean> authenticated = new HashMap<>();
     active.forEach(
         (connection, session) -> {
-          if (!isAuthenticated(session)) {
+          if (!authenticated.computeIfAbsent(session, this::isAuthenticated)) {
             connection.close();
           }
         });
