@@ -31,6 +31,8 @@ class PluginRedactionTest {
             "https://user:pass@agent.minimaxi.com/v1/api/user/renewal?token=" + SECRET + "#x"));
     assertEquals(
         "http://localhost:8080/path", PluginRedaction.safeUrl("http://localhost:8080/path?a=b"));
+    assertEquals(
+        "http://[::1]:8080/path", PluginRedaction.safeUrl("http://user:pass@[::1]:8080/path?a=b"));
     assertEquals("<invalid URL>", PluginRedaction.safeUrl("not a url"));
     assertEquals("<invalid URL>", PluginRedaction.safeUrl("/relative/path"));
     assertEquals("<invalid URL>", PluginRedaction.safeUrl(null));

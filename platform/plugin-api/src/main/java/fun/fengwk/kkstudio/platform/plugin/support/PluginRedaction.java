@@ -57,10 +57,9 @@ public final class PluginRedaction {
     if (scheme == null || host == null) {
       return INVALID_URL;
     }
-    String renderedHost = host.contains(":") ? "[" + host + "]" : host;
     String port = parsed.getPort() < 0 ? "" : ":" + parsed.getPort();
     String path = parsed.getRawPath() == null ? "" : parsed.getRawPath();
-    return scheme + "://" + renderedHost + port + path;
+    return scheme + "://" + host + port + path;
   }
 
   /** 对可能包含服务端原文与内嵌 URL 的诊断文本执行 URL 退化与秘密替换。 */
