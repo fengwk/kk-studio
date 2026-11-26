@@ -257,8 +257,12 @@ class ThreadSnapshotHubIntegrationTest {
         canvasVersions,
         environments,
         capacity,
-        null,
+        treePublisher(),
         publisher);
+  }
+
+  private static ThreadTreeSnapshotPublisher treePublisher() {
+    return new ThreadTreeSnapshotPublisher(Runnable::run, ignored -> List.of());
   }
 
   private static HarnessChangeSubscription subscribed(AutoCloseable closeable) {

@@ -145,7 +145,8 @@ class ApplicationEventWebSocketHandlerTest {
             realtimeSubscriptions,
             canvasVersionSource,
             environmentChangeSource,
-            () -> 512);
+            () -> 512,
+            treePublisher());
     browserUseRegistry = new IdeBrowserUseRegistry();
     nowNanos = new AtomicLong(1_000_000_000L);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
@@ -568,7 +569,7 @@ class ApplicationEventWebSocketHandlerTest {
             canvasVersionSource,
             environmentChangeSource,
             () -> 512,
-            null,
+            treePublisher(),
             null,
             null,
             ignored -> {
@@ -655,9 +656,11 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(
         springSession, textMessage("{\"type\":\"subscribe\",\"resource\":" + tree + "}"));
     recorder.completeFirst();
+    assertTrue(recorder.sent.getLast().contains("\"name\":\"snapshot\""));
+    recorder.complete(1);
     handler.handleTextMessage(
         springSession, textMessage("{\"type\":\"subscribe\",\"resource\":" + canvas + "}"));
-    recorder.complete(1);
+    recorder.complete(2);
 
     // 两项资源都失权，但主动动作只裁决其目标，空闲订阅仍由原周期回收。
     when(access.allowsThread(any(), eq(THREAD))).thenReturn(false);
@@ -674,7 +677,7 @@ class ApplicationEventWebSocketHandlerTest {
             + tree
             + "}",
         recorder.sent.getLast());
-    recorder.complete(2);
+    recorder.complete(3);
     nowNanos.addAndGet(TimeUnit.SECONDS.toNanos(2));
     handler.heartbeatTick();
     verify(releaseCanvas).close();
@@ -840,7 +843,7 @@ class ApplicationEventWebSocketHandlerTest {
             canvasVersionSource,
             environmentChangeSource,
             () -> DEFAULT_SENDER_CAPACITY,
-            null,
+            treePublisher(),
             publisher);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
     handler.afterConnectionEstablished(springSession);
@@ -1293,8 +1296,12 @@ class ApplicationEventWebSocketHandlerTest {
         canvasVersionSource,
         environmentChangeSource,
         () -> DEFAULT_SENDER_CAPACITY,
-        null,
+        treePublisher(),
         publisher);
+  }
+
+  private static ThreadTreeSnapshotPublisher treePublisher() {
+    return new ThreadTreeSnapshotPublisher(Runnable::run, ignored -> List.of());
   }
 
   /** 最小可发送的 Thread 快照；名称决定单帧体积。 */

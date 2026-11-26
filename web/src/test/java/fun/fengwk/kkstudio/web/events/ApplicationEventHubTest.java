@@ -102,7 +102,8 @@ class ApplicationEventHubTest {
             realtimeSubscriptions,
             canvasVersionSource,
             environmentChangeSource,
-            () -> BUFFER_CAPACITY);
+            () -> BUFFER_CAPACITY,
+            treePublisher());
   }
 
   /** 公开订阅句柄：release 收敛 handle 的 checked exception，便于断言上游真实关闭。 */
@@ -472,10 +473,20 @@ class ApplicationEventHubTest {
   }
 
   @Test
-  void treeChangeIsKeyedByRootAndAggregatesToTheSameResource() {
-    // 测试意图：执行树失效以真实根为资源 key（ack 游标恒为 0），上游通知只落成「回读本根树」的最小信号。
+  void treeChangesPublishCurrentSnapshotsForTheSubscribedRoot() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
     AtomicReference<UUID> subscribedKey = new AtomicReference<>();
     AtomicReference<Consumer<HarnessInvalidationChanges.Event>> consumer = new AtomicReference<>();
+    HarnessThreadTreeNodeDTO initialNode = new HarnessThreadTreeNodeDTO();
+    initialNode.setThreadId(THREAD.toString());
+    initialNode.setName("initial");
+    HarnessThreadTreeNodeDTO updatedNode = new HarnessThreadTreeNodeDTO();
+    updatedNode.setThreadId(THREAD.toString());
+    updatedNode.setName("updated");
+    AtomicReference<List<HarnessThreadTreeNodeDTO>> projection =
+        new AtomicReference<>(List.of(initialNode));
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(tasks::add, ignored -> projection.get());
     when(executionTreeChangeSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
@@ -483,20 +494,77 @@ class ApplicationEventHubTest {
               consumer.set(inv.getArgument(1));
               return subscribed(0L, () -> {});
             });
+    ApplicationEventHub snapshotHub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            environmentChangeSource,
+            () -> BUFFER_CAPACITY,
+            publisher);
 
     List<Signal> signals = new ArrayList<>();
-    Subscription subscription =
-        hub.subscribe(new ResourceKey(ResourceKind.THREAD_TREE, THREAD), signals::add);
+    Subscription subscription = snapshotHub.subscribe(THREAD_TREE_KEY, signals::add);
     assertEquals(THREAD, subscribedKey.get(), "树上游必须按真实根订阅");
     assertEquals(0L, subscription.cursor());
     subscription.activate();
+    tasks.remove().run();
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(List.of(initialNode))), signals);
 
+    projection.set(List.of(updatedNode));
     consumer.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
-    assertEquals(List.of(new Signal.ThreadTreeChanged()), signals);
+    tasks.remove().run();
+    assertEquals(
+        List.of(
+            new Signal.ThreadTreeSnapshot(List.of(initialNode)),
+            new Signal.ThreadTreeSnapshot(List.of(updatedNode))),
+        signals);
 
-    // 提示型资源没有持久游标：resync 必须同样到达（不因 cursor 过滤被丢弃）。
+    // Resync 强制发布当前权威快照，不再发送历史 changed/resync 提示。
     consumer.get().accept(new HarnessInvalidationChanges.Event.Resync());
-    assertEquals(List.of(new Signal.ThreadTreeChanged(), new Signal.Resync()), signals);
+    tasks.remove().run();
+    assertEquals(new Signal.ThreadTreeSnapshot(List.of(updatedNode)), signals.getLast());
+    assertEquals(3, signals.size());
+    subscription.close();
+    snapshotHub.close();
+  }
+
+  @Test
+  void synchronousTreeInvalidationDuringSubscribeUsesTheRegisteredPublisherHandle() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    HarnessThreadTreeNodeDTO node = new HarnessThreadTreeNodeDTO();
+    node.setThreadId(THREAD.toString());
+    node.setName("synchronous");
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(tasks::add, ignored -> List.of(node));
+    when(executionTreeChangeSource.subscribe(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              Consumer<HarnessInvalidationChanges.Event> callback = invocation.getArgument(1);
+              callback.accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+              assertEquals(1, tasks.size(), "the source can request a snapshot during subscribe");
+              return subscribed(0L, () -> {});
+            });
+    ApplicationEventHub snapshotHub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            environmentChangeSource,
+            () -> BUFFER_CAPACITY,
+            publisher);
+    List<Signal> signals = new ArrayList<>();
+
+    Subscription subscription = snapshotHub.subscribe(THREAD_TREE_KEY, signals::add);
+    subscription.activate();
+    assertEquals(1, tasks.size(), "synchronous invalidation coalesces with the initial snapshot");
+    tasks.remove().run();
+
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(List.of(node))), signals);
+    subscription.close();
+    snapshotHub.close();
   }
 
   @Test
@@ -972,6 +1040,10 @@ class ApplicationEventHubTest {
         1L,
         new ProviderStreamEvent.TextDelta(text),
         Instant.parse("2026-08-05T00:00:00Z"));
+  }
+
+  private static ThreadTreeSnapshotPublisher treePublisher() {
+    return new ThreadTreeSnapshotPublisher(Runnable::run, ignored -> List.of());
   }
 
   private static Sink sink() {

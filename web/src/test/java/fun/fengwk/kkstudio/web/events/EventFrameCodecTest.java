@@ -338,12 +338,12 @@ class EventFrameCodecTest {
             + "}",
         CODEC.event(THREAD_KEY, new Signal.Realtime(delta)));
 
-    // 提示型资源：执行树/Environment 的 data 为空对象（标识只在 resource），交互携带真实执行根。
+    // 提示型资源：Environment 的 data 为空对象，交互携带真实执行根；执行树只发送快照。
     assertEquals(
         "{\"type\":\"event\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
             + THREAD
-            + "\"},\"name\":\"changed\",\"data\":{}}",
-        CODEC.event(THREAD_TREE_KEY, new Signal.ThreadTreeChanged()));
+            + "\"},\"name\":\"snapshot\",\"data\":{\"nodes\":[]}}",
+        CODEC.event(THREAD_TREE_KEY, new Signal.ThreadTreeSnapshot(List.of())));
     assertEquals(
         "{\"type\":\"event\",\"resource\":{\"kind\":\"environments\"},\"name\":\"changed\",\"data\":{}}",
         CODEC.event(ENVIRONMENTS_KEY, new Signal.EnvironmentChanged()));
@@ -377,10 +377,10 @@ class EventFrameCodecTest {
   }
 
   @Test
-  void hintSignalsRequireTheirOwnResourceKind() {
+  void treeSnapshotAndHintSignalsRequireTheirOwnResourceKind() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.event(ENVIRONMENTS_KEY, new Signal.ThreadTreeChanged()));
+        () -> CODEC.event(ENVIRONMENTS_KEY, new Signal.ThreadTreeSnapshot(List.of())));
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.event(THREAD_TREE_KEY, new Signal.EnvironmentChanged()));
@@ -389,7 +389,7 @@ class EventFrameCodecTest {
         () -> CODEC.event(THREAD_TREE_KEY, new Signal.InteractionsChanged(THREAD)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.event(INTERACTIONS_KEY, new Signal.ThreadTreeChanged()));
+        () -> CODEC.event(INTERACTIONS_KEY, new Signal.ThreadTreeSnapshot(List.of())));
   }
 
   /**

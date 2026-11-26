@@ -468,8 +468,8 @@ describe('ActiveThreadTree', () => {
       socket.emitServer({
         type: 'event',
         resource: { kind: 'thread-tree', id: ROOT_ID },
-        name: 'changed',
-        data: {},
+        name: 'snapshot',
+        data: { nodes: [] },
       })
     })
     await flushMicrotasks()

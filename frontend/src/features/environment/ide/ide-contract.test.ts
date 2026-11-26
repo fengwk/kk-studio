@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type {
   EnvironmentIdeViewDTO,
+  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 import {
   buildOpenRequest,
   canonicalJson,
   IdeProtocolError,
-  type IdeWireSnapshotView,
-  type IdeWireView,
   normalizeIdeView,
   validateCommandView,
   validateOpenResponse,
@@ -47,13 +46,13 @@ function malformedView(patch: Record<string, unknown>): EnvironmentIdeViewDTO {
 }
 
 /** 无目录 workspace 的 wire 视图：服务端省略 directory。 */
-function viewWithoutDirectory(overrides: Partial<IdeWireView> = {}): IdeWireView {
-  const wire: IdeWireView = { ...view() }
+function viewWithoutDirectory(overrides: Partial<EnvironmentIdeViewDTO> = {}): EnvironmentIdeViewDTO {
+  const wire: EnvironmentIdeViewDTO = { ...view() }
   delete wire.directory
   return { ...wire, ...overrides }
 }
 
-function snapshot(overrides: Partial<IdeWireSnapshotView> = {}): IdeWireSnapshotView {
+function snapshot(overrides: Partial<EnvironmentIdeViewSnapshotDTO> = {}): EnvironmentIdeViewSnapshotDTO {
   return {
     daemonInstanceId: DAEMON,
     revision: '20',
@@ -205,11 +204,11 @@ describe('IDE contract validation', () => {
       heartbeatIntervalMillis: '20000',
     })
     const entryUrl = `/ide/${ENV}/${VIEW}/__ide/bootstrap?token=t`
-    const nullDirectory: IdeWireView = {
+    const nullDirectory: EnvironmentIdeViewDTO = {
       ...view({ entryUrl }),
       directory: null,
     }
-    const omittedDirectory: IdeWireView = { ...viewWithoutDirectory(), entryUrl }
+    const omittedDirectory: EnvironmentIdeViewDTO = { ...viewWithoutDirectory(), entryUrl }
 
     for (const response of [nullDirectory, omittedDirectory]) {
       const opened = validateOpenResponse(ENV, request, response)

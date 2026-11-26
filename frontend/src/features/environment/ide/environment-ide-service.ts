@@ -5,12 +5,9 @@ import type {
   EnvironmentIdeCloseViewDTO,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewBindingDTO,
+  EnvironmentIdeViewDTO,
+  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
-import type {
-  IdeWireSnapshotView,
-  IdeWireView,
-} from '@/features/environment/ide/ide-contract'
-
 type ReadViewQuery = ApiRoutes[
   'GET /api/ide/environments/{environmentId}/views/{viewId}'
 ] extends { query: infer Query } ? Query : never
@@ -19,7 +16,7 @@ type ReadViewQuery = ApiRoutes[
 export function openIdeView(
   environmentId: string,
   body: EnvironmentIdeOpenViewDTO,
-): Promise<IdeWireView> {
+): Promise<EnvironmentIdeViewDTO> {
   return request('POST /api/ide/environments/{environmentId}/views', {
     path: { environmentId },
     body,
@@ -34,7 +31,7 @@ export function readIdeView(
   environmentId: string,
   viewId: string,
   query: ReadViewQuery,
-): Promise<IdeWireSnapshotView> {
+): Promise<EnvironmentIdeViewSnapshotDTO> {
   return request('GET /api/ide/environments/{environmentId}/views/{viewId}', {
     path: { environmentId, viewId },
     query,
@@ -46,7 +43,7 @@ export function changeIdeViewDirectory(
   environmentId: string,
   viewId: string,
   body: EnvironmentIdeChangeDirectoryDTO,
-): Promise<IdeWireView> {
+): Promise<EnvironmentIdeViewDTO> {
   return request('PUT /api/ide/environments/{environmentId}/views/{viewId}/directory', {
     path: { environmentId, viewId },
     body,

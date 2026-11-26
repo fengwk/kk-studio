@@ -44,26 +44,13 @@ export function canonicalJson(value: unknown): string {
   return `{${entries.join(',')}}`
 }
 
-/**
- * wire 视图：无目录 workspace 上服务端省略 directory 或返回 JSON null，而生成契约仍把它
- * 声明为必填 string。集成改用生成类型前用 Omit 兼容两者，读入后立即规范化。
- */
-export type IdeWireView = Omit<EnvironmentIdeViewDTO, 'directory'> & {
-  directory?: string | null
-}
-
 /** 内部规范视图：无目录用缺省表达，不再保留 null。 */
 export type IdeNormalizedView = Omit<EnvironmentIdeViewDTO, 'directory'> & {
   directory?: string
 }
 
-/** wire 快照；view 自身仍可为 null（没有该 view 的权威事实）。 */
-export type IdeWireSnapshotView = Omit<EnvironmentIdeViewSnapshotDTO, 'view'> & {
-  view: IdeWireView | null
-}
-
 /** 把 wire 的 null/缺省目录统一成 undefined；其余字段原样保留。 */
-export function normalizeIdeView(view: IdeWireView): IdeNormalizedView {
+export function normalizeIdeView(view: EnvironmentIdeViewDTO): IdeNormalizedView {
   const { directory, ...rest } = view
   return directory == null ? rest : { ...rest, directory }
 }
@@ -74,7 +61,7 @@ function hasValidDirectory(directory: unknown): boolean {
 }
 
 /** 同一 view 在同一 daemonInstance 内的内容指纹；不存在用稳定字面量。 */
-export function viewFingerprint(view: IdeWireView | null): string {
+export function viewFingerprint(view: EnvironmentIdeViewDTO | null): string {
   return canonicalJson(view == null ? null : normalizeIdeView(view))
 }
 
@@ -88,7 +75,7 @@ function requireSnapshotView(
   environmentId: string,
   viewId: string,
   browserSessionId: string,
-  snapshot: IdeWireSnapshotView,
+  snapshot: EnvironmentIdeViewSnapshotDTO,
 ): IdeSnapshotView {
   if (
     snapshot == null
@@ -143,7 +130,7 @@ export function validateViewSnapshot(
   environmentId: string,
   viewId: string,
   browserSessionId: string,
-  snapshot: IdeWireSnapshotView,
+  snapshot: EnvironmentIdeViewSnapshotDTO,
 ): IdeSnapshotView {
   if (!isCanonicalUuid(environmentId) || !isCanonicalUuid(viewId) || !isCanonicalUuid(browserSessionId)) {
     throw new IdeProtocolError('Invalid IDE view identity')
@@ -164,7 +151,7 @@ export interface IdeBindingResult {
 export function validateOpenResponse(
   environmentId: string,
   request: EnvironmentIdeOpenViewDTO,
-  response: IdeWireView,
+  response: EnvironmentIdeViewDTO,
 ): IdeBindingResult {
   if (
     response == null
@@ -223,7 +210,7 @@ export function validateCommandView(
   environmentId: string,
   browserSessionId: string,
   viewId: string,
-  response: IdeWireView,
+  response: EnvironmentIdeViewDTO,
 ): IdeCommandView {
   if (
     response == null

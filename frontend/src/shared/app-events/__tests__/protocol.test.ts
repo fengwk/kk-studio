@@ -211,18 +211,7 @@ describe('decodeServerMessage', () => {
     }))).toEqual(invalidPayload(treeResource, 'thread-tree', 'snapshot'))
   })
 
-  it('decodes hint-resource changed events without a cursor', () => {
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          
-          type: 'event',
-          resource: treeResource,
-          name: 'changed',
-          data: {},
-        }),
-      ),
-    ).toEqual({ type: 'event', resource: treeResource, name: 'changed', data: {} })
+  it('decodes global hint-resource changed events without a cursor', () => {
     expect(
       decodeServerMessage(
         JSON.stringify({
@@ -726,20 +715,7 @@ describe('decodeServerMessage', () => {
         }),
       ),
     ).toBeNull()
-    // data 形状必须精确：tree/environments 为空对象，interactions 只接受 canonical rootThreadId。
-    const treeChanged = {
-      
-      type: 'event',
-      resource: treeResource,
-      name: 'changed',
-      data: {},
-    }
-    expect(
-      decodeServerMessage(JSON.stringify({ ...treeChanged, cursor: '0' })),
-    ).toBeNull()
-    expect(
-      decodeServerMessage(JSON.stringify({ ...treeChanged, data: { rootThreadId: THREAD_ID } })),
-    ).toEqual(invalidPayload(treeResource, 'thread-tree', 'changed'))
+    // tree accepts snapshots only; environments carries no data and interactions requires a canonical root.
     const interactionsChanged = {
       
       type: 'event',
@@ -768,17 +744,13 @@ describe('decodeServerMessage', () => {
         JSON.stringify({ ...interactionsChanged, cursor: '0' }),
       ),
     ).toBeNull()
-    // resource/name 组合仍然严格：tree 只接受 changed。
-    expect(
-      decodeServerMessage(
-        JSON.stringify({ ...treeChanged, name: 'version', data: { version: '1' }, cursor: '1' }),
-      ),
-    ).toBeNull()
-    expect(
-      decodeServerMessage(
-        JSON.stringify({ ...treeChanged, resource: { kind: 'thread-tree', id: THREAD_ID, extra: 1 } }),
-      ),
-    ).toBeNull()
+    // 旧 thread-tree changed 组合不再是合法 wire 消息。
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'changed', data: {},
+    }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: { kind: 'thread-tree', id: THREAD_ID, extra: 1 }, name: 'snapshot', data: { nodes: [] },
+    }))).toBeNull()
   })
 
   it('rejects error frames without code or message', () => {
@@ -882,16 +854,6 @@ describe('backend wire samples', () => {
         `{"type":"subscribed","resource":{"kind":"thread-tree","id":"${THREAD_ID}"},"cursor":"0"}`,
       ),
     ).toEqual({ type: 'subscribed', resource: { kind: 'thread-tree', id: THREAD_ID }, cursor: '0' })
-    expect(
-      decodeServerMessage(
-        `{"type":"event","resource":{"kind":"thread-tree","id":"${THREAD_ID}"},"name":"changed","data":{}}`,
-      ),
-    ).toEqual({
-      type: 'event',
-      resource: { kind: 'thread-tree', id: THREAD_ID },
-      name: 'changed',
-      data: {},
-    })
     // 旧资源名不再被客户端接受。
     expect(decodeServerMessage(
       `{"type":"event","resource":{"kind":"tree","id":"${THREAD_ID}"},"name":"changed","data":{}}`,

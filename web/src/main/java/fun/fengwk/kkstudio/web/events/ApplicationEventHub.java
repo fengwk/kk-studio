@@ -79,7 +79,6 @@ final class ApplicationEventHub implements AutoCloseable {
           Signal.ThreadSnapshot,
           Signal.ThreadSnapshotFailed,
           Signal.Realtime,
-          Signal.ThreadTreeChanged,
           Signal.ThreadTreeSnapshot,
           Signal.ThreadTreeSnapshotFailed,
           Signal.InteractionsChanged,
@@ -93,9 +92,6 @@ final class ApplicationEventHub implements AutoCloseable {
     record ThreadSnapshotFailed() implements Signal {}
 
     record Realtime(RealtimeEvent event) implements Signal {}
-
-    /** 该根的执行树需要回读；资源本身已带根 id。 */
-    record ThreadTreeChanged() implements Signal {}
 
     /** 小体积完整权威树快照；不附加 Thread.version 游标。 */
     record ThreadTreeSnapshot(List<HarnessThreadTreeNodeDTO> nodes) implements Signal {
@@ -171,25 +167,6 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
       NotificationInvalidationSource environmentChangeSource,
-      IntSupplier maxBufferedSignals) {
-    this(
-        harnessChanges,
-        realtimeSource,
-        realtimeSubscriptions,
-        canvasVersionSource,
-        environmentChangeSource,
-        maxBufferedSignals,
-        null,
-        null,
-        null);
-  }
-
-  ApplicationEventHub(
-      HarnessChangeSubscriptions harnessChanges,
-      RealtimeEventSource realtimeSource,
-      RealtimeSubscriptionService realtimeSubscriptions,
-      CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher) {
     this(
@@ -221,29 +198,7 @@ final class ApplicationEventHub implements AutoCloseable {
         maxBufferedSignals,
         threadTreeSnapshotPublisher,
         threadSnapshotPublisher,
-        null);
-  }
-
-  ApplicationEventHub(
-      HarnessChangeSubscriptions harnessChanges,
-      RealtimeEventSource realtimeSource,
-      RealtimeSubscriptionService realtimeSubscriptions,
-      CanvasVersionEventSource canvasVersionSource,
-      NotificationInvalidationSource environmentChangeSource,
-      IntSupplier maxBufferedSignals,
-      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
-      ThreadSnapshotPublisher threadSnapshotPublisher,
-      Consumer<UUID> threadValidator) {
-    this(
-        harnessChanges,
-        realtimeSource,
-        realtimeSubscriptions,
-        canvasVersionSource,
-        environmentChangeSource,
-        maxBufferedSignals,
-        threadTreeSnapshotPublisher,
-        threadSnapshotPublisher,
-        threadValidator,
+        null,
         null);
   }
 
@@ -293,7 +248,8 @@ final class ApplicationEventHub implements AutoCloseable {
     this.environmentChangeSource =
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     this.maxBufferedSignals = Objects.requireNonNull(maxBufferedSignals, "maxBufferedSignals");
-    this.threadTreeSnapshotPublisher = threadTreeSnapshotPublisher;
+    this.threadTreeSnapshotPublisher =
+        Objects.requireNonNull(threadTreeSnapshotPublisher, "threadTreeSnapshotPublisher");
     this.threadSnapshotPublisher = threadSnapshotPublisher;
     this.threadValidator = threadValidator;
     this.threadTreeValidator = threadTreeValidator;
@@ -432,9 +388,6 @@ final class ApplicationEventHub implements AutoCloseable {
       }
       handle = state.threadTreeSnapshotHandle;
     }
-    if (handle == null) {
-      return false;
-    }
     handle.request(true);
     return true;
   }
@@ -494,18 +447,17 @@ final class ApplicationEventHub implements AutoCloseable {
         state.cursor = version.cursor();
       }
       case THREAD_TREE -> {
+        // The source may deliver an invalidation synchronously during subscribe.
+        state.threadTreeSnapshotHandle =
+            threadTreeSnapshotPublisher.subscribe(
+                state.key.id(),
+                nodes -> fanout(state, new Signal.ThreadTreeSnapshot(nodes)),
+                () -> fanout(state, new Signal.ThreadTreeSnapshotFailed()));
         HarnessChangeSubscription subscription =
             harnessChanges
                 .executionTree()
                 .subscribe(state.key.id(), event -> onExecutionTreeChange(state, event));
         state.invalidationRelease = subscription::close;
-        if (threadTreeSnapshotPublisher != null) {
-          state.threadTreeSnapshotHandle =
-              threadTreeSnapshotPublisher.subscribe(
-                  state.key.id(),
-                  nodes -> fanout(state, new Signal.ThreadTreeSnapshot(nodes)),
-                  () -> fanout(state, new Signal.ThreadTreeSnapshotFailed()));
-        }
       }
       case CHAT_SPACE -> state.invalidationRelease =
           workspaceNotifications.subscribe(
@@ -545,19 +497,14 @@ final class ApplicationEventHub implements AutoCloseable {
   /** 执行树按资源自带根 id 定点失效，事件本身不携带额外坐标。 */
   private void onExecutionTreeChange(
       ApplicationEventResourceState state, HarnessInvalidationChanges.Event event) {
-    if (threadTreeSnapshotPublisher == null || state.threadTreeSnapshotHandle == null) {
-      fanout(state, executionTreeSignal(event));
-      return;
+    ThreadTreeSnapshotPublisher.Handle handle;
+    synchronized (state) {
+      if (state.retired) {
+        return;
+      }
+      handle = state.threadTreeSnapshotHandle;
     }
-    state.threadTreeSnapshotHandle.request(
-        event instanceof HarnessInvalidationChanges.Event.Resync);
-  }
-
-  private static Signal executionTreeSignal(HarnessInvalidationChanges.Event event) {
-    if (event instanceof HarnessInvalidationChanges.Event.Changed) {
-      return new Signal.ThreadTreeChanged();
-    }
-    return new Signal.Resync();
+    handle.request(event instanceof HarnessInvalidationChanges.Event.Resync);
   }
 
   /** 待处理交互是全局资源：changed 携带真实执行根，resync 要求整体回读。 */

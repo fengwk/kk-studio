@@ -239,14 +239,6 @@ final class EventFrameCodec {
       ObjectNode data = NODES.objectNode();
       data.set("nodes", snapshotMapper.valueToTree(snapshot.nodes()));
       node.set("data", data);
-    } else if (signal instanceof Signal.ThreadTreeChanged) {
-      if (resource.kind() != ResourceKind.THREAD_TREE) {
-        throw new IllegalArgumentException(
-            "thread-tree change signal requires the thread-tree resource");
-      }
-      // 根 id 已在 resource 中，事件 data 无需重复携带。
-      node.put("name", "changed");
-      node.set("data", NODES.objectNode());
     } else if (signal instanceof Signal.InteractionsChanged interactionsChanged) {
       if (resource.kind() != ResourceKind.INTERACTIONS) {
         throw new IllegalArgumentException(

@@ -20,9 +20,7 @@
  *   - thread realtime：data 为 lossy realtime delta envelope 的 JSON 对象（如 MODEL_DELTA），
  *     绝不携带 cursor。
  *   - canvas revision：data {"revision":"N"}，cursor 必带且与 data.revision 完全相等。
- *   - projects changed：data {"projectId":"<UUID>"}，只提示回读 Project Snapshot，不带 cursor。
  *   - thread-tree snapshot：resource 带真实执行根 id，data 为完整小树 {nodes:[HarnessThreadTreeNodeDTO]}，不带 Thread.version cursor。
- *   - thread-tree changed：仅旧版内部提示，不用于浏览器数据流。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
  *   - chat-space tree {treeVersion} / threads {} / space {version} / schedules {scheduleId?}：仅提示回读，不带 cursor。
@@ -37,9 +35,9 @@
  *
  * 解码是真正严格的：每种 type/name 只接受精确字段集、多余/未知字段一律拒绝；
  * resource 精确只有 kind+id 且 id 必须是 canonical UUID（小写十六进制）；
- * 全局 projects/interactions/environments resource 不带 id；
+ * 全局 interactions/environments resource 不带 id；
  * resource/name 组合必须合法（thread 仅 snapshot|realtime，canvas 仅 revision，
- * interactions|environments 仅 changed，thread-tree 仅 snapshot|changed）；canvas revision
+ * interactions|environments 仅 changed，thread-tree 仅 snapshot）；canvas revision
  * 与其 durable cursor 必须是 canonical 非负十进制字符串且完全相等；Thread 与提示型资源的
  * ack cursor 恒为 '0'，提示型事件及 snapshot/realtime 事件不携带 cursor；realtime data 必须是非数组 JSON
  * 对象且不得携带 cursor。connected 的两个身份与 heartbeatIntervalMillis（不超过
@@ -182,19 +180,12 @@ type ApplicationEventCanvasRevisionEvent = {
   cursor: ApplicationEventCursor
 }
 
-/** thread-tree 的提示型 changed 事件：根 id 已在 resource 上，data 恒为空对象且绝不携带 cursor。 */
+/** thread-tree 的权威快照事件：根 id 已在 resource 上，data 为完整节点列表且绝不携带 cursor。 */
 type ApplicationEventTreeSnapshotEvent = {
   type: 'event'
   resource: ApplicationEventResource & { kind: 'thread-tree' }
   name: 'snapshot'
   data: { nodes: HarnessThreadTreeNodeDTO[] }
-}
-
-type ApplicationEventTreeChangedEvent = {
-  type: 'event'
-  resource: ApplicationEventResource & { kind: 'thread-tree' }
-  name: 'changed'
-  data: Record<string, never>
 }
 
 /**
@@ -243,7 +234,6 @@ export type ApplicationEventServerMessage =
   | ApplicationEventThreadRealtimeEvent
   | ApplicationEventCanvasRevisionEvent
   | ApplicationEventTreeSnapshotEvent
-  | ApplicationEventTreeChangedEvent
   | ApplicationEventInteractionsChangedEvent
   | ApplicationEventEnvironmentsChangedEvent
   | ApplicationEventChatSpaceEvent
@@ -454,10 +444,7 @@ function decodeEventData(
     case 'canvas':
       return decodeCanvasRevisionEvent(parsed, resource)
     case 'thread-tree':
-      if (name === 'snapshot') {
-        return decodeTreeSnapshotEvent(parsed, resource)
-      }
-      return decodeTreeChangedEvent(parsed, resource)
+      return decodeTreeSnapshotEvent(parsed, resource)
     case 'interactions':
       return decodeInteractionsChangedEvent(parsed, resource)
     case 'environments':
@@ -523,7 +510,7 @@ function isEventNameFor(
     case 'canvas':
       return name === 'revision'
     case 'thread-tree':
-      return name === 'snapshot' || name === 'changed'
+      return name === 'snapshot'
     case 'chat-space':
       return name === 'tree' || name === 'threads' || name === 'space' || name === 'schedules'
     default:
@@ -756,7 +743,7 @@ function decodeCanvasRevisionEvent(
   return { type: 'event', resource, name: 'revision', data: { revision }, cursor: revision }
 }
 
-/** thread-tree 的提示型事件：根 id 在 resource 上，data 恒为空对象且绝不携带 cursor。 */
+/** thread-tree 的权威快照事件：根 id 在 resource 上，data 为完整节点列表且绝不携带 cursor。 */
 function decodeTreeSnapshotEvent(
   parsed: Record<string, unknown>,
   resource: ApplicationEventResource & { kind: 'thread-tree' },
@@ -805,16 +792,6 @@ function isThreadTreeNode(value: unknown): value is HarnessThreadTreeNodeDTO {
       ))
     && typeof value.updatedAt === 'number'
     && Number.isFinite(value.updatedAt)
-}
-
-function decodeTreeChangedEvent(
-  parsed: Record<string, unknown>,
-  resource: ApplicationEventResource & { kind: 'thread-tree' },
-): ApplicationEventServerMessage | null {
-  if (!hasExactFields(parsed.data, [])) {
-    return null
-  }
-  return { type: 'event', resource, name: 'changed', data: {} }
 }
 
 /** environments 的提示型事件：data 恒为空对象且绝不携带 cursor。 */
