@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAccount } from '@/features/account/account-context'
-import { clearStoredComposerDraft } from '@/features/thread/composer/composer-draft'
-import { partsToMessageContents, type ComposerPart } from '@/features/thread/composer/composer-parts'
+import { clearStoredComposerDraft, restoreComposerDraft } from '@/features/thread/composer/composer-draft'
+import { partsToMessageContents, trimMessageParts, type ComposerPart } from '@/features/thread/composer/composer-parts'
 import { RootThreadControlArea } from '@/features/thread/runtime/panes/RootThreadControlArea'
 import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { ThreadPanel, ThreadStatusFooter } from '@/features/thread/runtime/thread-panel'
@@ -47,7 +47,7 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
   const [storageError, setStorageError] = useState<string | null>(null)
   const sending = useRef(false)
   const retryRecord = !stored.unreadable && stored.record && !stored.record.value.rejected ? stored.record : null
-  const [parts, changeParts] = usePaneDraft(scope, onUnsentChange, retryRecord != null)
+  const { parts, changeParts, clearParts } = usePaneDraft(scope, onUnsentChange, retryRecord != null)
   const [model, setModel] = useState<HarnessModelSelectionDTO>()
   const [environmentName, setEnvironmentName] = useState<string | null>(null)
   const [yolo, setYolo] = useState<boolean>()
@@ -75,7 +75,9 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
       }, { idempotencyKey: key })
       try {
         if (clearSessionSend(storageKey, record)) {
-          clearStoredComposerDraft(scope)
+          // Another tab can edit this draft while our receipt is pending. Clear only the sent content.
+          const persisted = partsToMessageContents(trimMessageParts(restoreComposerDraft(scope, [])))
+          if (JSON.stringify(persisted) === JSON.stringify(body.message)) clearStoredComposerDraft(scope)
           return { ...result, cleared: true }
         }
       } catch {
@@ -139,7 +141,7 @@ function DraftPane({ active, onUnsentChange, openSpaceSettings, replace, space, 
           return
         }
         setStored({ record: null, unreadable: false })
-        changeParts([])
+        clearParts()
         onUnsentChange(false)
         replace({ kind: 'thread', threadId })
       },

@@ -1101,9 +1101,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "unsupported provider protocol must be reported as skip, got: " + result);
   }
 
-  /** MCP discovery 外部失败仍保存未验证配置，并在导入结果中报告发现警告。 */
+  /** 公开发现 API 的错误分类变化不改变配置导入的条目跳过行为。 */
   @Test
-  void mcpDiscoveryFailureSavesUnverifiedConfigAndReportsWarning() throws Exception {
+  void mcpDiscoveryFailureIsReportedAsSkip() throws Exception {
     failingMcpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     failingMcpServer.createContext(
         "/mcp",
@@ -1122,14 +1122,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "    enabled: true\n";
     JsonNode result = importYaml(yaml, true);
     assertTrue(
-        result.path("imported").findValuesAsString("name").contains("broken_mcp"),
-        "MCP config must be saved despite discovery failure, got: " + result);
-    assertTrue(
         result.path("skipped").findValuesAsString("name").contains("broken_mcp"),
-        "MCP discovery failure must be reported as a warning, got: " + result);
-    JsonNode server = getData("/api/platform/mcp-servers/broken_mcp");
-    assertEquals("UNVERIFIED", server.path("discoveryStatus").asText());
-    assertEquals(0, server.path("toolCount").asInt());
+        "MCP discovery failure must be reported as skip, got: " + result);
+    assertFalse(result.path("imported").findValuesAsString("name").contains("broken_mcp"));
   }
 
   /** BigDecimal 定价必须保持原精度，不能经浮点丢位。 */

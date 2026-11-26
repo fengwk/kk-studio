@@ -269,23 +269,28 @@ test('a first-send key conflict in another tab preserves the draft until an expl
   expect(posts.map(({ key }) => key)).toEqual([draftId, draftId])
   expect(posts.creations.size).toBe(1)
 
+  // A late receipt in the first tab must not clear the second tab's different draft.
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByText('Thread 6', { exact: true })).toBeVisible()
+  expect(posts[2]).toEqual(posts[0])
+
   // Reload must keep the conflict editable, without offering to repeat its frozen request.
   await second.reload()
   await expect(conflict).toContainText('Your message was not sent')
   await expect(second.getByRole('button', { name: 'Retry' })).toHaveCount(0)
   await expect(editor).toHaveText(message)
   await expect(editor).toBeEditable()
-  expect(posts).toHaveLength(2)
+  expect(posts).toHaveLength(3)
 
   const corrected = 'Edited second tab message'
   await editor.fill(corrected)
   await sendButton(second).click()
   await expect(second.getByText('Thread 9', { exact: true })).toBeVisible()
   await expect(second.getByText(corrected, { exact: true })).toBeVisible()
-  expect(posts).toHaveLength(3)
-  expect(posts[2].key).not.toBe(draftId)
-  expect(posts[2].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
-  expect(posts[2].body).toMatchObject({ message: [{ type: 'TEXT', text: corrected }] })
+  expect(posts).toHaveLength(4)
+  expect(posts[3].key).not.toBe(draftId)
+  expect(posts[3].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  expect(posts[3].body).toMatchObject({ message: [{ type: 'TEXT', text: corrected }] })
   expect(posts.creations.size).toBe(2)
 })
 

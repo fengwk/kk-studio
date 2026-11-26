@@ -937,9 +937,9 @@ describe('WorkspaceSchedules', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '立即运行' }))
     // A 5xx is uncertain; only the explicit application refusal releases the original key.
-    expect(await screen.findByRole('status')).toHaveTextContent('未收到运行回执。')
+    expect(await screen.findByRole('status')).toHaveTextContent('未收到运行结果。重试不会重复运行。')
     fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重试获取运行回执' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '重试运行' }))
     await waitFor(() => expect(report).toHaveBeenCalledWith('Schedule no longer exists'))
     expect(runKeys[0]).toBeTruthy()
     expect(runKeys).toEqual([runKeys[0], runKeys[0]])

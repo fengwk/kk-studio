@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PanelLeftOpen } from 'lucide-react'
-import { ApiError, apiErrorDetail } from '@/shared/api/client'
+import { ApiError, apiErrorDetail, isConflictReason } from '@/shared/api/client'
 import type { ChatSpaceDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { createUuid } from '@/shared/lib/uuid'
@@ -31,6 +31,7 @@ import './workspace-shell.css'
 const workspaceErrors = {
   version_conflict: 'workspace.versionConflict', VERSION_CONFLICT: 'workspace.versionConflict', FOLDER_NAME_EXISTS: 'workspace.nameExists',
   CHAT_SPACE_TITLE_EXISTS: 'workspace.nameExists', THREAD_NAME_EXISTS: 'workspace.nameExists',
+  THREAD_RENAME_RETRY: 'workspace.versionConflict',
   LAST_ACTIVE_CHAT_SPACE: 'workspace.lastSpace', FOLDER_NOT_EMPTY: 'workspace.folderNotEmpty',
   LAST_ROOT_FOLDER: 'workspace.lastRoot', RESOURCE_IN_USE: 'workspace.inUse',
   EXECUTION_NOT_SETTLED: 'workspace.notSettled',
@@ -109,7 +110,8 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       await refresh(isSpace)
       return result
     } catch (error) {
-      if (isTreeVersionConflict(error) || (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT'))) await refresh(isSpace)
+      if (isTreeVersionConflict(error) || isConflictReason(error, 'THREAD_RENAME_RETRY')
+        || (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT'))) await refresh(isSpace)
       throw new Error(errorText(error), { cause: error })
     }
   }

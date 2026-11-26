@@ -158,6 +158,36 @@ func TestPublishedOutputRetentionStartsAtPublish(t *testing.T) {
 	})
 }
 
+// A retention-marker error must leave an unpublished capture available for cleanup.
+func TestPublishDoesNotExposeLogWhenRetentionMarkerFails(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, path, err := store.CreateStagingFile("publish-failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(filepath.Dir(path), "created-at.part"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := store.Publish(path); target != "" || err == nil {
+		t.Fatalf("target=%q err=%v; want publish failure", target, err)
+	}
+	if _, err := os.Stat(strings.TrimSuffix(path, ".part") + ".log"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("log stat err=%v; want no published file", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteStaging(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRepeatedAcquireLeasesShareWorkspaceCount(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {

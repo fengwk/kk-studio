@@ -105,12 +105,10 @@ func (s *TextOutputStore) Publish(path string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	target := strings.TrimSuffix(path, ".part") + ".log"
-	if err := os.Rename(path, target); err != nil {
-		return "", err
-	}
-	if workspace := s.staging[path]; workspace != "" {
-		// Keep the staging lease until the new retention anchor is installed. Round up so
-		// the second-resolution marker never expires the output early.
+	workspace := s.staging[path]
+	if workspace != "" {
+		// Install the retention marker before exposing the log. Round up the second-resolution
+		// timestamp so the next sweep cannot expire the output at the start of that second.
 		marker := filepath.Join(workspace, "created-at")
 		pending := marker + ".part"
 		if err := os.WriteFile(pending, []byte(strconv.FormatInt(time.Now().Unix()+1, 10)), 0o600); err != nil {
@@ -119,6 +117,11 @@ func (s *TextOutputStore) Publish(path string) (string, error) {
 		if err := os.Rename(pending, marker); err != nil {
 			return "", err
 		}
+	}
+	if err := os.Rename(path, target); err != nil {
+		return "", err
+	}
+	if workspace != "" {
 		delete(s.staging, path)
 		s.releaseWorkspaceLocked(workspace)
 	}

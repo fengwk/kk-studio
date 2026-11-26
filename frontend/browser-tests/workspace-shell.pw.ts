@@ -356,6 +356,39 @@ test('creates root and child folders inline, handles errors, renames with F2 and
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
 })
 
+test('keeps the Thread rename draft after a retryable serialization conflict', async ({ page }) => {
+  const harness = await setup(page)
+  const item = harness.tree.folders[0]!.resources[0]!.threads![0]!
+  const attempts: Array<{ title: string; expectedVersion: string }> = []
+  await page.route(`**/api/chat-spaces/${spaceId}/threads/${thread}`, route => {
+    expect(route.request().method()).toBe('PATCH')
+    const body = route.request().postDataJSON() as typeof attempts[number]
+    attempts.push(body)
+    if (attempts.length === 1) {
+      harness.tree.folders[1]!.name = 'Updated concurrently'
+      return route.fulfill({ status: 409, contentType: 'application/problem+json',
+        body: JSON.stringify({ code: 'conflict', reason: 'THREAD_RENAME_RETRY' }) })
+    }
+    item.title = body.title
+    item.version = '1'
+    return route.fulfill({ json: { sessionId: session, sessionTitle: 'Release planning', folderId: root,
+      title: item.title, state: 'RUNNING', version: item.version } })
+  })
+  await page.goto(path)
+  await page.getByRole('treeitem', { name: 'Release planning' }).click()
+  await page.getByRole('treeitem', { name: 'Release notes' }).press('F2')
+  const input = page.getByRole('textbox', { name: 'Rename Release notes' })
+  await input.fill('Updated release notes')
+  await input.press('Enter')
+  await expect(page.getByRole('alert')).toHaveText('The workspace changed. Review and try again.')
+  await expect(page.getByRole('treeitem', { name: 'Updated concurrently' })).toBeVisible()
+  await expect(input).toHaveValue('Updated release notes')
+  expect(attempts).toHaveLength(1)
+  await input.press('Enter')
+  await expect(page.getByRole('treeitem', { name: 'Updated release notes' })).toBeVisible()
+  expect(attempts).toEqual(Array.from({ length: 2 }, () => ({ title: 'Updated release notes', expectedVersion: '0' })))
+})
+
 for (const kind of ['folder', 'canvas'] as const) {
   test(`reconfirms ${kind} creation after CAS rejection and replays a lost receipt after tree refresh`, async ({ page }) => {
     const harness = await setup(page)

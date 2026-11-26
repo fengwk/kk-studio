@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { createUuid } from '@/shared/lib/uuid'
+import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import { isManualRunRejected } from './workspace-action-retry'
 import { runScheduleNow } from './workspace-api'
 
@@ -28,26 +28,32 @@ export function manualRunScope(userId: string, spaceId: string, scheduleId: stri
 
 export function manualRunState(scope: string): 'running' | 'retry' | 'idle' {
   if (running.has(scope)) return 'running'
-  try { return localStorage.getItem(scope) ? 'retry' : 'idle' }
+  try { return sessionStorage.getItem(scope) !== null ? 'retry' : 'idle' }
   catch { return 'idle' } // Sending still requires working storage.
 }
 
 export async function requestManualRun(scope: string, spaceId: string, scheduleId: string) {
   if (running.has(scope)) return 'busy'
-  const previous = localStorage.getItem(scope)
+  const previous = sessionStorage.getItem(scope)
   const key = previous ?? createUuid()
-  // Persist before sending, so a reload while the request is in flight can recover the receipt.
-  if (!previous) localStorage.setItem(scope, key)
+  if (!isCanonicalUuid(key)) throw new Error('Invalid manual run record')
+  // A reload can replay this tab's pending run. Another tab does not settle or clear it.
+  if (previous === null) {
+    sessionStorage.setItem(scope, key)
+    if (sessionStorage.getItem(scope) !== key) throw new Error('Manual run record was not saved')
+  }
   running.add(scope)
   notify()
   try {
-    await runScheduleNow(spaceId, scheduleId, key)
-    localStorage.removeItem(scope)
+    try {
+      await runScheduleNow(spaceId, scheduleId, key)
+    } catch (error) {
+      if (!isManualRunRejected(error)) return 'unknown'
+      sessionStorage.removeItem(scope)
+      throw error
+    }
+    sessionStorage.removeItem(scope)
     return 'received'
-  } catch (error) {
-    if (!isManualRunRejected(error)) return 'unknown'
-    localStorage.removeItem(scope)
-    throw error
   } finally {
     running.delete(scope)
     notify()

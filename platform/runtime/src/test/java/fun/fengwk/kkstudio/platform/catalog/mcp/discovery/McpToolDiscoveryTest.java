@@ -158,16 +158,12 @@ class McpToolDiscoveryTest {
   void failureMessageNeverLeaksUrlOrHeaders() {
     // 意图：网络失败的错误信息绝不回显 URL、header 或底层异常原因
     fakeServer.setFailDiscovery(true);
-    McpServer server =
-        server(5000L).toBuilder().url("https://sensitive-marker.example/mcp").build();
+    McpServer server = server(5000L);
 
     DomainException error =
         assertThrows(DomainException.class, () -> realDiscovery().discover(server));
     assertEquals(DomainErrorCode.UPSTREAM_FAILED, error.code());
-    assertTrue(error.getMessage().contains("discovery failed"));
-    assertTrue(
-        error.toString().lines().findFirst().orElse("").length() < 200,
-        () -> "error must not embed long payloads: " + error);
+    assertEquals("MCP server discovery failed.", error.getMessage());
   }
 
   private McpToolDiscovery realDiscovery() {

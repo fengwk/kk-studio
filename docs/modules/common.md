@@ -48,8 +48,7 @@ HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，�
 RFC 3986 或按表单解码都还原原值。`java.net.URLEncoder` 的 form-urlencoded 输出把空格写成 `+`，
 只在接收方同样按表单解码时才成立，不能用于路径段。
 
-Harness Model 的 Gemini path-segment 编码规则与本类相同，但该模块是可独立编译的叶子模块、不依赖 `common`，
-因此那边保留自己的实现；两处规则变更必须同步。
+Harness Model 依赖 Common 的通用 JSON 编解码能力。Gemini 请求仍在模型协议入口按相同的 unreserved 规则编码路径段。
 
 ## Resource 引用与 URI 校验
 

@@ -12,5 +12,5 @@ export function usePaneDraft(scope: string, onUnsentChange: (unsent: boolean) =>
     setParts(next)
   }, [scope])
 
-  return [parts, changeParts] as const
+  return { parts, changeParts, clearParts: () => setParts([]) }
 }

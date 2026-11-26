@@ -213,7 +213,7 @@ view 绑定（`PaneTarget`）与布局，不复制 Thread、draft 或执行状�
 [`ThreadPaneRenderer`](../../frontend/src/features/thread/workspace/ThreadPaneRenderer.tsx) 通过 `useThreadProjection` 读取投影：根 Thread 渲染 [`RootThreadControlArea`](../../frontend/src/features/thread/runtime/panes/RootThreadControlArea.tsx) 与根交互区，子代理查看层由 [`ChildThreadView`](../../frontend/src/features/thread/runtime/panes/ChildThreadView.tsx)（`ConnectedThreadView`）读取自己的投影。
 `ThreadPane` 与命令控制 Hook 只消费必填投影；命令批直接从该投影构建。
 
-草稿窗格在首条发送前，把请求体和幂等键保存在当前标签页的 `sessionStorage`，键由用户、Chat Space 和 `draftId` 组成。写入失败则不发送；未知结果锁定编辑，在同一标签页刷新后仍可手动重试，不自动重发。应用明确返回校验失败时允许修正；登录失效不改变未决状态。收到接受回执后清除匹配的记录和输入，并在当前窗格打开新 Thread。
+草稿窗格在首条发送前，把请求体和幂等键保存在当前标签页的 `sessionStorage`，键由用户、Chat Space 和 `draftId` 组成。写入失败则不发送；未知结果锁定编辑，在同一标签页刷新后仍可手动重试，不自动重发。明确返回校验失败时允许修正，幂等键明确被不同请求占用时保留输入并在用户再次发送时换新键；登录失效不改变未决状态。收到接受回执后只清除本次发送的记录与匹配的输入，并在当前窗格打开新 Thread。
 
 已有 Thread 的命令批在发送前冻结幂等键、payload 与顺序；设置批次还冻结 cursor。
 `pending-request-store` 按 `threadId` 保存未决请求，与 IndexedDB 离线草稿分开。写入失败中止发送；未知结果保留相同请求供精确重试或显式放弃。
@@ -335,19 +335,19 @@ Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结
 
 ## Canvas 编辑与上传
 
-从目录菜单新建画布，确认名称后写入当前空间和目录，再选择打开窗格。取消选择窗格不会删除已创建的画布；打开已有画布不做写入。同一 Canvas 可在多个窗格打开，共用文档缓存，各自保存选中项和视口。
+从目录菜单新建画布，确认名称后写入当前空间和目录，再选择打开窗格。取消选择窗格不会删除已创建的画布；打开已有画布不做写入。同一 Canvas 可在多个窗格打开，共用文档快照；各视图有自己的选区、视口、草稿和待确认命令。关闭后再次打开会使用空闲视图槽位，保留的草稿和命令按槽位恢复，不改变其它已打开视图。
 空画布提供与左侧“+”相同的添加入口，说明如何添加资源和运行 Function，添加首个节点后引导消失。
 
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
 冲突由每条命令的语义前置条件裁决。patch 连续且较新时应用，
 空回执或 revision 缺口回读 Snapshot；语义 409 结算操作并保留草稿供人工恢复，
-网络未知结果保留原 key/body 阻塞队列。冲突横幅只为可恢复的队列状态提供重试入口，文案与恢复判定分离。
-重命名的 `expectedName`/`expectedTitle` 基线在打开菜单时冻结，保存时不以最新远端值替换。
+网络未知结果、408 和 429 保留原 key/body 并阻塞本视图队列；冲突横幅为可恢复状态提供重试入口。
+重命名和编辑已有文本节点时冻结对应名称／资源基线；恢复的文本草稿沿用其保存的基线。远端已改动时按冲突处理，只有用户明确选择按最新内容重试才更新基线。
 单删与选区删除在触发时冻结资源、函数与分组成员基线。删除节点前先保存待提交的函数草稿；
 由删除触发的保存也使用点击时的函数基线；只有从该基线连续确认的自有保存值可以推进删除的函数基线，远端变更仍由 CAS 裁决。
 保存失败或画布切换时停止后续删除；删除期间不为目标节点接收新的函数草稿。
 
-编辑 scope 按 userId/canvasId/editingSessionId 隔离，当前 userId 为固定 anonymous。
+草稿和命令按 userId、Canvas、编辑会话及视图槽位分开；当前本地存储的 userId 为固定 anonymous，服务端仍按账号校验画布归属。主视图沿用无槽位的存储键。
 IndexedDB 草稿 ACK 物理完成后才删除持久 operation，草稿保存与 ACK 共用序列化链；
 generation 防止旧响应清除新输入，卸载围栏保护底层存储。
 “已保存”要求 command、draft 均无 pending 且无 storageError。
@@ -356,8 +356,7 @@ bfcache 恢复时复验 scope 所有权，活标签冲突触发安全 reload。
 添加 Function 或打开已有 Function 的配置时，目录加载、读取失败与目录缺少函数分别反馈；读取失败可就地重试。
 Function 配置使用扁平 args，资源引用为 `{type:'resource',nodeId,index}`。
 复杂 prompt/references 使用完整 JSON 编辑模式；连线前 flush 目标 Function config。
-Run 提交前冻结 requestId 与请求：4xx 确定拒绝清理记录，408/429、5xx 或网络断开保留原
-attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas](canvas.md#function-run)。
+同一节点的 Function Run 由各窗格共享未决请求，同一页面同时只执行一次该节点的运行控制动作。Run 提交前冻结 requestId 与请求：确定拒绝清理记录，408/429、5xx 或网络断开保留原 attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas](canvas.md#function-run)。
 
 上传共用 Worker SHA-256 → reserve → PENDING PUT 或 READY 去重 → complete → 命令消费。
 每个 await 后校验 batch epoch；切换目标或卸载作废整批。已完成上传由服务端过期回收。
