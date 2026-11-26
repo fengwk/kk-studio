@@ -208,6 +208,28 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
+  public void reportsMcpUpstreamFailureAsBadGateway() throws Exception {
+    String name = "upstream_mcp_" + System.nanoTime();
+    String unreachableUrl = "http://127.0.0.1:1/mcp";
+    mockMvc
+        .perform(
+            post(BASE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBody(name, unreachableUrl, 1000L).toString()))
+        .andExpect(status().isCreated());
+
+    McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
+    discover.setExpectedVersion(0L);
+    mockMvc
+        .perform(
+            post(BASE + "/{name}/discover", name)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(discover)))
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.code").value("upstream_failed"));
+  }
+
+  @Test
   public void rejectsInvalidUrlWithBadRequestAndRedactsSecrets() throws Exception {
     String name = "bad_url_mcp_" + System.nanoTime();
     ObjectNode create = createBody(name, "http://user:secret@example.com/mcp", 5000L);

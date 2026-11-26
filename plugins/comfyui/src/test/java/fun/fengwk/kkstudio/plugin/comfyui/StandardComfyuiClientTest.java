@@ -675,9 +675,11 @@ class StandardComfyuiClientTest {
                 PluginCredentialUnavailableReason.REAUTH_REQUIRED, "reauth required"));
     StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
 
-    assertThrows(
-        PluginCredentialUnavailableException.class,
-        () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+    ComfyuiRequestNotSentException failure =
+        assertThrows(
+            ComfyuiRequestNotSentException.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+    assertFalse(failure.getMessage().contains("reauth required"));
     assertNull(authorization.get());
   }
 
@@ -688,12 +690,12 @@ class StandardComfyuiClientTest {
     when(access.resolve()).thenReturn(snapshot("bad token\\n"));
     StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
 
-    IllegalStateException failure =
+    ComfyuiRequestNotSentException failure =
         assertThrows(
-            IllegalStateException.class,
+            ComfyuiRequestNotSentException.class,
             () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
 
-    assertEquals("ComfyUI credential payload is invalid", failure.getMessage());
+    assertFalse(failure.getMessage().contains("bad token"));
   }
 
   /** rejectUsed 致命失败（Error）时也必须释放已经取得的响应体，且主失败身份原样保留：这是本方法真正拥有的资源边界。 */
@@ -735,12 +737,13 @@ class StandardComfyuiClientTest {
     StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
     authorization.set(null);
 
-    IllegalStateException failure =
+    ComfyuiRequestNotSentException failure =
         assertThrows(
-            IllegalStateException.class,
+            ComfyuiRequestNotSentException.class,
             () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
 
-    assertEquals("ComfyUI credential resolution failed", failure.getMessage());
+    assertEquals(
+        "ComfyUI request was not sent: credential resolution failed", failure.getMessage());
     assertFalse(failure.getMessage().contains("synthetic-secret"));
     assertNull(authorization.get());
   }

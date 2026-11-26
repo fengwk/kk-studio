@@ -38,7 +38,8 @@ public class ConfigSyncMcpDiscovery {
     try {
       return discovery.discover(server);
     } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.VALIDATION) {
+      if (error.code() != DomainErrorCode.VALIDATION
+          && error.code() != DomainErrorCode.UPSTREAM_FAILED) {
         throw error;
       }
       return null;

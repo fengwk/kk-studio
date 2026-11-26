@@ -113,8 +113,9 @@ final class ComfyuiHttpTransport implements Closeable {
     try {
       return HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body));
     } catch (JacksonException error) {
-      // 序列化错误可能带 prompt 片段，公开错误只给固定事实，不串原始 cause。
-      throw new IllegalStateException("cannot serialize ComfyUI request JSON");
+      // 序列化失败发生于 send 前；固定错误不携带 prompt 或原始 cause。
+      throw new ComfyuiRequestNotSentException(
+          "ComfyUI request was not sent: local request serialization failed");
     }
   }
 
@@ -158,14 +159,21 @@ final class ComfyuiHttpTransport implements Closeable {
     PluginCredentialSnapshot snapshot = null;
     if (authMode == ComfyuiSettings.AuthMode.BEARER) {
       snapshot = resolveCredential();
-      builder.header("Authorization", authorization(snapshot.payloadJson()));
+      try {
+        builder.header("Authorization", authorization(snapshot.payloadJson()));
+      } catch (IllegalArgumentException error) {
+        // 头值在 send 前被本地拒绝；不回显凭据或原始 cause。
+        throw new ComfyuiRequestNotSentException(
+            "ComfyUI request was not sent: credential header is invalid");
+      }
     }
     HttpRequest request;
     try {
       request = builder.timeout(requestTimeout).build();
     } catch (IllegalArgumentException error) {
-      // 凭据/头值非法时只给固定分类，不回显取值。
-      throw new IllegalStateException("ComfyUI request is invalid");
+      // 请求构造在 send 前失败；不回显可能包含敏感头值的原始消息。
+      throw new ComfyuiRequestNotSentException(
+          "ComfyUI request was not sent: local request construction failed");
     }
     long deadlineNanos = System.nanoTime() + requestTimeout.toNanos();
     HttpResponse<InputStream> response;
@@ -285,16 +293,21 @@ final class ComfyuiHttpTransport implements Closeable {
     try {
       PluginCredentialSnapshot snapshot = credentialAccess.resolve();
       if (snapshot == null || snapshot.payloadJson() == null || snapshot.payloadJson().isBlank()) {
-        throw new IllegalStateException("ComfyUI credential is not available");
+        throw new ComfyuiRequestNotSentException(
+            "ComfyUI request was not sent: credential is unavailable");
       }
       return snapshot;
+    } catch (ComfyuiRequestNotSentException notSent) {
+      throw notSent;
     } catch (PluginCredentialUnavailableException unavailable) {
-      // 局部拒绝/未配置/过期都是确定性结果：原样上报，绝不静默降级到无认证。
-      throw unavailable;
+      // 解析凭据时尚未发出 HTTP；对调用方只暴露可操作事实，不带凭据上下文或 cause。
+      throw new ComfyuiRequestNotSentException(
+          "ComfyUI request was not sent: credential is unavailable");
     } catch (RuntimeException error) {
-      // 未知解析故障只声明去敏的解析失败，不伪装成本地未配置；Error 原样上抛。两者都在出网前失败。
+      // 解析故障发生在出网前；只记录类型，不暴露可能包含敏感信息的原始错误。
       log.debug("ComfyUI credential resolution failed type={}", error.getClass().getSimpleName());
-      throw new IllegalStateException("ComfyUI credential resolution failed");
+      throw new ComfyuiRequestNotSentException(
+          "ComfyUI request was not sent: credential resolution failed");
     }
   }
 
@@ -324,8 +337,9 @@ final class ComfyuiHttpTransport implements Closeable {
     }
   }
 
-  private static IllegalStateException invalidCredential() {
-    return new IllegalStateException("ComfyUI credential payload is invalid");
+  private static ComfyuiRequestNotSentException invalidCredential() {
+    return new ComfyuiRequestNotSentException(
+        "ComfyUI request was not sent: credential payload is invalid");
   }
 
   private void rejectUsed(PluginCredentialSnapshot snapshot) {

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
@@ -111,6 +112,7 @@ class McpToolDiscoveryTest {
     fakeServer.addTool("array_schema", "desc", "[\"a\",\"b\"]");
     DomainException error =
         assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
+    assertEquals(DomainErrorCode.UPSTREAM_FAILED, error.code());
     assertEquals("MCP server discovery failed.", error.getMessage());
   }
 
@@ -161,6 +163,7 @@ class McpToolDiscoveryTest {
 
     DomainException error =
         assertThrows(DomainException.class, () -> realDiscovery().discover(server));
+    assertEquals(DomainErrorCode.UPSTREAM_FAILED, error.code());
     assertTrue(error.getMessage().contains("discovery failed"));
     assertTrue(
         error.toString().lines().findFirst().orElse("").length() < 200,

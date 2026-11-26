@@ -94,7 +94,7 @@ public final class McpToolDiscovery {
       List<McpToolDefinition> tools = client.listTools(deadline, token);
       return tools == null ? List.of() : tools;
     } catch (RuntimeException error) {
-      throw DomainException.validation(RESOURCE, "MCP server discovery failed.");
+      throw DomainException.upstream(RESOURCE, "MCP server discovery failed.");
     }
   }
 

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.workspace;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.workspace.dto.ThreadRenameDTO;
 import fun.fengwk.kkstudio.workspace.dto.TurnCutDTO;
 import fun.fengwk.kkstudio.workspace.dto.WorkspaceThreadPlacementDTO;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
 
@@ -213,9 +215,24 @@ public class WorkspaceSessions {
     return new ForkCreatedDTO(fork, thread, Long.toString(spaces.advance(spaceId)));
   }
 
-  // The response includes execution facts in the same transaction as the rename.
+  // The response reads multi-query execution facts in the same snapshot as the rename.
   @Transactional(isolation = Isolation.REPEATABLE_READ)
   public WorkspaceThreadPlacementDTO rename(
+      StudioPrincipal actor, UUID space, UUID id, ThreadRenameDTO request) {
+    try {
+      return renameInSnapshot(actor, space, id, request);
+    } catch (DataAccessException ex) {
+      for (Throwable cause = ex.getCause(); cause != null; cause = cause.getCause()) {
+        if (cause instanceof SQLException sql && "40001".equals(sql.getSQLState())) {
+          throw DomainException.conflict(
+              "THREAD_RENAME_RETRY", "Thread rename conflicted with a concurrent update; retry");
+        }
+      }
+      throw ex;
+    }
+  }
+
+  private WorkspaceThreadPlacementDTO renameInSnapshot(
       StudioPrincipal actor, UUID space, UUID id, ThreadRenameDTO request) {
     var current = spaces.lock(actor, space);
     requireThread(space, id);

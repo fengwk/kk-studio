@@ -141,8 +141,11 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
       promptId = client.submit(workflowJson, clientId(run));
     } catch (CanvasFunctionUnknownException unknown) {
       throw unknown;
+    } catch (ComfyuiRequestNotSentException notSent) {
+      // 首次提交中可证明 HTTP 尚未发出；恢复时已在上方对 SUBMITTING 保守返回 UNKNOWN。
+      throw notSent;
     } catch (RuntimeException failure) {
-      // 只声明结果未知，不回显可能的远端 URI/凭据/Cause。
+      // 其他错误可能发生在 ComfyUI 已受理请求后，只声明结果未知且不回显远端细节。
       throw new CanvasFunctionUnknownException(unknownSubmission);
     }
     checkpoint(context, COMFY_WAITING, state.withPromptId(promptId));

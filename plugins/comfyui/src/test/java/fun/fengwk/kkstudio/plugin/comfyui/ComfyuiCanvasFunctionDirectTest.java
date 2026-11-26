@@ -267,6 +267,56 @@ class ComfyuiCanvasFunctionDirectTest {
     assertEquals(List.of(), context.stages);
   }
 
+  /** 本次调用中在 /prompt 发出前已知的凭据错误是 FAILED；恢复到提交边界时仍必须保守 UNKNOWN。 */
+  @Test
+  void credentialFailureBeforePromptIsActionableButRecoveryAtBoundaryIsUnknown() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve())
+        .thenThrow(
+            new PluginCredentialUnavailableException(
+                PluginCredentialUnavailableReason.NOT_CONNECTED, "sensitive credential detail"));
+    ComfyuiSettings settings = directSettings(GRAPH, ARGS_SCHEMA, DIRECT_PARAMETER_BINDINGS, "[]");
+    ComfyuiCanvasFunctionAdapter adapter =
+        directAdapter(settings, client(ComfyuiSettings.AuthMode.BEARER, access));
+    RecordingContext context = new RecordingContext();
+    CanvasFunctionFrozenRun fresh =
+        run(
+            adapter,
+            CanvasFunctionSubmitState.SUBMITTED,
+            "QUEUED",
+            H3AdapterState.empty().encode(),
+            List.of());
+
+    ComfyuiRequestNotSentException failure =
+        assertThrows(ComfyuiRequestNotSentException.class, () -> adapter.submit(context, fresh));
+
+    assertEquals("ComfyUI request was not sent: credential is unavailable", failure.getMessage());
+    assertFalse(failure.getMessage().contains("sensitive credential detail"));
+    assertEquals(
+        List.of(
+            ComfyuiCanvasFunctionAdapter.COMFY_UPLOADING,
+            ComfyuiCanvasFunctionAdapter.COMFY_SUBMITTING),
+        context.stages);
+    assertEquals(0, uploads.get());
+    assertEquals(0, promptPosts.get());
+
+    // Checkpoint 已跨过提交边界后无法证明旧调用是否送达，恢复绝不把它降成可安全重发。
+    CanvasFunctionFrozenRun recovering =
+        run(
+            adapter,
+            CanvasFunctionSubmitState.SUBMITTED,
+            ComfyuiCanvasFunctionAdapter.COMFY_SUBMITTING,
+            context.lastAdapterState,
+            List.of());
+    CanvasFunctionUnknownException unknown =
+        assertThrows(
+            CanvasFunctionUnknownException.class,
+            () -> adapter.submit(new RecordingContext(), recovering));
+    assertFalse(unknown.getMessage().contains("sensitive credential detail"));
+    assertEquals(0, uploads.get());
+    assertEquals(0, promptPosts.get());
+  }
+
   /** DIRECT 可用保留区节点 id，且参数按"显式值优先、其次 schema default"注入，EXPLICIT 与 default 行为都不变。 */
   @Test
   void directInjectsExplicitValuesAndSchemaDefaultsIncludingReservedNodeIds() {
@@ -450,7 +500,9 @@ class ComfyuiCanvasFunctionDirectTest {
             new PluginCredentialUnavailableException(
                 PluginCredentialUnavailableReason.REAUTH_REQUIRED, "reauth required"));
     int before = historyCalls.get();
-    assertThrows(PluginCredentialUnavailableException.class, () -> client.history(PROMPT_ID));
+    ComfyuiRequestNotSentException unavailable =
+        assertThrows(ComfyuiRequestNotSentException.class, () -> client.history(PROMPT_ID));
+    assertFalse(unavailable.getMessage().contains("reauth required"));
     assertEquals(before, historyCalls.get());
     // 撤销后的失败不产生任何出网请求，之前记录的头未被覆盖。
     assertEquals("Bearer test-token", historyAuthorization.get());
@@ -628,6 +680,11 @@ class ComfyuiCanvasFunctionDirectTest {
 
   private static ComfyuiSettings directSettings(
       String graph, String argsSchema, String parameterBindings) {
+    return directSettings(graph, argsSchema, parameterBindings, DIRECT_MEDIA_BINDINGS);
+  }
+
+  private static ComfyuiSettings directSettings(
+      String graph, String argsSchema, String parameterBindings, String mediaBindings) {
     return ComfyuiSettings.parse(
         ComfyuiWorkflowFixtures.settingsJson(
             true,
@@ -638,7 +695,7 @@ class ComfyuiCanvasFunctionDirectTest {
                     graph,
                     argsSchema,
                     parameterBindings,
-                    DIRECT_MEDIA_BINDINGS,
+                    mediaBindings,
                     DIRECT_OUTPUTS,
                     ComfyuiWorkflowFixtures.IMAGE_POLICY))));
   }
@@ -654,6 +711,15 @@ class ComfyuiCanvasFunctionDirectTest {
       CanvasFunctionSubmitState submitState,
       String stage,
       Map<String, Object> adapterState) {
+    return run(adapter, submitState, stage, adapterState, List.of(imageReference()));
+  }
+
+  private CanvasFunctionFrozenRun run(
+      ComfyuiCanvasFunctionAdapter adapter,
+      CanvasFunctionSubmitState submitState,
+      String stage,
+      Map<String, Object> adapterState,
+      List<CanvasFunctionFrozenReference> references) {
     Map<String, CanvasJson> args = new LinkedHashMap<>();
     args.put("prompt", new JsonText("animate it"));
     args.put("duration", new JsonNumber(BigDecimal.valueOf(5)));
@@ -664,7 +730,7 @@ class ComfyuiCanvasFunctionDirectTest {
         REQUEST,
         new CanvasFunctionBinding(adapter.functions().get(0)),
         new JsonObject(args),
-        List.of(imageReference()),
+        references,
         outputs(adapter),
         submitState,
         stage,

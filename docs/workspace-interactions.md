@@ -112,7 +112,7 @@
 
 - 前端：在目录行内改名（`r` 或 `F2`），`Enter` 提交、`Esc` 取消；冲突时保留输入并重新读取。
 - 接口：Thread 为 `PATCH /threads/{id}`（`{title, expectedVersion}`），Session 为 `PATCH /resources/SESSION/{id}`（`{title}`）。
-- 事务：Thread 改名在 Session 行锁内校验重名；Session 标题写入 Harness Session。不改变 `tree_version`。
+- 事务：Thread 改名依次锁定空间、Session 和 Thread，并校验 `expectedVersion`；返回的执行状态与改名使用同一可重复读事务。序列化冲突回滚并返回可重试的 `409`，不会自动覆盖新版本。Session 标题写入 Harness Session。改名不改变 `tree_version`。
 - 事件：`tree`。
 
 **删除 Thread 或 Session**

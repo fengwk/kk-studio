@@ -118,18 +118,13 @@ final class ConfigSyncSkillAndMcpPlanning {
               knownMcpToolNames,
               skipped,
               skippedMcp);
-      if (mcpImport == null) {
-        continue;
-      }
       mcpImports.add(mcpImport);
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, spec.name()));
     }
     return new McpPlan(mcpImports, availableMcpTools, knownMcpToolNames);
   }
 
-  /**
-   * 单个 MCP Server：禁用时只保存配置；启用时发现失败即跳过该 Server 及其依赖，移除仍被引用的工具是硬冲突。返回 {@code null} 表示该 Server 被跳过。
-   */
+  /** 单个 MCP Server：禁用时只保存配置；启用时发现失败仍保存为未验证配置并报告警告，同时跳过依赖该 Server 的 Agent。移除仍被引用的工具是硬冲突。 */
   private ConfigSyncPlan.McpImport planMcpServer(
       McpSpec spec,
       Set<String> referencedMcpToolNames,
@@ -160,13 +155,19 @@ final class ConfigSyncSkillAndMcpPlanning {
     }
     discovered = mcpDiscovery.discoverOrNull(probe);
     if (discovered == null) {
-      // 契约：发现失败不伪造 UNVERIFIED 成功，skip 当前 MCP 并让依赖它的 Agent 一并 skip。
+      // 保存配置但不伪造工具发现成功；报告发现警告，并让依赖该 Server 的 Agent 一并 skip。
       skipped.add(
           new ConfigSyncSkipped(
               ConfigSyncKind.MCP_SERVERS, spec.name(), "cannot discover mcp tools"));
       skippedMcp.add(spec.name());
       availableMcpTools.remove(spec.name());
-      return null;
+      return new ConfigSyncPlan.McpImport(
+          spec.name(),
+          config.url(),
+          config.headers(),
+          config.enabled(),
+          config.timeoutMillis(),
+          null);
     }
     Set<String> currentNames = availableMcpTools.getOrDefault(spec.name(), Set.of());
     Set<String> nextNames = new LinkedHashSet<>();
