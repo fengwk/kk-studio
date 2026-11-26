@@ -83,12 +83,6 @@ async function rectOf(locator: Locator): Promise<Rect> {
   return { x: box!.x, width: box!.width }
 }
 
-/** 标签文字被横向裁切：内容宽度超过可视宽度才会出现省略号。 */
-function expectTruncated(metrics: LabelMetrics, what: string): void {
-  // 软断言：基线上三处收缩缺口应一次性报出，便于确认复现的是同一根因。
-  expect.soft(metrics.scrollWidth, `${what} 应被省略号裁切`).toBeGreaterThan(metrics.clientWidth)
-}
-
 function expectWhole(metrics: LabelMetrics, label: string, what: string): void {
   expect(metrics.text, `${what} 文本`).toBe(label)
   expect(metrics.scrollWidth, `${what} 应完整显示`).toBeLessThanOrEqual(metrics.clientWidth + 1)
@@ -148,11 +142,9 @@ for (const locale of LOCALES) {
     const environmentLabel = await readLabel(environment)
     const modelLabel = await readLabel(model)
 
-    // 两者都参与收缩并显示省略号：不允许一侧完整、另一侧被压成 1–2 个字符。
+    // 放不下才省略。不同系统的字体宽度可能让某个标签恰好完整显示。
     expectEllipsisStyle(environmentLabel, '环境标签')
     expectEllipsisStyle(modelLabel, '模型标签')
-    expectTruncated(environmentLabel, '390 宽环境标签')
-    expectTruncated(modelLabel, '390 宽模型标签')
 
     await expectPrefixVisible(environment, ENVIRONMENT_LABEL.slice(0, 8))
     await expectPrefixVisible(model, RECOGNIZABLE_PREFIX)
@@ -160,6 +152,8 @@ for (const locale of LOCALES) {
     const permissionControl = row.getByRole('button', { name: permission, exact: true })
     expectWhole(await readLabel(permissionControl), permissionValue, '权限模式')
     const modelRect = await rectOf(model)
+    const environmentRect = await rectOf(environment)
+    expect(environmentRect.x + environmentRect.width).toBeLessThanOrEqual(modelRect.x + 0.5)
     await expect(model).toHaveAttribute('title', MODEL_LABEL)
     await expect(environment).toHaveAttribute('title', ENVIRONMENT_LABEL)
 
