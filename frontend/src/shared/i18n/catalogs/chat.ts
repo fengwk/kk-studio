@@ -33,10 +33,6 @@ export const chatCatalog = {
     'en-US': 'No Agents available',
     'zh-CN': '暂无可用 Agent',
   },
-  'ai.chat.history.loadFailed': {
-    'en-US': 'History tree failed to load',
-    'zh-CN': '历史树加载失败',
-  },
   'ai.chat.history.liveUpdatesStopped': {
     'en-US': 'Live updates stopped. This thread may be out of date. Reload to reconnect.',
     'zh-CN': '实时更新已停止，此 Thread 的内容可能已过期。请重新加载页面以恢复连接。',

@@ -257,17 +257,17 @@ test.describe('Canvas editor canvas-only surface regressions', () => {
       await expect(page.locator('.react-flow__node')).toHaveCount(0)
     })
 
-    test(`a failed command batch explains itself with a localized toast ${suffix}`, async ({ page }) => {
+    test(`a rejected command batch explains itself with a localized toast ${suffix}`, async ({ page }) => {
       const copy = COPY[locale]
       await page.setViewportSize(viewport)
-      await page.goto(`${HARNESS_URL}?locale=${locale}&commands=fail`)
+      await page.goto(`${HARNESS_URL}?locale=${locale}&commands=reject`)
       await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
 
       await page.locator('.canvas-tool-rail .dock-add').click()
       await page.getByRole('menuitem', { name: copy.imageFunction }).click()
 
       const toast = page.locator('#toast')
-      // 批量写入失败的 toast 也走 i18n，并且不在 canvas 上留下假节点。
+      // 明确拒绝只提示失败，不进入未知结果的恢复流程，也不留下假节点。
       await expect(toast).toHaveText(copy.toastOperationFailed)
       await expect(toast).toHaveCSS('opacity', '1')
       await expect(page.locator('.canvas-conflict-banner')).toHaveCount(0)

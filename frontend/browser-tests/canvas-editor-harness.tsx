@@ -37,8 +37,8 @@ const catalogMode = params.get('catalog') ?? 'ready'
 /** `catalog=fail` 时先失败的请求数：默认只失败一次，重试即恢复。 */
 const catalogFailures = Number(params.get('catalogFailures') ?? '1')
 const conflictMode = params.get('conflict') ?? 'none'
-/** 命令批写入失败的确定 5xx：用户看到的是本地化 toast，不是静默或中文提示。 */
-const commandsFailure = params.get('commands') === 'fail'
+/** 模拟命令批被校验拒绝；没有请求需要等待恢复。 */
+const rejectCommands = params.get('commands') === 'reject'
 const transientCommandFailures = params.get('commands') === 'transient' ? [408, 429] : []
 
 // 目录状态标记：用例只等这个标记，不靠网络时序猜测加载 / 失败 / 就绪。
@@ -216,8 +216,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
     if (transientStatus !== undefined) {
       return problemResponse(transientStatus, { type: 'about:blank', status: transientStatus, title: 'try again' })
     }
-    if (commandsFailure) {
-      return problemResponse(500, { type: 'about:blank', status: 500, title: 'command failed' })
+    if (rejectCommands) {
+      return problemResponse(400, { type: 'about:blank', status: 400, code: 'validation', title: 'Invalid command batch' })
     }
     if (conflictMode === 'stale') {
       // 语义 409：批次整批不写入，冲突指向该批要创建的节点，草稿保留供用户决定。

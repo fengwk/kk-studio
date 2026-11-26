@@ -36,7 +36,7 @@ export interface CanvasDurabilityHarnessApi {
   buildQueue: (options: CanvasDurabilityBuildOptions) => CanvasCommandQueue
   enqueue: (
     commands: CanvasCommandDTO[],
-  ) => Promise<{ ok: true; revision: string } | { ok: false; errorName: string; errorMessage: string }>
+  ) => Promise<{ ok: true; revision: string } | { ok: false; errorName: string; causeMessage?: string }>
   recover: () => Promise<{
     replayed: number
     conflicted: number
@@ -181,7 +181,7 @@ function buildQueue(options: CanvasDurabilityBuildOptions): CanvasCommandQueue {
 
 async function enqueue(
   commands: CanvasCommandDTO[],
-): Promise<{ ok: true; revision: string } | { ok: false; errorName: string; errorMessage: string }> {
+): Promise<{ ok: true; revision: string } | { ok: false; errorName: string; causeMessage?: string }> {
   if (!queue) {
     throw new Error('Build a queue with an explicit view slot first')
   }
@@ -193,7 +193,7 @@ async function enqueue(
     return {
       ok: false,
       errorName: err?.name || 'Error',
-      errorMessage: err?.message || String(error),
+      causeMessage: err?.cause instanceof Error ? err.cause.message : undefined,
     }
   }
 }

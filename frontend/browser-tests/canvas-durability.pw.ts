@@ -29,10 +29,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
       (cmd) => window.__canvasDurability.enqueue([cmd]),
       RENAME_CMD,
     )
-    expect(enqueueRes.ok).toBe(false)
-    if (!enqueueRes.ok) {
-      expect(enqueueRes.errorMessage).toBe('network down')
-    }
+    expect(enqueueRes).toMatchObject({ ok: false, errorName: 'CanvasQueueBlockedError', causeMessage: 'network down' })
 
     // 3. 断言 IndexedDB 中存在 1 条待确认操作，记录其 idempotencyKey 与 commands
     const persistedBefore = await page.evaluate(() =>
