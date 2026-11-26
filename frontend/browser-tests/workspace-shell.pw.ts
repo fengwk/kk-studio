@@ -208,7 +208,11 @@ async function setup(page: Page, initialOptions?: {
   })
 
   return {
+    tree,
     interactions,
+    pushTreeChange: () => sendWsEvent?.({
+      type: 'event', resource: { kind: 'chat-space', id: spaceId }, name: 'tree', data: { treeVersion: tree.treeVersion },
+    }),
     pushInteractionChange: (rootId: string) => sendWsEvent?.({
       type: 'event',
       resource: { kind: 'interactions' },
@@ -351,6 +355,66 @@ test('creates root and child folders inline, handles errors, renames with F2 and
   await expect(page.getByRole('alertdialog')).toContainText('The folder is not empty.')
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
 })
+
+for (const kind of ['folder', 'canvas'] as const) {
+  test(`reconfirms ${kind} creation after CAS rejection and replays a lost receipt after tree refresh`, async ({ page }) => {
+    const harness = await setup(page)
+    const attempts: Array<{ key: string | undefined; body: string | null }> = []
+    const created = id(81)
+    const title = 'Created once'
+    await page.route(`**/api/chat-spaces/${spaceId}/${kind === 'folder' ? 'folders' : 'canvases'}`, route => {
+      const request = route.request()
+      attempts.push({ key: request.headers()['idempotency-key'], body: request.postData() })
+      const body = request.postDataJSON()
+      if (attempts.length === 1) {
+        // Another writer advances the tree before the first request reaches the CAS check.
+        expect(body.expectedTreeVersion).toBe('1')
+        harness.tree.treeVersion = '2'
+        harness.tree.folders[1]!.name = 'Renamed by another writer'
+        return route.fulfill({ status: 409, contentType: 'application/problem+json', body: JSON.stringify({ code: 'version_conflict' }) })
+      }
+      const receipt = { id: created, kind: kind.toUpperCase(), treeVersion: '3' }
+      if (attempts.length === 2) {
+        expect(attempts[1]!.key).toBeTruthy()
+        expect(attempts[1]!.key).not.toBe(attempts[0]!.key)
+        expect(body).toEqual(kind === 'folder'
+          ? { parentId: root, name: title, expectedTreeVersion: '2' }
+          : { folderId: root, title, expectedTreeVersion: '2' })
+        harness.tree.treeVersion = receipt.treeVersion
+        if (kind === 'folder') harness.tree.folders[0]!.children.push({ id: created, name: title, children: [], resources: [] } as never)
+        else harness.tree.folders[0]!.resources.push({ id: created, title, kind: 'CANVAS' })
+        return route.abort('failed')
+      }
+      // Replay is checked before CAS by the real endpoint.
+      expect(attempts).toHaveLength(3)
+      expect(attempts[2]).toEqual(attempts[1])
+      return route.fulfill({ json: receipt })
+    })
+    await page.goto(path)
+    await page.getByRole('treeitem', { name: 'Projects', exact: true }).hover()
+    await page.getByRole('button', { name: 'Actions for Projects' }).click()
+    await page.getByRole('menuitem', { name: `New ${kind}` }).click()
+    const input = page.getByRole('textbox', { name: kind === 'folder' ? 'New folder' : 'Name', exact: true })
+    await input.fill(title)
+    await input.press('Enter')
+    await expect(page.getByRole('alert')).toHaveText('The workspace changed. Review and try again.')
+    await expect(page.getByRole('treeitem', { name: 'Renamed by another writer' })).toBeVisible()
+    expect(attempts).toHaveLength(1)
+    await expect(input).toBeEditable()
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('No confirmation received.')
+    await expect(input).not.toBeEditable()
+    await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
+
+    harness.pushTreeChange()
+    await expect(page.getByRole('treeitem', { name: title })).toBeVisible()
+    expect(attempts).toHaveLength(2)
+    await page.getByRole('button', { name: 'Retry creation' }).click()
+    await expect(input).toHaveCount(0)
+    await expect(page.getByRole('treeitem', { name: title })).toHaveCount(1)
+    if (kind === 'canvas') await expect(page.getByTestId('canvas')).toBeVisible()
+  })
+}
 
 test('switches, creates, renames, archives and restores Chat Spaces', async ({ page }) => {
   await setup(page)

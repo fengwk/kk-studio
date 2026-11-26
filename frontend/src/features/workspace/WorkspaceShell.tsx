@@ -10,6 +10,8 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { NameDialog } from '@/shared/ui/overlays/NameDialog'
+import { CanvasCreationDialog } from './CanvasCreationDialog'
+import { isTreeVersionConflict } from './workspace-action-retry'
 import { newDraft } from './pane-bindings'
 import type { PaneRenderers, PaneTarget } from './pane-target'
 import { PaneLayout } from './panes'
@@ -27,7 +29,7 @@ import { createCanvas, createFolder, createSpace, deleteTreeRow, getSpaceTree, g
 import './workspace-shell.css'
 
 const workspaceErrors = {
-  VERSION_CONFLICT: 'workspace.versionConflict', FOLDER_NAME_EXISTS: 'workspace.nameExists',
+  version_conflict: 'workspace.versionConflict', VERSION_CONFLICT: 'workspace.versionConflict', FOLDER_NAME_EXISTS: 'workspace.nameExists',
   CHAT_SPACE_TITLE_EXISTS: 'workspace.nameExists', THREAD_NAME_EXISTS: 'workspace.nameExists',
   LAST_ACTIVE_CHAT_SPACE: 'workspace.lastSpace', FOLDER_NOT_EMPTY: 'workspace.folderNotEmpty',
   LAST_ROOT_FOLDER: 'workspace.lastRoot', RESOURCE_IN_USE: 'workspace.inUse',
@@ -79,7 +81,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   const [drawer, setDrawer] = useState(false)
   const [notice, setNotice] = useState<{ title: string; detail?: string | null }>()
   const report = useCallback((title: string) => setNotice({ title }), [])
-  const [creation, setCreation] = useState<{ kind: 'canvas' | 'space'; parentId?: string; key: string }>()
+  const [creation, setCreation] = useState<{ kind: 'canvas'; folderId: string } | { kind: 'space'; key: string }>()
   const [deletion, setDeletion] = useState<{ row: TreeRow; request: TreeDeletion; busy?: boolean; error?: string }>()
   const [defaults, setDefaults] = useState(false)
   const narrowTrigger = useRef<HTMLButtonElement>(null)
@@ -107,7 +109,7 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       await refresh(isSpace)
       return result
     } catch (error) {
-      if (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT')) await refresh(isSpace)
+      if (isTreeVersionConflict(error) || (error instanceof ApiError && (error.reason === 'VERSION_CONFLICT' || error.code === 'VERSION_CONFLICT'))) await refresh(isSpace)
       throw new Error(errorText(error), { cause: error })
     }
   }
@@ -156,7 +158,8 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
   }), [])
   function create(kind: 'canvas' | 'session' | 'space', parentId?: string) {
     if (kind === 'session') { if (parentId) toggle(parentId, true); open(newDraft(parentId)); return }
-    setCreation({ kind, parentId, key: createUuid() })
+    if (kind === 'canvas' && parentId) setCreation({ kind, folderId: parentId })
+    if (kind === 'space') setCreation({ kind, key: createUuid() })
   }
   function move(row: TreeRow, drop: TreeDrop) {
     void write(() => moveTreeRow(space.id, row, drop, tree.treeVersion)).then(() => {
@@ -202,13 +205,13 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
       needsAttention={[...index.values()].some(row => row.kind === 'thread' && row.thread.state === 'NEEDS_YOU')}
       panels={{
         directory: <WorkspaceTree roots={roots} index={index} expanded={expanded} toggle={toggle} open={openRow} create={create}
-          createDirectory={async (name, idempotencyKey, parentId) => {
-            const result = await write(() => createFolder(space.id, { parentId, name, expectedTreeVersion: tree.treeVersion }, idempotencyKey))
+          treeVersion={tree.treeVersion} createDirectory={async ({ name, folderId, expectedTreeVersion, key }) => {
+            const result = await write(() => createFolder(space.id, { parentId: folderId, name, expectedTreeVersion }, key))
             return result.id
           }}
           rename={async (row, name) => { await write<unknown>(() => renameTreeRow(space.id, row, name)) }} remove={remove} move={move} />,
         status: <WorkspaceStatus index={index} open={openRow} />,
-        schedules: <WorkspaceSchedules space={space} tree={tree} open={open} report={report} />,
+        schedules: <WorkspaceSchedules userId={userId} space={space} tree={tree} open={open} report={report} />,
       }}
       environments={Environments && <Environments open={open} findOpenView={panes.findOpenView} />}
       account={() => account(panes.hasUnsentContent)} goToSettings={goToSettings} />
@@ -221,17 +224,16 @@ function WorkspaceBody({ userId, space, spaces, tree, selectSpace, openInteracti
     {notice && <Dialog title={notice.title} onClose={() => setNotice(undefined)}>
       {notice.detail && <p className="modal-body">{notice.detail}</p>}
     </Dialog>}
-    {creation && <NameDialog title={t(creation.kind === 'space' ? 'workspace.newSpace' : 'workspace.newCanvas')}
+    {creation?.kind === 'space' && <NameDialog title={t('workspace.newSpace')}
       onCancel={() => setCreation(undefined)} onConfirm={async name => {
-        if (creation.kind === 'space') {
-          const next = await write(() => createSpace({ title: name, rootFolderName: t('workspace.defaultFolder'),
-            defaultAgentName: space.defaultAgentName, defaultEnvironmentId: space.defaultEnvironmentId, defaultYoloEnabled: space.defaultYoloEnabled }, creation.key), true)
-          setCreation(undefined); selectSpace(next.id)
-        } else if (creation.parentId) {
-          const folderId = creation.parentId
-          const canvas = await write(() => createCanvas(space.id, { folderId, title: name, expectedTreeVersion: tree.treeVersion }, creation.key))
-          toggle(folderId, true); setCreation(undefined); open({ kind: 'canvas', canvasId: canvas.id })
-        }
+        const next = await write(() => createSpace({ title: name, rootFolderName: t('workspace.defaultFolder'),
+          defaultAgentName: space.defaultAgentName, defaultEnvironmentId: space.defaultEnvironmentId, defaultYoloEnabled: space.defaultYoloEnabled }, creation.key), true)
+        setCreation(undefined); selectSpace(next.id)
+      }} />}
+    {creation?.kind === 'canvas' && <CanvasCreationDialog folderId={creation.folderId} treeVersion={tree.treeVersion}
+      onCancel={() => setCreation(undefined)} onCreate={async ({ folderId, name, expectedTreeVersion, key }) => {
+        const canvas = await write(() => createCanvas(space.id, { folderId, title: name, expectedTreeVersion }, key))
+        toggle(folderId, true); setCreation(undefined); open({ kind: 'canvas', canvasId: canvas.id })
       }} />}
     <ConfirmActionModal pending={Boolean(deletion?.busy)} error={deletion?.error} onClose={() => setDeletion(undefined)} modal={deletion ? {
       title: t('workspace.deleteItem', { name: deletion.row.name }), description: t('workspace.deletePrompt'), tone: 'danger',

@@ -16,7 +16,9 @@ const sched3Id = id(42)
 const cut1Id = id(51)
 const cut2Id = id(52)
 
-async function setupSchedulesHarness(page: Page) {
+async function setupSchedulesHarness(page: Page, dropFirstRunResponse?: Promise<void>) {
+  const manualAttempts: string[] = []
+  const runReceipts = new Map<string, unknown>()
   const futureTs = Date.now() + 24 * 3_600_000
   const tree = {
     treeVersion: '1',
@@ -269,8 +271,13 @@ async function setupSchedulesHarness(page: Page) {
       return route.fulfill({ json: { items: pageItems, olderCursor } })
     }
     if (runsMatch && method === 'POST') {
-      expect(route.request().headers()['idempotency-key']).toBeTruthy()
+      const key = route.request().headers()['idempotency-key']!
+      expect(key).toBeTruthy()
+      manualAttempts.push(key)
       const targetId = runsMatch[1]!
+      const scope = `${targetId}:${key}`
+      const receipt = runReceipts.get(scope)
+      if (receipt) return route.fulfill({ status: 201, json: receipt })
       const added = {
         id: id(nextSeq++),
         scheduledAt: Date.now(),
@@ -281,6 +288,10 @@ async function setupSchedulesHarness(page: Page) {
         thread: { sessionId, id: thread1Id, title: 'Manual run output' },
       }
       runsBySchedule[targetId] = [added, ...(runsBySchedule[targetId] ?? [])]
+      runReceipts.set(scope, added)
+      if (dropFirstRunResponse && manualAttempts.length === 1) {
+        return dropFirstRunResponse.then(() => route.abort('failed'))
+      }
       return route.fulfill({ status: 201, json: added })
     }
 
@@ -329,6 +340,7 @@ async function setupSchedulesHarness(page: Page) {
   return {
     schedules,
     runsBySchedule,
+    manualAttempts,
     setConflictOnNextPatch: () => {
       conflictNextPatch = true
     },
@@ -384,6 +396,45 @@ test('captures responsive schedules list and dialog acceptance screenshots at 14
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
   }
+})
+
+test('recovers a lost manual run receipt across sidebar tab changes and reload', async ({ page }) => {
+  let drop!: () => void
+  const dropFirstRunResponse = new Promise<void>(resolve => { drop = resolve })
+  const harness = await setupSchedulesHarness(page, dropFirstRunResponse)
+  await page.goto(path)
+  const directory = page.getByRole('tab', { name: 'Directory' })
+  const schedules = page.getByRole('tab', { name: 'Schedules' })
+  const menu = page.getByRole('button', { name: 'Actions for Weekly draft' })
+  const run = page.getByRole('menuitem', { name: 'Run now' })
+  await schedules.click()
+  const originalCount = harness.runsBySchedule[sched3Id]!.length
+  await menu.click()
+  await run.click()
+  await expect.poll(() => harness.manualAttempts.length).toBe(1)
+
+  // The panel remounts, but an active request stays locked until its response is lost.
+  await directory.click()
+  await schedules.click()
+  await menu.click()
+  await expect(run).toBeDisabled()
+  drop()
+  await expect(page.getByRole('status')).toHaveText('No run receipt received.')
+  await page.reload()
+  await schedules.click()
+  await expect(page.getByRole('status')).toHaveText('No run receipt received.')
+  expect(harness.manualAttempts).toHaveLength(1)
+
+  await menu.click()
+  await page.getByRole('menuitem', { name: 'Retry run receipt' }).click()
+  await expect(page.getByRole('button', { name: /Manual run output/ })).toBeVisible()
+  expect(harness.manualAttempts).toEqual([harness.manualAttempts[0], harness.manualAttempts[0]])
+  expect(harness.runsBySchedule[sched3Id]).toHaveLength(originalCount + 1)
+  await menu.click()
+  await run.click()
+  await expect.poll(() => harness.manualAttempts.length).toBe(3)
+  expect(harness.manualAttempts[2]).not.toBe(harness.manualAttempts[0])
+  expect(harness.runsBySchedule[sched3Id]).toHaveLength(originalCount + 2)
 })
 
 test('covers schedule controls, history pagination, unified thread open, 409 recovery, focus restoration and WS refresh', async ({ page }) => {
