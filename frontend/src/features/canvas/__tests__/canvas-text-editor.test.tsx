@@ -137,7 +137,7 @@ describe('CanvasTextEditor panels', () => {
   it('anchors edit mode below the projected flow node', () => {
     const snapshot = snapshotDTO()
     const { panel } = renderTextEditor({
-      textEditor: { mode: 'edit', nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
       snapshot,
     })
     expect(screen.getByLabelText('编辑 Markdown 文本「Note」')).toBeInTheDocument()
@@ -158,7 +158,7 @@ describe('CanvasTextEditor panels', () => {
 
   it('clamps the anchor into the stage bounds', () => {
     const { panel: far } = renderTextEditor({
-      textEditor: { mode: 'edit', nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
       snapshot: snapshotDTO({ x: 2000, y: -2000, width: 320, height: 260 }),
     })
     expect(far()).toHaveStyle({
@@ -167,7 +167,7 @@ describe('CanvasTextEditor panels', () => {
     })
 
     const { panel: near } = renderTextEditor({
-      textEditor: { mode: 'edit', nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
       snapshot: snapshotDTO({ x: -2000, y: -2000, width: 320, height: 260 }),
     })
     expect(near()).toHaveStyle({
@@ -178,7 +178,7 @@ describe('CanvasTextEditor panels', () => {
 
   it('renders edit mode without an anchor when the flow node is missing', () => {
     const { panel } = renderTextEditor({
-      textEditor: { mode: 'edit', nodeId: '00000000-0000-0000-0000-000000000000', name: 'Note', markdown: 'hello' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: '00000000-0000-0000-0000-000000000000', name: 'Note', markdown: 'hello' },
       snapshot: snapshotDTO(),
     })
     expect(screen.getByLabelText('编辑 Markdown 文本「Note」')).toBeInTheDocument()
@@ -188,19 +188,19 @@ describe('CanvasTextEditor panels', () => {
   it('disables save until both name and markdown are non-blank', async () => {
     const user = userEvent.setup()
     const { rerenderWith, saveTextEditor } = renderTextEditor({
-      textEditor: { mode: 'edit', nodeId: NODE_ID, name: 'Note', markdown: '' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: NODE_ID, name: 'Note', markdown: '' },
       snapshot: snapshotDTO(),
     })
     const save = () => screen.getByRole('button', { name: '保存' })
     expect(save()).toBeDisabled()
 
     rerenderWith({
-      textEditor: { mode: 'edit', nodeId: NODE_ID, name: '   ', markdown: 'hello' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: NODE_ID, name: '   ', markdown: 'hello' },
     })
     expect(save()).toBeDisabled()
 
     rerenderWith({
-      textEditor: { mode: 'edit', nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
+      textEditor: { mode: 'edit', baseline: { name: 'Note', resourceIds: [RESOURCE_ID] }, nodeId: NODE_ID, name: 'Note', markdown: 'hello' },
     })
     expect(save()).toBeEnabled()
     await user.click(save())

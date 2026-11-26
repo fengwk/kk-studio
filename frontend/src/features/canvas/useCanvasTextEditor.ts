@@ -45,16 +45,26 @@ export function useCanvasTextEditor({
     if (!resource || resource.kind !== 'TEXT') {
       return
     }
+    const confirmed = snapshot?.nodes.find((item) => item.id === node.id)
+    if (!confirmed) {
+      return
+    }
+    const draft = draftsRef.current[node.id]
+    const baseline = draft?.text ? draft.baseline : undefined
     setState((current) => ({
       ...current,
       textEditor: {
         mode: 'edit',
         nodeId: node.id,
-        name: node.name,
-        markdown: resource.textContent ?? '',
+        name: draft?.text?.name ?? node.name,
+        markdown: draft?.text?.markdown ?? resource.textContent ?? '',
+        baseline: {
+          name: baseline?.name ?? confirmed.name,
+          resourceIds: baseline?.resourceIds ?? confirmed.resources.map((item) => item.id),
+        },
       },
     }))
-  }, [setState])
+  }, [draftsRef, setState, snapshot])
 
   const createTextNode = useCallback(() => {
     setState((current) => ({
@@ -83,6 +93,7 @@ export function useCanvasTextEditor({
         ...existingDraft,
         generation: existingDraft.generation + 1,
         updatedAt: Date.now(),
+        baseline: { ...existingDraft.baseline, ...updatedEditor.baseline },
         text: {
           name: updatedEditor.name,
           markdown: updatedEditor.markdown,
@@ -112,23 +123,22 @@ export function useCanvasTextEditor({
     }
     const closeEditor = () => setState((current) => ({ ...current, textEditor: null }))
     if (editor.mode === 'edit') {
-      const node = currentCanvasSnapshot(scope, snapshot)?.nodes.find((item) => item.id === editor.nodeId)
-      if (!node) {
+      if (!currentCanvasSnapshot(scope, snapshot)?.nodes.some((item) => item.id === editor.nodeId)) {
         return
       }
       const commands: CanvasCommandDTO[] = [
         {
           type: 'SET_NODE_RESOURCES',
           nodeId: editor.nodeId,
-          expectedResourceIds: node.resources.map((r) => r.id),
+          expectedResourceIds: editor.baseline.resourceIds,
           resources: [{ type: 'TEXT', name: 'text', textContent: editor.markdown }],
         },
       ]
-      if (node.name !== editor.name.trim()) {
+      if (editor.baseline.name !== editor.name.trim()) {
         commands.push({
           type: 'RENAME_NODE',
           nodeId: editor.nodeId,
-          expectedName: node.name,
+          expectedName: editor.baseline.name,
           name: editor.name.trim(),
         })
       }

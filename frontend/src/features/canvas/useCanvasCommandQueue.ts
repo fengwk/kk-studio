@@ -4,6 +4,7 @@ import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type { CanvasScope } from '@/features/canvas/canvas-controller-scope'
 import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
+import { compareCanvasRevisions } from '@/features/canvas/canvas-version'
 import { useCanvasVersionEvents } from '@/features/canvas/canvas-version-events'
 import {
   CanvasCommandConflictError,
@@ -55,6 +56,13 @@ export function useCanvasCommandQueue({
     if (!snapshot) {
       return
     }
+    const key = queryKeys.studio.canvas(canvasId)
+    const publishSnapshot = (next: CanvasSnapshotDTO) => {
+      queryClient.setQueryData<CanvasSnapshotDTO>(key, current => (
+        current && compareCanvasRevisions(next.document.revision, current.document.revision) < 0
+          ? undefined : next
+      ))
+    }
     if (queueRef.current && queueCanvasIdRef.current !== canvasId) {
       queueRef.current = null
       queueCanvasIdRef.current = null
@@ -62,7 +70,7 @@ export function useCanvasCommandQueue({
     if (queueRef.current) {
       const authoritative = queueRef.current.replaceSnapshot(snapshot)
       if (authoritative !== snapshot) {
-        queryClient.setQueryData(queryKeys.studio.canvas(canvasId), authoritative)
+        publishSnapshot(authoritative)
       }
       return
     }
@@ -72,9 +80,7 @@ export function useCanvasCommandQueue({
       initialSnapshot: snapshot,
       editingSessionId: capturedSessionId,
       viewId,
-      onSnapshot: (next) => {
-        queryClient.setQueryData(queryKeys.studio.canvas(canvasId as string), next)
-      },
+      onSnapshot: publishSnapshot,
       // 该 queue 专属的 ACK：闭包捕获原 canvasId、视图、editingSessionId 与 epoch
       onDraftAcks: (acks) => ackDurableDraftsForScope(canvasId, capturedSessionId, capturedEpoch, acks),
     })

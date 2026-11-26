@@ -13,7 +13,6 @@ export function useLocalPendingRun(
   canvasId: string,
   nodeId: string,
   runtimeErrors: Record<string, LocalPendingRun> | undefined,
-  viewId?: string,
 ): [LocalPendingRun | null, (next: LocalPendingRun | null) => void] {
   const [state, setState] = useState<LocalPendingRun | null>(null)
 
@@ -23,11 +22,11 @@ export function useLocalPendingRun(
       setState(runtimeError)
       return
     }
-    const inspected = inspectLocalPendingRun(canvasId, nodeId, viewId)
+    const inspected = inspectLocalPendingRun(canvasId, nodeId)
     setState(inspected.error && inspected.raw !== null
       ? { raw: inspected.raw }
       : null)
-  }, [canvasId, nodeId, runtimeErrors, viewId])
+  }, [canvasId, nodeId, runtimeErrors])
 
   return [state, setState]
 }

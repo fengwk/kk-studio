@@ -10,7 +10,8 @@ import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage
 import { loadCanvasViewport } from '@/features/canvas/viewport-storage'
 import { createMockIDBFactory } from '@/test-support/mock-idb'
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
-import { readJsonObject } from '@/features/canvas/domain'
+import { projectCanvasSnapshot, readJsonObject } from '@/features/canvas/domain'
+import { queryKeys } from '@/shared/lib/query-keys'
 import {
   cancelCanvasFunctionRun,
   getCanvas,
@@ -915,6 +916,7 @@ describe('useCanvasController real snapshot runtime', () => {
       { type: 'RENAME_NODE', nodeId: NODE_NOTE, expectedName: 'Note', name: 'Note v2' },
     ])
 
+    await waitFor(() => expect(result.current.state.textEditor).toBeNull())
     act(() => result.current.nodeCallbacks.editTextNode(result.current.snapshot?.nodes[0] as never))
     act(() => result.current.setTextEditorDraft({ name: 'Note v2', markdown: 'again' }))
     act(() => result.current.saveTextEditor())
@@ -932,6 +934,107 @@ describe('useCanvasController real snapshot runtime', () => {
         resources: [{ type: 'TEXT', name: 'text', textContent: 'again' }],
       },
     ])
+  })
+
+  it.each([false, true])('retains the text CAS basis after a peer saves (reopen draft: %s)', async (reopen) => {
+    // Model atomic server CAS: reject a stale batch, rather than force a 409 regardless of its preconditions.
+    vi.mocked(postCanvasCommands).mockImplementation(async (_canvasId, request) => {
+      commands.push(request)
+      const node = current.nodes.find(item => item.id === NODE_NOTE)!
+      for (const command of request.commands) {
+        const resources = command.type === 'SET_NODE_RESOURCES' && command.expectedResourceIds
+        const staleResources = resources && (resources.length !== node.resources.length
+          || resources.some((id, index) => id !== node.resources[index].id))
+        const staleName = command.type === 'RENAME_NODE' && command.expectedName !== node.name
+        if (staleResources || staleName) {
+          throw new ApiError('stale', 409, 'CANVAS_CONFLICT', {
+            conflicts: [{ type: 'STALE_NODE', nodeId: NODE_NOTE, group: 'RESOURCES', current: node }],
+          })
+        }
+      }
+      current = applyCommandBatch(current, request.commands)
+      return diffPatch(current)
+    })
+    const mount = (viewId?: string) => renderHook(() => useCanvasController(CANVAS_ID, viewId), { wrapper: Wrapper })
+    const open = ({ result }: ReturnType<typeof mount>) => act(() => {
+      result.current.editTextNode(projectCanvasSnapshot(result.current.snapshot!).resourceNodes.find(node => node.id === NODE_NOTE)!)
+    })
+    const a = mount()
+    let b = mount('1')
+    await waitFor(() => expect(b.result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    await waitFor(() => expect(a.result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    open(a)
+    open(b)
+    act(() => b.result.current.setTextEditorDraft({ name: 'B title', markdown: 'B text' }))
+    await waitFor(async () => expect((await loadCanvasDrafts(CANVAS_ID, { viewId: '1' }))[NODE_NOTE]?.baseline)
+      .toMatchObject({ name: 'Note', resourceIds: [RES_NOTE] }))
+    if (reopen) b.unmount()
+
+    act(() => a.result.current.setTextEditorDraft({ name: 'A title', markdown: 'A text' }))
+    act(() => a.result.current.saveTextEditor())
+    await waitFor(() => expect(a.result.current.state.textEditor).toBeNull())
+    const aResource = current.nodes.find(node => node.id === NODE_NOTE)!.resources[0]
+    expect(aResource.id).not.toBe(RES_NOTE)
+    if (reopen) b = mount('1')
+    await waitFor(() => {
+      expect(b.result.current.snapshot?.nodes.find(node => node.id === NODE_NOTE)?.resources[0]).toEqual(aResource)
+      expect(b.result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('B text')
+    })
+    if (reopen) open(b)
+    act(() => b.result.current.saveTextEditor())
+    await waitFor(() => expect(b.result.current.state.conflictKind).toBe('terminal'))
+    expect(commands[1].commands).toMatchObject([
+      { type: 'SET_NODE_RESOURCES', expectedResourceIds: [RES_NOTE] },
+      { type: 'RENAME_NODE', expectedName: 'Note', name: 'B title' },
+    ])
+    expect(current.nodes.find(node => node.id === NODE_NOTE)).toMatchObject({ name: 'A title', resources: [{ textContent: 'A text' }] })
+    expect(b.result.current.state.textEditor).toMatchObject({ name: 'B title', markdown: 'B text' })
+    expect(b.result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('B text')
+    expect(commands).toHaveLength(2)
+
+    await act(async () => { await b.result.current.retryDraft(NODE_NOTE) })
+    expect(commands[2].commands).toMatchObject([
+      { type: 'SET_NODE_RESOURCES', expectedResourceIds: [aResource.id] },
+      { type: 'RENAME_NODE', expectedName: 'A title', name: 'B title' },
+    ])
+    expect(current.nodes.find(node => node.id === NODE_NOTE)).toMatchObject({ name: 'B title', resources: [{ textContent: 'B text' }] })
+    expect(b.result.current.state.textEditor).toBeNull()
+  })
+
+  it('does not publish a late patch over the newer shared snapshot', async () => {
+    const late = deferred<CanvasPatchDTO>()
+    let firstPatch!: CanvasPatchDTO
+    vi.mocked(postCanvasCommands).mockImplementationOnce(async (_canvasId, request) => {
+      commands.push(request)
+      current = applyCommandBatch(current, request.commands)
+      firstPatch = diffPatch(current)
+      return late.promise
+    })
+    const a = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    const b = renderHook(() => useCanvasController(CANVAS_ID, '1'), { wrapper: Wrapper })
+    await waitFor(() => expect(a.result.current.snapshot?.document.revision).toBe('0'))
+    await waitFor(() => expect(b.result.current.snapshot?.document.revision).toBe('0'))
+    act(() => a.result.current.renameNode(NODE_NOTE, 'First', 'Note'))
+    await waitFor(() => expect(commands).toHaveLength(1))
+    // Closing A leaves its in-flight ACK active, but its queue no longer observes newer snapshots.
+    a.unmount()
+    act(() => b.result.current.renameNode(NODE_NOTE, 'Second', 'First'))
+    await waitFor(() => expect(b.result.current.snapshot?.document.revision).toBe('2'))
+
+    const key = queryKeys.studio.canvas(CANVAS_ID)
+    const revisions: string[] = []
+    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+      const snapshot = queryClient.getQueryData<CanvasSnapshotDTO>(key)
+      if (snapshot) revisions.push(snapshot.document.revision)
+    })
+    try {
+      await act(async () => { late.resolve(firstPatch) })
+      await waitFor(async () => expect(await loadCanvasOperations(CANVAS_ID)).toEqual([]))
+      expect(revisions).not.toContain('1')
+      expect(queryClient.getQueryData<CanvasSnapshotDTO>(key)?.document.revision).toBe('2')
+    } finally {
+      unsubscribe()
+    }
   })
 
   it('allocates unique aliases from the command queue snapshot across rapid creates and uploads', async () => {
@@ -1948,6 +2051,11 @@ describe('useCanvasController real snapshot runtime', () => {
     // 关键回归：已落盘草稿没有被“空状态 diff”删除。
     const stored = await loadCanvasDrafts(CANVAS_ID)
     expect(stored[NODE_NOTE]?.text?.markdown).toBe('persisted draft')
+    await waitFor(() => expect(reopened.current.snapshot?.document.id).toBe(CANVAS_ID))
+    act(() => reopened.current.editTextNode(projectCanvasSnapshot(reopened.current.snapshot!).resourceNodes[0]))
+    expect(reopened.current.state.textEditor).toMatchObject({
+      markdown: 'persisted draft', baseline: { name: 'Note', resourceIds: [RES_NOTE] },
+    })
   })
 
   it('旧 ACK 只按 operation/generation 清除匹配草稿，不清掉在途期间追加的新输入', async () => {
@@ -2274,7 +2382,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('restores two views independently and retries 408/429 without crossing operation or ACK scopes', async () => {
-    const viewId = 'dddddddd-0000-4000-8000-000000000002'
+    const viewId = '1'
     const scoped = { viewId }
     const mount = (id?: string) => renderHook(() => useCanvasController(CANVAS_ID, id), { wrapper: Wrapper })
     const primaryPosition = { x: 100, y: 200 }
@@ -2339,10 +2447,11 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(secondaryOperation.idempotencyKey).toBe(second.idempotencyKey)
     expect(first.idempotencyKey).not.toBe(second.idempotencyKey)
 
-    // Recover one view while the other still has exactly the same draft generation pending.
-    await act(async () => { await b.result.current.retryRecovery() })
+    // Reoccupying the same slot must replay its original command, not the primary view's.
+    b.unmount()
+    mount(viewId)
+    await waitFor(async () => expect(await loadCanvasOperations(CANVAS_ID, scoped)).toEqual([]))
     expect(post.mock.calls.map(([, request]) => request)).toEqual([first, second, second])
-    expect(await loadCanvasOperations(CANVAS_ID, scoped)).toEqual([])
     expect(await loadCanvasOperations(CANVAS_ID)).toEqual([primaryOperation])
     expect((await loadCanvasDrafts(CANVAS_ID, scoped))[NODE_NOTE]).toBeUndefined()
     expect((await loadCanvasDrafts(CANVAS_ID))[NODE_NOTE]?.position).toEqual(primaryPosition)

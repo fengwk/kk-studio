@@ -8,7 +8,6 @@ import { setLocale } from '@/shared/i18n'
 
 function createFakeController(overrides?: Partial<CanvasController>): CanvasController {
   return {
-    viewId: undefined,
     state: {
       selectedIds: [],
       selectedLinks: [],

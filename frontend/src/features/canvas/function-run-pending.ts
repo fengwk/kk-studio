@@ -1,4 +1,3 @@
-import { canvasViewKey } from './canvas-view-key'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type {
   CanvasFunctionRunRequestDTO,
@@ -73,8 +72,8 @@ export interface PendingFunctionRunAttempt {
   createdAt: number
 }
 
-export function getPendingRunStorageKey(canvasId: string, nodeId: string, viewId?: string): string {
-  return `${PENDING_RUN_STORAGE_PREFIX}${canvasViewKey(canvasId, viewId)}:${nodeId}`
+export function getPendingRunStorageKey(canvasId: string, nodeId: string): string {
+  return `${PENDING_RUN_STORAGE_PREFIX}${canvasId}:${nodeId}`
 }
 
 /** request 必须恰好是 {requestId, expectedVersion} 且两者都合法；未知字段一律拒绝。 */
@@ -99,12 +98,12 @@ function hasExactFields(value: Record<string, unknown>, allowed: readonly string
   return keys.length === allowed.length && allowed.every((field) => keys.includes(field))
 }
 
-export function loadPendingFunctionRun(canvasId: string, nodeId: string, viewId?: string): PendingFunctionRunAttempt | null {
+export function loadPendingFunctionRun(canvasId: string, nodeId: string): PendingFunctionRunAttempt | null {
   const storage = getLocalStorageSafe()
   if (!storage) {
     throw new PendingRunStorageError('Local storage is unavailable')
   }
-  const key = getPendingRunStorageKey(canvasId, nodeId, viewId)
+  const key = getPendingRunStorageKey(canvasId, nodeId)
   let raw: string | null
   try {
     raw = storage.getItem(key)
@@ -141,7 +140,7 @@ export function loadPendingFunctionRun(canvasId: string, nodeId: string, viewId?
   return parsed as PendingFunctionRunAttempt
 }
 
-export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt, viewId?: string): void {
+export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void {
   const storage = getLocalStorageSafe()
   if (!storage) {
     throw new PendingRunStorageError('Local storage is unavailable')
@@ -158,7 +157,7 @@ export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt, viewI
   ) {
     throw new Error('Invalid function run attempt payload: must contain canonical lowercase UUIDs and a complete expectedVersion')
   }
-  const key = getPendingRunStorageKey(attempt.canvasId, attempt.nodeId, viewId)
+  const key = getPendingRunStorageKey(attempt.canvasId, attempt.nodeId)
 
   let rawExisting: string | null
   try {
@@ -189,7 +188,6 @@ export function clearPendingFunctionRun(
   canvasId: string,
   nodeId: string,
   expectedRequestId: string,
-  viewId?: string,
 ): void {
   if (!isCanonicalUuid(expectedRequestId)) {
     return
@@ -198,7 +196,7 @@ export function clearPendingFunctionRun(
   if (!storage) {
     return
   }
-  const key = getPendingRunStorageKey(canvasId, nodeId, viewId)
+  const key = getPendingRunStorageKey(canvasId, nodeId)
   let raw: string | null
   try {
     raw = storage.getItem(key)
@@ -209,7 +207,7 @@ export function clearPendingFunctionRun(
     return
   }
   try {
-    const existing = loadPendingFunctionRun(canvasId, nodeId, viewId)
+    const existing = loadPendingFunctionRun(canvasId, nodeId)
     if (existing && existing.request.requestId === expectedRequestId) {
       storage.removeItem(key)
     }
@@ -223,13 +221,12 @@ export function discardPendingFunctionRun(
   canvasId: string,
   nodeId: string,
   expectedRaw: string,
-  viewId?: string,
 ): boolean {
   const storage = getLocalStorageSafe()
   if (!storage) {
     throw new Error('无法读取浏览器存储，请检查存储权限')
   }
-  const key = getPendingRunStorageKey(canvasId, nodeId, viewId)
+  const key = getPendingRunStorageKey(canvasId, nodeId)
   let currentRaw: string | null
   try {
     currentRaw = storage.getItem(key)
@@ -257,12 +254,12 @@ export interface LocalPendingRunState {
   attempt: PendingFunctionRunAttempt | null
 }
 
-export function inspectLocalPendingRun(canvasId: string, nodeId: string, viewId?: string): LocalPendingRunState {
+export function inspectLocalPendingRun(canvasId: string, nodeId: string): LocalPendingRunState {
   const storage = getLocalStorageSafe()
   if (!storage) {
     return { error: '无法读取浏览器存储，请检查存储权限', raw: null, attempt: null }
   }
-  const key = getPendingRunStorageKey(canvasId, nodeId, viewId)
+  const key = getPendingRunStorageKey(canvasId, nodeId)
   let raw: string | null
   try {
     raw = storage.getItem(key)
@@ -277,7 +274,7 @@ export function inspectLocalPendingRun(canvasId: string, nodeId: string, viewId?
     return { error: null, raw: null, attempt: null }
   }
   try {
-    const attempt = loadPendingFunctionRun(canvasId, nodeId, viewId)
+    const attempt = loadPendingFunctionRun(canvasId, nodeId)
     return { error: null, raw, attempt }
   } catch (err) {
     return {

@@ -171,7 +171,6 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   const nodeId = NODE_FN
 
   function setupHook(options?: {
-    viewId?: string
     flushFunctionConfig?: (nodeId: string) => Promise<void>
     resolveFunctionVersion?: (nodeId: string) => CanvasFunctionVersionDTO | null
   }) {
@@ -181,7 +180,6 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     const resolveFunctionVersion = options?.resolveFunctionVersion ?? (() => FUNCTION_VERSION_A)
     const { result } = renderHook(() => useCanvasFunctionRun({
       canvasId,
-      viewId: options?.viewId,
       queryClient,
       setToast,
       flushFunctionConfig,
@@ -212,32 +210,50 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
   })
 
-  it('starts an independent Function Run attempt without replaying or clearing the primary view record', async () => {
+  it('shares pending Function Runs across views and blocks cross-view in-flight duplicates', async () => {
     cleanupTestStorage()
-    const viewId = crypto.randomUUID()
-    const oldRequestId = crypto.randomUUID()
-    // Seed the primary view's legacy pending attempt for this same node.
-    savePendingFunctionRun({
-      canvasId,
-      nodeId,
-      request: { requestId: oldRequestId, expectedVersion: FUNCTION_VERSION_A },
-      basisRequestId: null,
-      createdAt: 1,
-    })
-    let persistedBeforeSend: ReturnType<typeof loadPendingFunctionRun> = null
-    const start = vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockClear().mockImplementationOnce(async (_cid, _nid, req) => {
-      persistedBeforeSend = loadPendingFunctionRun(canvasId, nodeId, viewId)
-      return run(req.requestId, 'RUNNING', 'QUEUED')
-    })
-    const { result } = setupHook({ viewId })
-    await act(async () => { await result.current.startFunctionRun(nodeId) })
-    expect(start).toHaveBeenCalledTimes(1)
-    const [sentCanvas, sentNode, request] = start.mock.calls[0]
-    expect([sentCanvas, sentNode]).toEqual([canvasId, nodeId])
-    expect(request.requestId).not.toBe(oldRequestId)
-    expect(persistedBeforeSend).toMatchObject({ request })
-    expect(loadPendingFunctionRun(canvasId, nodeId, viewId)).toBeNull()
-    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(oldRequestId)
+    let rejectFirst!: (error: Error) => void
+    let markSent!: () => void
+    const firstSent = new Promise<void>(resolve => { markSent = resolve })
+    const start = vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockClear()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => {
+        rejectFirst = reject
+        markSent()
+      }))
+      .mockImplementationOnce(async (_cid, _nid, request) => run(request.requestId, 'RUNNING', 'QUEUED'))
+    vi.spyOn(canvasApi, 'getCanvasFunctionRun').mockRejectedValueOnce(new Error('reconciliation unavailable'))
+
+    const flushA = vi.fn(async () => undefined)
+    const flushB = vi.fn(async () => undefined)
+    const viewA = setupHook({ flushFunctionConfig: flushA, resolveFunctionVersion: () => FUNCTION_VERSION_A })
+    const viewB = setupHook({ flushFunctionConfig: flushB, resolveFunctionVersion: () => FUNCTION_VERSION_B })
+
+    const firstRun = viewA.result.current.startFunctionRun(nodeId)
+    await firstSent
+    const firstRequest = start.mock.calls[0][2]
+    try {
+      expect(start).toHaveBeenCalledTimes(1)
+      expect(firstRequest.expectedVersion).toEqual(FUNCTION_VERSION_A)
+      expect(loadPendingFunctionRun(canvasId, nodeId)?.request).toEqual(firstRequest)
+
+      // While A's outcome is unknown, B cannot issue a second POST for the same Canvas node.
+      await act(async () => { await viewB.result.current.startFunctionRun(nodeId) })
+      expect(start).toHaveBeenCalledTimes(1)
+    } finally {
+      await act(async () => {
+        rejectFirst(new Error('start response lost'))
+        await firstRun
+      })
+    }
+    expect(loadPendingFunctionRun(canvasId, nodeId)?.request).toEqual(firstRequest)
+
+    // Explicit retry from B replays A's exact immutable request, not B's current directory version.
+    await act(async () => { await viewB.result.current.startFunctionRun(nodeId) })
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(start.mock.calls[1][2]).toEqual(firstRequest)
+    expect(flushA).toHaveBeenCalledTimes(1)
+    expect(flushB).not.toHaveBeenCalled()
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
   })
 
   it('错误分类：403 Forbidden 属于不可重试终态，清除 pending 记录', async () => {
