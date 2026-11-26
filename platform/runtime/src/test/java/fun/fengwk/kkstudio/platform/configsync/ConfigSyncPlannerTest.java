@@ -148,28 +148,36 @@ class ConfigSyncPlannerTest {
   }
 
   @Test
-  void validatesLongAgainstImportedProviderAndModelAndKeepsNoneShortCompatible() {
+  void validatesImportedRetentionAgainstOptionsAndCanonicalDefault() {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     String providerAndModel =
-        PROVIDER_AND_MODEL.replace(
-            "providerType: openai\n",
-            "providerType: openai\n    baseUrl: https://api.openai.com/v1\n");
+        PROVIDER_AND_MODEL
+            .replace(
+                "providerType: openai\n",
+                "providerType: openai\n    baseUrl: https://api.openai.com/v1\n")
+            .replace("promptCacheRetention: NONE", "promptCacheRetention: SHORT");
     String unsupportedLong =
         providerAndModel
             .replace("modelId: gpt", "modelId: gpt-5.6")
-            .replace("promptCacheRetention: NONE", "promptCacheRetention: LONG");
+            .replace("promptCacheRetention: SHORT", "promptCacheRetention: LONG");
     assertThrows(DomainException.class, () -> plan(unsupportedLong));
 
     assertEquals(1, plan(providerAndModel).models().size());
-    String legacyShort =
-        providerAndModel.replace("promptCacheRetention: NONE", "promptCacheRetention: SHORT");
-    assertEquals(1, plan(legacyShort).models().size());
+    // Older official models expose SHORT but not NONE.
+    String unsupportedNone =
+        providerAndModel.replace("promptCacheRetention: SHORT", "promptCacheRetention: NONE");
+    assertThrows(DomainException.class, () -> plan(unsupportedNone));
 
-    String supportedLegacyLong =
+    String supportedLong =
         providerAndModel
             .replace("modelId: gpt", "modelId: gpt-5.5")
-            .replace("promptCacheRetention: NONE", "promptCacheRetention: LONG");
-    assertEquals(1, plan(supportedLegacyLong).models().size());
+            .replace("promptCacheRetention: SHORT", "promptCacheRetention: LONG");
+    assertEquals(1, plan(supportedLong).models().size());
+
+    assertEquals(1, plan(PROVIDER_AND_MODEL).models().size());
+    String nonDefaultForCompatibleChat =
+        PROVIDER_AND_MODEL.replace("promptCacheRetention: NONE", "promptCacheRetention: SHORT");
+    assertThrows(DomainException.class, () -> plan(nonDefaultForCompatibleChat));
   }
 
   /** 拼接一个 document 内的 Agent 条目；configLines 使用 6 空格缩进。 */

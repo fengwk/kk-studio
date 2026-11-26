@@ -106,7 +106,7 @@ test('canonical seed catalog does not mutate its input', () => {
     {
       provider: 'zai',
       name: 'glm-5.2',
-      config: { defaultVariant: 'max', variants: [{ id: 'max', reasoningEffort: 'high', promptCacheRetention: 'SHORT' }] },
+      config: { defaultVariant: 'max', variants: [{ id: 'max', reasoningEffort: 'high', promptCacheRetention: 'NONE' }] },
     },
   ]
   const snapshot = JSON.stringify(input)

@@ -279,7 +279,7 @@ registerCase({
         config: baseModelConfig({
           limit: { context: 4096, output: 256 },
           abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-          variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+          variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
         }),
       })
       model = modelResponse.json

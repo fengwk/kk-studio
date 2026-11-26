@@ -135,7 +135,7 @@ describe('AiResourceForms', () => {
     ])
   })
 
-  it('explains provider-managed caching and applies the canonical backend default to the draft', async () => {
+  it('requires explicit correction when a saved retention differs from the canonical default', async () => {
     setLocale('en-US')
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       promptCacheOptions: [],
@@ -180,13 +180,17 @@ describe('AiResourceForms', () => {
       )
     }
 
+    const user = userEvent.setup()
     render(<ProviderManagedHarness />)
 
-    // 服务商托管自动缓存只给出说明，不再提供档位下拉。
+    // Provider-managed caching has no selector; a saved non-canonical value remains until explicitly corrected.
     expect(await screen.findByText('Automatic (managed by provider)')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Prompt Cache Retention 1' })).not.toBeInTheDocument()
-    // 新建表单写入后端 canonical 默认档位，避免把旧档位当作端点能力。
-    await waitFor(() => expect(currentDraft.variants[0]?.promptCacheRetention).toBe('NONE'))
+    expect(currentDraft.variants[0]?.promptCacheRetention).toBe('SHORT')
+    const correction = screen.getByRole('button', { name: 'Use server default (Off)' })
+    expect(screen.getByText('The saved retention differs from this model’s canonical default.')).toBeInTheDocument()
+    await user.click(correction)
+    expect(currentDraft.variants[0]?.promptCacheRetention).toBe('NONE')
   })
 
   it('ignores late cache capabilities after a model clear or Provider version change', async () => {

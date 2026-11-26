@@ -117,7 +117,7 @@ export function baseModelConfig(overrides = {}) {
     },
     pricing: basePricing(),
     defaultVariant: 'default',
-    variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
     ...rest,
   }
 }
@@ -184,7 +184,7 @@ export function modelConfigMatrix() {
       messageIncludes: /protocolOptionsJson/,
       title: `protocolOptionsJson 严格边界：${suffix}`,
       build: () => baseModelConfig({
-        variants: [{ id: 'default', promptCacheRetention: 'SHORT', protocolOptionsJson }],
+        variants: [{ id: 'default', promptCacheRetention: 'NONE', protocolOptionsJson }],
       }),
     })),
     {
@@ -250,10 +250,10 @@ export function modelConfigMatrix() {
           abilities: { tools: true, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
           defaultVariant: 'medium',
           variants: [
-            { id: 'off', promptCacheRetention: 'SHORT' },
-            { id: 'low', reasoningEffort: 'low', promptCacheRetention: 'SHORT' },
-            { id: 'medium', reasoningEffort: 'medium', promptCacheRetention: 'SHORT' },
-            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
+            { id: 'off', promptCacheRetention: 'NONE' },
+            { id: 'low', reasoningEffort: 'low', promptCacheRetention: 'NONE' },
+            { id: 'medium', reasoningEffort: 'medium', promptCacheRetention: 'NONE' },
+            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'NONE' },
           ],
         }),
     },
@@ -266,8 +266,8 @@ export function modelConfigMatrix() {
           abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
           defaultVariant: 'off',
           variants: [
-            { id: 'off', reasoningEffort: 'off', promptCacheRetention: 'SHORT' },
-            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
+            { id: 'off', reasoningEffort: 'off', promptCacheRetention: 'NONE' },
+            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'NONE' },
           ],
         }),
     },
@@ -280,8 +280,8 @@ export function modelConfigMatrix() {
           abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
           defaultVariant: 'default',
           variants: [
-            { id: 'default', promptCacheRetention: 'SHORT' },
-            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
+            { id: 'default', promptCacheRetention: 'NONE' },
+            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'NONE' },
           ],
         }),
     },
@@ -295,7 +295,7 @@ export function modelConfigMatrix() {
       build: () =>
         baseModelConfig({
           abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-          variants: [{ id: 'default', reasoningEffort: 'high', promptCacheRetention: 'SHORT' }],
+          variants: [{ id: 'default', reasoningEffort: 'high', promptCacheRetention: 'NONE' }],
         }),
     },
     {
@@ -374,8 +374,8 @@ export function modelConfigMatrix() {
       build: () =>
         baseModelConfig({
           variants: [
-            { id: 'default', promptCacheRetention: 'SHORT' },
-            { id: 'default', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
+            { id: 'default', promptCacheRetention: 'NONE' },
+            { id: 'default', reasoningEffort: 'high', promptCacheRetention: 'NONE' },
           ],
         }),
     },
@@ -398,7 +398,7 @@ export function modelConfigMatrix() {
       title: 'variant id 空白',
       build: () =>
         baseModelConfig({
-          variants: [{ id: ' ', promptCacheRetention: 'SHORT' }],
+          variants: [{ id: ' ', promptCacheRetention: 'NONE' }],
         }),
     },
     {
@@ -410,7 +410,7 @@ export function modelConfigMatrix() {
       title: '未知 variant 字段被拒绝',
       build: () =>
         baseModelConfig({
-          variants: [{ id: 'default', promptCacheRetention: 'SHORT', temperature: 0.5 }],
+          variants: [{ id: 'default', promptCacheRetention: 'NONE', temperature: 0.5 }],
         }),
     },
     {
@@ -422,7 +422,7 @@ export function modelConfigMatrix() {
       title: 'reasoningEffort 超过长度限制',
       build: () =>
         baseModelConfig({
-          variants: [{ id: 'default', promptCacheRetention: 'SHORT', reasoningEffort: 'x'.repeat(65) }],
+          variants: [{ id: 'default', promptCacheRetention: 'NONE', reasoningEffort: 'x'.repeat(65) }],
         }),
     },
     {

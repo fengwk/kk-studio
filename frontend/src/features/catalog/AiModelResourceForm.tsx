@@ -81,19 +81,14 @@ export function ModelForm({
   useLayoutEffect(() => {
     if (!modelCapabilities || modelCapabilities.defaultPromptCacheRetention == null) return
     const defaultRetention = modelCapabilities.defaultPromptCacheRetention
-    const supported = new Set(modelCapabilities.promptCacheOptions.map((option) => option.retention))
-    const variants = draft.variants.map((variant) => {
-      const retention = variant.promptCacheRetention
-      // Edit mode only initializes new, unset variants; stored selections need an explicit change.
-      const needsDefault = retention === '' || (mode === 'create' && !supported.has(retention))
-      return needsDefault && retention !== defaultRetention
-        ? { ...variant, promptCacheRetention: defaultRetention }
-        : variant
-    })
+    // Only initialize unset variants; existing selections need an explicit change.
+    const variants = draft.variants.map((variant) =>
+      variant.promptCacheRetention === '' ? { ...variant, promptCacheRetention: defaultRetention } : variant,
+    )
     if (variants.some((variant, index) => variant !== draft.variants[index])) {
       onChange({ ...draft, variants })
     }
-  }, [modelCapabilities, draft, mode, onChange])
+  }, [modelCapabilities, draft, onChange])
   const defaultVariant = selectedDefaultVariant(draft)
   const nameId = useId()
   const modelIdFieldId = useId()

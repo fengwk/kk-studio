@@ -161,9 +161,12 @@ export function VariantListEditor({
                   <div className="form-group">
                     <FieldLabel>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
                     <span className="inline-hint">{cacheStatus}</span>
-                    {cacheState && currentRetention === 'LONG' && !retentionSupported && defaultRetention != null ? (
+                    {capabilityOptions.length === 0 &&
+                    currentRetention !== '' &&
+                    currentRetention !== defaultRetention &&
+                    defaultRetention != null ? (
                       <>
-                        <span className="field-error">{t('ai.catalog.form.promptCacheLongUnavailable')}</span>
+                        <span className="field-error">{t('ai.catalog.form.promptCacheRetentionUnavailable')}</span>
                         <div>
                           <Button variant="secondary" onClick={() => updateVariant(index, { promptCacheRetention: defaultRetention })}>
                             {t('ai.catalog.form.usePromptCacheDefault', { retention: retentionLabel(defaultRetention) })}

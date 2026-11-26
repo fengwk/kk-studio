@@ -495,7 +495,7 @@ async function setupDistributedHarness(ctx, suffix) {
     config: baseModelConfig({
       limit: { context: 4096, output: 512 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-      variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
+      variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
     }),
   })
   const model = modelRes.json
