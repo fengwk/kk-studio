@@ -97,16 +97,31 @@ func (s *TextOutputStore) CreateStagingFile(callID string) (*os.File, string, er
 	return file, path, nil
 }
 
-// Publish atomically changes a staging file suffix from .part to .log.
+// Publish atomically changes a staging file suffix from .part to .log and starts its retention period.
 func (s *TextOutputStore) Publish(path string) (string, error) {
 	if !strings.HasSuffix(path, ".part") {
 		return "", errors.New("staging file must end with .part")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	target := strings.TrimSuffix(path, ".part") + ".log"
 	if err := os.Rename(path, target); err != nil {
 		return "", err
 	}
-	s.release(path)
+	if workspace := s.staging[path]; workspace != "" {
+		// Keep the staging lease until the new retention anchor is installed. Round up so
+		// the second-resolution marker never expires the output early.
+		marker := filepath.Join(workspace, "created-at")
+		pending := marker + ".part"
+		if err := os.WriteFile(pending, []byte(strconv.FormatInt(time.Now().Unix()+1, 10)), 0o600); err != nil {
+			return "", err
+		}
+		if err := os.Rename(pending, marker); err != nil {
+			return "", err
+		}
+		delete(s.staging, path)
+		s.releaseWorkspaceLocked(workspace)
+	}
 	return target, nil
 }
 
@@ -215,16 +230,6 @@ func (s *TextOutputStore) Sweep(ttl time.Duration) (int, error) {
 		removed++
 	}
 	return removed, nil
-}
-
-func (s *TextOutputStore) release(path string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	workspace := s.staging[path]
-	delete(s.staging, path)
-	if workspace != "" {
-		s.releaseWorkspaceLocked(workspace)
-	}
 }
 
 func (s *TextOutputStore) releaseWorkspaceLocked(workspace string) {

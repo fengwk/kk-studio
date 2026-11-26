@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 )
@@ -93,6 +94,68 @@ func TestPublishUnregisteredPartFile(t *testing.T) {
 	if data, err := os.ReadFile(published); err != nil || string(data) != "output" {
 		t.Fatalf("data=%q err=%v", data, err)
 	}
+}
+
+// Backdate two staging workspaces to simulate long-running and interrupted captures without waiting.
+func TestPublishedOutputRetentionStartsAtPublish(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dataDir := t.TempDir()
+		store, err := OpenTextOutputStore(dataDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stage := func(id string) string {
+			t.Helper()
+			file, path, err := store.CreateStagingFile(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := file.WriteString("captured output"); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "created-at"), []byte("1"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}
+		staged, abandoned := stage("long-running"), stage("interrupted")
+		time.Sleep(500 * time.Millisecond) // Publish between whole-second boundaries.
+		const ttl = time.Minute
+		if removed, err := store.Sweep(ttl); err != nil || removed != 0 {
+			t.Fatalf("sweep while staged: removed=%d err=%v", removed, err)
+		}
+		published, err := store.Publish(staged)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Reopening loses the abandoned write lease, but must preserve the published file's TTL.
+		reopened, err := OpenTextOutputStore(dataDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if removed, err := reopened.Sweep(ttl); err != nil || removed != 1 {
+			t.Errorf("sweep after reopening: removed=%d err=%v; want only abandoned workspace removed", removed, err)
+		}
+		if _, err := os.Stat(abandoned); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("abandoned staging file: %v", err)
+		}
+		// A second-resolution marker must still retain the output for at least the full TTL.
+		time.Sleep(ttl - time.Nanosecond)
+		if removed, err := reopened.Sweep(ttl); err != nil || removed != 0 {
+			t.Errorf("sweep before TTL: removed=%d err=%v", removed, err)
+		}
+		if data, err := os.ReadFile(published); err != nil || string(data) != "captured output" {
+			t.Fatalf("published output=%q err=%v", data, err)
+		}
+		time.Sleep(time.Second + time.Nanosecond)
+		if removed, err := reopened.Sweep(ttl); err != nil || removed != 1 {
+			t.Fatalf("sweep after TTL: removed=%d err=%v", removed, err)
+		}
+	})
 }
 
 func TestRepeatedAcquireLeasesShareWorkspaceCount(t *testing.T) {
