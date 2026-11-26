@@ -1,4 +1,6 @@
-import { Clock3, LoaderCircle } from 'lucide-react'
+import { Clock3 } from 'lucide-react'
+import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
+import '@/shared/ui/layout/list-row.css'
 import { useI18n } from '@/shared/i18n'
 import { formatExecutionModelLabel } from '@/features/catalog'
 import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
@@ -35,13 +37,13 @@ export function ThreadTreeRows({ rows, currentThreadId, compactStatuses = false 
                 ))}
                 <span className={`is-branch${row.isLast ? ' is-last' : ''}`} />
               </span>
-              <span className="thread-tree-content">
-                <strong className="thread-tree-identity">{node.agentName}</strong>
+              <span className="thread-tree-content ui-list-row">
+                <strong className="thread-tree-identity ui-list-row-label">{node.agentName}</strong>
                 {node.name !== 'main' && node.name !== node.agentName
                   ? <span className="thread-tree-detail">{node.name}</span> : null}
                 {compactStatuses && node.status === 'RUNNING' ? (
                   <span className={`thread-tree-status ${statusClass}`} title={formatThreadStatusLabel(node.status, t)} aria-label={formatThreadStatusLabel(node.status, t)}>
-                    <LoaderCircle className="thread-tree-status-running-icon" aria-hidden="true" />
+                    <LoadingSpinner size={12} decorative className="ui-list-row-running" />
                   </span>
                 ) : compactStatuses && (node.status === 'WAITING' || node.status === 'EXIT_PENDING') ? (
                   <span className={`thread-tree-status ${statusClass}`} title={formatThreadStatusLabel(node.status, t)} aria-label={formatThreadStatusLabel(node.status, t)}>

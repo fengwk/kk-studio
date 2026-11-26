@@ -14,16 +14,14 @@ import type {
 import { useI18n } from '@/shared/i18n'
 import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
-import { DateInput } from '@/shared/ui/controls/DateInput'
 import { FieldError } from '@/shared/ui/controls/FieldError'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { NumberInput } from '@/shared/ui/controls/NumberInput'
-import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
-import { TimeInput } from '@/shared/ui/controls/TimeInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { workspaceKeys } from './queries'
+import { ScheduleTargetField } from './ScheduleTargetField'
+import { ScheduleTimeField } from './ScheduleTimeField'
 import {
   buildTargetFromDraft,
   buildTimeZoneOptions,
@@ -34,10 +32,8 @@ import {
   formatScheduleRunTime,
   getLocalTimeZone,
   listTreeSessions,
-  SCHEDULE_WEEKDAYS,
   todayInTimeZone,
   validateScheduleTitle,
-  WEEKDAY_LABEL_KEYS,
 } from './schedule-helpers'
 import {
   createSchedule,
@@ -517,171 +513,55 @@ export function ScheduleEditorDialog({
 
           <fieldset className="workspace-schedule-fieldset">
             <legend>{t('workspace.schedule.target')}</legend>
-            <div className="workspace-schedule-radios">
-              {([
-                ['NEW_SESSION', 'workspace.schedule.targetNewSession'],
-                ['BRANCH', 'workspace.schedule.targetBranch'],
-                ['CONTINUE', 'workspace.schedule.targetContinue'],
-              ] as const).map(([value, labelKey]) => (
-                <label key={value} className="workspace-schedule-radio">
-                  <input
-                    type="radio"
-                    name={`${baseId}-target-type`}
-                    value={value}
-                    checked={targetType === value}
-                    disabled={saving}
-                    onChange={() => {
-                      setTargetType(value)
-                      clearErrors('folderId', 'agentName', 'sessionId', 'sourceThreadId', 'turnEndEntryId', 'threadId')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  <span>{t(labelKey)}</span>
-                </label>
-              ))}
-            </div>
-
-            {targetType === 'NEW_SESSION' && (
-              <div className="workspace-schedule-grid2">
-                <div className={`workspace-schedule-field form-group${fieldErrors.folderId ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-folderId`} required>{t('workspace.schedule.folder')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-folderId`}
-                    value={folderId}
-                    options={folderOptions}
-                    disabled={saving || folderOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.folderId)}
-                    aria-describedby={fieldErrors.folderId ? `${baseId}-folderId-err` : undefined}
-                    onChange={value => {
-                      setFolderId(value)
-                      clearErrors('folderId')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.folderId && <FieldError id={`${baseId}-folderId-err`}>{fieldErrors.folderId}</FieldError>}
-                </div>
-
-                <div className={`workspace-schedule-field form-group${fieldErrors.agentName ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-agentName`} required>{t('workspace.schedule.agent')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-agentName`}
-                    value={agentName}
-                    options={agentOptions}
-                    disabled={saving || (agentsQuery.isLoading && agentOptions.length === 0) || agentOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.agentName)}
-                    aria-describedby={fieldErrors.agentName ? `${baseId}-agentName-err` : undefined}
-                    onChange={value => {
-                      setAgentName(value)
-                      clearErrors('agentName')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.agentName && <FieldError id={`${baseId}-agentName-err`}>{fieldErrors.agentName}</FieldError>}
-                </div>
-              </div>
-            )}
-
-            {targetType === 'BRANCH' && (
-              <div className="workspace-schedule-grid3">
-                <div className={`workspace-schedule-field form-group${fieldErrors.sessionId ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-sessionId`} required>{t('workspace.schedule.session')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-sessionId`}
-                    value={sessionId}
-                    options={sessionOptions}
-                    placeholder={t('workspace.schedule.sessionRequired')}
-                    disabled={saving || sessionOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.sessionId)}
-                    aria-describedby={fieldErrors.sessionId ? `${baseId}-sessionId-err` : undefined}
-                    onChange={handleSessionChange}
-                  />
-                  {fieldErrors.sessionId && <FieldError id={`${baseId}-sessionId-err`}>{fieldErrors.sessionId}</FieldError>}
-                </div>
-
-                <div className={`workspace-schedule-field form-group${fieldErrors.sourceThreadId ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-sourceThreadId`} required>{t('workspace.schedule.sourceThread')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-sourceThreadId`}
-                    value={sourceThreadId}
-                    options={threadOptions}
-                    placeholder={t('workspace.schedule.threadRequired')}
-                    disabled={saving || threadOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.sourceThreadId)}
-                    aria-describedby={fieldErrors.sourceThreadId ? `${baseId}-sourceThreadId-err` : undefined}
-                    onChange={value => {
-                      setSourceThreadId(value)
-                      setTurnEndEntryId('')
-                      clearErrors('sourceThreadId', 'turnEndEntryId')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.sourceThreadId && <FieldError id={`${baseId}-sourceThreadId-err`}>{fieldErrors.sourceThreadId}</FieldError>}
-                </div>
-
-                <div className={`workspace-schedule-field form-group${fieldErrors.turnEndEntryId ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-turnEndEntryId`} required>{t('workspace.schedule.turnEnd')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-turnEndEntryId`}
-                    value={turnEndEntryId}
-                    options={turnCutOptions}
-                    placeholder={t('workspace.schedule.turnEndRequired')}
-                    disabled={saving || turnCutOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.turnEndEntryId)}
-                    aria-describedby={fieldErrors.turnEndEntryId ? `${baseId}-turnEndEntryId-err` : undefined}
-                    onChange={value => {
-                      setTurnEndEntryId(value)
-                      clearErrors('turnEndEntryId')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.turnEndEntryId && <FieldError id={`${baseId}-turnEndEntryId-err`}>{fieldErrors.turnEndEntryId}</FieldError>}
-                </div>
-              </div>
-            )}
-
-            {targetType === 'CONTINUE' && (
-              <div className="workspace-schedule-grid2">
-                <div className={`workspace-schedule-field form-group${fieldErrors.sessionId ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-sessionId`} required>{t('workspace.schedule.session')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-sessionId`}
-                    value={sessionId}
-                    options={sessionOptions}
-                    placeholder={t('workspace.schedule.sessionRequired')}
-                    disabled={saving || sessionOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.sessionId)}
-                    aria-describedby={fieldErrors.sessionId ? `${baseId}-sessionId-err` : undefined}
-                    onChange={handleSessionChange}
-                  />
-                  {fieldErrors.sessionId && <FieldError id={`${baseId}-sessionId-err`}>{fieldErrors.sessionId}</FieldError>}
-                </div>
-
-                <div className={`workspace-schedule-field form-group${fieldErrors.threadId ? ' is-error' : ''}`}>
-                  <FieldLabel
-                    htmlFor={`${baseId}-threadId`}
-                    required
-                    help={t('workspace.schedule.threadHelp')}
-                  >
-                    {t('workspace.schedule.thread')}
-                  </FieldLabel>
-                  <Select
-                    id={`${baseId}-threadId`}
-                    value={threadId}
-                    options={threadOptions}
-                    placeholder={t('workspace.schedule.threadRequired')}
-                    disabled={saving || threadOptions.length === 0}
-                    aria-invalid={Boolean(fieldErrors.threadId)}
-                    aria-describedby={fieldErrors.threadId ? `${baseId}-threadId-err` : undefined}
-                    onChange={value => {
-                      setThreadId(value)
-                      clearErrors('threadId')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.threadId && <FieldError id={`${baseId}-threadId-err`}>{fieldErrors.threadId}</FieldError>}
-                </div>
-              </div>
-            )}
+            <ScheduleTargetField
+              baseId={baseId}
+              targetType={targetType}
+              saving={saving}
+              folders={folderOptions}
+              agents={agentOptions}
+              sessions={sessionOptions}
+              threads={threadOptions}
+              turnCuts={turnCutOptions}
+              folderId={folderId}
+              agentName={agentName}
+              sessionId={sessionId}
+              sourceThreadId={sourceThreadId}
+              turnEndEntryId={turnEndEntryId}
+              threadId={threadId}
+              errors={fieldErrors}
+              onTargetTypeChange={value => {
+                setTargetType(value)
+                clearErrors('folderId', 'agentName', 'sessionId', 'sourceThreadId', 'turnEndEntryId', 'threadId')
+                bumpIdempotencyAfterError()
+              }}
+              onFolderChange={value => {
+                setFolderId(value)
+                clearErrors('folderId')
+                bumpIdempotencyAfterError()
+              }}
+              onAgentChange={value => {
+                setAgentName(value)
+                clearErrors('agentName')
+                bumpIdempotencyAfterError()
+              }}
+              onSessionChange={handleSessionChange}
+              onSourceThreadChange={value => {
+                setSourceThreadId(value)
+                setTurnEndEntryId('')
+                clearErrors('sourceThreadId', 'turnEndEntryId')
+                bumpIdempotencyAfterError()
+              }}
+              onTurnEndChange={value => {
+                setTurnEndEntryId(value)
+                clearErrors('turnEndEntryId')
+                bumpIdempotencyAfterError()
+              }}
+              onThreadChange={value => {
+                setThreadId(value)
+                clearErrors('threadId')
+                bumpIdempotencyAfterError()
+              }}
+            />
           </fieldset>
 
           <div className={`workspace-schedule-field form-group${fieldErrors.message ? ' is-error' : ''}`}>
@@ -705,204 +585,66 @@ export function ScheduleEditorDialog({
 
           <fieldset className="workspace-schedule-fieldset">
             <legend>{t('workspace.schedule.when')}</legend>
-            <div className="workspace-schedule-seg" role="group" aria-label={t('workspace.schedule.mode')}>
-              <button
-                type="button"
-                className="workspace-schedule-seg-btn"
-                data-ui-focus="row"
-                aria-pressed={triggerType === 'REPEAT'}
-                disabled={saving}
-                onClick={() => {
-                  setTriggerType('REPEAT')
-                  clearErrors('onceDate', 'onceTime', 'repeatTime', 'minute', 'cron')
-                  bumpIdempotencyAfterError()
-                }}
-              >
-                {t('workspace.schedule.repeat')}
-              </button>
-              <button
-                type="button"
-                className="workspace-schedule-seg-btn"
-                data-ui-focus="row"
-                aria-pressed={triggerType === 'ONCE'}
-                disabled={saving}
-                onClick={() => {
-                  setTriggerType('ONCE')
-                  clearErrors('onceDate', 'onceTime', 'repeatTime', 'minute', 'cron')
-                  bumpIdempotencyAfterError()
-                }}
-              >
-                {t('workspace.schedule.once')}
-              </button>
-            </div>
-
-            {triggerType === 'REPEAT' ? (
-              <div className="workspace-schedule-grid2">
-                <div className="workspace-schedule-field">
-                  <FieldLabel htmlFor={`${baseId}-frequency`} required>{t('workspace.schedule.frequency')}</FieldLabel>
-                  <Select
-                    id={`${baseId}-frequency`}
-                    value={frequency}
-                    disabled={saving}
-                    options={[
-                      { value: 'DAILY', label: t('workspace.schedule.freqDaily') },
-                      { value: 'WEEKDAYS', label: t('workspace.schedule.freqWeekdays') },
-                      { value: 'WEEKLY', label: t('workspace.schedule.freqWeekly') },
-                      { value: 'HOURLY', label: t('workspace.schedule.freqHourly') },
-                      { value: 'CRON', label: t('workspace.schedule.freqCron') },
-                    ]}
-                    onChange={value => {
-                      setFrequency(value as ScheduleTriggerFrequency)
-                      clearErrors('repeatTime', 'minute', 'cron')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                </div>
-
-                {frequency === 'WEEKLY' && (
-                  <div className="workspace-schedule-field">
-                    <FieldLabel htmlFor={`${baseId}-weekday`} required>{t('workspace.schedule.weekday')}</FieldLabel>
-                    <Select
-                      id={`${baseId}-weekday`}
-                      value={weekday}
-                      disabled={saving}
-                      options={SCHEDULE_WEEKDAYS.map(day => ({
-                        value: day,
-                        label: t(WEEKDAY_LABEL_KEYS[day]),
-                      }))}
-                      onChange={value => {
-                        setWeekday(value)
-                        bumpIdempotencyAfterError()
-                      }}
-                    />
-                  </div>
-                )}
-
-                {(frequency === 'DAILY' || frequency === 'WEEKDAYS' || frequency === 'WEEKLY') && (
-                  <div className={`workspace-schedule-field form-group${fieldErrors.repeatTime ? ' is-error' : ''}`}>
-                    <FieldLabel htmlFor={`${baseId}-repeatTime`} required>{t('workspace.schedule.time')}</FieldLabel>
-                    <TimeInput
-                      id={`${baseId}-repeatTime`}
-                      value={repeatTime}
-                      disabled={saving}
-                      aria-invalid={Boolean(fieldErrors.repeatTime)}
-                      aria-describedby={fieldErrors.repeatTime ? `${baseId}-repeatTime-err` : undefined}
-                      onChange={value => {
-                        setRepeatTime(value)
-                        clearErrors('repeatTime')
-                        bumpIdempotencyAfterError()
-                      }}
-                    />
-                    {fieldErrors.repeatTime && <FieldError id={`${baseId}-repeatTime-err`}>{fieldErrors.repeatTime}</FieldError>}
-                  </div>
-                )}
-
-                {frequency === 'HOURLY' && (
-                  <div className={`workspace-schedule-field form-group${fieldErrors.minute ? ' is-error' : ''}`}>
-                    <FieldLabel htmlFor={`${baseId}-minute`} required>{t('workspace.schedule.minute')}</FieldLabel>
-                    <NumberInput
-                      id={`${baseId}-minute`}
-                      min={0}
-                      max={59}
-                      step={1}
-                      value={minute}
-                      disabled={saving}
-                      aria-invalid={Boolean(fieldErrors.minute)}
-                      aria-describedby={fieldErrors.minute ? `${baseId}-minute-err` : undefined}
-                      onChange={next => {
-                        setMinute(next)
-                        clearErrors('minute')
-                        bumpIdempotencyAfterError()
-                      }}
-                    />
-                    {fieldErrors.minute && <FieldError id={`${baseId}-minute-err`}>{fieldErrors.minute}</FieldError>}
-                  </div>
-                )}
-
-                {frequency === 'CRON' && (
-                  <div className={`workspace-schedule-field form-group${fieldErrors.cron ? ' is-error' : ''}`}>
-                    <FieldLabel
-                      htmlFor={`${baseId}-cron`}
-                      required
-                      help={t('workspace.schedule.cronHelp')}
-                    >
-                      {t('workspace.schedule.cron')}
-                    </FieldLabel>
-                    <TextInput
-                      id={`${baseId}-cron`}
-                      value={cron}
-                      placeholder="0 9 * * 1-5"
-                      spellCheck={false}
-                      autoComplete="off"
-                      disabled={saving}
-                      aria-invalid={Boolean(fieldErrors.cron)}
-                      aria-describedby={fieldErrors.cron ? `${baseId}-cron-err` : undefined}
-                      onChange={event => {
-                        setCron(event.target.value)
-                        clearErrors('cron')
-                        bumpIdempotencyAfterError()
-                      }}
-                    />
-                    {fieldErrors.cron && <FieldError id={`${baseId}-cron-err`}>{fieldErrors.cron}</FieldError>}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="workspace-schedule-grid2">
-                <div className={`workspace-schedule-field form-group${fieldErrors.onceDate ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-onceDate`} required>{t('workspace.schedule.date')}</FieldLabel>
-                  <DateInput
-                    id={`${baseId}-onceDate`}
-                    value={onceDate}
-                    min={todayInTimeZone(timeZone)}
-                    disabled={saving}
-                    aria-invalid={Boolean(fieldErrors.onceDate)}
-                    aria-describedby={fieldErrors.onceDate ? `${baseId}-onceDate-err` : undefined}
-                    onChange={value => {
-                      setOnceDate(value)
-                      clearErrors('onceDate', 'onceTime')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.onceDate && <FieldError id={`${baseId}-onceDate-err`}>{fieldErrors.onceDate}</FieldError>}
-                </div>
-
-                <div className={`workspace-schedule-field form-group${fieldErrors.onceTime ? ' is-error' : ''}`}>
-                  <FieldLabel htmlFor={`${baseId}-onceTime`} required>{t('workspace.schedule.time')}</FieldLabel>
-                  <TimeInput
-                    id={`${baseId}-onceTime`}
-                    value={onceTime}
-                    disabled={saving}
-                    aria-invalid={Boolean(fieldErrors.onceTime)}
-                    aria-describedby={fieldErrors.onceTime ? `${baseId}-onceTime-err` : undefined}
-                    onChange={value => {
-                      setOnceTime(value)
-                      clearErrors('onceTime')
-                      bumpIdempotencyAfterError()
-                    }}
-                  />
-                  {fieldErrors.onceTime && <FieldError id={`${baseId}-onceTime-err`}>{fieldErrors.onceTime}</FieldError>}
-                </div>
-              </div>
-            )}
-
-            <div className="workspace-schedule-field">
-              <FieldLabel htmlFor={`${baseId}-timeZone`} required>{t('workspace.schedule.timeZone')}</FieldLabel>
-              <Select
-                id={`${baseId}-timeZone`}
-                value={timeZone}
-                disabled={saving}
-                options={timeZones.map(zone => ({
-                  value: zone,
-                  label: zone === localTz ? t('workspace.schedule.localTz', { zone }) : zone,
-                }))}
-                onChange={value => {
-                  setTimeZone(value)
-                  clearErrors('onceTime')
-                  bumpIdempotencyAfterError()
-                }}
-              />
-            </div>
+            <ScheduleTimeField
+              baseId={baseId}
+              saving={saving}
+              triggerType={triggerType}
+              frequency={frequency}
+              weekday={weekday}
+              repeatTime={repeatTime}
+              minute={minute}
+              cron={cron}
+              onceDate={onceDate}
+              onceTime={onceTime}
+              timeZone={timeZone}
+              timeZones={timeZones}
+              localTimeZone={localTz}
+              errors={fieldErrors}
+              onTriggerTypeChange={value => {
+                setTriggerType(value)
+                clearErrors('onceDate', 'onceTime', 'repeatTime', 'minute', 'cron')
+                bumpIdempotencyAfterError()
+              }}
+              onFrequencyChange={value => {
+                setFrequency(value)
+                clearErrors('repeatTime', 'minute', 'cron')
+                bumpIdempotencyAfterError()
+              }}
+              onWeekdayChange={value => {
+                setWeekday(value)
+                bumpIdempotencyAfterError()
+              }}
+              onRepeatTimeChange={value => {
+                setRepeatTime(value)
+                clearErrors('repeatTime')
+                bumpIdempotencyAfterError()
+              }}
+              onMinuteChange={value => {
+                setMinute(value)
+                clearErrors('minute')
+                bumpIdempotencyAfterError()
+              }}
+              onCronChange={value => {
+                setCron(value)
+                clearErrors('cron')
+                bumpIdempotencyAfterError()
+              }}
+              onOnceDateChange={value => {
+                setOnceDate(value)
+                clearErrors('onceDate', 'onceTime')
+                bumpIdempotencyAfterError()
+              }}
+              onOnceTimeChange={value => {
+                setOnceTime(value)
+                clearErrors('onceTime')
+                bumpIdempotencyAfterError()
+              }}
+              onTimeZoneChange={value => {
+                setTimeZone(value)
+                clearErrors('onceTime')
+                bumpIdempotencyAfterError()
+              }}
+            />
 
             <p
               className="workspace-schedule-preview"

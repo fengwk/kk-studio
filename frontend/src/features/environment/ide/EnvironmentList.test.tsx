@@ -23,6 +23,14 @@ describe('EnvironmentList', () => {
     expect(open).toHaveBeenCalledWith(target, button)
   })
 
+  it('shows a shared warning spinner while the environment is connecting', () => {
+    vi.mocked(useIdeWorkspace).mockReturnValue({ environments: [environment({ status: 'CONNECTING', ready: false })], resolveTarget: vi.fn() } as never)
+    render(<EnvironmentList open={vi.fn()} />)
+    const status = screen.getByRole('img', { name: '连接中' })
+    expect(status).toHaveClass('ui-list-row-running')
+    expect(status.querySelector('.ui-loading-spinner-icon')).toBeInTheDocument()
+  })
+
   it('does not offer opening when environment is offline', () => {
     vi.mocked(useIdeWorkspace).mockReturnValue({ environments: [environment({ status: 'OFFLINE', ready: false })], resolveTarget: vi.fn() } as never)
     render(<EnvironmentList open={vi.fn()} />)

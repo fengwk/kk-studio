@@ -37,3 +37,37 @@ for (const width of [900, 360, 320]) {
     await expect(deep).toContainText('完成')
   })
 }
+
+test('320px shared list truncation and reduced-motion status icons', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.goto('/browser-tests/subagent-tree-harness.html')
+
+  const active = page.getByRole('region', { name: '活跃子 Agent' })
+  const running = active.locator('[data-thread-id="deep"]')
+  const label = running.locator('.ui-list-row-label')
+  await expect(label).toBeVisible()
+  expect(await label.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      clips: style.overflow === 'hidden',
+      ellipsis: style.textOverflow === 'ellipsis',
+      nowrap: style.whiteSpace === 'nowrap',
+      hasOverflow: element.scrollWidth > element.clientWidth,
+    }
+  })).toEqual({ clips: true, ellipsis: true, nowrap: true, hasOverflow: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  const runningIcon = running.locator('.ui-loading-spinner-icon')
+  await expect(runningIcon).toBeVisible()
+  await expect(runningIcon).not.toHaveCSS('animation-name', 'none')
+
+  const waiting = active.locator('[data-thread-id="worker"] .thread-tree-status')
+  await expect(waiting).toHaveAttribute('aria-label', '等待异步结果')
+  await expect(waiting.locator('.ui-loading-spinner')).toHaveCount(0)
+  await expect(waiting.locator('svg')).toHaveCount(1)
+  await expect(waiting.locator('svg')).toHaveCSS('animation-name', 'none')
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(runningIcon).toHaveCSS('animation-name', 'none')
+})
