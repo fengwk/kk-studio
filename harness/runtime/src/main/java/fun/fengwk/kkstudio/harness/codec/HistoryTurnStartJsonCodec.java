@@ -1,22 +1,22 @@
 package fun.fengwk.kkstudio.harness.codec;
 
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.readEnum;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.array;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.readEnum;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.util.ArrayList;

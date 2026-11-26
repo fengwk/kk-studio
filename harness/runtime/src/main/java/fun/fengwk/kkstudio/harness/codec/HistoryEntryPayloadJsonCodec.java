@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.codec;
 
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.readEnum;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.readEnum;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -12,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -47,7 +48,6 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.time.Instant;
 import java.util.Objects;

@@ -15,22 +15,25 @@ import java.util.Objects;
  *
  * <p>启用 {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} 与 {@link
  * DeserializationFeature#FAIL_ON_TRAILING_TOKENS}，在边界严格拒绝重复字段与尾随 token。
- *
- * <p>本类是 common 层唯一的严格 JSON 文本/树门禁，供 HTTP 边界、配置与插件使用。harness 的 {@code HarnessJson.STRICT_DECIMAL}
- * 使用同样的树读取配置，但 harness-model 是可独立编译的叶子模块（生产依赖只有 Jackson），两层因此各自持有本层的常量配置，不互相 依赖；模型与 runtime 侧的
- * codec 使用 {@code HarnessJson}，其余调用方使用本类。
  */
 public final class JsonValues {
 
   private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // JSON number 按 BigDecimal 读回，避免 1e-324 / 1e309 在 double 中变成 0 或 Infinity。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+      strictDecimalBuilder(JsonMapper.builder()).build();
 
   private JsonValues() {}
+
+  /** 在调用方的 builder 上启用严格树读取，保留原有的工厂与输入限制。 */
+  public static JsonMapper.Builder strictBuilder(JsonMapper.Builder builder) {
+    return builder
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
+  /** 同时以 BigDecimal 读取树中的小数，避免精度损失及上下溢。 */
+  public static JsonMapper.Builder strictDecimalBuilder(JsonMapper.Builder builder) {
+    return strictBuilder(builder).enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+  }
 
   /**
    * 确保文本非空白且是有效严格 JSON，返回原始文本。

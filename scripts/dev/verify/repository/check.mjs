@@ -394,7 +394,7 @@ const moduleDependencies = {
   schema: [],
   work: ['common'],
   'harness/environment': ['common'],
-  'harness/model': [],
+  'harness/model': ['common'],
   'harness/runtime': ['common', 'harness-environment', 'harness-model'],
   'harness/agent-builtin': ['common', 'harness-model', 'harness-runtime'],
   'platform/plugin-api': ['common', 'harness-runtime'],
@@ -414,7 +414,6 @@ const moduleDependencies = {
     'common',
     'work',
     'canvas-spi',
-    'harness-model',
     'platform-plugin-api',
     'platform-runtime',
   ],
@@ -619,7 +618,6 @@ const webHarnessAllowedPrefixes = [
 const webHarnessValueImports = new Set([
   'fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec',
   'fun.fengwk.kkstudio.harness.model.ImageInputTier',
-  'fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport',
 ])
 
 /** 精确按文件放行真实装配；不为 controller、普通 mapper 或任意 Driver 私有包开通配。 */

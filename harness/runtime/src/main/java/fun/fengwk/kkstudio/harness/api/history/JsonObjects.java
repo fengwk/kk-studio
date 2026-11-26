@@ -4,8 +4,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 /**
  * history 的严格 canonical JSON object 工具：{@link CustomMessagePayload} 构造时用它校验 detailsJson； history

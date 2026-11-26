@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.codec;
 
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.array;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.bool;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.decodeNullableText;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.common.json.JsonCodecSupport.requireFields;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;

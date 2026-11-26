@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.model.codec;
+package fun.fengwk.kkstudio.common.json;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.harness.codec;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.util.Objects;
 import java.util.Set;

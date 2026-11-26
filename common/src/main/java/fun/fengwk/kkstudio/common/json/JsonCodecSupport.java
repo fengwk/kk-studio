@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.model.codec;
+package fun.fengwk.kkstudio.common.json;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
