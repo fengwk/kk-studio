@@ -22,6 +22,7 @@ interface DraftPersistenceInput {
   scope: CanvasScope
   canvasId: string
   viewSlot: number
+  userId: string
   drafts: CanvasLocalState['drafts']
   snapshot: CanvasSnapshotDTO | undefined
 }
@@ -31,18 +32,18 @@ interface DraftPersistenceInput {
  *
  * 落盘任务在序列化阶段读取最新的持久化目标，ACK 与写入共用同一条链，因此「前序写入 → ACK → 后续写入」严格有序，已确认的草稿不会被排队中的写入复活。
  */
-export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, drafts, snapshot }: DraftPersistenceInput) {
+export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, userId, drafts, snapshot }: DraftPersistenceInput) {
   const { setState, isMountedRef, canvasEpochRef, activeCanvasIdRef, draftsRef, positionsRef, targetDraftsRef, draftPersistChainRef, draftBaselineRef } = scope
   const { t } = useI18n()
   const [draftLoadEpoch, setDraftLoadEpoch] = useState(0)
 
-  // 恢复 IndexedDB 中的持久化草稿（按 canvasId 严格隔离）
+  // 恢复当前用户、画布视图与编辑会话的持久化草稿
   useEffect(() => {
     const currentEpoch = canvasEpochRef.current
     // 加载开始即撤销持久基线，加载完成前禁止删除旧草稿
     draftBaselineRef.current = { canvasId: null, drafts: {} }
     let cancelled = false
-    void loadCanvasDrafts(canvasId, { viewSlot }).then((persisted) => {
+    void loadCanvasDrafts(canvasId, { userId, viewSlot }).then((persisted) => {
       if (cancelled || canvasEpochRef.current !== currentEpoch || activeCanvasIdRef.current !== canvasId) {
         return
       }
@@ -78,7 +79,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, drafts, s
     return () => {
       cancelled = true
     }
-  }, [activeCanvasIdRef, canvasEpochRef, canvasId, draftBaselineRef, draftsRef, positionsRef, setState, t, targetDraftsRef, viewSlot])
+  }, [activeCanvasIdRef, canvasEpochRef, canvasId, draftBaselineRef, draftsRef, positionsRef, setState, t, targetDraftsRef, userId, viewSlot])
 
   // 监听持久化存储异常
   useEffect(() => {
@@ -129,6 +130,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, drafts, s
       const result = await persistDraftDiff({
         canvasId: taskCanvasId,
         viewSlot,
+        userId,
         isCurrentTask,
         baselineDrafts: currentBaseline.drafts,
         targetDrafts: { ...targetDraftsRef.current },
@@ -160,7 +162,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, drafts, s
         setState((cur) => ({ ...cur, draftPersistPending: false }))
       }
     })
-  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, isMountedRef, setState, t, targetDraftsRef, viewSlot])
+  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, isMountedRef, setState, t, targetDraftsRef, userId, viewSlot])
 
   useEffect(() => {
     runDraftPersistence()
@@ -218,7 +220,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, drafts, s
 
     const ackTask = draftPersistChainRef.current.then(async () => {
       // 持久 ACK 针对原 identity：即使卸载或画布切换也必须 await 实际 IDB commit；写入失败则 reject，保留 operation
-      await ackCanvasDrafts(targetCanvasId, acks, { editingSessionId: targetSessionId, viewSlot })
+      await ackCanvasDrafts(targetCanvasId, acks, { userId, editingSessionId: targetSessionId, viewSlot })
 
       // 内存 state / baseline 变更只能当 captured generation 仍 active，绝不改新 canvas
       if (!isStillActive()) {
@@ -254,7 +256,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, viewSlot, drafts, s
     // 链序保证：前序 queued writes -> ACK -> 后续 writes
     draftPersistChainRef.current = ackTask.catch(() => undefined)
     return ackTask
-  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, draftsRef, isMountedRef, positionsRef, setState, targetDraftsRef, viewSlot])
+  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, draftsRef, isMountedRef, positionsRef, setState, targetDraftsRef, userId, viewSlot])
 
   const ackDurableDrafts = useCallback((acks: CanvasDraftAck[]): Promise<void> => {
     const activeCanvasId = activeCanvasIdRef.current

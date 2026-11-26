@@ -12,7 +12,6 @@
 import {
   buildSessionKey,
   CanvasStorageUnavailableError,
-  getCurrentUserId,
   notifyCanvasStorageError,
   openCanvasDatabase,
   resolveIdbFactory,
@@ -48,7 +47,7 @@ function resolveScope(canvasId: string, options: CanvasLocalStoreOptions) {
   if (isSessionReloading()) {
     throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
   }
-  const userId = options.userId ?? getCurrentUserId()
+  const { userId } = options
   const editingSessionId = options.editingSessionId ?? getEditingSessionId()
   return {
     userId,

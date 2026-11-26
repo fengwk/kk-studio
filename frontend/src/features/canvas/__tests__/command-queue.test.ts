@@ -15,6 +15,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const USER_ID = 'user'
 const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b'
 
 function deleteCommand(nodeId: string = NODE_ID): CanvasCommandDTO {
@@ -68,6 +69,7 @@ describe('CanvasCommandQueue', () => {
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(7),
       apply,
       refetch: vi.fn(),
@@ -94,6 +96,7 @@ describe('CanvasCommandQueue', () => {
     const revisions: string[] = []
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(10),
       apply,
       refetch,
@@ -120,6 +123,7 @@ describe('CanvasCommandQueue', () => {
       .mockResolvedValueOnce(advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -139,6 +143,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn().mockResolvedValue(advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -158,6 +163,7 @@ describe('CanvasCommandQueue', () => {
     const initial = snapshot(5)
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: initial,
       apply,
       refetch: vi.fn(),
@@ -170,6 +176,7 @@ describe('CanvasCommandQueue', () => {
   it('does not regress to a stale query snapshot but accepts equal-version runtime updates', () => {
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(8),
       apply: vi.fn(),
       refetch: vi.fn(),
@@ -194,6 +201,7 @@ describe('CanvasCommandQueue', () => {
     const refetch = vi.fn().mockResolvedValue(snapshot(4))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch,
@@ -212,6 +220,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn(async () => advancePatch(hugeNext))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(huge),
       apply,
       refetch: vi.fn(),
@@ -231,6 +240,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn(async () => advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -272,6 +282,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn(async () => advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -298,6 +309,7 @@ describe('CanvasCommandQueue', () => {
     const failingApply = vi.fn()
     const failingQueue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: failingApply,
       refetch: vi.fn(),
@@ -317,6 +329,7 @@ describe('CanvasCommandQueue', () => {
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: failingApply,
       refetch: vi.fn(),
@@ -340,6 +353,7 @@ describe('CanvasCommandQueue', () => {
     })
     const reloaded = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: recoverApply,
       refetch: vi.fn(),
@@ -372,6 +386,7 @@ describe('CanvasCommandQueue', () => {
       .mockResolvedValueOnce(advancePatch(2))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       createCommandId: () => idempotencyKey,
@@ -405,6 +420,7 @@ describe('CanvasCommandQueue', () => {
     const onDraftAcks = vi.fn()
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch,
@@ -439,6 +455,7 @@ describe('CanvasCommandQueue', () => {
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn().mockResolvedValue(snapshot(9)),
@@ -463,6 +480,7 @@ describe('CanvasCommandQueue', () => {
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -482,6 +500,7 @@ describe('CanvasCommandQueue', () => {
       .mockRejectedValueOnce(new ApiError('network down'))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -505,6 +524,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn(async () => advancePatch(9))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(5),
       apply,
       refetch,
@@ -521,6 +541,7 @@ describe('CanvasCommandQueue', () => {
     const applyNext = vi.fn(async () => advancePatch(11))
     const contiguous = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(10),
       apply: applyNext,
       refetch: vi.fn(),
@@ -543,6 +564,7 @@ describe('CanvasCommandQueue', () => {
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -586,6 +608,7 @@ describe('CanvasCommandQueue', () => {
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -665,6 +688,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn().mockRejectedValue(new ApiError('network down'))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -725,6 +749,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -768,6 +793,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn()
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -839,6 +865,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn().mockResolvedValue(snapshot(4)),
@@ -868,6 +895,7 @@ describe('CanvasCommandQueue', () => {
     const apply = vi.fn().mockRejectedValue(new ApiError('network down'))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -947,6 +975,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -996,6 +1025,7 @@ describe('CanvasCommandQueue', () => {
     })
     const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: reloadApply,
       refetch: vi.fn(),
@@ -1079,6 +1109,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
@@ -1114,6 +1145,7 @@ describe('CanvasCommandQueue', () => {
     const reloadCalls: ApplyCanvasCommandsRequestDTO[] = []
     const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: vi.fn().mockImplementation(async (_canvasId, req: ApplyCanvasCommandsRequestDTO) => {
         reloadCalls.push(req)
@@ -1156,6 +1188,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: vi.fn(),
       refetch: vi.fn(),
@@ -1198,6 +1231,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: vi.fn(async () => advancePatch(2)),
       refetch: vi.fn(),
@@ -1222,6 +1256,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: vi.fn(async () => advancePatch(2)),
       refetch: vi.fn(),
@@ -1244,6 +1279,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: vi.fn().mockRejectedValue(new ApiError('conflict', 409, 'CANVAS_CONFLICT')),
       refetch: vi.fn().mockResolvedValue(snapshot(2)),
@@ -1277,6 +1313,7 @@ describe('CanvasCommandQueue', () => {
     const initialCommands: CanvasCommandDTO[] = [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name: 'after' }]
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply: vi.fn(async () => advancePatch(2)),
       refetch: vi.fn(),
@@ -1308,6 +1345,7 @@ describe('CanvasCommandQueue', () => {
 
     const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(2),
       apply: recoverApply,
       refetch: vi.fn(),
@@ -1351,6 +1389,7 @@ describe('CanvasCommandQueue', () => {
 
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       viewSlot: 0,
+      userId: USER_ID,
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),

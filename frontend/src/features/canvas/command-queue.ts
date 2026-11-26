@@ -4,7 +4,6 @@ import {
   postCanvasCommands,
 } from '@/features/canvas/canvas-api'
 import { compareCanvasRevisions } from '@/features/canvas/canvas-version'
-import { getCurrentUserId } from '@/features/canvas/canvas-local-store'
 import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
 import {
   buildPendingOperation,
@@ -60,7 +59,7 @@ export interface CanvasCommandQueueOptions {
   onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
   /** 冻结操作的持久化存储；未提供时按 canvasId + 编辑会话使用 IndexedDB operation store。 */
   operationStore?: CanvasPendingOperationStore
-  userId?: string
+  userId: string
   editingSessionId?: string
   viewSlot: number
   /**
@@ -124,7 +123,7 @@ export class CanvasCommandQueue {
     this.refetch = options.refetch ?? getCanvas
     this.createCommandId = options.createCommandId ?? (() => crypto.randomUUID())
     this.onSnapshot = options.onSnapshot
-    this.userId = options.userId ?? getCurrentUserId()
+    this.userId = options.userId
     this.editingSessionId = options.editingSessionId ?? getEditingSessionId()
     this.viewSlot = options.viewSlot
     this.onDraftAcks = options.onDraftAcks

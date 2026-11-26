@@ -1,7 +1,7 @@
 /**
  * Canvas 本地持久化公共基座 (IndexedDB)
  *
- * - 本地状态按画布视图与编辑会话隔离，不同用途各自使用独立 object store，
+ * - 本地状态按用户、画布视图与编辑会话隔离，不同用途各自使用独立 object store，
  *   绝不把“待确认操作”塞进草稿记录后再靠可选字段猜测。
  * - 写入必须等待 `transaction.oncomplete` 才算真正落盘；`onabort`/`onerror` 一律上报，
  *   绝不依据 `request.onsuccess` 提前宣称已持久化。
@@ -10,18 +10,11 @@
 
 import { canvasViewKey } from './canvas-view-key'
 
-/** 未接入登录态前的稳定匿名身份。 */
-const DEFAULT_ANONYMOUS_USER = 'anonymous'
-
 export interface CanvasLocalStoreOptions {
-  userId?: string
+  userId: string
   editingSessionId?: string
   viewSlot: number
   idbFactory?: IDBFactory
-}
-
-export function getCurrentUserId(): string {
-  return DEFAULT_ANONYMOUS_USER
 }
 
 /** IndexedDB 在当前环境不可用；本地状态只能在当前标签页会话内保留。文案由渲染层按 locale 生成。 */

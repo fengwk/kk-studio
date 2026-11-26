@@ -24,6 +24,7 @@ import type {
  */
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const USER_ID = 'canvas-editor-user'
 
 const params = new URLSearchParams(window.location.search)
 const locale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
@@ -252,7 +253,7 @@ export function CanvasEditorHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <CanvasWorkbench canvasId={CANVAS_ID} viewSlot={0} />
+        <CanvasWorkbench canvasId={CANVAS_ID} viewSlot={0} userId={USER_ID} />
       </ApplicationEventProvider>
     </QueryClientProvider>
   )

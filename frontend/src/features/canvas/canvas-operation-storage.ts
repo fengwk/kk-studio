@@ -12,7 +12,6 @@
 import {
   buildSessionKey,
   CanvasStorageUnavailableError,
-  getCurrentUserId,
   notifyCanvasStorageError,
   openCanvasDatabase,
   resolveIdbFactory,
@@ -79,7 +78,7 @@ function assertSessionWritable(): void {
 
 function resolveScope(canvasId: string, options: CanvasLocalStoreOptions): ResolvedScope {
   assertSessionWritable()
-  const userId = options.userId ?? getCurrentUserId()
+  const { userId } = options
   const editingSessionId = options.editingSessionId ?? getEditingSessionId()
   return {
     userId,

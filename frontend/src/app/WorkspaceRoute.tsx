@@ -20,7 +20,9 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 
 function CanvasPane({ target }: PaneRendererProps<Extract<PaneTarget, { kind: 'canvas' }>>) {
-  return <CanvasWorkbench canvasId={target.canvasId} viewSlot={target.viewSlot} />
+  const { user } = useAccount()
+  if (!user) return null
+  return <CanvasWorkbench canvasId={target.canvasId} viewSlot={target.viewSlot} userId={user.id} />
 }
 const renderers = { canvas: CanvasPane, vscode: VsCodePaneRenderer, thread: ThreadPaneRenderer, draft: DraftPaneRenderer } satisfies PaneRenderers
 const account = (hasUnsentContent: boolean) => <AccountMenu hasUnsentContent={hasUnsentContent} />
