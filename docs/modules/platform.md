@@ -325,6 +325,7 @@ Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。`GET /api/platform/models/capabilities?providerName&modelId` 以 Provider 当前协议与端点、草稿 wire model ID 返回缓存选项、已知 TTL/写入倍率、默认档位及 `promptCacheState`（可配置、上游管理、由端点决定或不支持）；查询不要求先保存模型。模型创建、更新和配置导入均要求每个 variant 使用当前能力返回的可选档位；没有可选档位时，只接受能力返回的默认档位。切换 Provider 或模型后，编辑器保留草稿值，由用户明确选择有效档位；新变体使用当前默认档位。
 Provider 改址时，PUT 拒绝使已保存模型的档位失效的地址；配置同步的检查与导入按最终配置校验，可在同一份 YAML 中更新端点并修正受影响的模型。
+单模型写入先锁目标 Provider；配置导入在写模型前按名称依次锁定或创建涉及的 Provider，包括仅被单模型引用的目标。模型组写入只锁模型，不取 Provider 锁。
 `GET /api/platform/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
 模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，

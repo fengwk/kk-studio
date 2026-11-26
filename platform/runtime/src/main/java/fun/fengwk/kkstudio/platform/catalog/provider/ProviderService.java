@@ -118,7 +118,7 @@ public class ProviderService {
         applyEdits(existing, mutation, importCredential(spec.getCredential())), expected);
   }
 
-  /** Provider 行锁阻挡目标为该 Provider 的模型写入；这里不能反向锁模型。 */
+  /** 目标为该 Provider 的单模型写入先获取同一 Provider 行锁；这里无需锁模型。 */
   private void validateRetainedModels(
       Provider current, Mutation mutation, Set<String> plannedModels) {
     if (Objects.equals(current.baseUrl(), mutation.baseUrl())) {

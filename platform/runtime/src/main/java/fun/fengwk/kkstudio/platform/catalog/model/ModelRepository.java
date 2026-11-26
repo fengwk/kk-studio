@@ -94,7 +94,7 @@ public class ModelRepository {
         .list();
   }
 
-  /** 普通快照读取：调用方持有 Provider 行锁时不能反向请求模型行锁。 */
+  /** 普通快照读取：Provider 兼容性校验不需要模型行锁。 */
   public List<Model> listByProvider(String providerName) {
     return jdbcClient
         .sql(

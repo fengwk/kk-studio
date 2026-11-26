@@ -167,6 +167,7 @@ class ConfigSyncImportLockPostgresIntegrationTest {
     return new ConfigSyncApplier(
         jdbcClient,
         providerService,
+        providers,
         mock(ModelRepository.class),
         mock(ModelService.class),
         mock(SkillCatalogService.class),

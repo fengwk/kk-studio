@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
@@ -189,6 +190,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
         new ConfigSyncApplier(
             jdbcClient,
             providerService,
+            mock(ProviderRepository.class),
             mock(ModelRepository.class),
             mock(ModelService.class),
             mock(SkillCatalogService.class),

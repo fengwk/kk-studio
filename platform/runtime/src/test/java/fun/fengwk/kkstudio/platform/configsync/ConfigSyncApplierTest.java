@@ -16,6 +16,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
@@ -77,6 +80,7 @@ class ConfigSyncApplierTest {
   private static final String DEPENDENT_PLUGIN_ID = "dep.plugin";
 
   private final ProviderService providerService = mock(ProviderService.class);
+  private final ProviderRepository providerRepository = mock(ProviderRepository.class);
   private final ModelRepository modelRepository = mock(ModelRepository.class);
   private final ModelService modelService = mock(ModelService.class);
   private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
@@ -107,6 +111,7 @@ class ConfigSyncApplierTest {
       new ConfigSyncApplier(
           jdbcClient,
           providerService,
+          providerRepository,
           modelRepository,
           modelService,
           skillCatalogService,
@@ -175,9 +180,9 @@ class ConfigSyncApplierTest {
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 
-  private static ConfigSyncParser.ModelSpec modelSpec(String name) {
+  private static ConfigSyncParser.ModelSpec modelSpec(String name, String providerName) {
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
-    properties.setProviderName("provider");
+    properties.setProviderName(providerName);
     properties.setName(name);
     properties.setModelId("gpt");
     properties.setConfig(ConfigSyncFixtures.modelConfig());
@@ -234,23 +239,18 @@ class ConfigSyncApplierTest {
   }
 
   @Test
-  void existingPlannedModelsAreLockedBeforeProvidersAndTheirNamesArePassed() {
-    ConfigSyncParser.ProviderSpec provider = providerSpec("provider");
-    ConfigSyncParser.ModelSpec zeta = modelSpec("zeta");
-    ConfigSyncParser.ModelSpec alpha = modelSpec("alpha");
-    when(modelRepository.getByNameForUpdate("alpha"))
-        .thenReturn(
-            Model.builder()
-                .kind(ModelKind.MODEL)
-                .providerName("provider")
-                .name("alpha")
-                .version(1L)
-                .build());
+  void providerUnionIsLockedInNameOrderBeforeModelLookup() {
+    ConfigSyncParser.ProviderSpec alpha = providerSpec("alpha");
+    ConfigSyncParser.ProviderSpec charlie = providerSpec("charlie");
+    ConfigSyncParser.ModelSpec zetaModel = modelSpec("zeta-model", "bravo");
+    ConfigSyncParser.ModelSpec alphaModel = modelSpec("alpha-model", "alpha");
+    when(providerRepository.getByNameForUpdate("bravo"))
+        .thenReturn(Provider.builder().name("bravo").build());
 
     applier.apply(
         plan(
-            List.of(provider),
-            List.of(zeta, alpha),
+            List.of(charlie, alpha),
+            List.of(zetaModel, alphaModel),
             List.of(),
             List.of(),
             List.of(),
@@ -259,16 +259,24 @@ class ConfigSyncApplierTest {
         List.of(),
         Set.of());
 
-    // 模型行锁必须先于 Provider 行锁，并仅把计划写入的单模型名传给 Provider 导入。
-    InOrder order = Mockito.inOrder(jdbcClient, modelRepository, providerService);
+    // 已声明和仅被引用的 Provider 按名称合并排序，全部处理后才允许读取 Model。
+    InOrder order =
+        Mockito.inOrder(jdbcClient, providerService, providerRepository, modelRepository);
     order.verify(jdbcClient).sql(contains("pg_advisory_xact_lock"));
-    order.verify(modelRepository).getByNameForUpdate("alpha");
-    order.verify(modelRepository).getByNameForUpdate("zeta");
-    order.verify(providerService).importProvider(provider.properties(), Set.of("alpha", "zeta"));
-    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
-    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
+    order
+        .verify(providerService)
+        .importProvider(alpha.properties(), Set.of("zeta-model", "alpha-model"));
+    order.verify(providerRepository).getByNameForUpdate("bravo");
+    order
+        .verify(providerService)
+        .importProvider(charlie.properties(), Set.of("zeta-model", "alpha-model"));
+    order.verify(modelRepository).getByName("zeta-model");
+    order.verify(modelRepository).getByName("alpha-model");
+    verifyNoMoreInteractions(providerRepository, modelRepository);
     verify(providerService, never()).createProvider(any());
     verify(providerService, never()).updateProvider(any(), any());
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
   }
 
   @Test
@@ -327,7 +335,8 @@ class ConfigSyncApplierTest {
 
   @Test
   void modelImportCreatesNewModel() {
-    when(modelRepository.getByNameForUpdate("m")).thenReturn(null);
+    when(providerRepository.getByNameForUpdate("p")).thenReturn(mock(Provider.class));
+    when(modelRepository.getByName("m")).thenReturn(null);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
     properties.setName("m");
@@ -628,7 +637,8 @@ class ConfigSyncApplierTest {
   void existingModelIsUpdatedWithExistingVersionCas() {
     Model existing =
         Model.builder().kind(ModelKind.MODEL).providerName("p").name("m").version(4L).build();
-    when(modelRepository.getByNameForUpdate("m")).thenReturn(existing);
+    when(providerRepository.getByNameForUpdate("p")).thenReturn(mock(Provider.class));
+    when(modelRepository.getByName("m")).thenReturn(existing);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
     properties.setName("m");

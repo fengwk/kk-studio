@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
@@ -23,6 +24,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGitImport;
@@ -40,6 +42,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -53,7 +56,7 @@ import java.util.stream.Collectors;
  *
  * <p>计划在写事务外形成，因此事务内先按同一份插件声明重新核验依赖的 Agent 仍然存在（行锁读取，锁持有到外层事务结束），避免提交悬空依赖。
  *
- * <p>已有资源按文件数组顺序更新，互逆顺序会拿到互逆行锁。写事务在任何资源行锁之前先取固定的配置导入事务锁，让不同实例串行写入。
+ * <p>写事务在任何资源行锁之前先取固定的配置导入事务锁，让不同实例串行写入。Provider 按名称顺序锁定或创建，包括仅被计划中单模型引用的目标，随后才写模型。
  */
 @AllArgsConstructor
 @Component
@@ -75,6 +78,7 @@ public class ConfigSyncApplier {
 
   private final JdbcClient jdbcClient;
   private final ProviderService providerService;
+  private final ProviderRepository providerRepository;
   private final ModelRepository modelRepository;
   private final ModelService modelService;
   private final SkillCatalogService skillCatalogService;
@@ -110,11 +114,8 @@ public class ConfigSyncApplier {
       List<PreparedGitImport> preparedSkills,
       Set<String> confirmedPluginCredentialResets) {
     lockImport();
-    Map<String, Model> lockedModels = lockExistingSingleModels(plan.models());
-    Set<String> plannedModels =
-        plan.models().stream().map(ConfigSyncParser.ModelSpec::name).collect(Collectors.toSet());
-    applyProviders(plan.providers(), plannedModels);
-    applyModels(plan.models(), lockedModels);
+    applyProviders(plan);
+    applyModels(plan.models());
     for (PreparedGitImport skill : preparedSkills) {
       skillCatalogService.publishPreparedGitImport(skill);
     }
@@ -145,32 +146,33 @@ public class ConfigSyncApplier {
         .single();
   }
 
-  /** 先锁实际计划写入的单模型，再锁 Provider，与 ModelService 的锁序一致。 */
-  private Map<String, Model> lockExistingSingleModels(List<ConfigSyncParser.ModelSpec> models) {
-    Map<String, Model> existing = new HashMap<>();
-    models.stream()
-        .filter(spec -> spec.properties() instanceof SingleModelCreateDTO)
-        .map(ConfigSyncParser.ModelSpec::name)
-        .sorted()
-        .forEach(name -> existing.put(name, modelRepository.getByNameForUpdate(name)));
-    return existing;
-  }
-
-  private void applyProviders(
-      List<ConfigSyncParser.ProviderSpec> providers, Set<String> plannedModels) {
-    for (ConfigSyncParser.ProviderSpec spec : providers) {
-      // 导入是恢复文件业务事实：凭据为 null 表示清空而非沿用旧值；同名不同类型在写入时拒绝。
-      providerService.importProvider(spec.properties(), plannedModels);
+  /** 在任何模型加锁前按名称取得全部目标 Provider；null spec 表示只引用、不写入。 */
+  private void applyProviders(ConfigSyncPlan plan) {
+    Set<String> plannedModels =
+        plan.models().stream().map(ConfigSyncParser.ModelSpec::name).collect(Collectors.toSet());
+    Map<String, ConfigSyncParser.ProviderSpec> targets = new TreeMap<>();
+    for (ConfigSyncParser.ProviderSpec spec : plan.providers()) {
+      targets.put(spec.name(), spec);
+    }
+    for (ConfigSyncParser.ModelSpec spec : plan.models()) {
+      if (spec.properties() instanceof SingleModelCreateDTO single) {
+        targets.putIfAbsent(single.getProviderName(), null);
+      }
+    }
+    for (var target : targets.entrySet()) {
+      ConfigSyncParser.ProviderSpec spec = target.getValue();
+      if (spec != null) {
+        // 在同一顺序中锁住已有行或插入新行，并按文件事实恢复配置。
+        providerService.importProvider(spec.properties(), plannedModels);
+      } else if (providerRepository.getByNameForUpdate(target.getKey()) == null) {
+        throw DomainException.notFound("provider");
+      }
     }
   }
 
-  private void applyModels(
-      List<ConfigSyncParser.ModelSpec> models, Map<String, Model> lockedModels) {
+  private void applyModels(List<ConfigSyncParser.ModelSpec> models) {
     for (ConfigSyncParser.ModelSpec spec : models) {
-      Model existing =
-          lockedModels.containsKey(spec.name())
-              ? lockedModels.get(spec.name())
-              : modelRepository.getByName(spec.name());
+      Model existing = modelRepository.getByName(spec.name());
       if (existing == null) {
         modelService.createModel(spec.properties());
       } else {
