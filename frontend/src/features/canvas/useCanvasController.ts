@@ -39,9 +39,9 @@ import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
 /**
  * 画布编辑器的组合根：持有渲染状态、权威快照与函数目录查询、视口与选区，并把草稿持久化、命令队列、节点落位、文本编辑、引用边与节点操作
  * 这些子 hook 接到同一个 {@link useCanvasScope} 作用域上。展示 = 权威快照 + 待确认操作 + 本地草稿。
- * 宿主以画布视图为 key；一个控制器实例只服务一个视图。
+ * 宿主以用户和画布视图为 key；一个控制器实例只服务同一用户的同一视图。
  */
-export function useCanvasController(canvasId: string, viewSlot: number) {
+export function useCanvasController(canvasId: string, viewSlot: number, userId: string) {
   const viewKey = canvasViewKey(canvasId, viewSlot)
   const queryClient = useQueryClient()
   const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(viewKey))
@@ -87,6 +87,7 @@ export function useCanvasController(canvasId: string, viewSlot: number) {
     scope,
     canvasId,
     viewSlot,
+    userId,
     drafts: state.drafts,
     snapshot,
   })
@@ -97,6 +98,7 @@ export function useCanvasController(canvasId: string, viewSlot: number) {
     queryClient,
     canvasId,
     viewSlot,
+    userId,
     snapshot,
     ackDurableDraftsForScope: draftLayer.ackDurableDraftsForScope,
     applyDraftAcks: draftLayer.applyDraftAcks,

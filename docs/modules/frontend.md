@@ -335,7 +335,7 @@ Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结
 由删除触发的保存也使用点击时的函数基线；只有从该基线连续确认的自有保存值可以推进删除的函数基线，远端变更仍由 CAS 裁决。
 保存失败或画布切换时停止后续删除；删除期间不为目标节点接收新的函数草稿。
 
-草稿、待确认命令与视口统一使用 `canvasId/slot` 区分视图；草稿和命令另按用户与编辑会话隔离。当前本地存储的 userId 为固定 anonymous，服务端仍按账号校验画布归属。
+草稿、待确认命令与视口统一使用 `canvasId/slot` 区分视图；草稿和待确认命令还按当前登录账号的 `userId` 和编辑会话隔离。服务端仍按账号校验画布归属。
 IndexedDB 草稿 ACK 物理完成后才删除持久 operation，草稿保存与 ACK 共用序列化链；
 generation 防止旧响应清除新输入，卸载围栏保护底层存储。
 “已保存”要求 command、draft 均无 pending 且无 storageError。

@@ -14,6 +14,7 @@ import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/generated
 
 const SESSION_STORAGE_KEY = 'kk-studio.canvas.editingSessionId'
 const DEFAULT_CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const USER_ID = 'canvas-durability-user'
 
 export interface CanvasDurabilityRecordedCall {
   idempotencyKey: string
@@ -155,6 +156,7 @@ function buildQueue(options: CanvasDurabilityBuildOptions): CanvasCommandQueue {
 
   queue = new CanvasCommandQueue(currentCanvasId, {
     viewSlot: options.viewSlot,
+    userId: USER_ID,
     initialSnapshot,
     apply: async (_canvasId, body) => {
       recordedCalls.push({
@@ -221,7 +223,7 @@ async function listPersistedOperations(
   canvasId?: string,
 ): Promise<Array<{ id: string; idempotencyKey: string; commands: CanvasCommandDTO[]; sequence: number }>> {
   const cid = canvasId ?? currentCanvasId
-  const store = createCanvasOperationStore(cid, { viewSlot })
+  const store = createCanvasOperationStore(cid, { viewSlot, userId: USER_ID })
   const list = await store.list()
   return list.map((op) => ({
     id: op.id,

@@ -24,6 +24,7 @@ interface CommandQueueInput {
   queryClient: QueryClient
   canvasId: string
   viewSlot: number
+  userId: string
   snapshot: CanvasSnapshotDTO | undefined
   ackDurableDraftsForScope: (
     canvasId: string,
@@ -44,6 +45,7 @@ export function useCanvasCommandQueue({
   queryClient,
   canvasId,
   viewSlot,
+  userId,
   snapshot,
   ackDurableDraftsForScope,
   applyDraftAcks,
@@ -80,8 +82,9 @@ export function useCanvasCommandQueue({
       initialSnapshot: snapshot,
       editingSessionId: capturedSessionId,
       viewSlot,
+      userId,
       onSnapshot: publishSnapshot,
-      // 该 queue 专属的 ACK：闭包捕获原 canvasId、视图、editingSessionId 与 epoch
+      // 该 queue 专属的 ACK：闭包捕获原用户、canvasId、视图、editingSessionId 与 epoch
       onDraftAcks: (acks) => ackDurableDraftsForScope(canvasId, capturedSessionId, capturedEpoch, acks),
     })
     queueRef.current = queue
@@ -116,7 +119,7 @@ export function useCanvasCommandQueue({
           conflictMessage: t('canvas.conflict.recoveryFailed'),
         }))
       })
-  }, [ackDurableDraftsForScope, canvasEpochRef, canvasId, queryClient, queueCanvasIdRef, queueRef, setState, snapshot, t, viewSlot])
+  }, [ackDurableDraftsForScope, canvasEpochRef, canvasId, queryClient, queueCanvasIdRef, queueRef, setState, snapshot, t, userId, viewSlot])
 
   // 应用事件 WebSocket 订阅：更高 revision 直接刷新权威 Snapshot
   const refreshCanvasSnapshot = useCallback(() => {

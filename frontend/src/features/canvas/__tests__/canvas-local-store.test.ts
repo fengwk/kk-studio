@@ -10,7 +10,7 @@ import { createMockIDBFactory } from '@/test-support/mock-idb'
 describe('Canvas 本地持久化公共基座', () => {
   it('解析 IDBFactory：优先显式传入，其次 window.indexedDB，缺失时为 null', () => {
     const explicit = createMockIDBFactory()
-    expect(resolveIdbFactory({ viewSlot: 0, idbFactory: explicit })).toBe(explicit)
+    expect(resolveIdbFactory({ userId: 'user-1', viewSlot: 0, idbFactory: explicit })).toBe(explicit)
 
     const globalFactory = createMockIDBFactory()
     Object.defineProperty(window, 'indexedDB', { configurable: true, writable: true, value: globalFactory })
