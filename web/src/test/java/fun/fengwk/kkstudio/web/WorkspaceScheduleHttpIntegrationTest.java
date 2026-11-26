@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.support.JdbcTransactionManager;
@@ -72,6 +74,36 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
     String space = createSpace();
     String id = createSchedule(space, false);
     checkHistory(space, id);
+  }
+
+  /** 专用 Agent 只被定时任务引用，确保触发定时任务外键的冲突映射。 */
+  @Test
+  void scheduledAgentCannotBeDeletedOverHttp() throws Exception {
+    String agent = "scheduled-agent-" + UUID.randomUUID();
+    mvc.perform(
+            post("/api/platform/agents")
+                .cookie(login)
+                .header("Origin", "http://localhost")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"name":"%s",
+                     "execution":{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}},
+                     "config":{"tools":[],"skills":[],"subagents":[]}}
+                    """
+                        .formatted(agent)))
+        .andExpect(status().isCreated());
+
+    String space = createSpace();
+    createSchedule(space, false, agent);
+
+    mvc.perform(
+            delete("/api/platform/agents/{name}", agent)
+                .cookie(login)
+                .header("Origin", "http://localhost")
+                .param("expectedVersion", "0"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.reason").value("RESOURCE_IN_USE"));
   }
 
   @Test
@@ -337,6 +369,10 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
   }
 
   private String createSchedule(String space, boolean enabled) throws Exception {
+    return createSchedule(space, enabled, "default-assistant");
+  }
+
+  private String createSchedule(String space, boolean enabled, String agentName) throws Exception {
     String folder =
         mapper
             .readTree(
@@ -351,9 +387,9 @@ class WorkspaceScheduleHttpIntegrationTest extends WebPostgresTestSupport {
         """
         {"title":"Integration schedule","message":"Reply with exactly: scheduled integration output","enabled":%s,
          "trigger":{"type":"ONCE","localDate":"2099-01-01","time":"12:00"},"timeZone":"UTC",
-         "target":{"type":"NEW_SESSION","folderId":"%s","agentName":"default-assistant"}}
+         "target":{"type":"NEW_SESSION","folderId":"%s","agentName":"%s"}}
         """
-            .formatted(enabled, folder);
+            .formatted(enabled, folder, agentName);
     JsonNode created =
         mapper.readTree(
             mvc.perform(

@@ -19,8 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-import fun.fengwk.kkstudio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
@@ -36,8 +35,8 @@ import fun.fengwk.kkstudio.platform.orchestration.SessionInitialSettings;
 import fun.fengwk.kkstudio.workspace.dto.SessionCreateDTO;
 import fun.fengwk.kkstudio.workspace.dto.WorkspaceResourceKind;
 
-import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -89,9 +88,8 @@ class WorkspaceCorePostgresIntegrationTest {
         WorkspacePlacements.fingerprint("canvas"),
         1,
         null);
-    var document = new CanvasDocument(canvas, "Canvas title", 0, Instant.EPOCH, Instant.EPOCH);
-    var canvases = mock(CanvasQueryService.class);
-    when(canvases.findDocuments(List.of(canvas))).thenReturn(List.of(document));
+    var canvases = mock(CanvasDocuments.class);
+    when(canvases.findTitles(List.of(canvas))).thenReturn(Map.of(canvas, "Canvas title"));
     var harness = mock(HarnessPlacementQuery.class);
     var tree =
         new WorkspaceTreeService(spaces, placements, harness, runtimeProvider(), canvases, jdbc);

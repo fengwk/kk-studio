@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasResourceReference;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -78,10 +77,6 @@ public class CanvasQueryService {
     Objects.requireNonNull(blobId, "blobId");
     return canvasStore.findDocument(canvasId).isPresent()
         && resourceRepository.containsHeldBlob(canvasId, blobId);
-  }
-
-  public List<CanvasDocument> findDocuments(Collection<UUID> ids) {
-    return canvasStore.findDocuments(ids);
   }
 
   private CanvasSnapshot toSnapshot(CanvasDocument document, List<CanvasFunctionRun> functionRuns) {

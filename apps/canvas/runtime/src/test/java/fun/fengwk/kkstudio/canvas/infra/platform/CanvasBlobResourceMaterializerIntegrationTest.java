@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
@@ -44,6 +45,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
 
   @Autowired private CanvasBlobResourceMaterializer materializer;
   @Autowired private CanvasCommandService commands;
+  @Autowired private CanvasDocuments documents;
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private InMemoryS3StorageService s3;
@@ -63,7 +65,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
   @BeforeEach
   void createRunningRequest() {
     s3.clear();
-    canvasId = commands.createCanvas(UUID.randomUUID(), "materialize-fence").id();
+    canvasId = documents.create(UUID.randomUUID(), "materialize-fence").id();
     nodeId = UUID.randomUUID();
     requestId = UUID.randomUUID();
     resourceId = UUID.randomUUID();
@@ -153,7 +155,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
   void textAndBlobWinnerRequireLiveOwnership(String change) {
     text("cached");
     if (change.equals("wrong-canvas")) {
-      canvasId = commands.createCanvas(UUID.randomUUID(), "other-canvas").id();
+      canvasId = documents.create(UUID.randomUUID(), "other-canvas").id();
     } else {
       invalidate(change);
     }

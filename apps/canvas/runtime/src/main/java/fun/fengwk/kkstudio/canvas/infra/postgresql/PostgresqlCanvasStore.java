@@ -13,9 +13,11 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Canvas document 可变行状态（document/node/group/dedup）的 PostgreSQL 持久化。
@@ -64,7 +66,7 @@ public class PostgresqlCanvasStore {
   }
 
   /** 删除文档前清理命令回执；调用方须先清理画布内容。 */
-  void deleteDocument(UUID canvasId) {
+  public void deleteDocument(UUID canvasId) {
     commandDedupStore.deleteByCanvasId(canvasId);
     if (documentStore.deleteById(canvasId) != 1) {
       throw new IllegalStateException("delete canvas document failed: " + canvasId);
@@ -79,6 +81,13 @@ public class PostgresqlCanvasStore {
     return documentStore.findByIdForUpdate(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
 
+  public CanvasDocument requireLockedDocument(UUID canvasId) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    return lockDocument(canvasId)
+        .orElseThrow(
+            () -> DomainException.notFound("canvas", "canvas document not found: " + canvasId));
+  }
+
   /** 按 document → node 顺序加锁，并在读取归属后重新确认节点仍在该画布内。 */
   public Optional<CanvasDocument> lockDocumentForNode(UUID nodeId) {
     return nodeStore
@@ -87,11 +96,12 @@ public class PostgresqlCanvasStore {
         .filter(document -> lockNode(document.id(), nodeId).isPresent());
   }
 
-  public List<CanvasDocument> findDocuments(Collection<UUID> ids) {
-    return documentStore.findByIds(ids).stream().map(PostgresqlCanvasStore::toDomain).toList();
+  public Map<UUID, String> findDocumentTitles(Collection<UUID> ids) {
+    return documentStore.findByIds(ids).stream()
+        .collect(Collectors.toMap(CanvasDocumentDO::getId, CanvasDocumentDO::getTitle));
   }
 
-  void renameDocument(UUID canvasId, String title) {
+  public void renameDocument(UUID canvasId, String title) {
     if (documentStore.rename(canvasId, title) == 0) {
       throw DomainException.notFound("canvas");
     }

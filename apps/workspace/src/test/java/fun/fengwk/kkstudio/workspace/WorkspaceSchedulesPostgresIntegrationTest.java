@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -19,6 +20,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
 import fun.fengwk.kkstudio.platform.account.StudioRole;
 import fun.fengwk.kkstudio.platform.account.StudioUserLock;
@@ -174,6 +177,44 @@ class WorkspaceSchedulesPostgresIntegrationTest {
               .param("id", created.id())
               .query(Integer.class)
               .single());
+    }
+  }
+
+  /** A scheduled directory target rejects deletion with the shared conflict rule. */
+  @Test
+  void scheduledFolderCannotBeDeleted() {
+    try (var context = serviceContext()) {
+      var jdbc = context.getBean(JdbcClient.class);
+      var spaces = context.getBean(ChatSpaceService.class);
+      var schedules = context.getBean(WorkspaceSchedules.class);
+      var folders = context.getBean(FolderService.class);
+      var owner = testUser(context, "schedule-folder-reference");
+      var space =
+          spaces.create(
+              owner,
+              UUID.randomUUID(),
+              new ChatSpaceService.Create("Schedules", "Root", null, null, false));
+      UUID folder =
+          jdbc.sql("select id from workspace_folder where workspace_id=:space")
+              .param("space", space.id())
+              .query(UUID.class)
+              .single();
+      jdbc.sql("insert into agent (name, config) values ('test-agent', '{}'::jsonb)").update();
+      var target =
+          new ScheduleTargetDTO(
+              ScheduleTargetDTO.Type.NEW_SESSION, folder, "test-agent", null, null, null, null);
+      var trigger =
+          new ScheduleTriggerDTO(Type.REPEAT, Frequency.CRON, null, null, null, null, "* * * * *");
+      schedules.create(
+          owner,
+          space.id(),
+          UUID.randomUUID(),
+          new ScheduleDraftDTO("Daily check", "Check status", true, trigger, "UTC", target));
+
+      var error =
+          assertThrows(DomainException.class, () -> folders.delete(owner, space.id(), folder, 0));
+      assertEquals(DomainErrorCode.CONFLICT, error.code());
+      assertEquals("RESOURCE_IN_USE", error.reason());
     }
   }
 

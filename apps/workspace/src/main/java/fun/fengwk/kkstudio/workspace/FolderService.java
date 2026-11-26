@@ -179,18 +179,7 @@ public class FolderService {
     if (hasResources || folders.stream().anyMatch(folder -> folderId.equals(folder.parentId()))) {
       throw DomainException.conflict("FOLDER_NOT_EMPTY", "The folder is not empty");
     }
-    var scheduleReferences =
-        jdbc.sql(
-                "select id, title from workspace_schedule where workspace_id = :space and folder_id = :id order by id")
-            .param("space", spaceId)
-            .param("id", folderId)
-            .query((rs, row) -> rs.getObject("id", UUID.class) + ": " + rs.getString("title"))
-            .list();
-    if (!scheduleReferences.isEmpty()) {
-      throw DomainException.conflict(
-          "RESOURCE_IN_USE",
-          "Folder is used by schedules: " + String.join(", ", scheduleReferences));
-    }
+    ScheduleReferences.requireFolderUnused(jdbc, spaceId, folderId);
     var siblings = siblings(folders, source.parentId());
     if (source.parentId() == null && siblings.size() == 1) {
       throw lastRoot();

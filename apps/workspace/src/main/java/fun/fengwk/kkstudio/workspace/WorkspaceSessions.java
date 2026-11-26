@@ -238,7 +238,7 @@ public class WorkspaceSessions {
     var space = spaces.lock(actor, spaceId);
     requireThread(spaceId, id);
     ChatSpaceService.requireTreeVersion(space, treeVersion);
-    ScheduleReferences.requireUnused(jdbc, "thread_id", id);
+    ScheduleReferences.requireThreadUnused(jdbc, id);
     deletion.deleteThread(id, version);
     return spaces.advance(spaceId);
   }
@@ -248,7 +248,7 @@ public class WorkspaceSessions {
     var space = spaces.lock(actor, spaceId);
     var edge = placements.require(spaceId, id, Kind.SESSION);
     ChatSpaceService.requireTreeVersion(space, treeVersion);
-    ScheduleReferences.requireUnused(jdbc, "session_id", id);
+    ScheduleReferences.requireSessionUnused(jdbc, id);
     deletion.deleteSession(id, ids -> placements.delete(spaceId, edge));
     return spaces.advance(spaceId);
   }

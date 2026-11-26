@@ -14,10 +14,8 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Conflicted;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasGraph;
-import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
-import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasUploadOwnership;
@@ -35,16 +33,13 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 画布生命周期与 typed command 的 PostgreSQL 事务实现。
+ * Canvas typed command 的 PostgreSQL 事务实现。
  *
  * <p>所有写入都在 {@code canvas_document} 行锁内的短事务中完成，锁内不做上传、模型调用或任何其他外部 I/O。因此同一画布的写入按 document
  * 行锁串行提交：幂等判定、语义组前置条件校验、行级落库与 revision 前进要么整体成功，要么整体回滚。冲突不写入任何行，也不返回新基线。
  */
 @Repository
 public class CanvasCommandService {
-
-  /** 与 {@code canvas_document.title} 列宽一致的标题上限。 */
-  private static final int MAX_TITLE_LENGTH = 256;
 
   private final PostgresqlCanvasStore canvasStore;
   private final PostgresqlCanvasResourceRepository resourceRepository;
@@ -71,94 +66,13 @@ public class CanvasCommandService {
     this.uploadOwnership = Objects.requireNonNull(uploadOwnership, "uploadOwnership");
   }
 
-  /** 创建文档并返回初始 revision；加入调用方事务。 */
-  @Transactional
-  public CanvasDocument createCanvas(UUID canvasId, String title) {
-    return canvasStore.addDocument(
-        Objects.requireNonNull(canvasId, "canvasId"), validateTitle(title));
-  }
-
-  @Transactional
-  public void renameCanvas(UUID canvasId, String title) {
-    canvasStore.renameDocument(canvasId, validateTitle(title));
-  }
-
-  private static String validateTitle(String title) {
-    if (title == null) {
-      throw DomainException.validation("title", "title must not be null");
-    }
-    String validated = title.strip();
-    if (validated.isEmpty()) {
-      throw DomainException.validation("title", "title must not be blank");
-    }
-    if (validated.length() > MAX_TITLE_LENGTH) {
-      throw DomainException.validation(
-          "title", "title must not exceed " + MAX_TITLE_LENGTH + " characters");
-    }
-    for (int index = 0; index < validated.length(); index++) {
-      if (Character.isISOControl(validated.charAt(index))) {
-        throw DomainException.validation("title", "title must not contain control characters");
-      }
-    }
-    return validated;
-  }
-
-  /** 在调用方事务中深删画布；归属目录由调用方维护。 */
-  @Transactional
-  public void deleteCanvas(UUID canvasId, long expectedRevision) {
-    CanvasDocument document = requireLockedDocument(canvasId);
-    if (document.revision() != expectedRevision) {
-      throw DomainException.versionConflict("canvas", expectedRevision, document.revision());
-    }
-
-    List<NodeRecord> nodes = canvasStore.listNodes(canvasId);
-    for (NodeRecord node : nodes) {
-      canvasStore.lockNode(canvasId, node.id()).orElseThrow();
-    }
-    for (NodeRecord node : nodes) {
-      runRepository
-          .findByNodeIdForUpdate(node.id())
-          .ifPresent(
-              run -> {
-                if (run.status().isUnsettled()) {
-                  throw DomainException.conflict(
-                      "EXECUTION_NOT_SETTLED",
-                      "canvas function run is not settled: " + run.nodeId());
-                }
-              });
-    }
-    for (NodeRecord node : nodes) {
-      runRepository.lockWork(node.id());
-    }
-
-    for (NodeRecord node : nodes) {
-      resourceLifecycle.releaseNodePins(canvasId, node.id());
-      runRepository.deleteByNodeId(node.id());
-    }
-    for (CanvasResource resource : resourceRepository.findByCanvasId(canvasId)) {
-      resourceLifecycle.discardResource(canvasId, resource.id());
-    }
-    // 引用连线是节点参数的投影，随节点一并删除。
-    for (NodeRecord node : nodes) {
-      if (!canvasStore.deleteNode(canvasId, node.id())) {
-        throw new IllegalStateException("delete canvas node failed: " + node.id());
-      }
-    }
-    for (CanvasGroup group : canvasStore.listGroups(canvasId)) {
-      if (!canvasStore.deleteGroup(canvasId, group.id())) {
-        throw new IllegalStateException("delete canvas group failed: " + group.id());
-      }
-    }
-    canvasStore.deleteDocument(canvasId);
-  }
-
   private CanvasCommandResult applyCommandsWithHash(
       UUID canvasId,
       UUID idempotencyKey,
       List<CanvasCommand> commands,
       String requestHash,
       CanvasUploadOwnership uploadOwner) {
-    CanvasDocument document = requireLockedDocument(canvasId);
+    CanvasDocument document = canvasStore.requireLockedDocument(canvasId);
     CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (dedup != null) {
       if (!dedup.requestHash().equals(requestHash)) {
@@ -195,7 +109,7 @@ public class CanvasCommandService {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     Objects.requireNonNull(commands, "commands");
-    requireLockedDocument(canvasId);
+    canvasStore.requireLockedDocument(canvasId);
     String requestHash = CanvasCommandHash.of(commands);
     CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (dedup != null) {
@@ -261,14 +175,6 @@ public class CanvasCommandService {
       throw new IllegalStateException("Canvas upload references require platform Storage");
     }
     return owner;
-  }
-
-  private CanvasDocument requireLockedDocument(UUID canvasId) {
-    Objects.requireNonNull(canvasId, "canvasId");
-    return canvasStore
-        .lockDocument(canvasId)
-        .orElseThrow(
-            () -> DomainException.notFound("canvas", "canvas document not found: " + canvasId));
   }
 
   /** 读取 document 行锁内的权威快照，作为命令前沿的判定基础。 */

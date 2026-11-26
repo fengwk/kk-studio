@@ -134,7 +134,8 @@ public class AgentService {
           && postgres.getServerErrorMessage() != null) {
         String constraint = postgres.getServerErrorMessage().getConstraint();
         if ("workspace_resource_agent_name_fkey".equals(constraint)
-            || "chat_space_default_agent_name_fkey".equals(constraint)) {
+            || "chat_space_default_agent_name_fkey".equals(constraint)
+            || "fk_workspace_schedule_agent".equals(constraint)) {
           throw DomainException.conflict("RESOURCE_IN_USE", "Agent is referenced by a workspace");
         }
       }

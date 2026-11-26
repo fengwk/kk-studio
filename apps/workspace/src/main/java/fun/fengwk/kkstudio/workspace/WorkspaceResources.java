@@ -4,7 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
+import fun.fengwk.kkstudio.canvas.CanvasDocuments;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.account.StudioPrincipal;
@@ -20,13 +20,13 @@ import java.util.UUID;
 public class WorkspaceResources {
   private final ChatSpaceService spaces;
   private final WorkspacePlacements placements;
-  private final CanvasCommandService canvases;
+  private final CanvasDocuments canvases;
   private final ObjectProvider<HarnessRuntime> runtime;
 
   WorkspaceResources(
       ChatSpaceService spaces,
       WorkspacePlacements placements,
-      CanvasCommandService canvases,
+      CanvasDocuments canvases,
       ObjectProvider<HarnessRuntime> runtime) {
     this.spaces = spaces;
     this.placements = placements;
@@ -48,7 +48,7 @@ public class WorkspaceResources {
     ChatSpaceService.requireTreeVersion(
         space, WorkspaceInput.version(request.expectedTreeVersion()));
     placements.requireFolder(spaceId, request.folderId());
-    canvases.createCanvas(id, request.title());
+    canvases.create(id, request.title());
     placements.insert(
         spaceId, request.folderId(), id, Kind.CANVAS, null, hash, space.treeVersion() + 1, null);
     return new ResourceRefDTO(
@@ -70,7 +70,7 @@ public class WorkspaceResources {
       if (kind == Kind.SESSION) {
         runtime.getObject().renameSession(new RenameSessionCommand(id, title));
       } else {
-        canvases.renameCanvas(id, title);
+        canvases.rename(id, title);
       }
       return spaces.treeChanged(spaceId, space.treeVersion());
     }
@@ -87,7 +87,7 @@ public class WorkspaceResources {
     var edge = placements.require(spaceId, id, Kind.CANVAS);
     ChatSpaceService.requireTreeVersion(space, treeVersion);
     placements.delete(spaceId, edge);
-    canvases.deleteCanvas(id, revision);
+    canvases.delete(id, revision);
     return spaces.advance(spaceId);
   }
 }
