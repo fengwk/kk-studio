@@ -23,7 +23,7 @@ public class ModelVariantDTO {
   /** 必填变体 id：非空白、无环绕空白，且在 {@code config.variants} 内唯一。 */
   private String id;
 
-  /** 必填提示缓存留存档位；必须被所属 Provider 类型的 {@code promptCacheRetentions} 支持。 */
+  /** 必填提示缓存留存档位；按 Provider 协议、端点和上游模型 ID 校验，无可选档位时仅接受默认档位。 */
   private PromptCacheRetention promptCacheRetention;
 
   /** 可空 reasoning effort：由厂商自定义，{@code off} 显式关闭，null 表示协议默认；最大长度 64。 */

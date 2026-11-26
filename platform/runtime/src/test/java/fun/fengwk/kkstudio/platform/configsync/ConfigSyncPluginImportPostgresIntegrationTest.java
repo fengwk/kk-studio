@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
@@ -172,7 +173,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
     // provider 服务是唯一真实库写入的替身：只在同一事务内真插一行 provider，用于证明它随插件失败一起回滚。
     providerService = mock(ProviderService.class);
-    when(providerService.importProvider(any()))
+    when(providerService.importProvider(any(), any()))
         .thenAnswer(
             invocation -> {
               jdbcClient
@@ -189,6 +190,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
         new ConfigSyncApplier(
             jdbcClient,
             providerService,
+            mock(ProviderRepository.class),
             mock(ModelRepository.class),
             mock(ModelService.class),
             mock(SkillCatalogService.class),

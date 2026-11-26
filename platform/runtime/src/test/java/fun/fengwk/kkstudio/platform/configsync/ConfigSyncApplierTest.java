@@ -16,6 +16,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
@@ -77,6 +80,7 @@ class ConfigSyncApplierTest {
   private static final String DEPENDENT_PLUGIN_ID = "dep.plugin";
 
   private final ProviderService providerService = mock(ProviderService.class);
+  private final ProviderRepository providerRepository = mock(ProviderRepository.class);
   private final ModelRepository modelRepository = mock(ModelRepository.class);
   private final ModelService modelService = mock(ModelService.class);
   private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
@@ -107,6 +111,7 @@ class ConfigSyncApplierTest {
       new ConfigSyncApplier(
           jdbcClient,
           providerService,
+          providerRepository,
           modelRepository,
           modelService,
           skillCatalogService,
@@ -175,6 +180,15 @@ class ConfigSyncApplierTest {
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 
+  private static ConfigSyncParser.ModelSpec modelSpec(String name, String providerName) {
+    SingleModelCreateDTO properties = new SingleModelCreateDTO();
+    properties.setProviderName(providerName);
+    properties.setName(name);
+    properties.setModelId("gpt");
+    properties.setConfig(ConfigSyncFixtures.modelConfig());
+    return new ConfigSyncParser.ModelSpec(name, ModelKind.MODEL, properties);
+  }
+
   @Test
   void agentTwoStageWriteResolvesCyclicSubagents() {
     Agent existingA = Agent.builder().name("a").version(0L).build();
@@ -225,14 +239,18 @@ class ConfigSyncApplierTest {
   }
 
   @Test
-  void providersAreImportedViaExplicitUpsertCommand() {
-    ConfigSyncParser.ProviderSpec created = providerSpec("new");
-    ConfigSyncParser.ProviderSpec existing = providerSpec("old");
+  void providerUnionIsLockedInNameOrderBeforeModelLookup() {
+    ConfigSyncParser.ProviderSpec alpha = providerSpec("alpha");
+    ConfigSyncParser.ProviderSpec charlie = providerSpec("charlie");
+    ConfigSyncParser.ModelSpec zetaModel = modelSpec("zeta-model", "bravo");
+    ConfigSyncParser.ModelSpec alphaModel = modelSpec("alpha-model", "alpha");
+    when(providerRepository.getByNameForUpdate("bravo"))
+        .thenReturn(Provider.builder().name("bravo").build());
 
     applier.apply(
         plan(
-            List.of(created, existing),
-            List.of(),
+            List.of(charlie, alpha),
+            List.of(zetaModel, alphaModel),
             List.of(),
             List.of(),
             List.of(),
@@ -241,18 +259,24 @@ class ConfigSyncApplierTest {
         List.of(),
         Set.of());
 
-    // 导入使用显式 upsert 命令恢复文件事实，不区分 create/update，不读取 repository 判断存在性。
-    // 固定导入锁必须先于任何资源 upsert：否则互逆数组顺序仍会先拿到互逆行锁。
-    InOrder order = Mockito.inOrder(jdbcClient, providerService);
+    // 已声明和仅被引用的 Provider 按名称合并排序，全部处理后才允许读取 Model。
+    InOrder order =
+        Mockito.inOrder(jdbcClient, providerService, providerRepository, modelRepository);
     order.verify(jdbcClient).sql(contains("pg_advisory_xact_lock"));
-    order.verify(providerService).importProvider(created.properties());
-    order.verify(providerService).importProvider(existing.properties());
-    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
-    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
-    verify(providerService).importProvider(created.properties());
-    verify(providerService).importProvider(existing.properties());
+    order
+        .verify(providerService)
+        .importProvider(alpha.properties(), Set.of("zeta-model", "alpha-model"));
+    order.verify(providerRepository).getByNameForUpdate("bravo");
+    order
+        .verify(providerService)
+        .importProvider(charlie.properties(), Set.of("zeta-model", "alpha-model"));
+    order.verify(modelRepository).getByName("zeta-model");
+    order.verify(modelRepository).getByName("alpha-model");
+    verifyNoMoreInteractions(providerRepository, modelRepository);
     verify(providerService, never()).createProvider(any());
     verify(providerService, never()).updateProvider(any(), any());
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
   }
 
   @Test
@@ -311,6 +335,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void modelImportCreatesNewModel() {
+    when(providerRepository.getByNameForUpdate("p")).thenReturn(mock(Provider.class));
     when(modelRepository.getByName("m")).thenReturn(null);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
@@ -612,6 +637,7 @@ class ConfigSyncApplierTest {
   void existingModelIsUpdatedWithExistingVersionCas() {
     Model existing =
         Model.builder().kind(ModelKind.MODEL).providerName("p").name("m").version(4L).build();
+    when(providerRepository.getByNameForUpdate("p")).thenReturn(mock(Provider.class));
     when(modelRepository.getByName("m")).thenReturn(existing);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");

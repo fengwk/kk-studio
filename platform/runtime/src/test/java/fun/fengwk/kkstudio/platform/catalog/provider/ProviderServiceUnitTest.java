@@ -27,11 +27,14 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 
 /** Provider 服务的输入规范化、凭据补丁与 CAS 失败映射（仓库为替身，不触库）。 */
 public class ProviderServiceUnitTest {
@@ -46,7 +49,9 @@ public class ProviderServiceUnitTest {
         repository,
         new ProviderConfigurationCodec(objectMapper),
         new AgentEditableSupport(),
-        discovery);
+        discovery,
+        mock(ModelRepository.class),
+        new ModelRuntimeConfigParser(objectMapper));
   }
 
   // ---- 创建与规范化 ----
@@ -149,7 +154,7 @@ public class ProviderServiceUnitTest {
     // 测试意图：更新路径读取损坏的持久配置时，不把可能携带原始配置的解析器 cause 暴露给
     // Web 异常边界。
     Provider provider = existing("initial-secret", "{\"credential\":\"sensitive-value\"");
-    when(repository.getByName("provider")).thenReturn(provider);
+    when(repository.getByNameForUpdate("provider")).thenReturn(provider);
 
     DomainException error =
         assertThrows(
@@ -165,7 +170,7 @@ public class ProviderServiceUnitTest {
     assertThrows(
         DomainException.class, () -> service.updateProvider("provider", new ProviderUpdateDTO()));
 
-    when(repository.getByName("provider")).thenReturn(existing(null, "{}", 1L));
+    when(repository.getByNameForUpdate("provider")).thenReturn(existing(null, "{}", 1L));
     assertThrows(
         DomainException.class,
         () -> service.updateProvider("provider", versioned(update(SecretUpdate.keep()), 0L)));
@@ -174,16 +179,20 @@ public class ProviderServiceUnitTest {
 
   @Test
   public void updateCasFailureDistinguishesMissingRowFromNewerVersion() {
-    when(repository.getByName("provider")).thenReturn(existing(null, "{}"));
+    when(repository.getByNameForUpdate("provider")).thenReturn(existing(null, "{}"));
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
     ProviderUpdateDTO update = versioned(update(SecretUpdate.keep()), 0L);
 
-    when(repository.getByName("provider")).thenReturn(existing(null, "{}"), (Provider) null);
-    assertThrows(DomainException.class, () -> service.updateProvider("provider", update));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> service.updateProvider("provider", update))
+            .code());
 
-    when(repository.getByName("provider"))
-        .thenReturn(existing(null, "{}"), existing(null, "{}", 5L));
-    assertThrows(DomainException.class, () -> service.updateProvider("provider", update));
+    when(repository.getByName("provider")).thenReturn(existing(null, "{}", 5L));
+    assertEquals(
+        DomainErrorCode.VERSION_CONFLICT,
+        assertThrows(DomainException.class, () -> service.updateProvider("provider", update))
+            .code());
   }
 
   @Test
@@ -199,9 +208,9 @@ public class ProviderServiceUnitTest {
   @Test
   public void importCreatesWhenAbsent() {
     when(repository.create(any())).thenReturn(true);
-    when(repository.getByName("provider")).thenReturn(null, existing(null, "{}"));
+    when(repository.getByName("provider")).thenReturn(existing(null, "{}"));
 
-    ProviderDTO imported = service.importProvider(properties(ProviderType.OPENAI, null));
+    ProviderDTO imported = service.importProvider(properties(ProviderType.OPENAI, null), Set.of());
 
     assertEquals("provider", imported.getName());
     verify(repository).create(any());
@@ -212,10 +221,11 @@ public class ProviderServiceUnitTest {
   @Test
   public void importUpdatesExistingWithReadVersionAndClearsMissingCredential() {
     Provider current = existing("initial-secret", "{}", null, 3L);
+    when(repository.getByNameForUpdate("provider")).thenReturn(current);
     when(repository.getByName("provider")).thenReturn(current);
     when(repository.updateByName(any(), eq(3L))).thenReturn(true);
 
-    service.importProvider(properties(ProviderType.OPENAI, "   "));
+    service.importProvider(properties(ProviderType.OPENAI, "   "), Set.of());
 
     ArgumentCaptor<Provider> captor = ArgumentCaptor.forClass(Provider.class);
     verify(repository).updateByName(captor.capture(), eq(3L));
@@ -227,12 +237,13 @@ public class ProviderServiceUnitTest {
   @Test
   public void importRestoresCredential() {
     Provider current = existing(null, "{}", "http://localhost:8080", 0L);
+    when(repository.getByNameForUpdate("provider")).thenReturn(current);
     when(repository.getByName("provider")).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     ProviderCreateDTO props = properties(ProviderType.OPENAI, "restored-secret");
     props.setBaseUrl("http://localhost:8080");
 
-    service.importProvider(props);
+    service.importProvider(props, Set.of());
 
     ArgumentCaptor<Provider> captor = ArgumentCaptor.forClass(Provider.class);
     verify(repository).updateByName(captor.capture(), eq(0L));
@@ -245,22 +256,27 @@ public class ProviderServiceUnitTest {
     ProviderCreateDTO properties = properties(ProviderType.OPENAI, null);
     when(repository.updateByName(any(), eq(3L))).thenReturn(false);
 
-    when(repository.getByName("provider")).thenReturn(existing(null, "{}", 3L), (Provider) null);
-    assertThrows(DomainException.class, () -> service.importProvider(properties));
+    when(repository.getByNameForUpdate("provider")).thenReturn(existing(null, "{}", 3L));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> service.importProvider(properties, Set.of()))
+            .code());
 
-    when(repository.getByName("provider"))
-        .thenReturn(existing(null, "{}", 3L), existing(null, "{}", 4L));
-    assertThrows(DomainException.class, () -> service.importProvider(properties));
+    when(repository.getByName("provider")).thenReturn(existing(null, "{}", 4L));
+    assertEquals(
+        DomainErrorCode.VERSION_CONFLICT,
+        assertThrows(DomainException.class, () -> service.importProvider(properties, Set.of()))
+            .code());
   }
 
   /** 导入创建遇到唯一约束竞争时映射为重复业务错误。 */
   @Test
   public void importCreateDuplicateKeyThrowsDuplicate() {
-    when(repository.getByName("provider")).thenReturn(null);
     when(repository.create(any())).thenThrow(new DuplicateKeyException("dup"));
 
     assertThrows(
-        DomainException.class, () -> service.importProvider(properties(ProviderType.OPENAI, null)));
+        DomainException.class,
+        () -> service.importProvider(properties(ProviderType.OPENAI, null), Set.of()));
   }
 
   @Test
@@ -278,12 +294,13 @@ public class ProviderServiceUnitTest {
   /** 同名不同类型：换协议即新建 Provider，导入必须拒绝，不能把既有模型接到另一协议上。 */
   @Test
   public void importRejectsTypeChangeOfExistingProvider() {
-    when(repository.getByName("provider")).thenReturn(existing(ProviderType.ANTHROPIC, null, "{}"));
+    when(repository.getByNameForUpdate("provider"))
+        .thenReturn(existing(ProviderType.ANTHROPIC, null, "{}"));
 
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.importProvider(properties(ProviderType.OPENAI, null)));
+            () -> service.importProvider(properties(ProviderType.OPENAI, null), Set.of()));
 
     assertEquals(DomainErrorCode.CONFLICT, error.code());
     assertEquals("PROVIDER_TYPE_IMMUTABLE", error.reason());
@@ -356,6 +373,7 @@ public class ProviderServiceUnitTest {
 
   /** 以 expectedVersion 等于当前版本更新，并返回传给仓库的实体。 */
   private Provider updated(Provider current, ProviderUpdateDTO update) {
+    when(repository.getByNameForUpdate("provider")).thenReturn(current);
     when(repository.getByName("provider")).thenReturn(current);
     when(repository.updateByName(any(), anyLong())).thenReturn(true);
     versioned(update, current.version());

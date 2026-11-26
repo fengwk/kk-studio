@@ -94,6 +94,18 @@ public class ModelRepository {
         .list();
   }
 
+  /** 普通快照读取：Provider 兼容性校验不需要模型行锁。 */
+  public List<Model> listByProvider(String providerName) {
+    return jdbcClient
+        .sql(
+            "select "
+                + COLUMNS
+                + " from model where provider_name = :name and kind = 'MODEL' order by name")
+        .param("name", providerName)
+        .query(ROW_MAPPER)
+        .list();
+  }
+
   public Model getByName(String name) {
     return findOne("select " + COLUMNS + " from model where name = :name", name);
   }

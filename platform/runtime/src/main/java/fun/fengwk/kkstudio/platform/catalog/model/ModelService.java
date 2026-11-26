@@ -109,7 +109,11 @@ public class ModelService {
   @Transactional
   public ModelDTO createModel(ModelCreateDTO createDTO) {
     Mutation mutation = mutation(createDTO);
-    validateMutation(mutation);
+    if (mutation.kind() == ModelKind.MODEL) {
+      lockProviderAndValidate(mutation);
+    } else {
+      validateMembers(mutation.group());
+    }
     Model model =
         Model.builder()
             .name(mutation.name())
@@ -143,20 +147,24 @@ public class ModelService {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     String name = canonicalName(modelName);
-    Model snapshot = repository.getByName(name);
-    if (snapshot != null
-        && snapshot.kind() == ModelKind.GROUP
-        && updateDTO instanceof ModelGroupUpdateDTO groupUpdate) {
-      // 先锁成员再锁组行：成员改名/删除走同一模型行锁，避免组配置引用已删除的成员或 Variant。
-      lockMembers(snapshot, groupUpdate.getGroup());
+    Mutation singleMutation = null;
+    if (updateDTO instanceof SingleModelUpdateDTO) {
+      singleMutation = mutation(updateDTO);
+      // 单模型写入与导入统一先锁目标 Provider，再锁模型。
+      lockProviderAndValidate(singleMutation);
+    } else if (updateDTO instanceof ModelGroupUpdateDTO groupUpdate) {
+      Model snapshot = repository.getByName(name);
+      if (snapshot != null && snapshot.kind() == ModelKind.GROUP) {
+        // 先锁成员再锁组行，避免组配置引用已删除的成员或 Variant。
+        lockMembers(snapshot, groupUpdate.getGroup());
+      }
     }
     Model current = requireModelForUpdate(name);
     ensureExpectedVersion(current, expected);
-    Mutation mutation = mutation(updateDTO);
+    Mutation mutation = singleMutation != null ? singleMutation : mutation(updateDTO);
     if (current.kind() != mutation.kind()) {
       throw DomainException.validation(RESOURCE, "model type cannot be changed");
     }
-    validateMutation(mutation);
     if (mutation.kind() == ModelKind.MODEL) {
       for (String removedVariant : removedVariants(current.configJson(), mutation.configJson())) {
         if (repository.hasVariantReferences(name, removedVariant)) {
@@ -165,6 +173,8 @@ public class ModelService {
               "model variant is still referenced: " + name + " variant=" + removedVariant);
         }
       }
+    } else {
+      validateMembers(mutation.group());
     }
     Model model =
         current.toBuilder()
@@ -301,15 +311,11 @@ public class ModelService {
     }
   }
 
-  private void validateMutation(Mutation mutation) {
-    if (mutation.kind() == ModelKind.MODEL) {
-      Provider provider = requireProviderForUpdate(mutation.providerName());
-      ModelConfigDTO config = decodeConfig(mutation.configJson());
-      validateVariantCapabilities(
-          provider.name(), provider.providerType(), provider.baseUrl(), mutation.modelId(), config);
-    } else {
-      validateMembers(mutation.group());
-    }
+  private void lockProviderAndValidate(Mutation mutation) {
+    Provider provider = requireProviderForUpdate(mutation.providerName());
+    ModelConfigDTO config = decodeConfig(mutation.configJson());
+    validateVariantCapabilities(
+        provider.name(), provider.providerType(), provider.baseUrl(), mutation.modelId(), config);
   }
 
   /**

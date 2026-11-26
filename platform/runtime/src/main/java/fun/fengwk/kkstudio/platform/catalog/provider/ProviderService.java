@@ -11,12 +11,17 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * 全局 provider CRUD：输入规范化、名称唯一、(name, version) CAS、删除引用检查与远端模型发现。
@@ -35,16 +40,22 @@ public class ProviderService {
   private final ProviderConfigurationCodec configurationCodec;
   private final AgentEditableSupport editableSupport;
   private final ProviderModelDiscovery modelDiscovery;
+  private final ModelRepository modelRepository;
+  private final ModelRuntimeConfigParser modelConfigParser;
 
   public ProviderService(
       ProviderRepository repository,
       ProviderConfigurationCodec configurationCodec,
       AgentEditableSupport editableSupport,
-      ProviderModelDiscovery modelDiscovery) {
+      ProviderModelDiscovery modelDiscovery,
+      ModelRepository modelRepository,
+      ModelRuntimeConfigParser modelConfigParser) {
     this.repository = repository;
     this.configurationCodec = configurationCodec;
     this.editableSupport = editableSupport;
     this.modelDiscovery = modelDiscovery;
+    this.modelRepository = modelRepository;
+    this.modelConfigParser = modelConfigParser;
   }
 
   public List<ProviderDTO> listProviders() {
@@ -70,10 +81,14 @@ public class ProviderService {
     if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    Provider provider = requireProvider(name);
+    Provider provider = repository.getByNameForUpdate(name);
+    if (provider == null) {
+      throw DomainException.notFound(RESOURCE);
+    }
     ensureExpectedVersion(provider, expected);
     String credential = applyCredential(updateDTO.getCredential(), provider.credential());
     Mutation mutation = mutation(updateDTO, provider.providerType());
+    validateRetainedModels(provider, mutation, Set.of());
     return persistUpdate(applyEdits(provider, mutation, credential), expected);
   }
 
@@ -84,12 +99,12 @@ public class ProviderService {
    * 只在创建时设置；同名但类型不同直接拒绝，避免把既有模型接到另一协议上。
    */
   @Transactional
-  public ProviderDTO importProvider(ProviderCreateDTO spec) {
+  public ProviderDTO importProvider(ProviderCreateDTO spec, Set<String> plannedModels) {
     if (spec == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
     String name = requireName(spec.getName());
-    Provider existing = repository.getByName(name);
+    Provider existing = repository.getByNameForUpdate(name);
     if (existing == null) {
       return insertProvider(mutation(spec, null), importCredential(spec.getCredential()));
     }
@@ -98,8 +113,27 @@ public class ProviderService {
     }
     long expected = existing.version();
     Mutation mutation = mutation(spec, existing.providerType());
+    validateRetainedModels(existing, mutation, plannedModels);
     return persistUpdate(
         applyEdits(existing, mutation, importCredential(spec.getCredential())), expected);
+  }
+
+  /** 目标为该 Provider 的单模型写入先获取同一 Provider 行锁；这里无需锁模型。 */
+  private void validateRetainedModels(
+      Provider current, Mutation mutation, Set<String> plannedModels) {
+    if (Objects.equals(current.baseUrl(), mutation.baseUrl())) {
+      return;
+    }
+    for (var model : modelRepository.listByProvider(current.name())) {
+      if (!plannedModels.contains(model.name())) {
+        ModelService.validateVariantCapabilities(
+            current.name(),
+            current.providerType(),
+            mutation.baseUrl(),
+            model.modelId(),
+            modelConfigParser.decode(model.configJson()));
+      }
+    }
   }
 
   /** 与导入写入共用静态校验，不生成连接身份或写入数据库。 */

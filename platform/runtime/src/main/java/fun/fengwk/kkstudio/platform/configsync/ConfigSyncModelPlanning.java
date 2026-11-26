@@ -20,7 +20,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Model 可用池的判定：快照 Model 先进入池，文件条目覆盖同名并在此判定 Provider 依赖，最后消解组依赖并按 MODEL → GROUP 排序。
@@ -80,11 +82,14 @@ final class ConfigSyncModelPlanning {
       providerIdentities.put(
           provider.name(), new ProviderIdentity(provider.providerType(), provider.baseUrl()));
     }
+    Map<String, ProviderIdentity> changedProviders = new HashMap<>();
     for (ConfigSyncParser.ProviderSpec providerSpec : document.providers()) {
-      providerIdentities.put(
-          providerSpec.name(),
-          new ProviderIdentity(
-              providerSpec.providerType(), providerSpec.properties().getBaseUrl()));
+      ProviderIdentity target =
+          new ProviderIdentity(providerSpec.providerType(), providerSpec.properties().getBaseUrl());
+      ProviderIdentity current = providerIdentities.put(providerSpec.name(), target);
+      if (current != null && !Objects.equals(current.endpoint(), target.endpoint())) {
+        changedProviders.put(providerSpec.name(), target);
+      }
     }
     Map<String, ModelSpec> candidateModels = new LinkedHashMap<>();
     for (ModelSpec spec : document.models()) {
@@ -114,7 +119,34 @@ final class ConfigSyncModelPlanning {
       candidateModels.put(key, spec);
     }
     removeUnsatisfiedGroups(availableModels, skippedModels, skipped);
-    return new ModelPlan(availableModels, orderModels(candidateModels, availableModels, imported));
+    List<ModelSpec> ordered = orderModels(candidateModels, availableModels, imported);
+    validateRetainedModels(snapshot, changedProviders, ordered);
+    return new ModelPlan(availableModels, ordered);
+  }
+
+  /** 只排除实际写入计划中的模型；跳过的 YAML 条目不改变数据库中的模型。 */
+  private void validateRetainedModels(
+      ConfigSyncSnapshot snapshot,
+      Map<String, ProviderIdentity> changedProviders,
+      List<ModelSpec> ordered) {
+    if (changedProviders.isEmpty()) {
+      return;
+    }
+    Set<String> plannedNames = ordered.stream().map(ModelSpec::name).collect(Collectors.toSet());
+    for (var model : snapshot.models()) {
+      if (model.kind() != ModelKind.MODEL || plannedNames.contains(model.name())) {
+        continue;
+      }
+      ProviderIdentity target = changedProviders.get(model.providerName());
+      if (target != null) {
+        ModelService.validateVariantCapabilities(
+            model.providerName(),
+            target.providerType(),
+            target.endpoint(),
+            model.modelId(),
+            configParser.decode(model.configJson()));
+      }
+    }
   }
 
   /** 组只能引用可用的 MODEL；任一成员缺失或 Variant 未声明时移除该组，依赖它的 Agent 随池判定被 skip。 */
@@ -195,9 +227,7 @@ final class ConfigSyncModelPlanning {
 
   private record ProviderIdentity(ProviderType providerType, String endpoint) {
     private ProviderIdentity {
-      if (endpoint != null) {
-        endpoint = endpoint.strip();
-      }
+      endpoint = endpoint == null || endpoint.isBlank() ? null : endpoint.strip();
     }
   }
 }

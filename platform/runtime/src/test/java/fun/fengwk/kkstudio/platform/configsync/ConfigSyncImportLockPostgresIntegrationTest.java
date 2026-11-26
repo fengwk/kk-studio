@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
@@ -160,10 +161,13 @@ class ConfigSyncImportLockPostgresIntegrationTest {
             providers,
             new ProviderConfigurationCodec(JsonMapper.builder().build()),
             new AgentEditableSupport(),
-            mock(ProviderModelDiscovery.class));
+            mock(ProviderModelDiscovery.class),
+            mock(ModelRepository.class),
+            new ModelRuntimeConfigParser(JsonMapper.builder().build()));
     return new ConfigSyncApplier(
         jdbcClient,
         providerService,
+        providers,
         mock(ModelRepository.class),
         mock(ModelService.class),
         mock(SkillCatalogService.class),

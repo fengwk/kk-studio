@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import tools.jackson.databind.ObjectMapper;
@@ -125,6 +127,26 @@ class ModelServiceUnitTest {
     create.setProviderName("ghost");
     assertThrows(DomainException.class, () -> service.createModel(create));
     verify(repository, never()).create(any());
+  }
+
+  /** 迁移单模型时先锁请求中的目标 Provider，避免与持该 Provider 锁的导入互等。 */
+  @Test
+  void singleModelUpdateLocksTargetProviderBeforeModel() {
+    Model existing = existing("model", 0L);
+    when(repository.getByNameForUpdate("model")).thenReturn(existing);
+    when(repository.getByName("model")).thenReturn(existing);
+    when(repository.updateByName(any(), eq(0L))).thenReturn(true);
+    when(providerRepository.getByNameForUpdate("target"))
+        .thenReturn(Provider.builder().name("target").providerType(ProviderType.OPENAI).build());
+    SingleModelUpdateDTO update = update("model", 0L);
+    update.setProviderName("target");
+
+    service.updateModel("model", update);
+
+    InOrder order = inOrder(providerRepository, repository);
+    order.verify(providerRepository).getByNameForUpdate("target");
+    order.verify(repository).getByNameForUpdate("model");
+    verify(providerRepository, never()).getByNameForUpdate("provider");
   }
 
   /** 编辑保留完整的基础费率定义。 */
