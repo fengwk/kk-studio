@@ -35,7 +35,8 @@ const inputs = (
 
 test('test intent: aligned Go and application versions pass and the tag must carry a v prefix', () => {
   assert.deepEqual(checkAlignment(inputs('1.2.3')), { expected: '1.2.3', mismatches: [] })
-  assert.deepEqual(checkAlignment({ ...inputs('1.2.3'), tag: 'v1.2.3' }), { expected: '1.2.3', mismatches: [] })
+  const version = `1.2.3+${'a'.repeat(58)}`
+  assert.deepEqual(checkAlignment({ ...inputs(version), tag: `v${version}` }), { expected: version, mismatches: [] })
 })
 
 test('test intent: each active runtime and package version source is compared to the root version', () => {
@@ -61,7 +62,7 @@ test('test intent: missing or ambiguous Go and package versions and invalid tags
   )
   assert.throws(() => checkAlignment({ ...inputs('1'), daemonConfig: 'const DaemonVersion = version\n' }), /exactly one literal/)
   assert.throws(() => checkAlignment({ ...inputs('1'), daemonConfig: `${GO_CONFIG('1')}${GO_CONFIG('1')}` }), /exactly one literal/)
-  for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3', 'v', '1.2.3']) {
+  for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3', 'v', '1.2.3', `v${'a'.repeat(65)}`]) {
     assert.throws(() => checkAlignment({ ...inputs('1.2.3'), tag }), /invalid RELEASE_TAG/, JSON.stringify(tag))
   }
 })

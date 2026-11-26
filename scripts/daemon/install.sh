@@ -79,7 +79,10 @@ The release must be named explicitly by --version; no mutable "latest" release i
 
 Fixed layout (0700 directories, 0600 files):
   ~/.kk-studio/environments/<environment-id>/{daemon.json,daemon.token,daemon.lock,install.lock,
-  lib/,ide/,skills/,.work/,last-operation.json,daemon.stdout.log,daemon.stderr.log}
+  lib/,ide/,skills/,.work/,last-operation.json}
+
+Service logs on Linux: journalctl --user -u kk-studio-daemon-<environment-id>.service
+Service logs on macOS: daemon.stdout.log and daemon.stderr.log in the environment directory.
 
 Installation operations are serialized by a kernel lock (install.lock) held through a separate
 temporary helper copy: no PID guessing, stale lock directory or flock command is used, and the

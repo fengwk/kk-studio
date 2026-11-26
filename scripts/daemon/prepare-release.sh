@@ -32,7 +32,7 @@ main() {
   if [ "$#" -eq 1 ] && { [ "$1" = -h ] || [ "$1" = --help ]; }; then usage; return 0; fi
   [ "$#" -eq 3 ] || { usage >&2; return 2; }
   local tag=$1 os=$2 arch=$3 goos release_key version binary_name platform
-  [[ $tag =~ ^v[0-9A-Za-z._-]+$ ]] || die 'invalid release tag'
+  [[ $tag =~ ^v[0-9A-Za-z._+-]{1,64}$ ]] || die 'invalid release tag'
   [[ $os =~ ^(linux|macos|windows)$ && $arch =~ ^(amd64|arm64)$ ]] || die 'unsupported platform'
   if [ "$os" = windows ] && [ "$arch" = arm64 ]; then die 'windows-arm64 has no bundled code-server runtime'; fi
   case "$os" in linux) goos=linux ;; macos) goos=darwin ;; windows) goos=windows ;; esac

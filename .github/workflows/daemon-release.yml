@@ -81,8 +81,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="${RELEASE_TAG}"
-          if ! [[ "${tag}" =~ ^v[0-9A-Za-z._-]+$ ]]; then
-            echo "unsupported release tag (expected ^v[0-9A-Za-z._-]+$): ${tag}" >&2
+          if ! [[ "${tag}" =~ ^v[0-9A-Za-z._+-]{1,64}$ ]]; then
+            echo "unsupported release tag (expected ^v[0-9A-Za-z._+-]{1,64}$): ${tag}" >&2
             exit 1
           fi
           commit=$(git rev-parse --verify 'HEAD^{commit}')
@@ -242,7 +242,6 @@ jobs:
           # 暂存目录刚被整体重建，因此这里列出的就是待上传的完整资产集合；集合必须与
           # 发布契约逐字相同，多一个或少一个都直接失败，绝不静默上传一部分。
           shopt -s nullglob
-          expected_names=()
           assets=()
           for platform in ${RELEASE_PLATFORMS}; do
             dir="${RELEASE_ROOT}/${platform}"
@@ -271,7 +270,6 @@ jobs:
 
           # LICENSE 与 THIRD_PARTY_NOTICES 在五个平台目录中内容一致，各只上传一份。
           for name in LICENSE THIRD_PARTY_NOTICES; do
-            expected_names+=("${name}")
             assets+=("${RELEASE_ROOT}/linux-amd64/${name}")
           done
           for platform in ${RELEASE_PLATFORMS}; do
@@ -279,12 +277,9 @@ jobs:
             arch=${platform#*-}
             for suffix in ".tar.gz" ".tar.gz.sha256" ".json"; do
               name="kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}${suffix}"
-              expected_names+=("${name}")
               assets+=("${RELEASE_ROOT}/${platform}/${name}")
             done
           done
-
-          expected=$(printf '%s\n' "${expected_names[@]}" | LC_ALL=C sort)
 
           # 跨平台目录内同名的法律文件必须逐字一致，避免不同平台带上不同许可。
           for platform in ${RELEASE_PLATFORMS}; do
@@ -298,86 +293,40 @@ jobs:
             done
           done
 
-          if gh release view "${RELEASE_TAG}" --json isDraft,assets >/dev/null 2>&1; then
-            draft=$(gh release view "${RELEASE_TAG}" --json isDraft --jq '.isDraft')
-            remote_names=$(gh release view "${RELEASE_TAG}" --json assets \
-              --jq '.assets[].name' | LC_ALL=C sort)
-            compare_remote=true
-            upload_names=()
-            if [ "${draft}" != "true" ]; then
-              # 已发布资产不可替换。全部校验和一致才是一次无操作重跑。
-              if [ "${remote_names}" != "${expected}" ]; then
-                echo "published release assets differ from the staged set; refusing to replace them" >&2
+          if release=$(gh release view "${RELEASE_TAG}" --json isDraft,assets 2>/dev/null); then
+            draft=$(jq -r '.isDraft | if type == "boolean" then . else error("missing release draft state") end' <<<"${release}")
+            remote_count=$(jq -e '.assets | if type == "array" then length else error("missing release assets") end' <<<"${release}")
+            matched=0
+            pending=()
+            for path in "${assets[@]}"; do
+              name=${path##*/}
+              remote_asset=$(jq -c --arg name "${name}" '.assets[] | select(.name == $name)' <<<"${release}")
+              if [ -z "${remote_asset}" ]; then
+                if [ "${draft}" != "true" ]; then
+                  echo "published release is missing asset ${name}" >&2
+                  exit 1
+                fi
+                pending+=("${path}")
+                continue
+              fi
+              # GitHub 提供上传内容的 digest；草稿也可校验，无需下载任何归档。
+              local_digest=$(sha256sum "${path}" | awk '{ print $1 }')
+              if ! jq -es --arg digest "sha256:${local_digest}" \
+                'length == 1 and .[0].digest == $digest' <<<"${remote_asset}" >/dev/null; then
+                echo "release asset ${name} has a missing or mismatched digest, or is duplicated; refusing to replace it" >&2
                 exit 1
               fi
-            elif [ -n "${remote_names}" ]; then
-              # 草稿可以补齐缺失资产，但不能覆盖已有内容，也不能带着额外资产发布。
-              while IFS= read -r name; do
-                case $'\n'"${expected}"$'\n' in
-                  *$'\n'"${name}"$'\n'*) ;;
-                  *)
-                    echo "draft release has an asset outside the release contract: ${name}" >&2
-                    exit 1
-                    ;;
-                esac
-              done <<<"${remote_names}"
-            fi
-            if [ "${draft}" = "true" ]; then
-              compare_remote=false
-              if [ -n "${remote_names}" ]; then
-                for name in "${expected_names[@]}"; do
-                  case $'\n'"${remote_names}"$'\n' in
-                    *$'\n'"${name}"$'\n'*) compare_remote=true ;;
-                    *) upload_names+=("${name}") ;;
-                  esac
-                done
-              else
-                upload_names=("${expected_names[@]}")
-              fi
-            fi
-            if [ "${compare_remote}" = true ]; then
-              for name in "${expected_names[@]}"; do
-                if [ "${draft}" = "true" ]; then
-                  case $'\n'"${remote_names}"$'\n' in
-                    *$'\n'"${name}"$'\n'*) ;;
-                    *) continue ;;
-                  esac
-                fi
-                asset_path=$(
-                  for path in "${assets[@]}"; do
-                    case "${path}" in */"${name}") echo "${path}"; break ;; esac
-                  done
-                )
-                [ -n "${asset_path}" ] || { echo "cannot locate staged asset ${name}" >&2; exit 1; }
-                url=$(gh release view "${RELEASE_TAG}" --json assets \
-                  --jq ".assets[] | select(.name == \"${name}\") | .url")
-                [ -n "${url}" ] || { echo "cannot read release asset ${name}" >&2; exit 1; }
-                checksum=$(mktemp)
-                if ! gh api "${url}" >"${checksum}"; then
-                  rm -f "${checksum}"
-                  echo "cannot read release asset ${name}" >&2
-                  exit 1
-                fi
-                remote=$(sha256sum "${checksum}" | awk '{ print $1 }')
-                rm -f "${checksum}"
-                local_digest=$(sha256sum "${asset_path}" | awk '{ print $1 }')
-                if [ "${remote}" != "${local_digest}" ]; then
-                  echo "release asset ${name} differs from the staged asset; refusing to replace it" >&2
-                  exit 1
-                fi
-              done
+              matched=$((matched + 1))
+            done
+            if [ "${matched}" -ne "${remote_count}" ]; then
+              echo "release has assets outside the staged set" >&2
+              exit 1
             fi
             if [ "${draft}" != "true" ]; then
               echo "published release already has the staged assets"
               exit 0
             fi
-            if [ "${#upload_names[@]}" -gt 0 ]; then
-              pending=()
-              for name in "${upload_names[@]}"; do
-                for path in "${assets[@]}"; do
-                  case "${path}" in */"${name}") pending+=("${path}"); break ;; esac
-                done
-              done
+            if [ "${#pending[@]}" -gt 0 ]; then
               gh release upload "${RELEASE_TAG}" "${pending[@]}"
             fi
             gh release edit "${RELEASE_TAG}" --draft=false
