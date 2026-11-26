@@ -40,6 +40,7 @@ SNAPSHOT_DB=
 PARTIAL_DB=
 BACKUP_FILE=
 CHECKSUM_FILE=
+BACKUP_STAGE_DIR=
 CLI_HOST=
 CLI_PORT=
 CLI_USERNAME=
@@ -424,7 +425,8 @@ prepare_work_directory() {
   prepare_owner_only_directory "$WORK_DIR"
   local path
   for path in "$BACKUP_FILE" "$CHECKSUM_FILE"; do
-    [ ! -e "$path" ] || fail "refusing to overwrite an existing artifact: $path"
+    [ ! -e "$path" ] && [ ! -L "$path" ] \
+      || fail "refusing to overwrite an existing artifact: $path"
   done
 
   local available_kib
@@ -437,24 +439,39 @@ prepare_work_directory() {
 
 write_backup() {
   step "Write a full custom-format backup: $BACKUP_FILE"
-  local partial="$BACKUP_FILE.partial"
-  rm -f "$partial"
+  BACKUP_STAGE_DIR=$(mktemp -d "$WORK_DIR/.reset-backup.XXXXXXXX")
+  local dump="$BACKUP_STAGE_DIR/${BACKUP_FILE##*/}"
+  local checksum="$BACKUP_STAGE_DIR/${CHECKSUM_FILE##*/}"
+  local digest actual expected
   if ! pg_dump --no-password --format=custom --create \
-      --dbname="$TARGET_DB" --file="$partial"; then
-    rm -f "$partial"
+      --dbname="$TARGET_DB" --file="$dump"; then
     fail "the full backup failed; the database was not changed"
   fi
-  if [ ! -s "$partial" ]; then
-    rm -f "$partial"
-    fail "the full backup is empty; the database was not changed"
-  fi
-  if ! pg_restore --no-password --list "$partial" > /dev/null; then
-    rm -f "$partial"
+  [ -s "$dump" ] || fail "the full backup is empty; the database was not changed"
+  if ! pg_restore --no-password --list "$dump" > /dev/null; then
     fail "the full backup failed validation; the database was not changed"
   fi
-  mv "$partial" "$BACKUP_FILE"
-  printf '%s  %s\n' "$(file_sha256 "$BACKUP_FILE")" "$(basename "$BACKUP_FILE")" \
-    > "$CHECKSUM_FILE"
+  digest=$(file_sha256 "$dump")
+  printf '%s  %s\n' "$digest" "${BACKUP_FILE##*/}" > "$checksum"
+  actual=$(file_sha256 "$dump")
+  printf -v expected '%s  %s' "$actual" "${BACKUP_FILE##*/}"
+  [ "$(< "$checksum")" = "$expected" ] \
+    || fail "the full backup checksum failed validation; the database was not changed"
+
+  # linkSync 原子拒绝已存在的目标（包括目录和符号链接）。先发布 dump 取得同名产物的
+  # 写入权；只有成功取得它的调用才可以在校验文件发布失败时撤销该链接。
+  node -e '
+const { linkSync, unlinkSync } = require("node:fs")
+const [dump, checksum, backupFile, checksumFile] = process.argv.slice(1)
+linkSync(dump, backupFile)
+try {
+  linkSync(checksum, checksumFile)
+} catch (error) {
+  unlinkSync(backupFile)
+  throw error
+}
+' "$dump" "$checksum" "$BACKUP_FILE" "$CHECKSUM_FILE" \
+    || fail "cannot publish the full backup; the database was not changed"
 }
 
 # 解冻：先放开连接，再把快照库改回目标库名。改名必须先确认目标库名是空闲的（调用方负责先清掉本次
@@ -534,6 +551,9 @@ replace_database() {
 
 on_exit() {
   local status=$?
+  if [ -n "$BACKUP_STAGE_DIR" ]; then
+    rm -rf -- "$BACKUP_STAGE_DIR" || echo "ERROR: cannot clean backup staging directory: $BACKUP_STAGE_DIR" >&2
+  fi
   if [ "$CLEANUP_STARTED" = true ]; then
     if [ "$status" -ne 0 ]; then
       echo "ERROR: snapshot cleanup stopped after $CLEANUP_DROPPED deletion(s); completed deletions cannot be rolled back." >&2
