@@ -59,6 +59,7 @@ function transform(x: number, y: number) {
 
 interface Harness {
   result: { current: CanvasTransformBatchActions }
+  unmount: () => void
   getDrafts: () => Record<string, { x: number; y: number }>
 }
 
@@ -77,6 +78,7 @@ function createHarness(
   }))
   return {
     result: view.result,
+    unmount: view.unmount,
     getDrafts: () => positionDrafts,
   }
 }
@@ -343,7 +345,8 @@ describe('useCanvasTransformBatch', () => {
     const executeCommands = vi.fn()
       .mockImplementationOnce(() => oldGate)
       .mockResolvedValue(undefined)
-    const { result, getDrafts } = createHarness(executeCommands)
+    const previous = createHarness(executeCommands)
+    const { result } = previous
 
     act(() => {
       result.current.moveNodes([{ id: NODE_A, kind: 'resource', transform: transform(10, 20) }])
@@ -351,13 +354,14 @@ describe('useCanvasTransformBatch', () => {
     })
     expect(executeCommands).toHaveBeenCalledTimes(1)
 
-    // 切换画布：旧批次仍未返回，新 canvas 的提交必须立即放行。
+    // 离开画布会卸载旧批次；新 owner 的提交必须立即放行。
     act(() => {
-      result.current.reset()
+      previous.unmount()
     })
+    const next = createHarness(executeCommands)
     act(() => {
-      result.current.moveNodes([{ id: NODE_B, kind: 'resource', transform: transform(30, 40) }])
-      result.current.commitTransforms()
+      next.result.current.moveNodes([{ id: NODE_B, kind: 'resource', transform: transform(30, 40) }])
+      next.result.current.commitTransforms()
     })
     await waitFor(() => expect(executeCommands).toHaveBeenCalledTimes(2))
     expect(executeCommands.mock.calls[1]?.[0]).toEqual([{
@@ -365,7 +369,7 @@ describe('useCanvasTransformBatch', () => {
       nodeId: NODE_B,
       transform: transform(30, 40),
     }])
-    await waitFor(() => expect(getDrafts()[NODE_B]).toBeUndefined())
+    await waitFor(() => expect(next.getDrafts()[NODE_B]).toBeUndefined())
 
     // 旧批次迟到成功：不得影响新 owner（不释放占用、不调度、不提交第三个批次）。
     await act(async () => {
@@ -373,7 +377,7 @@ describe('useCanvasTransformBatch', () => {
       await oldGate
     })
     expect(executeCommands).toHaveBeenCalledTimes(2)
-    expect(getDrafts()[NODE_B]).toBeUndefined()
+    expect(next.getDrafts()[NODE_B]).toBeUndefined()
   })
 
   it('does not restore a rejected old batch into the new canvas owner', async () => {
@@ -384,18 +388,16 @@ describe('useCanvasTransformBatch', () => {
     const executeCommands = vi.fn()
       .mockImplementationOnce(() => oldGate)
       .mockResolvedValue(undefined)
-    const { result, getDrafts } = createHarness(executeCommands)
-
+    const previous = createHarness(executeCommands)
     act(() => {
-      result.current.moveNodes([{ id: NODE_A, kind: 'resource', transform: transform(10, 20) }])
-      result.current.flushTransforms()
+      previous.result.current.moveNodes([{ id: NODE_A, kind: 'resource', transform: transform(10, 20) }])
+      previous.result.current.flushTransforms()
+      previous.unmount()
     })
+    const next = createHarness(executeCommands)
     act(() => {
-      result.current.reset()
-    })
-    act(() => {
-      result.current.moveNodes([{ id: NODE_A, kind: 'resource', transform: transform(50, 60) }])
-      result.current.flushTransforms()
+      next.result.current.moveNodes([{ id: NODE_A, kind: 'resource', transform: transform(50, 60) }])
+      next.result.current.flushTransforms()
     })
     await act(async () => {})
     expect(executeCommands).toHaveBeenCalledTimes(2)
@@ -411,7 +413,7 @@ describe('useCanvasTransformBatch', () => {
       nodeId: NODE_A,
       transform: transform(50, 60),
     }])
-    expect(getDrafts()[NODE_A]).toBeUndefined()
+    expect(next.getDrafts()[NODE_A]).toBeUndefined()
   })
 
   it('does not restore an outdated ungroup over a move-back decision made during flight', async () => {
@@ -471,26 +473,15 @@ describe('useCanvasTransformBatch', () => {
     expect(getDrafts()[NODE_B]).toBeUndefined()
   })
 
-  it('reset cancels the pending debounce and clears pending transforms', async () => {
+  it('clears the pending debounce and transforms on unmount', async () => {
     vi.useFakeTimers()
     const executeCommands = vi.fn(async () => undefined)
-    const { result } = createHarness(executeCommands)
+    const { result, unmount } = createHarness(executeCommands)
 
     act(() => {
       result.current.moveNodes([{ id: NODE_A, kind: 'resource', transform: transform(10, 20) }])
       result.current.commitTransforms()
-    })
-    act(() => {
-      result.current.reset()
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(500)
-    })
-    expect(executeCommands).not.toHaveBeenCalled()
-
-    // pending 已清空：后续 commit 不再产生任何命令。
-    act(() => {
-      result.current.commitTransforms()
+      unmount()
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500)

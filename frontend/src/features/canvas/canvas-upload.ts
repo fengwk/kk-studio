@@ -14,7 +14,6 @@ import type { CanvasCommandDTO, CanvasTransformDTO } from '@/shared/api/generate
 const canvasUploadHasher = sharedWorkerHasher()
 
 export interface CanvasUploadPipelineOptions {
-  canvasId: string | null
   storageService?: StorageService
   hashFile?: HashFile
   executeCommands: (commands: CanvasCommandDTO[]) => Promise<unknown>
@@ -27,18 +26,15 @@ export interface CanvasUploadPipelineOptions {
 
 export interface CanvasUploadPipelineActions {
   uploadFiles: (files: FileList | File[]) => Promise<void>
-  /** 离开/切换画布时作废在途批次并清空全部 progress；下一次 uploadFiles 自动使用新批次。 */
-  resetUploads: () => void
 }
 
 /**
  * Canvas 资源上传管线：Web Worker SHA-256 → reserve → PENDING 直传/READY 跳过 →
- * complete → CREATE_RESOURCE_NODE。单文件失败不阻断后续文件；切换画布时整批作废
+ * complete → CREATE_RESOURCE_NODE。单文件失败不阻断后续文件；卸载时整批作废
  * （每个 await 后校验批次 epoch），alias 一律在 finally 释放，progress 在所有退出路径清理。
  */
 export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): CanvasUploadPipelineActions {
   const {
-    canvasId,
     executeCommands,
     reserveNodeAlias,
     releaseNodeAlias,
@@ -51,9 +47,17 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
   const batchEpochRef = useRef(0)
   const localIdSequenceRef = useRef(0)
   const progressKeysRef = useRef(new Set<string>())
+  const onUploadProgressRef = useRef(onUploadProgress)
+
+  useEffect(() => {
+    onUploadProgressRef.current = onUploadProgress
+  }, [onUploadProgress])
 
   useEffect(() => () => {
     batchEpochRef.current += 1
+    for (const localId of progressKeysRef.current) {
+      onUploadProgressRef.current(localId, null)
+    }
     progressKeysRef.current.clear()
   }, [])
 
@@ -165,7 +169,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       }
       setToast(error instanceof Error ? error.message : translate('canvas.upload.failed', { name: file.name }))
     } finally {
-      // reset/unmount 已统一清过 progress，避免重复发 null 事件。
+      // unmount 已统一清过 progress，避免重复发 null 事件。
       if (active()) {
         setUploadProgress(localId, null)
       }
@@ -182,23 +186,12 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
   ])
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
-    if (!canvasId) {
-      return
-    }
     const epoch = batchEpochRef.current
     const active = () => batchEpochRef.current === epoch
     for (const file of Array.from(files)) {
       await uploadFile(file, active)
     }
-  }, [canvasId, uploadFile])
+  }, [uploadFile])
 
-  const resetUploads = useCallback(() => {
-    batchEpochRef.current += 1
-    for (const localId of progressKeysRef.current) {
-      onUploadProgress(localId, null)
-    }
-    progressKeysRef.current.clear()
-  }, [onUploadProgress])
-
-  return { uploadFiles, resetUploads }
+  return { uploadFiles }
 }

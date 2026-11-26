@@ -9,8 +9,6 @@ import { setLocale } from '@/shared/i18n'
 function createFakeController(overrides?: Partial<CanvasController>): CanvasController {
   return {
     state: {
-      view: 'editor',
-      canvasId: null,
       selectedIds: [],
       selectedLinks: [],
       positionDrafts: {},
@@ -43,8 +41,6 @@ function createFakeController(overrides?: Partial<CanvasController>): CanvasCont
     nodeCallbacks: { editTextNode: vi.fn() },
     initialFitPending: false,
     completeInitialFit: vi.fn(),
-    openEditor: vi.fn(),
-    openLibrary: vi.fn(),
     setToast: vi.fn(),
     setViewport: vi.fn(),
     setSelection: vi.fn(),

@@ -20,8 +20,7 @@ type DraftPositions = Record<string, { x: number; y: number }>
 
 interface DraftPersistenceInput {
   scope: CanvasScope
-  canvasId: string | null
-  view: CanvasLocalState['view']
+  canvasId: string
   drafts: CanvasLocalState['drafts']
   snapshot: CanvasSnapshotDTO | undefined
 }
@@ -31,17 +30,13 @@ interface DraftPersistenceInput {
  *
  * 落盘任务在序列化阶段读取最新的持久化目标，ACK 与写入共用同一条链，因此「前序写入 → ACK → 后续写入」严格有序，已确认的草稿不会被排队中的写入复活。
  */
-export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snapshot }: DraftPersistenceInput) {
+export function useCanvasDraftPersistence({ scope, canvasId, drafts, snapshot }: DraftPersistenceInput) {
   const { setState, isMountedRef, canvasEpochRef, activeCanvasIdRef, draftsRef, positionsRef, targetDraftsRef, draftPersistChainRef, draftBaselineRef } = scope
   const { t } = useI18n()
-  const [draftReloadToken, setDraftReloadToken] = useState(0)
   const [draftLoadEpoch, setDraftLoadEpoch] = useState(0)
 
   // 恢复 IndexedDB 中的持久化草稿（按 canvasId 严格隔离）
   useEffect(() => {
-    if (!canvasId || view !== 'editor') {
-      return
-    }
     const currentEpoch = canvasEpochRef.current
     // 加载开始即撤销持久基线，加载完成前禁止删除旧草稿
     draftBaselineRef.current = { canvasId: null, drafts: {} }
@@ -62,16 +57,11 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
       targetDraftsRef.current = mergedDrafts
       draftBaselineRef.current = { canvasId, drafts: persisted }
 
-      setState((current) => {
-        if (current.canvasId !== canvasId) {
-          return current
-        }
-        return {
-          ...current,
-          drafts: mergedDrafts,
-          positionDrafts: mergedPositions,
-        }
-      })
+      setState((current) => ({
+        ...current,
+        drafts: mergedDrafts,
+        positionDrafts: mergedPositions,
+      }))
       setDraftLoadEpoch((epoch) => epoch + 1)
     }).catch((err) => {
       if (cancelled || canvasEpochRef.current !== currentEpoch) {
@@ -87,7 +77,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
     return () => {
       cancelled = true
     }
-  }, [activeCanvasIdRef, canvasEpochRef, canvasId, draftBaselineRef, draftReloadToken, draftsRef, positionsRef, setState, t, targetDraftsRef, view])
+  }, [activeCanvasIdRef, canvasEpochRef, canvasId, draftBaselineRef, draftsRef, positionsRef, setState, t, targetDraftsRef])
 
   // 监听持久化存储异常
   useEffect(() => {
@@ -106,9 +96,6 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
   const runDraftPersistence = useCallback(() => {
     const taskEpoch = canvasEpochRef.current
     const taskCanvasId = activeCanvasIdRef.current
-    if (!taskCanvasId || view !== 'editor') {
-      return
-    }
     if (draftBaselineRef.current.canvasId !== taskCanvasId) {
       return
     }
@@ -171,15 +158,15 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
         setState((cur) => ({ ...cur, draftPersistPending: false }))
       }
     })
-  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, isMountedRef, setState, t, targetDraftsRef, view])
+  }, [activeCanvasIdRef, canvasEpochRef, draftBaselineRef, draftPersistChainRef, isMountedRef, setState, t, targetDraftsRef])
 
   useEffect(() => {
     runDraftPersistence()
-  }, [canvasId, draftLoadEpoch, drafts, runDraftPersistence, view])
+  }, [canvasId, draftLoadEpoch, drafts, runDraftPersistence])
 
   // 远端删除探测：快照中不存在但本地有未提交草稿的节点，标记为 remote_deleted 保留草稿供救援
   useEffect(() => {
-    if (!snapshot || !canvasId) {
+    if (!snapshot) {
       return
     }
     const remoteNodeIds = new Set(snapshot.nodes.map((node) => node.id))
@@ -269,9 +256,6 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
 
   const ackDurableDrafts = useCallback((acks: CanvasDraftAck[]): Promise<void> => {
     const activeCanvasId = activeCanvasIdRef.current
-    if (!activeCanvasId) {
-      return Promise.resolve()
-    }
     return ackDurableDraftsForScope(activeCanvasId, getEditingSessionId(), canvasEpochRef.current, acks)
   }, [ackDurableDraftsForScope, activeCanvasIdRef, canvasEpochRef])
 
@@ -358,12 +342,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
     })
   }, [draftsRef, positionsRef, setState, targetDraftsRef])
 
-  const reloadDrafts = useCallback(() => {
-    setDraftReloadToken((token) => token + 1)
-  }, [])
-
   return {
-    reloadDrafts,
     runDraftPersistence,
     ackDurableDraftsForScope,
     ackDurableDrafts,

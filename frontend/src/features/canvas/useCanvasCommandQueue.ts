@@ -10,7 +10,6 @@ import {
   CanvasCommandQueue,
   CanvasQueueBlockedError,
 } from '@/features/canvas/command-queue'
-import type { CanvasLocalState } from '@/features/canvas/types'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
@@ -22,8 +21,7 @@ import type {
 interface CommandQueueInput {
   scope: CanvasScope
   queryClient: QueryClient
-  canvasId: string | null
-  view: CanvasLocalState['view']
+  canvasId: string
   snapshot: CanvasSnapshotDTO | undefined
   ackDurableDraftsForScope: (
     canvasId: string,
@@ -43,7 +41,6 @@ export function useCanvasCommandQueue({
   scope,
   queryClient,
   canvasId,
-  view,
   snapshot,
   ackDurableDraftsForScope,
   applyDraftAcks,
@@ -53,7 +50,7 @@ export function useCanvasCommandQueue({
   const pendingCommandCountRef = useRef(0)
 
   useEffect(() => {
-    if (!snapshot || !canvasId) {
+    if (!snapshot) {
       return
     }
     if (queueRef.current && queueCanvasIdRef.current !== canvasId) {
@@ -114,15 +111,12 @@ export function useCanvasCommandQueue({
 
   // 应用事件 WebSocket 订阅：更高 revision 直接刷新权威 Snapshot
   const refreshCanvasSnapshot = useCallback(() => {
-    if (!canvasId) {
-      return
-    }
     void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvas(canvasId) })
   }, [canvasId, queryClient])
 
   useCanvasVersionEvents({
     canvasId,
-    enabled: view === 'editor' && Boolean(snapshot),
+    enabled: Boolean(snapshot),
     revision: snapshot?.document.revision ?? '0',
     onSnapshot: refreshCanvasSnapshot,
   })

@@ -1,7 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
-import type { CanvasView } from '@/features/canvas/types'
 
 /**
  * useCanvasKeyboard 独立契约测试。
@@ -11,10 +10,8 @@ import type { CanvasView } from '@/features/canvas/types'
  * - 编辑视图快捷键 0/1/f/t、Delete/Backspace 的消费与回调；
  * - Escape 的 surface 作用域判定（stage 内/编辑器顶层 vs 其他元素）与焦点恢复；
  * - blocking overlay / 内层菜单存在时全局 handler 让路；
- * - library 视图下快捷键与 Escape 都不生效。
  */
 interface KeyboardApi {
-  view: CanvasView
   stageElementRef: { current: HTMLElement | null }
   fitViewRef: { current: (() => void) | null }
   focusSelectionRef: { current: (() => void) | null }
@@ -27,7 +24,6 @@ interface KeyboardApi {
 
 function createApi(): KeyboardApi {
   return {
-    view: 'editor',
     stageElementRef: { current: null },
     fitViewRef: { current: null },
     focusSelectionRef: { current: null },
@@ -42,12 +38,7 @@ function createApi(): KeyboardApi {
 function setup() {
   const api = createApi()
   const hook = renderHook(() => useCanvasKeyboard(api))
-  const rerenderWith = (next: Partial<KeyboardApi>) => {
-    // hook 闭包捕获同一个 api 对象：就地修改后 rerender 触发 effect 依赖变化重绑。
-    Object.assign(api, next)
-    hook.rerender()
-  }
-  return { hook, api, rerenderWith }
+  return { hook, api }
 }
 
 function fireKey(target: EventTarget, init: KeyboardEventInit): KeyboardEvent {
@@ -61,7 +52,7 @@ describe('useCanvasKeyboard editor shortcuts', () => {
     document.body.innerHTML = ''
   })
 
-  it('fires 0/1/f/t only in editor view with preventDefault', () => {
+  it('fires 0/1/f/t with preventDefault', () => {
     const { api } = setup()
     api.fitViewRef.current = vi.fn()
     api.focusSelectionRef.current = vi.fn()
@@ -153,26 +144,24 @@ describe('useCanvasKeyboard scoping', () => {
     expect(api.closeOverlays).toHaveBeenCalledTimes(1)
   })
 
-  it('treats window/document targets as the editor surface only in editor view', () => {
-    const { api, rerenderWith } = setup()
+  it('treats window/document targets as the canvas surface', () => {
+    const { api } = setup()
     const escape = fireKey(window, { key: 'Escape' })
     expect(escape.defaultPrevented).toBe(true)
     expect(api.closeOverlays).toHaveBeenCalledTimes(1)
+  })
 
-    // 切到 library：window 上的 Escape 不再属于 canvas surface。
-    // view 是渲染时解构进闭包的，必须就地修改 api 并 rerender 才能生效。
-    rerenderWith({ view: 'library' })
-    api.closeOverlays.mockClear()
-    api.clearSelection.mockClear()
-    fireKey(window, { key: 'Escape' })
-    expect(api.closeOverlays).not.toHaveBeenCalled()
-    // library 视图下 Delete/0 都不消费。
-    const libraryDelete = fireKey(window, { key: 'Delete' })
-    expect(libraryDelete.defaultPrevented).toBe(false)
-    expect(api.deleteSelection).not.toHaveBeenCalled()
+  it('stops consuming shortcuts and Escape after unmount', () => {
+    const { hook, api } = setup()
     api.fitViewRef.current = vi.fn()
-    const libraryZero = fireKey(window, { key: '0' })
-    expect(libraryZero.defaultPrevented).toBe(false)
+    hook.unmount()
+
+    for (const key of ['Escape', 'Delete', '0']) {
+      expect(fireKey(window, { key }).defaultPrevented).toBe(false)
+    }
+    expect(api.closeOverlays).not.toHaveBeenCalled()
+    expect(api.clearSelection).not.toHaveBeenCalled()
+    expect(api.deleteSelection).not.toHaveBeenCalled()
     expect(api.fitViewRef.current).not.toHaveBeenCalled()
   })
 })

@@ -1,22 +1,14 @@
 import type { CanvasLocalState } from '@/features/canvas/types'
-import {
-  DEFAULT_CANVAS_VIEWPORT,
-  loadCanvasViewport,
-} from '@/features/canvas/viewport-storage'
+import { loadCanvasViewport } from '@/features/canvas/viewport-storage'
 
-/** 控制器渲染状态的初始值：深链打开画布时直接进入编辑器并恢复已存视口。 */
-export function createInitialCanvasState(initialCanvasId?: string): CanvasLocalState {
+export function createInitialCanvasState(canvasId: string): CanvasLocalState {
   return {
-    view: initialCanvasId ? 'editor' : 'library',
-    canvasId: initialCanvasId ?? null,
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},
     drafts: {},
     storageError: null,
-    viewport: initialCanvasId
-      ? loadCanvasViewport(initialCanvasId)
-      : { ...DEFAULT_CANVAS_VIEWPORT },
+    viewport: loadCanvasViewport(canvasId),
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,

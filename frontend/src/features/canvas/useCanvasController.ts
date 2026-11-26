@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCanvasUploadPipeline } from '@/features/canvas/canvas-upload'
 import {
-  enterCanvasScope,
   publishDrafts,
   useCanvasScope,
   currentCanvasSnapshot,
@@ -21,7 +20,7 @@ import type {
 import { useCanvasCommandQueue } from '@/features/canvas/useCanvasCommandQueue'
 import { useCanvasDraftPersistence } from '@/features/canvas/useCanvasDraftPersistence'
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
-import { useCanvasNavigation } from '@/features/canvas/useCanvasNavigation'
+import { useCanvasEditorViewState } from '@/features/canvas/useCanvasEditorViewState'
 import { useCanvasNodeActions } from '@/features/canvas/useCanvasNodeActions'
 import { useCanvasNodePlacement } from '@/features/canvas/useCanvasNodePlacement'
 import { useCanvasReferenceLinks } from '@/features/canvas/useCanvasReferenceLinks'
@@ -39,10 +38,11 @@ import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
 /**
  * 画布编辑器的组合根：持有渲染状态、权威快照与函数目录查询、视口与选区，并把草稿持久化、命令队列、节点落位、文本编辑、引用边与节点操作
  * 这些子 hook 接到同一个 {@link useCanvasScope} 作用域上。展示 = 权威快照 + 待确认操作 + 本地草稿。
+ * 宿主以 canvasId 为 key；一个控制器实例只服务一张画布。
  */
-export function useCanvasController(initialCanvasId?: string) {
+export function useCanvasController(canvasId: string) {
   const queryClient = useQueryClient()
-  const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(initialCanvasId))
+  const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(canvasId))
   const stage = useCanvasStageSurface()
   const {
     stageMetrics,
@@ -54,8 +54,8 @@ export function useCanvasController(initialCanvasId?: string) {
     dockAddRef,
     closeContextMenuRef,
   } = stage
-  const scope = useCanvasScope(setState, initialCanvasId ?? null)
-  const { isMountedRef, canvasEpochRef, activeCanvasIdRef, queueRef, queueCanvasIdRef, draftsRef } = scope
+  const scope = useCanvasScope(setState, canvasId)
+  const { isMountedRef, canvasEpochRef, queueRef, queueCanvasIdRef, draftsRef } = scope
 
   useEffect(() => {
     isMountedRef.current = true
@@ -67,42 +67,32 @@ export function useCanvasController(initialCanvasId?: string) {
     }
   }, [canvasEpochRef, isMountedRef, queueCanvasIdRef, queueRef])
 
-  useEffect(() => {
-    if (state.canvasId !== activeCanvasIdRef.current) {
-      enterCanvasScope(scope, state.canvasId)
-    }
-  }, [activeCanvasIdRef, scope, state.canvasId])
-
   // 视口落盘挂在提交之后：拖拽期间的逐帧视口变化会被合并成有限的存储写入。
-  useCanvasViewportPersistence(state.canvasId, state.viewport)
+  useCanvasViewportPersistence(canvasId, state.viewport)
 
   const snapshotQuery = useQuery({
-    queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
-    queryFn: ({ signal }) => getCanvas(state.canvasId as string, { signal }),
-    enabled: state.view === 'editor' && Boolean(state.canvasId),
+    queryKey: queryKeys.studio.canvas(canvasId),
+    queryFn: ({ signal }) => getCanvas(canvasId, { signal }),
   })
   const modelsQuery = useQuery({
     queryKey: queryKeys.studio.canvasFunctions,
     queryFn: ({ signal }) => listCanvasFunctions({ signal }),
-    enabled: state.view === 'editor',
   })
   const snapshot = snapshotQuery.data
   const models = modelsQuery.data
 
   const draftLayer = useCanvasDraftPersistence({
     scope,
-    canvasId: state.canvasId,
-    view: state.view,
+    canvasId,
     drafts: state.drafts,
     snapshot,
   })
-  const { reloadDrafts, runDraftPersistence, ackDurableDrafts, setPositionDrafts, dismissDraft } = draftLayer
+  const { runDraftPersistence, ackDurableDrafts, setPositionDrafts, dismissDraft } = draftLayer
 
   const { executeCommands, retryRecovery } = useCanvasCommandQueue({
     scope,
     queryClient,
-    canvasId: state.canvasId,
-    view: state.view,
+    canvasId,
     snapshot,
     ackDurableDraftsForScope: draftLayer.ackDurableDraftsForScope,
     applyDraftAcks: draftLayer.applyDraftAcks,
@@ -167,7 +157,7 @@ export function useCanvasController(initialCanvasId?: string) {
     localPendingErrors,
     isNodeInFlight,
   } = useCanvasFunctionRun({
-    canvasId: state.canvasId,
+    canvasId,
     queryClient,
     setToast,
     flushFunctionConfig,
@@ -178,7 +168,7 @@ export function useCanvasController(initialCanvasId?: string) {
     resetFunctionConfigDrafts()
   }, [resetFunctionConfigDrafts])
 
-  const { moveNodes, commitTransforms, reset: resetTransformBatch } = useCanvasTransformBatch({
+  const { moveNodes, commitTransforms } = useCanvasTransformBatch({
     snapshot,
     executeCommands,
     setPositionDrafts,
@@ -186,7 +176,7 @@ export function useCanvasController(initialCanvasId?: string) {
   })
 
   const placement = useCanvasNodePlacement(scope, snapshot)
-  const { suggestNodeAlias, reserveNodeAlias, releaseNodeAlias, clearReservedAliases, nextTransform } = placement
+  const { suggestNodeAlias, reserveNodeAlias, releaseNodeAlias, nextTransform } = placement
 
   const setUploadProgress = useCallback((localId: string, progress: number | null) => {
     setState((current) => {
@@ -200,8 +190,7 @@ export function useCanvasController(initialCanvasId?: string) {
     })
   }, [])
 
-  const { uploadFiles, resetUploads } = useCanvasUploadPipeline({
-    canvasId: state.canvasId,
+  const { uploadFiles } = useCanvasUploadPipeline({
     executeCommands,
     reserveNodeAlias,
     releaseNodeAlias,
@@ -210,17 +199,7 @@ export function useCanvasController(initialCanvasId?: string) {
     setToast,
   })
 
-  const navigation = useCanvasNavigation({
-    scope,
-    initialCanvasId: initialCanvasId ?? null,
-    setState,
-    reloadDrafts,
-    resetTransformBatch,
-    resetUploads,
-    resetFunctionConfigDrafts,
-    clearReservedAliases,
-  })
-  const { openEditor, openLibrary, setViewport, setSelection, completeInitialFit, initialFitPending } = navigation
+  const { setViewport, setSelection, completeInitialFit, initialFitPending } = useCanvasEditorViewState(canvasId, setState)
   const dismissConflictMessage = useCallback(() => {
     setState((current) => ({ ...current, conflictKind: null, conflictMessage: null }))
   }, [])
@@ -282,7 +261,6 @@ export function useCanvasController(initialCanvasId?: string) {
   }, [])
 
   useCanvasKeyboard({
-    view: state.view,
     stageElementRef,
     fitViewRef,
     focusSelectionRef,
@@ -327,8 +305,6 @@ export function useCanvasController(initialCanvasId?: string) {
     nodeCallbacks,
     initialFitPending,
     completeInitialFit,
-    openEditor,
-    openLibrary,
     setToast,
     setViewport,
     setSelection,

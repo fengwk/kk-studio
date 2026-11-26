@@ -20,7 +20,6 @@ type FitView = (options?: {
 }) => Promise<boolean>
 
 export interface CanvasStageViewportOptions {
-  canvasId: string | null
   viewport: StoredCanvasViewport
   stageWidth: StageMetrics['width']
   containerRef: RefObject<HTMLElement | null>
@@ -52,7 +51,6 @@ export interface CanvasStageViewportActions {
  * 所有 ref 与 flow 的写入顺序保持与内联实现一致：先更新 lastViewport，再下发 flow，最后写状态。
  */
 export function useCanvasStageViewport({
-  canvasId,
   viewport,
   stageWidth,
   containerRef,
@@ -138,11 +136,8 @@ export function useCanvasStageViewport({
   }, [setViewport])
 
   useEffect(() => {
-    initialFitStartedRef.current = false
-  }, [canvasId])
-
-  useEffect(() => {
     mountedRef.current = true
+    initialFitStartedRef.current = false
     return () => {
       mountedRef.current = false
     }

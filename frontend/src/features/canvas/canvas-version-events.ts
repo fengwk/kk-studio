@@ -5,7 +5,7 @@ import type { CanvasRevisionEventDTO } from '@/shared/api/contracts/canvas'
 import { compareCanvasRevisions } from '@/features/canvas/canvas-version'
 
 export interface CanvasVersionEventsOptions {
-  canvasId: string | null
+  canvasId: string
   /** 仅当编辑器持有权威 snapshot 后才订阅。 */
   enabled: boolean
   /** 客户端当前已知的 graph 版本修订号（canonical 十进制字符串）。 */
@@ -25,13 +25,13 @@ export function useCanvasVersionEvents(options: CanvasVersionEventsOptions) {
   const revisionRef = useRef(revision)
 
   useEffect(() => {
-    if (!enabled || !canvasId) {
+    if (!enabled) {
       return
     }
     revisionRef.current = revision
   }, [canvasId, enabled, revision])
 
-  useResourceSync(enabled && canvasId ? { kind: 'canvas', id: canvasId } : null, {
+  useResourceSync(enabled ? { kind: 'canvas', id: canvasId } : null, {
     sync: onSnapshot,
     syncOn: (name, data) => {
       if (name !== 'revision') {

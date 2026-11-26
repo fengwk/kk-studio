@@ -66,8 +66,6 @@ function renderTextEditor(options: {
   const setTextEditorDraft = vi.fn()
   const saveTextEditor = vi.fn()
   const state = {
-    view: 'editor' as const,
-    canvasId: CANVAS_ID,
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},
