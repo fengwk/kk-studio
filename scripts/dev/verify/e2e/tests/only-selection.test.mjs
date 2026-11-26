@@ -46,6 +46,8 @@ node() {
       return "$STUB_MATRIX_EXIT"
       ;;
     */lib/json-probe.mjs)
+      # Like the real probe, drain the HTTP response before closing the pipe.
+      cat >/dev/null
       printf '%s\\n' "$@" > "$STUB_ROOT/probe-args"
       printf 'ok\\n'
       ;;
