@@ -21,7 +21,7 @@ function sameViewport(left: StoredCanvasViewport, right: StoredCanvasViewport): 
  * 因此「最后一次平移」不会丢。打开画布时的视口来自存档，视为已落盘，不回写。
  */
 export function useCanvasViewportPersistence(
-  canvasId: string | null,
+  canvasId: string,
   viewport: StoredCanvasViewport,
 ): void {
   const pendingRef = useRef<PendingViewport | null>(null)
@@ -61,9 +61,6 @@ export function useCanvasViewportPersistence(
       // 进入/切换画布：先把上一个画布的待写值落盘，再把当前视口当作既有存档。
       flush()
       persistedRef.current = { canvasId, viewport }
-      return
-    }
-    if (!canvasId) {
       return
     }
     pendingRef.current = { canvasId, viewport }

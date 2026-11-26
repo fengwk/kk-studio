@@ -10,7 +10,6 @@ import type {
   StorageUploadDTO,
 } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const UPLOAD_ID = 'dddddddd-0000-4000-8000-000000000009'
 const PENDING_PUT = {
   method: 'PUT' as const,
@@ -80,7 +79,6 @@ function createHarness(options?: Partial<CanvasUploadPipelineOptions>) {
   }
   const nextTransform = vi.fn(() => ({ x: 100, y: 100, width: 320, height: 246 }))
   const view = renderHook(() => useCanvasUploadPipeline({
-    canvasId: CANVAS_ID,
     storageService,
     hashFile,
     executeCommands,
@@ -93,6 +91,7 @@ function createHarness(options?: Partial<CanvasUploadPipelineOptions>) {
   }))
   return {
     result: view.result,
+    unmount: view.unmount,
     progressCalls,
     toasts,
     executeCommands,
@@ -352,7 +351,7 @@ describe('useCanvasUploadPipeline', () => {
     const hashGate = new Promise<string>((resolve) => {
       resolveHash = resolve
     })
-    const { result, storageService, executeCommands, reserveNodeAlias, progressCalls } = createHarness({
+    const { result, storageService, executeCommands, reserveNodeAlias, progressCalls, unmount } = createHarness({
       hashFile: vi.fn(() => hashGate),
     })
     const file = new File(['slow'], 'slow.png', { type: 'image/png' })
@@ -362,9 +361,9 @@ describe('useCanvasUploadPipeline', () => {
     act(() => {
       uploadPromise = result.current.uploadFiles([file])
     })
-    // 画布切换：作废在途任务并清空 progress。
+    // 离开画布会卸载管线，作废在途任务并清空 progress。
     act(() => {
-      result.current.resetUploads()
+      unmount()
     })
     await act(async () => {
       resolveHash('sha')
@@ -380,12 +379,11 @@ describe('useCanvasUploadPipeline', () => {
     ])
   })
 
-  it('re-arms uploads after a reset so the next batch starts fresh', async () => {
+  it('accepts uploads after mounting a fresh pipeline', async () => {
+    const previous = createHarness()
+    previous.unmount()
     const { result, storageService, executeCommands } = createHarness()
 
-    act(() => {
-      result.current.resetUploads()
-    })
     await act(async () => {
       await result.current.uploadFiles([new File(['png'], 'after.png', { type: 'image/png' })])
     })
@@ -395,12 +393,12 @@ describe('useCanvasUploadPipeline', () => {
     expect(executeCommands).toHaveBeenCalledOnce()
   })
 
-  it('does not start queued files of an abandoned batch after reset', async () => {
+  it('does not start queued files of an unmounted batch', async () => {
     let resolveFirst!: (value: string) => void
     const firstGate = new Promise<string>((resolve) => {
       resolveFirst = resolve
     })
-    const { result, storageService, executeCommands, progressCalls, toasts } = createHarness({
+    const { result, storageService, executeCommands, progressCalls, toasts, unmount } = createHarness({
       hashFile: vi.fn()
         .mockImplementationOnce(() => firstGate)
         .mockResolvedValue('second:sha'),
@@ -412,7 +410,7 @@ describe('useCanvasUploadPipeline', () => {
       uploadPromise = result.current.uploadFiles([first, second])
     })
     act(() => {
-      result.current.resetUploads()
+      unmount()
     })
     await act(async () => {
       resolveFirst('first:sha')
@@ -455,15 +453,5 @@ describe('useCanvasUploadPipeline', () => {
 
     expect(executeCommands).not.toHaveBeenCalled()
     expect(toasts).toEqual(['存储服务返回了无效的上传句柄'])
-  })
-
-  it('ignores uploads without a canvas id', async () => {
-    const { result, storageService } = createHarness({ canvasId: null })
-
-    await act(async () => {
-      await result.current.uploadFiles([new File(['x'], 'a.png', { type: 'image/png' })])
-    })
-
-    expect(storageService.reserveUpload).not.toHaveBeenCalled()
   })
 })

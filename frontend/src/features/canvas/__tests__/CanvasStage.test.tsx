@@ -167,8 +167,6 @@ function renderStage(options: {
     cancelFunctionRun: vi.fn(),
   }
   const state = {
-    view: 'editor' as const,
-    canvasId: CANVAS_ID,
     selectedIds: options.selectedIds ?? [],
     selectedLinks: options.selectedLinks ?? [],
     positionDrafts: options.positionDrafts ?? {},

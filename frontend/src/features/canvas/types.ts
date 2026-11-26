@@ -8,7 +8,6 @@ import type {
   CanvasTransformDTO,
 } from '@/shared/api/generated/contracts'
 
-export type CanvasView = 'library' | 'editor'
 /** 冲突横幅是否提供整体重试入口，由产生冲突的结构决定，不靠文案字面量匹配。 */
 export type CanvasConflictKind = 'recoverable' | 'terminal'
 export type AddMenuAction =
@@ -29,8 +28,6 @@ type CanvasTextEditorState =
   | { mode: 'edit'; nodeId: string; name: string; markdown: string }
 
 export interface CanvasLocalState {
-  view: CanvasView
-  canvasId: string | null
   selectedIds: string[]
   selectedLinks: CanvasLinkSelection[]
   positionDrafts: Record<string, { x: number; y: number }>

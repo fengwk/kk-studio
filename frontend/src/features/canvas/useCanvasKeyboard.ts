@@ -1,9 +1,7 @@
 import { useEffect, type RefObject } from 'react'
-import type { CanvasView } from '@/features/canvas/types'
 import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
 
 type KeyboardApi = {
-  view: CanvasView
   stageElementRef: RefObject<HTMLElement | null>
   fitViewRef: RefObject<(() => void) | null>
   focusSelectionRef: RefObject<(() => void) | null>
@@ -24,10 +22,9 @@ const MENU_SELECTOR = '[role="menu"]'
 function isCanvasSurfaceEscapeTarget(
   target: EventTarget | null,
   stage: HTMLElement | null,
-  view: CanvasView,
 ): boolean {
   if (!(target instanceof HTMLElement) || target === document.body || target === document.documentElement) {
-    return view === 'editor'
+    return true
   }
   return Boolean(stage?.contains(target))
 }
@@ -44,7 +41,6 @@ function isCanvasSurfaceEscapeTarget(
  */
 export function useCanvasKeyboard(api: KeyboardApi) {
   const {
-    view,
     stageElementRef,
     fitViewRef,
     focusSelectionRef,
@@ -74,7 +70,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
         // 只消费 Canvas surface 上的 Escape：无具体聚焦元素（window/document/
         // documentElement/body）时编辑器视为当前作用域；其余不在 stage 内的
         // 目标（顶栏、编辑器头部等）交给低优先级作用域处理。
-        const onSurface = isCanvasSurfaceEscapeTarget(target, stageElementRef.current, view)
+        const onSurface = isCanvasSurfaceEscapeTarget(target, stageElementRef.current)
         if (!onSurface) {
           return
         }
@@ -82,14 +78,8 @@ export function useCanvasKeyboard(api: KeyboardApi) {
         // capture 相位消费：事件不再下行/冒泡，低优先级 handler 不会随后抢焦点。
         event.stopPropagation()
         closeOverlays()
-        if (view === 'editor') {
-          clearSelection()
-          stageElementRef.current?.focus({ preventScroll: true })
-        }
-        return
-      }
-
-      if (view !== 'editor') {
+        clearSelection()
+        stageElementRef.current?.focus({ preventScroll: true })
         return
       }
 
@@ -129,7 +119,6 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     fitViewRef,
     focusSelectionRef,
     stageElementRef,
-    view,
     zoomRef,
   ])
 }

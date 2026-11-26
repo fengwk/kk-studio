@@ -5,14 +5,14 @@ import { useCanvasController, type CanvasController } from '@/features/canvas/us
 export const CanvasRuntimeContext = createContext<CanvasController | null>(null)
 
 interface CanvasRuntimeProviderProps extends PropsWithChildren {
-  initialCanvasId?: string
+  canvasId: string
 }
 
 export function CanvasRuntimeProvider({
   children,
-  initialCanvasId,
+  canvasId,
 }: CanvasRuntimeProviderProps) {
-  const controller = useCanvasController(initialCanvasId)
+  const controller = useCanvasController(canvasId)
   return (
     <CanvasRuntimeContext.Provider value={controller}>
       {children}

@@ -2,8 +2,8 @@ import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
+import { LoadingIndicator } from '@/shared/ui/feedback/LoadingSpinner'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
-import './canvas-editor.css'
 
 export function CanvasEditor() {
   const { state, snapshot, snapshotQuery } = useCanvasRuntime()
@@ -28,15 +28,14 @@ export function CanvasEditor() {
   }
   if (snapshotQuery.isLoading || !snapshot) {
     return (
-      <section className="canvas-editor-state" role="status">
-        <span className="canvas-spinner" />
-        <StateBlock title={t('canvas.editor.loading')} />
+      <section className="canvas-editor-state">
+        <LoadingIndicator label={t('canvas.editor.loading')} />
       </section>
     )
   }
 
   return (
-    <section className="view editor-view active" tabIndex={-1} aria-label={t('canvas.editor.ariaLabel')}>
+    <section className="editor-view" tabIndex={-1} aria-label={t('canvas.editor.ariaLabel')}>
       <span className="sr-only" aria-live="polite">
         {state.commandPending || state.draftPersistPending
           ? t('canvas.editor.save.saving')

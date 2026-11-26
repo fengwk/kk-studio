@@ -45,9 +45,9 @@ function StrictWrapper({ children }: PropsWithChildren) {
   return <StrictMode>{children}</StrictMode>
 }
 
-function renderPersistence(canvasId: string | null, viewport: StoredCanvasViewport) {
+function renderPersistence(canvasId: string, viewport: StoredCanvasViewport) {
   return renderHook(
-    (props: { canvasId: string | null; viewport: StoredCanvasViewport }) => (
+    (props: { canvasId: string; viewport: StoredCanvasViewport }) => (
       useCanvasViewportPersistence(props.canvasId, props.viewport)
     ),
     { wrapper: StrictWrapper, initialProps: { canvasId, viewport } },
@@ -155,16 +155,5 @@ describe('useCanvasViewportPersistence', () => {
 
     unmount()
     expect(writes).toEqual([{ canvasId: CANVAS_A, viewport: { x: 40, y: 50, zoom: 1.4 } }])
-  })
-
-  it('persists nothing while the library is open', () => {
-    const writes = recordViewportWrites()
-    const { rerender } = renderPersistence(null, { x: 0, y: 0, zoom: 1 })
-
-    rerender({ canvasId: null, viewport: { x: 5, y: 5, zoom: 1 } })
-    act(() => {
-      vi.advanceTimersByTime(CANVAS_VIEWPORT_PERSIST_INTERVAL_MS * 2)
-    })
-    expect(writes).toHaveLength(0)
   })
 })

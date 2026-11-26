@@ -26,8 +26,6 @@ export interface CanvasTransformBatchActions {
   commitTransforms: () => void
   /** 立即聚合当前 pending 提交；失败保留草稿与 pending 以便下次 commit 重试。 */
   flushTransforms: () => void
-  /** 离开/切换画布时清理防抖定时器与 pending（positionDrafts 由调用方一并重置）。 */
-  reset: () => void
 }
 
 interface PendingBatch {
@@ -64,18 +62,6 @@ export function useCanvasTransformBatch(options: CanvasTransformBatchOptions): C
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current)
     }
-  }, [])
-
-  const reset = useCallback(() => {
-    epochRef.current += 1
-    flushRequestedRef.current = false
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-    pendingNodeTransformsRef.current.clear()
-    pendingGroupMovesRef.current.clear()
-    pendingUngroupsRef.current.clear()
   }, [])
 
   const flushTransformsRef = useRef<() => void>(() => undefined)
@@ -210,7 +196,7 @@ export function useCanvasTransformBatch(options: CanvasTransformBatchOptions): C
     })
   }, [setPositionDrafts, snapshot])
 
-  return { moveNodes, commitTransforms, flushTransforms, reset }
+  return { moveNodes, commitTransforms, flushTransforms }
 }
 
 function takePendingBatch(

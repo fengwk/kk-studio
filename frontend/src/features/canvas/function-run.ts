@@ -56,7 +56,7 @@ export interface FunctionRunActions {
  * 重放只原样沿用持久化请求，绝不用最新目录版本替换。
  */
 export function useCanvasFunctionRun(options: {
-  canvasId: string | null
+  canvasId: string
   queryClient: QueryClient
   setToast: (toast: string) => void
   flushFunctionConfig: (nodeId: string) => Promise<unknown>
@@ -74,7 +74,7 @@ export function useCanvasFunctionRun(options: {
 
   const discardPendingRun = useCallback((nodeId: string, expectedRaw: string): boolean => {
     // 1. 禁止在 flight 时 discard
-    if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
+    if (inFlightNodesRef.current.has(nodeId)) {
       return false
     }
 
@@ -92,9 +92,6 @@ export function useCanvasFunctionRun(options: {
   }, [canvasId, setToast, t])
 
   const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: string | null) => {
-    if (!canvasId) {
-      return
-    }
     queryClient.setQueryData<CanvasSnapshotDTO>(
       queryKeys.studio.canvas(canvasId),
       (current) => patchSnapshotRun(current, run, basisRequestId),
@@ -106,15 +103,12 @@ export function useCanvasFunctionRun(options: {
 
   /** 捕获该 node 当前缓存的 run.requestId（可 null）作为本地投影的 CAS basis。 */
   const readBasisRequestId = useCallback((nodeId: string): string | null => {
-    if (!canvasId) {
-      return null
-    }
     const current = queryClient.getQueryData<CanvasSnapshotDTO>(queryKeys.studio.canvas(canvasId))
     return current?.nodes.find((node) => node.id === nodeId)?.run?.requestId ?? null
   }, [canvasId, queryClient])
 
   const startFunctionRun = useCallback(async (nodeId: string) => {
-    if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
+    if (inFlightNodesRef.current.has(nodeId)) {
       return
     }
     inFlightNodesRef.current.add(nodeId)
@@ -187,7 +181,7 @@ export function useCanvasFunctionRun(options: {
     requestId?: string,
   ) => {
     const targetRequestId = requestId ?? readBasisRequestId(nodeId)
-    if (!canvasId || !targetRequestId || inFlightNodesRef.current.has(nodeId)) {
+    if (!targetRequestId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
     inFlightNodesRef.current.add(nodeId)
@@ -209,7 +203,7 @@ export function useCanvasFunctionRun(options: {
     resolution: CanvasFunctionUnknownResolution,
     verification: string,
   ) => {
-    if (!canvasId || !requestId || inFlightNodesRef.current.has(nodeId)) {
+    if (!requestId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
     inFlightNodesRef.current.add(nodeId)

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { useState, type PropsWithChildren } from 'react'
+import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
 import { loadPendingFunctionRun } from '@/features/canvas/function-run-pending'
@@ -405,16 +405,6 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
   }
 }
 
-function Wrapper({ children }: PropsWithChildren) {
-  const [client] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  }))
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
-}
-
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (reason?: unknown) => void
@@ -429,8 +419,17 @@ function deferred<T>() {
 describe('useCanvasController real snapshot runtime', () => {
   let current: CanvasSnapshotDTO
   let commands: ApplyCanvasCommandsRequestDTO[]
+  let queryClient: QueryClient
+
+  // 切换画布只重挂载控制器；应用层 QueryClient 与真实宿主一样保持不变。
+  function Wrapper({ children }: PropsWithChildren) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  }
 
   beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
     vi.clearAllMocks()
     canvasEventSubscriptions.splice(0)
     // 只清理画布存储；locale 偏好不属于被清对象，清掉会让后续提示切到默认语言。
@@ -527,12 +526,10 @@ describe('useCanvasController real snapshot runtime', () => {
     vi.restoreAllMocks()
   })
 
-  it('starts an initial canvas in editor mode and queries its snapshot immediately', async () => {
+  it('mounts the required canvas and queries its snapshot immediately', async () => {
     localStorage.removeItem(`kk-studio.canvas.viewport:${CANVAS_ID}`)
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
 
-    expect(result.current.state.view).toBe('editor')
-    expect(result.current.state.canvasId).toBe(CANVAS_ID)
     expect(result.current.initialFitPending).toBe(true)
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     expect(getCanvas).toHaveBeenCalledWith(CANVAS_ID, expect.objectContaining({
@@ -546,8 +543,7 @@ describe('useCanvasController real snapshot runtime', () => {
       JSON.stringify({ x: 30, y: -20, zoom: 0.7 }),
     )
     const viewportWrites = recordViewportWrites()
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     expect(result.current.state.viewport).toEqual({ x: 30, y: -20, zoom: 0.7 })
@@ -558,8 +554,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('coalesces viewport persistence instead of writing storage per move', async () => {
     const viewportWrites = recordViewportWrites()
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     viewportWrites.length = 0
 
@@ -575,8 +570,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('drives commands, local UI state, uploads, and keyboard actions from one server snapshot', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await waitFor(() => expect(result.current.models).toHaveLength(1))
 
@@ -724,14 +718,10 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(focus).toHaveBeenCalledOnce()
     expect(zoom).toHaveBeenCalledWith(1)
     expect(result.current.state.selectedIds).toEqual([])
-
-    act(() => result.current.openLibrary())
-    expect(result.current.state.view).toBe('library')
   })
 
   it('drives group context-menu commands with correct UNGROUP/DELETE_GROUP semantics', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => result.current.ungroupGroup(GROUP_A))
@@ -765,8 +755,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('renameNode 发送冻结的 expectedName A 而非远端最新 B，且同名 no-op 仅对比 baseline', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     // 1. 基线名称为 'Note' (A)
@@ -810,8 +799,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('renameGroup 发送冻结的 expectedTitle A 而非远端最新 B，且同名 no-op 仅对比 baseline', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     // 1. 基线标题为 'Group' (A)
@@ -855,8 +843,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('ungroups a member only after its dragged bounds fully leave the Group body', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
@@ -904,8 +891,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('persists a text-editor rename together with the markdown update', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_NOTE)
     expect(node?.name).toBe('Note')
@@ -972,8 +958,7 @@ describe('useCanvasController real snapshot runtime', () => {
       storedHeight: null,
     }))
 
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.models).toHaveLength(1))
 
     act(() => {
@@ -1015,8 +1000,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('flushes config before start, projects RUNNING without polling, converges via version events, and cancels', async () => {
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
@@ -1149,8 +1133,7 @@ describe('useCanvasController real snapshot runtime', () => {
       return diffPatch(current)
     })
 
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await waitFor(() => expect(result.current.models).toHaveLength(1))
     // 确认查询缓存持有的就是同一个对象引用（否则本用例不成立）
@@ -1190,8 +1173,7 @@ describe('useCanvasController real snapshot runtime', () => {
   it('does not flush or POST when the node function has no catalog definition', async () => {
     // 测试意图：目录缺少该函数定义时，点击必须 0 flush、0 POST（不得凭空构造请求）。
     vi.mocked(listCanvasFunctions).mockResolvedValue([])
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(listCanvasFunctions).toHaveBeenCalled())
     await act(async () => {
       await Promise.resolve()
@@ -1218,8 +1200,7 @@ describe('useCanvasController real snapshot runtime', () => {
     vi.mocked(startCanvasFunctionRun).mockRejectedValueOnce(
       new ApiError('catalog changed', 409, 'CONFLICT'),
     )
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await waitFor(() => expect(result.current.models).toHaveLength(1))
 
@@ -1246,8 +1227,7 @@ describe('useCanvasController real snapshot runtime', () => {
       error: null,
       updatedAt: 1786291201000,
     })
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     await new Promise((resolve) => setTimeout(resolve, 60))
@@ -1256,8 +1236,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('replays the create/start/checkpoint/terminal version sequence and converges replaced output', async () => {
     current = snapshot(1)
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.revision).toBe('1'))
 
     await act(async () => {
@@ -1318,8 +1297,7 @@ describe('useCanvasController real snapshot runtime', () => {
     const cancelDeferred = deferred<CanvasFunctionRunDTO>()
     vi.mocked(cancelCanvasFunctionRun).mockImplementationOnce(() => cancelDeferred.promise)
 
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     void result.current.cancelFunctionRun(NODE_FN, REQUEST_OLD)
@@ -1652,7 +1630,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(result.current.state.drafts[NODE_FN]?.function?.args).toMatchObject({ prompt: 'keep draft' })
   })
 
-  it('does not continue deletion in a new canvas after the old save ACK', async () => {
+  it('does not continue deletion in a remounted canvas after the old save ACK', async () => {
     const nextCanvasId = '99999999-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
     const saveAck = deferred<CanvasPatchDTO>()
     vi.mocked(postCanvasCommands).mockImplementationOnce(async (_id, request) => {
@@ -1662,7 +1640,7 @@ describe('useCanvasController real snapshot runtime', () => {
     vi.mocked(getCanvas).mockImplementation(async (id) => id === nextCanvasId
       ? { ...snapshot(), document: { ...snapshot().document, id } }
       : current)
-    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     let deletion: Promise<void> | undefined
     act(() => {
@@ -1672,21 +1650,21 @@ describe('useCanvasController real snapshot runtime', () => {
       deletion = result.current.deleteNode(NODE_FN)
     })
     await waitFor(() => expect(postCanvasCommands).toHaveBeenCalledTimes(1))
-    act(() => result.current.openEditor(nextCanvasId))
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(nextCanvasId))
+    unmount()
+    const next = renderHook(() => useCanvasController(nextCanvasId), { wrapper: Wrapper })
+    await waitFor(() => expect(next.result.current.snapshot?.document.id).toBe(nextCanvasId))
     await act(async () => {
       saveAck.resolve(diffPatch(current))
       await deletion
     })
     expect(postCanvasCommands).toHaveBeenCalledTimes(1)
-    expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.function?.args)
+    expect(next.result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.function?.args)
       .toMatchObject({ prompt: 'old prompt' })
   })
 
   it('retains a failed config draft so start retries the save before posting the run', async () => {
     vi.mocked(postCanvasCommands).mockRejectedValueOnce(new ApiError('save failed', 400))
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
@@ -1743,8 +1721,7 @@ describe('useCanvasController real snapshot runtime', () => {
         commands.push(request)
         return secondSave.promise
       })
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
@@ -1846,8 +1823,7 @@ describe('useCanvasController real snapshot runtime', () => {
         error: status === 'RUNNING' ? null : 'safe failure',
         updatedAt: 1786291201000,
       }))
-      const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-      act(() => result.current.openEditor(CANVAS_ID))
+      const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
       await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
       await act(async () => {
@@ -1952,7 +1928,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(result.current.state.conflictMessage).toBeNull()
   })
 
-  it('初始草稿加载与保存 effect 不竞争：重新打开同一画布不会先清掉已落盘草稿', async () => {
+  it('初始草稿加载与保存 effect 不竞争：重挂载同一画布不会清掉已落盘草稿', async () => {
     const seeded: CanvasNodeDraft = {
       generation: 1,
       updatedAt: Date.now(),
@@ -1960,13 +1936,14 @@ describe('useCanvasController real snapshot runtime', () => {
     }
     await saveCanvasDraft(CANVAS_ID, NODE_NOTE, seeded)
 
-    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await waitFor(() => expect(result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('persisted draft'))
 
-    // 重新打开同一画布：会先把内存草稿重置为空，再异步从 IDB 恢复。
-    act(() => result.current.openEditor(CANVAS_ID))
-    await waitFor(() => expect(result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('persisted draft'))
+    // 卸载后重新挂载同一画布：从 IDB 恢复已落盘草稿。
+    unmount()
+    const { result: reopened } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(reopened.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('persisted draft'))
 
     // 关键回归：已落盘草稿没有被“空状态 diff”删除。
     const stored = await loadCanvasDrafts(CANVAS_ID)
@@ -1979,8 +1956,7 @@ describe('useCanvasController real snapshot runtime', () => {
       commands.push(request)
       return release.promise
     })
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => result.current.nodeCallbacks.editTextNode(result.current.snapshot?.nodes[0] as never))
@@ -2020,8 +1996,7 @@ describe('useCanvasController real snapshot runtime', () => {
       value: createMockIDBFactory({ shouldFailOpen: true }),
     })
 
-    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
 
     await waitFor(() => expect(result.current.state.storageError).toBeTruthy())
     expect(result.current.state.toast).toBeTruthy()
@@ -2192,69 +2167,69 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(readJsonObject(result.current.state.drafts[NODE_FN]?.function?.args).prompt).toBe('3')
   })
 
-  it('canvas 切换 queued writes 隔离：画布切换时排队的持久化任务严格被 scope/epoch 拦截，绝不跨画布写入', async () => {
+  it('卸载使尚未执行的草稿写入失效，且不会污染下一张画布', async () => {
     const CANVAS_2 = '99999999-9999-4000-8000-000000000099'
-    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
-      // 在画布 1 产生草稿
       result.current.moveNodes([{
         id: NODE_NOTE,
         kind: 'resource',
         transform: { x: 555, y: 666, width: 320, height: 260 },
       }])
-      // 紧接着立即切换至画布 2，此时前序 persist 任务仍在异步队列中
-      result.current.openEditor(CANVAS_2)
     })
+    unmount()
+    vi.mocked(getCanvas).mockResolvedValueOnce({
+      document: { ...current.document, id: CANVAS_2 }, nodes: [], groups: [], references: [],
+    })
+    const next = renderHook(() => useCanvasController(CANVAS_2), { wrapper: Wrapper })
+    await waitFor(() => expect(next.result.current.snapshot?.document.id).toBe(CANVAS_2))
 
-    await new Promise((resolve) => setTimeout(resolve, 60))
-
-    const draftsCanvas2 = await loadCanvasDrafts(CANVAS_2)
-    expect(draftsCanvas2[NODE_NOTE]).toBeUndefined()
+    // 写入在微任务中执行；同步卸载后，该任务不得写入任一画布。
+    expect((await loadCanvasDrafts(CANVAS_ID))[NODE_NOTE]).toBeUndefined()
+    expect((await loadCanvasDrafts(CANVAS_2))[NODE_NOTE]).toBeUndefined()
   })
 
-  it('定时器控制：退出库后不发旧配置：在函数配置防抖期间调用 openLibrary，定时器到期后绝不发送旧配置且保留持久草稿', async () => {
-    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+  it('定时器控制：宿主卸载后不发旧配置且保留持久草稿', async () => {
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
-        prompt: 'library-exit-draft',
+        prompt: 'unmount-draft',
         references: [],
         parameters: {},
       })
     })
 
     // 确认内存草稿已就绪，并等待本地 IDB 草稿落盘
-    expect(readJsonObject(result.current.state.drafts[NODE_FN]?.function?.args).prompt).toBe('library-exit-draft')
+    expect(readJsonObject(result.current.state.drafts[NODE_FN]?.function?.args).prompt).toBe('unmount-draft')
     await waitFor(async () => {
       const stored = await loadCanvasDrafts(CANVAS_ID)
-      expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('library-exit-draft')
+      expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('unmount-draft')
     })
 
-    // 在 320ms 网络防抖冲刷前调用 openLibrary 退出到库视图
-    act(() => {
-      result.current.openLibrary()
-    })
+    // 在防抖冲刷前卸载宿主，确保旧控制器定时器不提交配置。
+    unmount()
 
     // 等待超过 320ms 防抖窗口（400ms）
     await new Promise((resolve) => setTimeout(resolve, 400))
 
     // 绝不向网络发送旧配置命令
     const functionCommands = commands.filter((req) =>
-      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && readJsonObject(c.function?.args).prompt === 'library-exit-draft'),
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && readJsonObject(c.function?.args).prompt === 'unmount-draft'),
     )
     expect(functionCommands).toHaveLength(0)
 
     // 本地持久草稿完好保留在底层存储中
     const stored = await loadCanvasDrafts(CANVAS_ID)
-    expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('library-exit-draft')
+    expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('unmount-draft')
   })
 
-  it('定时器控制：切画布不污染：在画布 1 防抖期间切换至画布 2，定时器到期后绝不向画布 2 队列发送旧配置', async () => {
+  it('定时器控制：卸载并切换画布后不污染新 controller', async () => {
     const CANVAS_2 = '88888888-8888-4000-8000-000000000088'
-    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
@@ -2272,10 +2247,13 @@ describe('useCanvasController real snapshot runtime', () => {
       expect(readJsonObject(drafts1[NODE_FN]?.function?.args).prompt).toBe('canvas-1-pending-config')
     })
 
-    // 在 320ms 网络防抖冲刷前立即切换至画布 2
-    act(() => {
-      result.current.openEditor(CANVAS_2)
+    // 在防抖冲刷前卸载旧宿主，再以画布 2 挂载新 controller。
+    unmount()
+    vi.mocked(getCanvas).mockResolvedValueOnce({
+      document: { ...current.document, id: CANVAS_2 }, nodes: [], groups: [], references: [],
     })
+    const next = renderHook(() => useCanvasController(CANVAS_2), { wrapper: Wrapper })
+    await waitFor(() => expect(next.result.current.snapshot?.document.id).toBe(CANVAS_2))
 
     // 等待超过 320ms 防抖周期
     await new Promise((resolve) => setTimeout(resolve, 400))
@@ -2433,7 +2411,7 @@ describe('useCanvasController real snapshot runtime', () => {
     })
   })
 
-  it('canvas 切换期间 ACK 排队：不动新 canvas 草稿（同 nodeId 双 canvas 隔离）', async () => {
+  it('旧 canvas 的迟到 ACK 不动新挂载 canvas 草稿（同 nodeId 双 canvas 隔离）', async () => {
     // 测试意图：验证存在同 nodeId 的两个画布 CANVAS_A 和 CANVAS_B，
     // CANVAS_A 提交操作在途时切换到 CANVAS_B 并产生同 nodeId 的新草稿，
     // CANVAS_A 的迟到 ACK 响应仅清理 CANVAS_A 的持久草稿，绝不误删或回滚 CANVAS_B 的内存与持久草稿。
@@ -2460,7 +2438,7 @@ describe('useCanvasController real snapshot runtime', () => {
       return diffPatch(applyCommandBatch(snapshotB, request.commands))
     })
 
-    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     // 1. 在 CANVAS_A 产生 NODE_NOTE 草稿并提交，请求挂起
@@ -2474,15 +2452,14 @@ describe('useCanvasController real snapshot runtime', () => {
     })
     await waitFor(() => expect(commands).toHaveLength(1))
 
-    // 2. 切换至 CANVAS_B
-    act(() => {
-      result.current.openEditor(CANVAS_B)
-    })
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_B))
+    // 2. 以 CANVAS_B 卸载并重新挂载宿主
+    unmount()
+    const next = renderHook(() => useCanvasController(CANVAS_B), { wrapper: Wrapper })
+    await waitFor(() => expect(next.result.current.snapshot?.document.id).toBe(CANVAS_B))
 
     // 3. 在 CANVAS_B 下为同名 NODE_NOTE 产生新草稿
     act(() => {
-      result.current.moveNodes([{
+      next.result.current.moveNodes([{
         id: NODE_NOTE,
         kind: 'resource',
         transform: { x: 999, y: 999, width: 320, height: 260 },
@@ -2492,7 +2469,7 @@ describe('useCanvasController real snapshot runtime', () => {
       const storedB = await loadCanvasDrafts(CANVAS_B)
       expect(storedB[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
     })
-    expect(result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
+    expect(next.result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
 
     // 4. 此时 CANVAS_A 的慢响应返回并执行 ACK
     await act(async () => {
@@ -2507,7 +2484,7 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     // 关键验证：CANVAS_B 的内存草稿与 IDB 草稿绝不被误删或改动！
-    expect(result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
+    expect(next.result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
     const storedBAfter = await loadCanvasDrafts(CANVAS_B)
     expect(storedBAfter[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
   })

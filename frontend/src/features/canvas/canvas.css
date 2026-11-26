@@ -47,64 +47,22 @@
   display: none !important;
 }
 
-.canvas-feature .view {
-  display: none;
-}
-
-.canvas-feature .view.active {
-  display: block;
-}
-
 .canvas-feature h1,
 .canvas-feature h2,
 .canvas-feature p {
   margin: 0;
 }
 
-.canvas-feature.canvas-editor-active {
+.canvas-feature.canvas-workbench {
   overflow: hidden;
 }
 
-.canvas-feature .editor-view.active {
+.canvas-feature .editor-view {
   display: flex;
   height: 100%;
   min-height: 0;
   flex: 1;
   flex-direction: column;
-}
-
-.canvas-feature .editor-header {
-  display: flex;
-  height: 44px;
-  flex: 0 0 44px;
-  align-items: center;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--stage-bg);
-}
-
-.canvas-feature .canvas-back-button {
-  flex: 0 0 auto;
-}
-
-.canvas-feature .document-title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-  margin-left: 10px;
-}
-
-.canvas-feature .document-title strong {
-  overflow: hidden;
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-feature .document-title .save-state {
-  color: var(--accent);
-  font-size: var(--font-size-xs);
 }
 
 .canvas-feature .canvas-editor-state {
@@ -127,16 +85,6 @@
   display: flex;
   justify-content: center;
   gap: 8px;
-}
-
-.canvas-feature .canvas-spinner {
-  width: 24px;
-  height: 24px;
-  margin: 0 auto;
-  border: 2px solid var(--border-hover);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: canvas-spin 0.8s linear infinite;
 }
 
 .canvas-feature .canvas-stage {
@@ -1471,12 +1419,6 @@
   align-items: center;
   gap: var(--space-2);
   max-width: 100%;
-}
-
-@keyframes canvas-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 @media (min-width: 901px) and (max-width: 1600px) {

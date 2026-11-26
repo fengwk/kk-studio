@@ -77,8 +77,6 @@ function createController(
     nodeCallbacks: { editTextNode: vi.fn() },
     initialFitPending: false,
     completeInitialFit: vi.fn(),
-    openEditor: vi.fn(),
-    openLibrary: vi.fn(),
     setToast: vi.fn(),
     setViewport: vi.fn(),
     setSelection: vi.fn(),
@@ -148,8 +146,6 @@ function renderEditor(options: {
 } = {}) {
   const refetch = vi.fn(async () => undefined)
   const state = {
-    view: 'editor' as const,
-    canvasId: CANVAS_ID,
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},

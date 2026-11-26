@@ -40,10 +40,6 @@ export function useCanvasNodePlacement(scope: CanvasScope, snapshot: CanvasSnaps
     }
   }, [])
 
-  const clearReservedAliases = useCallback(() => {
-    reservedNodeAliasesRef.current.clear()
-  }, [])
-
   const nextTransform = useCallback((
     size: Pick<CanvasTransformDTO, 'width' | 'height'> = NODE_SIZE,
   ): CanvasTransformDTO => {
@@ -56,5 +52,5 @@ export function useCanvasNodePlacement(scope: CanvasScope, snapshot: CanvasSnaps
     }
   }, [scope, snapshot])
 
-  return { suggestNodeAlias, reserveNodeAlias, releaseNodeAlias, clearReservedAliases, nextTransform }
+  return { suggestNodeAlias, reserveNodeAlias, releaseNodeAlias, nextTransform }
 }

@@ -132,7 +132,6 @@ function StageInner() {
   }, [publishMetrics])
 
   const { emitViewport } = useCanvasStageViewport({
-    canvasId: state.canvasId,
     viewport: state.viewport,
     stageWidth: stageMetrics.width,
     containerRef,
