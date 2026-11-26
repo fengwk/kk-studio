@@ -111,7 +111,6 @@ public final class BuiltinHistoryPayloadMapper {
             model,
             requestedAt,
             response.serviceTier(),
-            response.requestBodyPricing(),
             effort),
         null);
   }

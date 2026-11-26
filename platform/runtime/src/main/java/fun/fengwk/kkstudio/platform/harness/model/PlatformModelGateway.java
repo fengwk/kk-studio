@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -201,12 +200,7 @@ public final class PlatformModelGateway implements ModelGateway {
         outcome = invalid("provider returned a null completion");
         return;
       }
-      ProviderResponse response = completion.response();
-      ProviderResponse observedResponse = response.withRequestBodyPricing(null);
-      // 已退役的定价事实仍可读取历史，但本次执行不能写入供应方注入的快照。
-      outcome =
-          new Succeeded(
-              observedResponse == response ? completion : new ProviderCompletion(observedResponse));
+      outcome = new Succeeded(completion);
     }
 
     @Override

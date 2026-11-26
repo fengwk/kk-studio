@@ -14,7 +14,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
@@ -198,7 +197,6 @@ class ProviderResponseJsonCodecTest {
             null,
             "{}",
             List.of(),
-            null,
             null);
 
     ProviderResponse decoded = codec.decode(codec.encode(response));
@@ -434,25 +432,9 @@ class ProviderResponseJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(overflow));
   }
 
-  /** 可选 request-body 快照只含指纹和布尔值；旧响应缺失字段、非法指纹与非布尔值都严格处理。 */
+  /** 退役字段即使带有曾经合法的快照也必须被拒绝。 */
   @Test
-  void roundTripsOptionalRequestBodyPricingSnapshot() {
-    String fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    ObjectNode node = canonicalNode();
-    node.putObject("requestBodyPricing").put(fingerprint, true);
-    ProviderResponse decoded = codec.decodeNode(node);
-    assertEquals(Map.of(fingerprint, true), decoded.requestBodyPricing().matches());
-    String encoded = codec.encode(decoded);
-    assertTrue(encoded.contains("\"requestBodyPricing\":{\"" + fingerprint + "\":true}"), encoded);
-    assertFrame(codec.decode(encoded).requestBodyPricing());
-
-    assertNull(codec.decodeNode(canonicalNode()).requestBodyPricing());
-    assertRejected(root -> root.putObject("requestBodyPricing").put(fingerprint, "true"));
-    assertRejected(root -> root.putObject("requestBodyPricing").put("not-a-fingerprint", true));
-    assertRejected(root -> root.putArray("requestBodyPricing"));
-  }
-
-  private static void assertFrame(RequestBodyPricingSnapshot snapshot) {
-    assertEquals(1, snapshot.matches().size());
+  void rejectsRetiredPricingField() {
+    assertRejected(root -> root.putObject("requestBodyPricing").put("a".repeat(64), true));
   }
 }

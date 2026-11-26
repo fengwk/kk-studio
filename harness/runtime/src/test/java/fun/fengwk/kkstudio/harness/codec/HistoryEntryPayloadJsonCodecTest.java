@@ -52,7 +52,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -301,29 +300,9 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
   }
 
-  /** 测试意图：真实执行模型、请求起始时间与 Provider service tier 必须随 assistant metadata 无损冻结。 */
+  /** 真实执行模型、请求起始时间、service tier 与 effort 随 assistant metadata 无损冻结。 */
   @Test
-  void roundTripsActualModelRequestedAtAndResponseServiceTier() {
-    AssistantMessageMetadata metadata =
-        new AssistantMessageMetadata(
-            GenerationStopReason.COMPLETE,
-            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
-            null,
-            ModelSelection.model("actual-model", "high"),
-            Instant.parse("2026-01-01T00:00:05Z"),
-            "priority");
-    MessagePayload payload = new MessagePayload(assistant("answer"), metadata, null);
-
-    MessagePayload decoded =
-        (MessagePayload) CODEC.decode(EntryType.MESSAGE, CODEC.encode(payload));
-
-    assertEquals(metadata, decoded.assistantMetadata());
-  }
-
-  /** 测试意图：request-body 定价快照只持久指纹与布尔值。 */
-  @Test
-  void roundTripsRequestBodyPricingSnapshot() {
-    String fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  void roundTripsAssistantMetadataPricingFactsAndEffort() {
     AssistantMessageMetadata metadata =
         new AssistantMessageMetadata(
             GenerationStopReason.COMPLETE,
@@ -332,24 +311,26 @@ class HistoryEntryPayloadJsonCodecTest {
             ModelSelection.model("actual-model", "high"),
             Instant.parse("2026-01-01T00:00:05Z"),
             "priority",
-            new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+            "high");
     MessagePayload payload = new MessagePayload(assistant("answer"), metadata, null);
+
     MessagePayload decoded =
         (MessagePayload) CODEC.decode(EntryType.MESSAGE, CODEC.encode(payload));
-    assertEquals(metadata, decoded.assistantMetadata());
-    String encoded = CODEC.encode(payload);
-    assertTrue(encoded.contains("\"requestBodyPricing\":{\"" + fingerprint + "\":true}"), encoded);
-    assertFalse(encoded.contains("/speed"), encoded);
 
+    assertEquals(metadata, decoded.assistantMetadata());
+  }
+
+  /** 历史解码不能静默丢弃曾经合法的退役快照。 */
+  @Test
+  void rejectsRetiredPricingField() {
+    MessagePayload payload =
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null);
     String invalid =
-        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
-            + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
-            + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-            + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2},"
-            + "\"requestBodyPricing\":{\""
-            + fingerprint
-            + "\":\"true\"}},"
-            + "\"toolResultMetadata\":null}";
+        CODEC
+            .encode(payload)
+            .replace(
+                "\"assistantMetadata\":{",
+                "\"assistantMetadata\":{\"requestBodyPricing\":{\"" + "a".repeat(64) + "\":true},");
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.MESSAGE, invalid));
   }
 

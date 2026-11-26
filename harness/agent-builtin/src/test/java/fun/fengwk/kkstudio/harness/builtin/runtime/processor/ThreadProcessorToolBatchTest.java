@@ -460,7 +460,6 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             baseResponse.serviceTier(),
             baseResponse.rawUsageJson(),
             List.of(),
-            null,
             null);
     UUID modelId =
         seedModelInvocation(

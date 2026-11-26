@@ -155,7 +155,6 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             base.serviceTier(),
             base.rawUsageJson(),
             base.toolCallDiagnostics(),
-            null,
             null);
     seedModelInvocation(
         fixture.store,

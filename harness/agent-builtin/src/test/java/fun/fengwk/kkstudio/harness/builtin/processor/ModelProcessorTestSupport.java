@@ -1000,7 +1000,6 @@ abstract class ModelProcessorTestSupport {
         null,
         null,
         List.of(),
-        null,
         null);
   }
 

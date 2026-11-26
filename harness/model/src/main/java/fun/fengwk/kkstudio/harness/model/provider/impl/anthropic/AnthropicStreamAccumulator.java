@@ -140,7 +140,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             usage.serviceTier(),
             usageSnapshot.rawUsageJson(),
             Collections.unmodifiableList(assembled.toolCallDiagnostics()),
-            null,
             null);
 
     return new ProviderCompletion(response);
