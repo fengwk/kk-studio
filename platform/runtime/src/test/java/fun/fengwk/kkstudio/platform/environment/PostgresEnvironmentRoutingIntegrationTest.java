@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -234,6 +235,35 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
     assertNotNull(readyEnv.readyMetadata());
+  }
+
+  @Test
+  void onlyLatestConnectingHandshakeCanOpenAndBecomeReady() {
+    DaemonHandshake handshake = new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID);
+    // 两张已被替换的票据分别走迟到 open 和 abandon，互不掩盖对最新票据的影响。
+    var staleOpen = assertInstanceOf(DaemonAdmission.Admitted.class, serverNode1.admit(handshake));
+    var staleAbandon =
+        assertInstanceOf(DaemonAdmission.Admitted.class, serverNode1.admit(handshake));
+    UUID staleToken = registryNode1.find(DEV).orElseThrow().leaseToken();
+    var latest = assertInstanceOf(DaemonAdmission.Admitted.class, serverNode1.admit(handshake));
+    EnvironmentConnection connecting = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
+    assertNotEquals(staleToken, connecting.leaseToken());
+
+    FakeControlChannel staleChannel = new FakeControlChannel("stale");
+    assertThrows(
+        IllegalStateException.class, () -> serverNode1.open(staleOpen, staleChannel, null));
+    assertTrue(staleChannel.envelopes().isEmpty());
+    serverNode1.abandon(staleAbandon);
+    assertEquals(connecting.leaseUntil(), registryNode1.find(DEV).orElseThrow().leaseUntil());
+
+    FakeControlChannel latestChannel = new FakeControlChannel("latest");
+    DaemonSession session = serverNode1.open(latest, latestChannel, null);
+    session.receive(readyEnvelope(DEV));
+    EnvironmentConnection ready = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.READY, ready.status());
+    assertEquals(connecting.leaseToken(), ready.leaseToken());
+    assertTrue(serverNode1.isReady(DEV));
   }
 
   @Test

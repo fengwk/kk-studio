@@ -8,17 +8,23 @@ import java.util.Objects;
 /** Daemon 准入裁决结果。 */
 public sealed interface DaemonAdmission {
 
-  /**
-   * 准入成功。
-   *
-   * @param environmentId 绑定的环境标识
-   * @param daemonInstanceId Daemon 实例唯一标识
-   */
-  record Admitted(EnvironmentId environmentId, String daemonInstanceId) implements DaemonAdmission {
+  /** 一次握手的准入凭据，以对象身份区分同一 Daemon 实例的重叠握手。 */
+  final class Admitted implements DaemonAdmission {
+    private final EnvironmentId environmentId;
+    private final String daemonInstanceId;
 
-    public Admitted {
-      Objects.requireNonNull(environmentId, "environmentId must not be null");
-      Objects.requireNonNull(daemonInstanceId, "daemonInstanceId must not be null");
+    public Admitted(EnvironmentId environmentId, String daemonInstanceId) {
+      this.environmentId = Objects.requireNonNull(environmentId, "environmentId must not be null");
+      this.daemonInstanceId =
+          Objects.requireNonNull(daemonInstanceId, "daemonInstanceId must not be null");
+    }
+
+    public EnvironmentId environmentId() {
+      return environmentId;
+    }
+
+    public String daemonInstanceId() {
+      return daemonInstanceId;
     }
   }
 
