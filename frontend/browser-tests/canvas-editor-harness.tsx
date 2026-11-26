@@ -39,6 +39,7 @@ const catalogFailures = Number(params.get('catalogFailures') ?? '1')
 const conflictMode = params.get('conflict') ?? 'none'
 /** 命令批写入失败的确定 5xx：用户看到的是本地化 toast，不是静默或中文提示。 */
 const commandsFailure = params.get('commands') === 'fail'
+const transientCommandFailures = params.get('commands') === 'transient' ? [408, 429] : []
 
 // 目录状态标记：用例只等这个标记，不靠网络时序猜测加载 / 失败 / 就绪。
 document.documentElement.dataset.functionCatalog = 'loading'
@@ -211,6 +212,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
   }
   if (method === 'POST' && path === `/api/canvas/canvases/${CANVAS_ID}/commands`) {
     const commands = body?.commands ?? []
+    const transientStatus = transientCommandFailures.shift()
+    if (transientStatus !== undefined) {
+      return problemResponse(transientStatus, { type: 'about:blank', status: transientStatus, title: 'try again' })
+    }
     if (commandsFailure) {
       return problemResponse(500, { type: 'about:blank', status: 500, title: 'command failed' })
     }

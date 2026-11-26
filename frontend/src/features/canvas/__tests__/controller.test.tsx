@@ -2273,6 +2273,84 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(readJsonObject(draftsCanvas1[NODE_FN]?.function?.args).prompt).toBe('canvas-1-pending-config')
   })
 
+  it('restores two views independently and retries 408/429 without crossing operation or ACK scopes', async () => {
+    const viewId = 'dddddddd-0000-4000-8000-000000000002'
+    const scoped = { viewId }
+    const mount = (id?: string) => renderHook(() => useCanvasController(CANVAS_ID, id), { wrapper: Wrapper })
+    const primaryPosition = { x: 100, y: 200 }
+    const secondaryPosition = { x: 300, y: 400 }
+    const primaryViewport = { x: 11, y: 22, zoom: 1 }
+    const secondaryViewport = { x: 33, y: 44, zoom: 1.5 }
+    // Seed the old unscoped key, then edit the same node/generation in the second view.
+    await saveCanvasDraft(CANVAS_ID, NODE_NOTE, { generation: 1, updatedAt: 1, position: primaryPosition })
+    const primary = mount()
+    const secondary = mount(viewId)
+    await waitFor(() => expect(primary.result.current.state.drafts[NODE_NOTE]?.position).toEqual(primaryPosition))
+    expect(secondary.result.current.state.drafts[NODE_NOTE]).toBeUndefined()
+    act(() => {
+      primary.result.current.setViewport(primaryViewport)
+      secondary.result.current.setViewport(secondaryViewport)
+      secondary.result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'resource',
+        transform: { ...secondaryPosition, width: 320, height: 260 },
+      }])
+    })
+    await waitFor(async () => expect((await loadCanvasDrafts(CANVAS_ID, scoped))[NODE_NOTE]?.position).toEqual(secondaryPosition))
+    expect((await loadCanvasDrafts(CANVAS_ID))[NODE_NOTE]?.position).toEqual(primaryPosition)
+    expect(postCanvasCommands).not.toHaveBeenCalled()
+    primary.unmount()
+    secondary.unmount()
+
+    const a = mount()
+    const b = mount(viewId)
+    await waitFor(() => {
+      expect(a.result.current.state.drafts[NODE_NOTE]?.position).toEqual(primaryPosition)
+      expect(b.result.current.state.drafts[NODE_NOTE]?.position).toEqual(secondaryPosition)
+      expect(a.result.current.snapshot).toBeDefined()
+      expect(b.result.current.snapshot).toBeDefined()
+    })
+    expect(a.result.current.state.viewport).toEqual(primaryViewport)
+    expect(b.result.current.state.viewport).toEqual(secondaryViewport)
+    expect(a.result.current.initialFitPending).toBe(false)
+    expect(b.result.current.initialFitPending).toBe(false)
+
+    const post = vi.mocked(postCanvasCommands)
+    post.mockRejectedValueOnce(new ApiError('timeout', 408)).mockRejectedValueOnce(new ApiError('rate limited', 429))
+    act(() => {
+      a.result.current.moveNodes([{
+        id: NODE_NOTE, kind: 'resource', transform: { ...primaryPosition, width: 320, height: 260 },
+      }])
+      a.result.current.commitTransforms()
+    })
+    await waitFor(() => expect(a.result.current.state.conflictKind).toBe('recoverable'))
+    expect(b.result.current.state.conflictKind).toBeNull()
+    act(() => {
+      b.result.current.moveNodes([{
+        id: NODE_NOTE, kind: 'resource', transform: { ...secondaryPosition, width: 320, height: 260 },
+      }])
+      b.result.current.commitTransforms()
+    })
+    await waitFor(() => expect(b.result.current.state.conflictKind).toBe('recoverable'))
+    const [first, second] = post.mock.calls.map(([, request]) => request)
+    const [primaryOperation] = await loadCanvasOperations(CANVAS_ID)
+    const [secondaryOperation] = await loadCanvasOperations(CANVAS_ID, scoped)
+    expect(primaryOperation.idempotencyKey).toBe(first.idempotencyKey)
+    expect(secondaryOperation.idempotencyKey).toBe(second.idempotencyKey)
+    expect(first.idempotencyKey).not.toBe(second.idempotencyKey)
+
+    // Recover one view while the other still has exactly the same draft generation pending.
+    await act(async () => { await b.result.current.retryRecovery() })
+    expect(post.mock.calls.map(([, request]) => request)).toEqual([first, second, second])
+    expect(await loadCanvasOperations(CANVAS_ID, scoped)).toEqual([])
+    expect(await loadCanvasOperations(CANVAS_ID)).toEqual([primaryOperation])
+    expect((await loadCanvasDrafts(CANVAS_ID, scoped))[NODE_NOTE]).toBeUndefined()
+    expect((await loadCanvasDrafts(CANVAS_ID))[NODE_NOTE]?.position).toEqual(primaryPosition)
+    await act(async () => { await a.result.current.retryRecovery() })
+    expect(post.mock.calls.map(([, request]) => request)).toEqual([first, second, second, first])
+    expect(await loadCanvasOperations(CANVAS_ID)).toEqual([])
+  })
+
   it('ACK 后紧接 persist 不复活：ACK 成功后同一边界更新权威草稿，后续 persist 绝不复活已确认草稿', async () => {
     const release = deferred<CanvasPatchDTO>()
     vi.mocked(postCanvasCommands).mockImplementationOnce(async (_canvasId, request) => {

@@ -56,6 +56,7 @@ export function CanvasGenerationPanel({
     snapshot.document.id,
     node.id,
     runtime.localPendingErrors,
+    runtime.viewId,
   )
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   // UNKNOWN 运行必须由用户给出核查结论与说明，面板不自动重试。

@@ -10,13 +10,13 @@ import { hasExactKeys, isRecord } from '@/shared/lib/value'
  *   and keys the unsent text; `folderId` is set when the draft was started from a directory,
  *   otherwise the first top-level folder is used when sending.
  * - `thread`: a public Thread of this space.
- * - `canvas`: a Canvas of this space.
+ * - `canvas`: a Canvas of this space. Omit `viewId` for the primary view; additional views use their pane ID.
  * - `vscode`: one VS Code workbench view of an environment.
  */
 export type PaneTarget =
   | { kind: 'draft'; draftId: string; folderId?: string }
   | { kind: 'thread'; threadId: string }
-  | { kind: 'canvas'; canvasId: string }
+  | { kind: 'canvas'; canvasId: string; viewId?: string }
   | { kind: 'vscode'; environmentId: string; viewId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
@@ -31,7 +31,9 @@ export function isPaneTarget(value: unknown): value is PaneTarget {
     case 'thread':
       return hasExactKeys(value, ['kind', 'threadId']) && isCanonicalUuid(value.threadId)
     case 'canvas':
-      return hasExactKeys(value, ['kind', 'canvasId']) && isCanonicalUuid(value.canvasId)
+      return isCanonicalUuid(value.canvasId) && (value.viewId === undefined
+        ? hasExactKeys(value, ['kind', 'canvasId'])
+        : hasExactKeys(value, ['kind', 'canvasId', 'viewId']) && isCanonicalUuid(value.viewId))
     case 'vscode':
       return hasExactKeys(value, ['kind', 'environmentId', 'viewId'])
         && isCanonicalUuid(value.environmentId) && isCanonicalUuid(value.viewId)

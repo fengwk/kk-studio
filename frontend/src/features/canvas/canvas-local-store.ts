@@ -9,12 +9,15 @@
  * - IndexedDB 不可用时绝不假装已落盘：内存回退可用于当前标签页会话，但必须向调用方告警。
  */
 
+import { canvasViewKey } from './canvas-view-key'
+
 /** 未接入登录态前的稳定匿名身份。 */
 const DEFAULT_ANONYMOUS_USER = 'anonymous'
 
 export interface CanvasLocalStoreOptions {
   userId?: string
   editingSessionId?: string
+  viewId?: string
   idbFactory?: IDBFactory
 }
 
@@ -46,8 +49,8 @@ export function resolveIdbFactory(options?: CanvasLocalStoreOptions): IDBFactory
   return null
 }
 
-export function buildSessionKey(userId: string, canvasId: string, editingSessionId: string): string {
-  return `${userId}:${canvasId}:${editingSessionId}`
+export function buildSessionKey(userId: string, canvasId: string, editingSessionId: string, viewId?: string): string {
+  return `${userId}:${canvasViewKey(canvasId, viewId)}:${editingSessionId}`
 }
 
 export type CanvasStorageErrorListener = (error: Error) => void

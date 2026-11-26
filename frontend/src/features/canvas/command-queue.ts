@@ -62,6 +62,7 @@ export interface CanvasCommandQueueOptions {
   operationStore?: CanvasPendingOperationStore
   userId?: string
   editingSessionId?: string
+  viewId?: string
   /**
    * ACK 回调 Promise 契约：必须先 await 持久 draft generation ACK 清理成功，再 remove operation。
    * 必须实际等 IDB tx complete，顺序不能反。
@@ -111,6 +112,7 @@ export class CanvasCommandQueue {
   private readonly store: CanvasPendingOperationStore
   private readonly userId: string
   private readonly editingSessionId: string
+  private readonly viewId?: string
   private readonly onDraftAcks?: (acks: CanvasDraftAck[]) => Promise<void>
 
   constructor(
@@ -124,10 +126,12 @@ export class CanvasCommandQueue {
     this.onSnapshot = options.onSnapshot
     this.userId = options.userId ?? getCurrentUserId()
     this.editingSessionId = options.editingSessionId ?? getEditingSessionId()
+    this.viewId = options.viewId
     this.onDraftAcks = options.onDraftAcks
     this.store = options.operationStore ?? createCanvasOperationStore(canvasId, {
       userId: this.userId,
       editingSessionId: this.editingSessionId,
+      viewId: this.viewId,
     })
   }
 
@@ -222,6 +226,7 @@ export class CanvasCommandQueue {
       canvasId: this.canvasId,
       userId: this.userId,
       editingSessionId: this.editingSessionId,
+      viewId: this.viewId,
       idempotencyKey: payload.idempotencyKey,
       commands: payload.commands,
       ack: [...payload.ack],
@@ -276,6 +281,9 @@ export class CanvasCommandQueue {
       }
       // 网络 / 服务端瞬时失败：保留冻结操作，标记队列阻塞，等待恢复或重载按原 key/body 幂等重放。
       this.markBlocked(error)
+      if (isRetryableClientError(error)) {
+        throw new CanvasQueueBlockedError(undefined, error)
+      }
       throw error
     }
   }
@@ -412,11 +420,16 @@ function isCanvasConflict(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 409
 }
 
+function isRetryableClientError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 408 || error.status === 429)
+}
+
 function isTerminalClientError(error: unknown): boolean {
   return error instanceof ApiError
     && typeof error.status === 'number'
     && error.status >= 400
     && error.status < 500
+    && !isRetryableClientError(error)
 }
 
 /** bigint-safe 的“前驱 revision”，仅用于判断 patch 是否与本地快照连续。 */

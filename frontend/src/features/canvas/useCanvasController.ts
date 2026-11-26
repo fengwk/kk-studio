@@ -8,6 +8,7 @@ import {
 } from '@/features/canvas/canvas-controller-scope'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { overlayNodeWithDraft, type CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import { canvasViewKey } from '@/features/canvas/canvas-view-key'
 import { createInitialCanvasState } from '@/features/canvas/canvas-local-state'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
 import { useCanvasFunctionRun } from '@/features/canvas/function-run'
@@ -38,11 +39,12 @@ import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
 /**
  * 画布编辑器的组合根：持有渲染状态、权威快照与函数目录查询、视口与选区，并把草稿持久化、命令队列、节点落位、文本编辑、引用边与节点操作
  * 这些子 hook 接到同一个 {@link useCanvasScope} 作用域上。展示 = 权威快照 + 待确认操作 + 本地草稿。
- * 宿主以 canvasId 为 key；一个控制器实例只服务一张画布。
+ * 宿主以画布视图为 key；一个控制器实例只服务一个视图。
  */
-export function useCanvasController(canvasId: string) {
+export function useCanvasController(canvasId: string, viewId?: string) {
+  const viewKey = canvasViewKey(canvasId, viewId)
   const queryClient = useQueryClient()
-  const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(canvasId))
+  const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(viewKey))
   const stage = useCanvasStageSurface()
   const {
     stageMetrics,
@@ -68,7 +70,7 @@ export function useCanvasController(canvasId: string) {
   }, [canvasEpochRef, isMountedRef, queueCanvasIdRef, queueRef])
 
   // 视口落盘挂在提交之后：拖拽期间的逐帧视口变化会被合并成有限的存储写入。
-  useCanvasViewportPersistence(canvasId, state.viewport)
+  useCanvasViewportPersistence(viewKey, state.viewport)
 
   const snapshotQuery = useQuery({
     queryKey: queryKeys.studio.canvas(canvasId),
@@ -84,6 +86,7 @@ export function useCanvasController(canvasId: string) {
   const draftLayer = useCanvasDraftPersistence({
     scope,
     canvasId,
+    viewId,
     drafts: state.drafts,
     snapshot,
   })
@@ -93,6 +96,7 @@ export function useCanvasController(canvasId: string) {
     scope,
     queryClient,
     canvasId,
+    viewId,
     snapshot,
     ackDurableDraftsForScope: draftLayer.ackDurableDraftsForScope,
     applyDraftAcks: draftLayer.applyDraftAcks,
@@ -158,6 +162,7 @@ export function useCanvasController(canvasId: string) {
     isNodeInFlight,
   } = useCanvasFunctionRun({
     canvasId,
+    viewId,
     queryClient,
     setToast,
     flushFunctionConfig,
@@ -199,7 +204,7 @@ export function useCanvasController(canvasId: string) {
     setToast,
   })
 
-  const { setViewport, setSelection, completeInitialFit, initialFitPending } = useCanvasEditorViewState(canvasId, setState)
+  const { setViewport, setSelection, completeInitialFit, initialFitPending } = useCanvasEditorViewState(viewKey, setState)
   const dismissConflictMessage = useCallback(() => {
     setState((current) => ({ ...current, conflictKind: null, conflictMessage: null }))
   }, [])
@@ -322,6 +327,7 @@ export function useCanvasController(canvasId: string) {
     discardPendingRun,
     localPendingErrors,
     isNodeInFlight,
+    viewId,
     uploadFiles,
     toggleAddMenu,
     closeAddMenu,

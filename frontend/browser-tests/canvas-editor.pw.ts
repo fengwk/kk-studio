@@ -142,6 +142,27 @@ test('downloads a cross-origin Canvas attachment without navigating the workspac
   }
 })
 
+test('the first 408 exposes recovery and a 429 during recovery keeps the same operation retryable', async ({ page }) => {
+  const copy = COPY['en-US']
+  await page.goto(`${HARNESS_URL}?locale=en-US&commands=transient`)
+  await expect(page.locator('html')).toHaveAttribute('data-function-catalog', 'ready')
+  await page.locator('.canvas-tool-rail .dock-add').click()
+  await page.getByRole('menuitem', { name: copy.imageFunction }).click()
+
+  // Neither transient response may settle the operation. The next retry must create the node.
+  const banner = page.locator('.canvas-conflict-banner')
+  const retry = banner.getByRole('button', { name: copy.retry, exact: true })
+  await expect(banner).toContainText('Unconfirmed operations are blocking the queue.')
+  await expect(retry).toBeVisible()
+  await retry.click()
+  await expect(banner).toContainText('Some unconfirmed operations could not be replayed.')
+  await expect(retry).toBeEnabled()
+  await expect(page.locator('.react-flow__node')).toHaveCount(0)
+  await retry.click()
+  await expect(page.locator('.react-flow__node')).toHaveCount(1)
+  await expect(banner).toHaveCount(0)
+})
+
 test.describe('Canvas editor canvas-only surface regressions', () => {
   for (const { locale, viewport } of localeMatrix()) {
     const suffix = `${locale}-${viewport.width}x${viewport.height}`

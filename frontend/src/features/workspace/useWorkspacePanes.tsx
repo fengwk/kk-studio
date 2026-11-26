@@ -14,7 +14,7 @@ function targetKey(target: PaneTarget) {
   switch (target.kind) {
     case 'draft': return `draft:${target.draftId}`
     case 'thread': return `thread:${target.threadId}`
-    case 'canvas': return `canvas:${target.canvasId}`
+    case 'canvas': return `canvas:${target.canvasId}:${target.viewId ?? ''}`
     case 'vscode': return `vscode:${target.environmentId}:${target.viewId}`
   }
 }
