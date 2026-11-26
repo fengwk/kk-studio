@@ -10,8 +10,6 @@ import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timelin
 import type { BoundThreadPanelController } from '@/features/thread/runtime/controllers/useBoundThreadPanelViews'
 import { harnessService } from '@/shared/api/harness-service'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
-import { useThreadPresentation } from '../panes/thread-presentation'
-import { ThreadPresentationActions } from '../panes/ThreadPresentationActions'
 import type {
   EnvironmentDTO,
   HarnessModelRequestDebugDTO,
@@ -103,14 +101,10 @@ it('renders on-demand preview, inspector and history actions and clears history 
   const controller = boundController()
   function Harness() {
     const views = useBoundThreadPanelViews('thread', controller)
-    const presentation = useThreadPresentation({
-      views, projection: { thread: controller.thread, models: controller.models },
-      threadId: 'thread', selected: true, active: true,
-    })
     return <>
-      {presentation.mode === 'debug' ? <button onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>关闭 Debug</button> : null}
-      <button onClick={() => presentation.act(presentation.viewKey, 'debug')}>测试 Debug 命令</button>
-      <ThreadPresentationActions view={presentation} />{views.mainView.debug}
+      {views.mode === 'debug' ? <button onClick={() => views.switchMode('conversation')}>关闭 Debug</button> : null}
+      <button onClick={() => views.switchMode('debug')}>测试 Debug 命令</button>
+      {views.mainView.debug}
     </>
   }
   render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
@@ -131,68 +125,6 @@ it('renders on-demand preview, inspector and history actions and clears history 
   fireEvent.click(screen.getByRole('button', { name: '关闭事件详情' }))
   fireEvent.click(screen.getByRole('button', { name: '关闭 Debug' }))
   expect(screen.queryByTestId('preview-request-body')).toBeNull()
-})
-
-it('passes composer draft model and environment to debug and ignores stale responses from previous draft selections', async () => {
-  let finishWithoutEnv!: (data: HarnessModelRequestDebugDTO) => void
-  let finishWithEnv!: (data: HarnessModelRequestDebugDTO) => void
-  vi.mocked(harnessService.getModelRequestDebug)
-    .mockReset()
-    .mockImplementationOnce(() => new Promise((resolve) => { finishWithoutEnv = resolve }))
-    .mockImplementationOnce(() => new Promise((resolve) => { finishWithEnv = resolve }))
-
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const controller = boundController()
-  const draftModelA = { modelName: 'MiniMax-M2.7', variant: 'default' }
-  const draftModelB = { modelName: 'claude-sonnet', variant: 'thinking' }
-
-  const { result, rerender } = renderHook(
-    ({ debugSettings }) => useBoundThreadPanelViews('thread', controller, { debugSettings }),
-    {
-      initialProps: {
-        debugSettings: { model: draftModelA, environmentName: null as string | null },
-      },
-      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
-    },
-  )
-
-  act(() => result.current.switchMode('debug'))
-  expect(harnessService.getModelRequestDebug).toHaveBeenNthCalledWith(1, 'thread', {
-    model: draftModelA,
-    environmentName: null,
-  })
-
-  // 用户在 Composer 中切换草稿模型与环境（未持久化到 branchSettings）：立即按新草稿发 POST
-  rerender({
-    debugSettings: { model: draftModelB, environmentName: 'dev-box' },
-  })
-  expect(harnessService.getModelRequestDebug).toHaveBeenNthCalledWith(2, 'thread', {
-    model: draftModelB,
-    environmentName: 'dev-box',
-  })
-
-  await act(async () => {
-    finishWithEnv({
-      ...DEBUG,
-      model: draftModelB,
-      environmentName: 'dev-box',
-      systemInstruction: 'planned with dev-box',
-    })
-  })
-  await waitFor(() => expect(result.current.debug?.environmentName).toBe('dev-box'))
-  expect(result.current.debug?.model).toEqual(draftModelB)
-
-  // 前一次无环境草稿的慢响应迟到，不得覆盖当前 dev-box 的规划结果
-  await act(async () => {
-    finishWithoutEnv({
-      ...DEBUG,
-      model: draftModelA,
-      environmentName: null,
-      systemInstruction: 'stale without env',
-    })
-  })
-  expect(result.current.debug?.environmentName).toBe('dev-box')
-  expect(result.current.debug?.systemInstruction).toBe('planned with dev-box')
 })
 
 const READY_ENVIRONMENT: EnvironmentDTO = {
@@ -246,10 +178,7 @@ describe('useBoundThreadPanelLabels', () => {
   })
 })
 
-/**
- * 本地草稿没有 API threadId（都是 ""），因此视图状态必须按 viewKey 隔离；
- * 换绑目标时 Debug 模式、滚动位置与检查器选中一并作废，同身份则原样保留。
- */
+/** 换 Thread 时清掉 Debug 视图状态，同一 Thread 重渲染则保留。 */
 describe('useBoundThreadPanelViews view identity', () => {
   const PREVIEW = {
     kind: 'HISTORICAL_REQUEST_PREVIEW' as const,
@@ -261,7 +190,7 @@ describe('useBoundThreadPanelViews view identity', () => {
     generatedAt: 1790485200,
   }
 
-  function renderViews(initialProps: { threadId: string; viewKey?: string }) {
+  function renderViews(initialProps: { threadId: string }) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const controller: BoundThreadPanelController = {
       bodyRef: { current: null },
@@ -272,8 +201,7 @@ describe('useBoundThreadPanelViews view identity', () => {
       models: [],
     }
     return renderHook(
-      ({ threadId, viewKey }: { threadId: string; viewKey?: string }) =>
-        useBoundThreadPanelViews(threadId, controller, { viewKey }),
+      ({ threadId }: { threadId: string }) => useBoundThreadPanelViews(threadId, controller),
       {
         initialProps,
         wrapper: ({ children }: { children: ReactNode }) => (
@@ -289,16 +217,13 @@ describe('useBoundThreadPanelViews view identity', () => {
     act(() => result.current.selectDebugInspector({ type: 'preview', preview: PREVIEW }))
   }
 
-  it('resets mode, selection and inspector when the local view identity changes', () => {
-    const { result, rerender } = renderViews({
-      threadId: '',
-      viewKey: 'branch:session-1:entry-2:branch-1',
-    })
+  it('resets mode, selection and inspector when the bound Thread changes', () => {
+    const { result, rerender } = renderViews({ threadId: 'thread-a' })
     openDebugPreview(result)
     expect(result.current.mode).toBe('debug')
     expect(result.current.debugSelection).toEqual({ type: 'preview', preview: PREVIEW })
 
-    rerender({ threadId: '', viewKey: 'branch:session-1:entry-3:branch-2' })
+    rerender({ threadId: 'thread-b' })
 
     expect(result.current.mode).toBe('conversation')
     expect(result.current.selectedEventId).toBeNull()
@@ -307,39 +232,11 @@ describe('useBoundThreadPanelViews view identity', () => {
     expect(result.current.mainView.debug).toBeUndefined()
   })
 
-  it('also resets when a draft pane is rebound to a new session draft', () => {
-    // 新建 Session 草稿没有 Debug 能力，残留的 Debug 模式会连 composer 一起隐藏。
-    const { result, rerender } = renderViews({
-      threadId: '',
-      viewKey: 'branch:session-1:entry-2:branch-1',
-    })
-    openDebugPreview(result)
-
-    rerender({ threadId: '', viewKey: '' })
-
-    expect(result.current.mode).toBe('conversation')
-    expect(result.current.debugSelection).toBeNull()
-  })
-
-  it('resets the inspector when a bound thread identity changes', () => {
-    // 已绑定 Thread 改用真实 threadId 作为身份（未传 viewKey），换 Thread 同样清零。
+  it('keeps the debug view while the identity is unchanged', () => {
     const { result, rerender } = renderViews({ threadId: 'thread-a' })
     openDebugPreview(result)
 
-    rerender({ threadId: 'thread-b' })
-
-    expect(result.current.mode).toBe('conversation')
-    expect(result.current.debugSelection).toBeNull()
-  })
-
-  it('keeps the debug view while the identity is unchanged', () => {
-    const { result, rerender } = renderViews({
-      threadId: '',
-      viewKey: 'branch:session-1:entry-2:branch-1',
-    })
-    openDebugPreview(result)
-
-    rerender({ threadId: '', viewKey: 'branch:session-1:entry-2:branch-1' })
+    rerender({ threadId: 'thread-a' })
 
     expect(result.current.mode).toBe('debug')
     expect(result.current.debugSelection).toEqual({ type: 'preview', preview: PREVIEW })

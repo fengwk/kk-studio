@@ -204,14 +204,18 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   const failedCard = cards.nth(1)
   await expect(failedCard).toContainText('上下文压缩失败')
   await expect(failedCard).toContainText('摘要因输出上限被截断。')
-  await expect(failedCard.getByRole('link', { name: '查看执行' }))
-    .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000032?afterEntryId=00000000-0000-4000-8000-00000000000a')
-  await expect(failedCard.getByRole('button')).toHaveCount(0)
+  const failedInspection = failedCard.getByRole('button', { name: '查看执行' })
+  await expect(failedInspection).toHaveAttribute('type', 'button')
+  expect(await failedInspection.getAttribute('href')).toBeNull()
+  await expect(failedCard.getByRole('button', { name: '查看执行' })).toHaveCount(1)
 
   const stoppedCard = cards.nth(2)
   await expect(stoppedCard).toContainText('上下文压缩已停止')
   await expect(stoppedCard).toContainText('未生成摘要即被停止。')
-  await expect(stoppedCard.getByRole('button')).toHaveCount(0)
+  const stoppedInspection = stoppedCard.getByRole('button', { name: '查看执行' })
+  await expect(stoppedInspection).toHaveAttribute('type', 'button')
+  expect(await stoppedInspection.getAttribute('href')).toBeNull()
+  await expect(stoppedInspection).toHaveCount(1)
 
   await expect(cards.nth(3)).toContainText('正在压缩上下文…')
   await expect(cards.nth(3)).toContainText('正在整理以上内容。')
@@ -231,12 +235,16 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   await page.screenshot({ path: test.info().outputPath('compaction-lifecycle-desktop.png'), fullPage: true })
 
   // 实时快照在不改 Thread version 时也必须刷新助手正文。
-  await cards.nth(3).getByRole('link', { name: '查看执行' }).click()
+  const inspectionAction = cards.nth(3).getByRole('button', { name: '查看执行' })
+  await expect(inspectionAction).toHaveAttribute('type', 'button')
+  expect(await inspectionAction.getAttribute('href')).toBeNull()
+  await inspectionAction.click()
   const branch = page.getByTestId('compaction-branch-view')
   const transcript = branch.getByRole('log')
   await expect(transcript.getByText('生成中的摘要', { exact: true })).toBeVisible()
   await expect(branch.getByText('正在生成摘要…')).toBeVisible()
   await expect(branch.getByRole('textbox')).toHaveCount(0)
+  // The source context before the compaction cut is excluded; only this branch's post-cut output is shown.
   await expect(transcript).not.toContainText('Earlier context')
   await expect(transcript).not.toContainText('[Compaction mode]')
   await expect(transcript).not.toContainText('Tools are disabled')
@@ -276,6 +284,13 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   await expect(page.locator('.compaction-branch-view')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth))
+
+  // Returning replaces the branch in this pane instead of navigating to a standalone thread address.
+  const back = branch.getByRole('button', { name: '返回主对话' })
+  await expect(back).toHaveAttribute('type', 'button')
+  await back.click()
+  await expect(page.locator('[data-entry-kind="compaction"]')).toHaveCount(4)
+  expect(new URL(page.url()).pathname).toBe(HARNESS_URL)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(HARNESS_URL)

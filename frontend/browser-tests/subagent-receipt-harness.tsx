@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { setLocale } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
@@ -142,13 +144,24 @@ const MESSAGES = buildThreadTimeline(ENTRIES, [], []).messages
  * 数据来自 buildThreadTimeline 投影，不依赖后端、模型或任何主机服务。
  */
 export function SubagentReceiptHarnessApp() {
+  const [selected, setSelected] = useState('')
+  const messageList = (
+    <div className="thread-dialogue">
+      <div className="thread-blocks">
+        <MessageList messages={MESSAGES} />
+      </div>
+    </div>
+  )
+  const withoutPane = new URLSearchParams(location.search).has('without-pane')
+
   return (
     <MemoryRouter>
-      <div className="thread-dialogue">
-        <div className="thread-blocks">
-          <MessageList messages={MESSAGES} />
-        </div>
-      </div>
+      <output hidden aria-label="selected thread">{selected}</output>
+      {withoutPane ? messageList : (
+        <ThreadNavigationContext.Provider value={setSelected}>
+          {messageList}
+        </ThreadNavigationContext.Provider>
+      )}
     </MemoryRouter>
   )
 }

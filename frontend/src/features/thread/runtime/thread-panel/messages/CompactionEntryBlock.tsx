@@ -1,7 +1,7 @@
 import { useI18n } from '@/shared/i18n'
 import { SystemMessageBody } from '@/features/thread/runtime/thread-panel/messages/SystemMessageBody'
 import { SystemMessageCard } from '@/features/thread/runtime/thread-panel/messages/SystemMessageCard'
-import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
+import { ThreadInspectionButton } from '@/features/thread/runtime/panes/ThreadInspectionButton'
 import type {
   CompactionCardFact,
   CompactionCardState,
@@ -44,13 +44,13 @@ export function CompactionEntryBlock({
   const cutEntryId = fact.cutEntryId
   const viewExecutionLabel = t('ai.runtime.entry.compactionViewExecution')
   const actionsNode = childThreadId == null ? null : (
-    <ThreadLink
+    <ThreadInspectionButton
       threadId={childThreadId}
       afterEntryId={cutEntryId ?? undefined}
       title={viewExecutionLabel}
     >
       {viewExecutionLabel}
-    </ThreadLink>
+    </ThreadInspectionButton>
   )
   return (
     <SystemMessageCard

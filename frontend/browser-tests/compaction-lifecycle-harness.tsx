@@ -1,12 +1,13 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter, Route, Routes, useParams, useSearchParams } from 'react-router'
+import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 // 真实 transcript 滚动与卡片布局由产品样式提供；harness 不复制布局。
 import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { CompactionBranchView } from '@/features/thread/runtime/panes/CompactionBranchView'
+import { ThreadNavigationContext, type ThreadNavigationOptions } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
@@ -142,14 +143,29 @@ function TranscriptRoute() {
   )
 }
 
-function BranchRoute() {
-  const { threadId = '' } = useParams<{ threadId: string }>()
-  const [searchParams] = useSearchParams()
-  const afterEntryId = searchParams.get('afterEntryId') ?? ''
+function HarnessPane() {
+  const [inspection, setInspection] = useState<{
+    threadId: string
+    options?: ThreadNavigationOptions
+  } | null>(null)
+  const openThread = (threadId: string, options?: ThreadNavigationOptions) => {
+    setInspection({ threadId, options })
+  }
+
   return (
-    <div style={{ height: '100vh' }}>
-      <CompactionBranchView threadId={threadId} afterEntryId={afterEntryId} />
-    </div>
+    <ThreadNavigationContext.Provider value={openThread}>
+      <div style={{ height: '100vh' }}>
+        {inspection == null ? (
+          <TranscriptRoute />
+        ) : (
+          <CompactionBranchView
+            threadId={inspection.threadId}
+            afterEntryId={inspection.options?.afterEntryId ?? ''}
+            onBack={() => setInspection(null)}
+          />
+        )}
+      </div>
+    </ThreadNavigationContext.Provider>
   )
 }
 
@@ -159,11 +175,8 @@ export function CompactionLifecycleHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <MemoryRouter initialEntries={['/']}>
-          <Routes>
-            <Route path="/" element={<TranscriptRoute />} />
-            <Route path="/threads/:threadId" element={<BranchRoute />} />
-          </Routes>
+        <MemoryRouter>
+          <HarnessPane />
         </MemoryRouter>
       </ApplicationEventProvider>
     </QueryClientProvider>

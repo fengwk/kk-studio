@@ -1,13 +1,12 @@
 import { Button } from '@/shared/ui/controls/Button'
 import { CopyTextButton } from '@/shared/ui/controls/CopyTextButton'
 import { useI18n } from '@/shared/i18n'
-import { Link } from 'react-router'
 import type { ThreadPresentation } from './thread-presentation'
 
 /**
  * 子代理视图顶栏动作：返回父 agent，身份（agent · model），再补前 8 位 thread ID 与复制按钮。
  *
- * 短 ID 只做展示：悬停提示与复制都使用完整 threadId，路由仍由返回入口的完整地址决定。
+ * 短 ID 只做展示：悬停提示与复制都使用完整 threadId；父级返回由宿主查看层处理。
  */
 export function ThreadPresentationActions({ view }: { view: ThreadPresentation | null }) {
   const { t } = useI18n()
@@ -17,10 +16,10 @@ export function ThreadPresentationActions({ view }: { view: ThreadPresentation |
   const subagentThreadId = view.parentThreadId ? view.threadId : null
   return (
     <>
-      {view.parentThreadId ? view.parentHref
-        ? <Link className="btn-secondary is-compact thread-parent-action" to={view.parentHref}>{t('ai.runtime.childThread.back')}</Link>
-        : <Button variant="secondary" size="compact" className="thread-parent-action"
-          onClick={() => view.act(view.viewKey, 'parent')}>{t('ai.runtime.childThread.back')}</Button> : null}
+      {view.parentThreadId
+        ? <Button variant="secondary" size="compact" className="thread-parent-action"
+          onClick={() => view.act(view.viewKey, 'parent')}>{t('ai.runtime.childThread.back')}</Button>
+        : null}
       {view.parentThreadId && view.identity
         ? <span className="workspace-view-identity" title={view.identity}>{view.identity}</span>
         : null}

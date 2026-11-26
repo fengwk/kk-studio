@@ -1,5 +1,4 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
@@ -22,44 +21,48 @@ const childInvocation: InteractionDTO = {
 }
 
 function renderSource(item: InteractionDTO, openThread?: (threadId: string) => void) {
-  const source = <InteractionOwnerSource item={item} />
   return render(
-    <MemoryRouter>
-      {openThread ? (
-        <ThreadNavigationContext.Provider value={openThread}>{source}</ThreadNavigationContext.Provider>
-      ) : source}
-    </MemoryRouter>,
+    <ThreadNavigationContext.Provider value={openThread ?? vi.fn()}>
+      <InteractionOwnerSource item={item} />
+    </ThreadNavigationContext.Provider>,
   )
 }
 
 describe('interaction owner source', () => {
   it('adds a subagent entry without exposing the child thread id', () => {
-    // 测试意图：子线程调用只展示“子 Agent”入口，链接目标是子线程地址且不暴露 UUID 或旧归属按钮。
+    // 测试意图：子线程调用只展示原生按钮入口，不暴露 UUID 或旧归属按钮。
     setLocale('zh-CN')
     renderSource(childInvocation)
 
-    const link = screen.getByRole('link', { name: '打开子 Agent' })
-    expect(link).toHaveAttribute('title', '打开子 Agent')
-    expect(link).toHaveAttribute('href', '/threads/0f3c9a2e-1111-4000-8000-000000000001')
-    expect(link).toHaveTextContent('子 Agent')
-    expect(link).not.toHaveTextContent('0f3c9a2e')
-    expect(screen.queryByRole('button')).toBeNull()
+    const button = screen.getByRole('button', { name: '打开子 Agent' })
+    expect(button).toHaveAttribute('title', '打开子 Agent')
+    expect(button).toHaveAttribute('type', 'button')
+    expect(button).toHaveTextContent('子 Agent')
+    expect(button).not.toHaveTextContent('0f3c9a2e')
   })
 
   it('opens the subagent in the current pane when the pane owns thread navigation', () => {
-    // 测试意图：根面板由 ThreadLink 复用 pane 导航，不再整页跳转。
+    // 测试意图：子 Agent 来源按钮通过 pane 导航回调打开子线程。
     setLocale('zh-CN')
     const openThread = vi.fn()
     renderSource(childInvocation, openThread)
 
-    fireEvent.click(screen.getByRole('link', { name: '打开子 Agent' }))
+    const button = screen.getByRole('button', { name: '打开子 Agent' })
+    expect(button).toHaveAttribute('type', 'button')
+    fireEvent.click(button)
     expect(openThread).toHaveBeenCalledWith('0f3c9a2e-1111-4000-8000-000000000001')
+  })
+
+  it('hides the subagent action when pane navigation is not installed', () => {
+    setLocale('zh-CN')
+    render(<InteractionOwnerSource item={childInvocation} />)
+    expect(screen.queryByRole('button', { name: '打开子 Agent' })).not.toBeInTheDocument()
   })
 
   it('shows no subagent entry for invocations owned by the execution root', () => {
     setLocale('zh-CN')
     renderSource({ ...childInvocation, threadId: childInvocation.rootThreadId })
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '打开子 Agent' })).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -75,7 +78,7 @@ describe('interaction owner source', () => {
       waitingCount: 2,
       createdAt: 1790503200000,
     })
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '打开子 Agent' })).toBeNull()
   })
 
   it('still offers the subagent entry when owner is AGENT_TASK', () => {
@@ -84,14 +87,12 @@ describe('interaction owner source', () => {
       ...childInvocation,
       owner: { kind: 'AGENT_TASK', id: 'task-1', title: 'reporter', link: null },
     })
-    expect(screen.queryByRole('button')).toBeNull()
-    expect(screen.getByRole('link', { name: '打开子 Agent' }))
-      .toHaveAttribute('href', '/threads/0f3c9a2e-1111-4000-8000-000000000001')
+    expect(screen.getByRole('button', { name: '打开子 Agent' })).toHaveAttribute('type', 'button')
   })
 
   it('localizes the subagent entry in English', () => {
     setLocale('en-US')
     renderSource(childInvocation)
-    expect(screen.getByRole('link', { name: 'Open subagent' })).toHaveTextContent('subagent')
+    expect(screen.getByRole('button', { name: 'Open subagent' })).toHaveTextContent('subagent')
   })
 })

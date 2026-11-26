@@ -9,6 +9,7 @@ const sessionId = '10000000-0000-4000-8000-000000000005'
 const ids = ['10000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000007', '10000000-0000-4000-8000-000000000008']
 const secondThreadId = '10000000-0000-4000-8000-000000000009'
 const secondSessionId = '10000000-0000-4000-8000-000000000010'
+const inspectionChildThreadId = '10000000-0000-4000-8000-000000000011'
 const execution = { driver: 'builtin', settings: { modelName: 'Code model', variant: 'max' } }
 const branchSettings = { agentName: 'assistant', execution, environmentName: null }
 const api = `/api/chat-spaces/${spaceId}`
@@ -37,7 +38,7 @@ async function captureWidths(page: Page, state: string) {
   await page.setViewportSize({ width: 1440, height: 900 })
 }
 
-async function serve(target: Page | BrowserContext, { agents = true, admin = false, rejectFolder = false, rejectFirstSession = false, loseFirstResponse = false } = {}) {
+async function serve(target: Page | BrowserContext, { agents = true, admin = false, rejectFolder = false, rejectFirstSession = false, loseFirstResponse = false, withChild = false } = {}) {
   const posts: { path: string; key: string | undefined; body: unknown }[] = []
   const creations = new Map<string, { body: string | null; result: { sessionId: string; threadId: string; commandId: string; treeVersion: string } }>()
   const messages = new Map<string, string>()
@@ -78,15 +79,30 @@ async function serve(target: Page | BrowserContext, { agents = true, admin = fal
       if (body.title === 'Taken') return route.fulfill({ status: 409, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'THREAD_NAME_EXISTS' }) })
       return json({ sessionId, threadId: path.endsWith('/branches') ? ids[1] : ids[2], treeVersion: '3' })
     }
-    for (const id of [...ids, secondThreadId]) {
+    for (const id of [...ids, secondThreadId, inspectionChildThreadId]) {
+      const childThread = id === inspectionChildThreadId
       const responseSessionId = id === secondThreadId ? secondSessionId : sessionId
       const text = messages.get(id) ?? messages.get(ids[0]) ?? ''
       const referenceThread = text === referenceMessage
-      const thread = { name: 'main', threadId: id, sessionId: responseSessionId, parentThreadId: null, rootThreadId: id,
+      const rootThreadId = childThread ? ids[0] : id
+      const thread = { name: childThread ? 'worker' : 'main', threadId: id, sessionId: responseSessionId,
+        parentThreadId: childThread ? ids[0] : null, rootThreadId,
         headEntryId: referenceThread ? 'current-assistant' : 'end', yoloEnabled: false, nextCommandSequence: '2', version: '1',
-        status: referenceThread ? 'RUNNING' : 'IDLE', executionControl: 'RUNNABLE',
+        status: childThread || referenceThread ? 'RUNNING' : 'IDLE', executionControl: 'RUNNABLE',
         branchSettings, createdAt: 1790812800, updatedAt: 1790812800 }
-      if (path === `/api/harness/threads/${id}/tree`) return json([{ ...thread, kind: 'USER', agentName: 'assistant', execution, turnCount: 1, toolCallCount: 0 }])
+      if (path === `/api/harness/threads/${id}/tree`) {
+        const rootNode = { ...thread, kind: childThread ? 'SUBAGENT' : 'USER', agentName: childThread ? 'worker' : 'assistant', execution, turnCount: 1, toolCallCount: 0 }
+        return json(withChild && id === ids[0] ? [rootNode, {
+          ...rootNode,
+          threadId: inspectionChildThreadId,
+          parentThreadId: ids[0],
+          rootThreadId: ids[0],
+          name: 'worker',
+          agentName: 'worker',
+          kind: 'SUBAGENT',
+          status: 'RUNNING',
+        }] : [rootNode])
+      }
       if (path === `/api/harness/threads/${id}`) {
         const base = { sessionId: responseSessionId, createdAt: 1790812800, usageCost: null }
         return json({ version: '1', thread, baseEntryId: null, entries: [
@@ -117,6 +133,34 @@ async function serve(target: Page | BrowserContext, { agents = true, admin = fal
 
 const sendButton = (page: Page) => page.getByRole('button', { name: 'Send message' })
 const unsent = (page: Page) => page.locator('[data-unsent]')
+
+test('the workspace pane inspects a child thread in place and returns to its root', async ({ page }) => {
+  await serve(page, { withChild: true })
+  await page.goto(harness)
+  const pane = page.locator('[data-pane-id]')
+  const paneId = await pane.getAttribute('data-pane-id')
+  await page.getByRole('textbox').fill(referenceMessage)
+  await sendButton(page).click()
+  await expect(page.getByText(referenceMessage, { exact: true })).toBeVisible()
+  const pathname = new URL(page.url()).pathname
+  const tree = page.getByRole('region', { name: 'Active subagents' })
+  // The tree row button has the row's accessible name; it intentionally has no separate action label.
+  const action = tree.getByRole('button', { name: 'worker Running turns: 1 · tools: 0 Code model (max)' })
+  await expect(action).toHaveAttribute('type', 'button')
+  expect(await action.getAttribute('href')).toBeNull()
+  await action.click()
+
+  await expect(pane).toHaveAttribute('data-pane-id', paneId!)
+  await expect(page.locator('.workspace-thread-view')).toBeHidden()
+  const childView = page.locator('.bound-thread-view')
+  await expect(childView).toBeVisible()
+  const back = childView.getByRole('button', { name: 'Back to parent agent' })
+  await expect(back).toHaveAttribute('type', 'button')
+  await back.click()
+  await expect(page.locator('.workspace-thread-view')).toBeVisible()
+  await expect(tree).toBeVisible()
+  expect(new URL(page.url()).pathname).toBe(pathname)
+})
 
 test('a draft stays in the same pane, shows its first message, and cuts a completed turn', async ({ page }) => {
   const posts = await serve(page)

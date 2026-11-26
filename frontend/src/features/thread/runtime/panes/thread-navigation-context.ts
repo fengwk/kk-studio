@@ -8,7 +8,7 @@ export interface ThreadNavigationOptions {
   afterEntryId?: string
 }
 
-/** 普通点击交给当前 pane；没有 pane 导航时保留独立 Thread 地址。 */
+/** 内部执行在当前 pane 打开；没有 pane 导航时不提供查看操作。 */
 export const ThreadNavigationContext = createContext<
   ((threadId: string, options?: ThreadNavigationOptions) => void) | null
 >(null)

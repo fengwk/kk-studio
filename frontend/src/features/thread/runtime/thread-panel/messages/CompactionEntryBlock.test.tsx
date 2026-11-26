@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import type {
   CompactionCardFact,
@@ -47,11 +47,11 @@ function renderCard(text: string, id?: string) {
   return render(<EntryMessageBlock message={compactionMessage(text, id)} />)
 }
 
-function renderFactCard(fact: CompactionCardFact, text = '') {
+function renderFactCard(fact: CompactionCardFact, text = '', onOpenThread = vi.fn()) {
   return render(
-    <MemoryRouter>
+    <ThreadNavigationContext.Provider value={onOpenThread}>
       <EntryMessageBlock message={compactionCard(fact, text)} />
-    </MemoryRouter>,
+    </ThreadNavigationContext.Provider>,
   )
 }
 
@@ -163,15 +163,18 @@ describe('CompactionEntryBlock', () => {
     expect(container.textContent).toContain('<script>')
   })
   it('opens the execution view from any card that carries a branch thread', () => {
+    const onOpenThread = vi.fn()
     const { container } = renderFactCard({
       state: 'compacted',
       childThreadId: 'child-1',
       cutEntryId: 'cut-1',
       errorCode: null,
-    }, 'summary')
+    }, 'summary', onOpenThread)
 
-    const link = screen.getByRole('link', { name: '查看执行' })
-    expect(link).toHaveAttribute('href', '/threads/child-1?afterEntryId=cut-1')
+    const button = screen.getByRole('button', { name: '查看执行' })
+    expect(button).toHaveAttribute('type', 'button')
+    fireEvent.click(button)
+    expect(onOpenThread).toHaveBeenCalledWith('child-1', { afterEntryId: 'cut-1' })
     expect(container.querySelector('[data-compaction-state="compacted"]')).not.toBeNull()
   })
 
@@ -185,9 +188,8 @@ describe('CompactionEntryBlock', () => {
 
     expect(screen.getByText('上下文压缩失败')).toBeInTheDocument()
     expect(screen.getByText('摘要因输出上限被截断。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看执行' }))
-      .toHaveAttribute('href', '/threads/child-1?afterEntryId=cut-1')
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByRole('button', { name: '查看执行' })).toHaveAttribute('type', 'button')
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
   })
 
   it('shows the stopped result without a retry action', () => {
@@ -213,8 +215,7 @@ describe('CompactionEntryBlock', () => {
 
     expect(screen.getByText('正在压缩上下文…')).toBeInTheDocument()
     expect(screen.getByText('正在整理以上内容。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看执行' }))
-      .toHaveAttribute('href', '/threads/child-1?afterEntryId=cut-1')
+    expect(screen.getByRole('button', { name: '查看执行' })).toHaveAttribute('type', 'button')
     expect(container.querySelector('.thread-disclosure-toggle')).toBeNull()
   })
 })

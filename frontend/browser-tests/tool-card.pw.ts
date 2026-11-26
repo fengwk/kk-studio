@@ -123,10 +123,11 @@ test.beforeEach(async ({ page }) => {
 test('running task header opens its durable child without a result receipt', async ({ page }) => {
   await harness(page, 'taskRunning')
   const card = page.locator('.thread-turn-tool')
-  const link = card.getByRole('link', { name: '查看子 Agent 执行' })
-  await expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000006')
+  const action = card.getByRole('button', { name: '查看子 Agent 执行' })
+  await expect(action).toHaveAttribute('type', 'button')
+  expect(await action.getAttribute('href')).toBeNull()
   await expect(card.locator('.thread-disclosure-body')).toHaveCount(0)
-  await link.click()
+  await action.click()
   await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000006')
 })
 
@@ -142,11 +143,11 @@ for (const width of [1440, 360, 320]) {
     // 收起时不显示 prompt，也不展示完整 thread_id。
     await expect(card).not.toContainText('Keep this user text: Thread ID user-owned-marker')
     await expect(card.locator('.thread-tool-summary')).not.toContainText('00000000-')
-    const links = card.getByRole('link')
-    await expect(links).toHaveCount(1)
-    await expect(links).toHaveAccessibleName('查看子 Agent 执行')
-    await expect(links).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
-    await links.click()
+    const actions = card.getByRole('button', { name: '查看子 Agent 执行' })
+    await expect(actions).toHaveCount(1)
+    await expect(actions).toHaveAttribute('type', 'button')
+    expect(await actions.getAttribute('href')).toBeNull()
+    await actions.click()
     await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000005')
 
     // 展开后完整参数与 prompt 可见，链接仍在 Header 操作区。
@@ -154,7 +155,7 @@ for (const width of [1440, 360, 320]) {
     await expect(card.locator('.thread-disclosure-toggle')).toHaveAttribute('aria-expanded', 'true')
     await expect(card.locator('.thread-tool-summary')).toContainText('thread_id=00000000-0000-4000-8000-000000000004')
     await expect(card).toContainText('Keep this user text: Thread ID user-owned-marker')
-    const typography = await links.evaluate((element) => {
+    const typography = await actions.evaluate((element) => {
       const style = getComputedStyle(element)
       const body = getComputedStyle(document.querySelector('.task-tool-renderer .thread-tool-pre')!)
       return {

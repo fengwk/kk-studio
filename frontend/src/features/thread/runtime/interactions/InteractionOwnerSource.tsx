@@ -1,11 +1,11 @@
 import { ExternalLink } from 'lucide-react'
-import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
+import { ThreadInspectionButton } from '@/features/thread/runtime/panes/ThreadInspectionButton'
 import { useI18n } from '@/shared/i18n'
 import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import '@/features/thread/runtime/interactions/interaction-owner-source.css'
 
 /**
- * 交互待办的 subagent 来源入口：调用线程与执行根不同时，由 `ThreadLink` 复用 pane 的
+ * 交互待办的 subagent 来源入口：调用线程与执行根不同时，由 `ThreadInspectionButton` 复用 pane 的
  * 就地查看路径；入口只显示词条，不展示完整 threadId。
  */
 export function InteractionOwnerSource({ item, showSubagentSource = true }: {
@@ -21,7 +21,7 @@ export function InteractionOwnerSource({ item, showSubagentSource = true }: {
     return null
   }
   return (
-    <ThreadLink
+    <ThreadInspectionButton
       className="interaction-subagent-source"
       threadId={subagentThreadId}
       title={t('ai.interaction.openSubagent')}
@@ -29,6 +29,6 @@ export function InteractionOwnerSource({ item, showSubagentSource = true }: {
     >
       <ExternalLink size={12} aria-hidden="true" />
       <span>{t('ai.interaction.subagentSource')}</span>
-    </ThreadLink>
+    </ThreadInspectionButton>
   )
 }

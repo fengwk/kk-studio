@@ -200,7 +200,7 @@ export function CustomMessageQueueHarness() {
           threadId={HARNESS_CHILD_THREAD_ID}
           projection={projection}
           environments={[]}
-          readOnly
+          onParent={() => {}}
         />
       </div>
     </div>

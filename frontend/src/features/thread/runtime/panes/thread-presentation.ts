@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import type { ThreadProjection } from '../useThreadProjection'
 import type { useBoundThreadPanelViews } from '../controllers/useBoundThreadPanelViews'
 import { formatModelLabel } from '@/features/catalog'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
-
-type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'parent'
 
 /**
  * Debug 视图的退出键：内层已消费的 Esc（如先清选中事件）、重复按键、输入法组合与阻塞弹窗内的 Esc 都不退出。
@@ -16,16 +14,14 @@ export function isDebugCloseEscape(event: KeyboardEvent<HTMLElement>): boolean {
     && !shouldDeferToBlockingModal(event.currentTarget)
 }
 
-/** 临时查看层报告；与根的路由/草稿/busy 摘要分离，不缓存 controller 或节点。 */
+/** 子 Thread 查看头部使用的身份与父级返回动作。 */
 export interface ThreadPresentation {
   viewKey: string
   threadId: string | null
-  mode: 'conversation' | 'debug'
   name: string | null
   parentThreadId: string | null
-  parentHref: string | null
   identity: string | null
-  act: (viewKey: string, action: PresentationAction, trigger?: HTMLElement) => void
+  act: (viewKey: string, action: 'parent') => void
 }
 
 /**
@@ -44,92 +40,44 @@ export function threadIdentity(projection: Pick<ThreadProjection, 'thread'>): st
   ].filter(Boolean).join(' · ')
 }
 
-/** 动作稳定但只使用 commit 后最新查看层；过期身份和隐藏层不能执行。 */
+/** 父级返回动作只允许由当前可见且激活的子 Thread 查看层触发。 */
 export function useThreadPresentation({
-  views, projection, threadId, selected, active, onReport, onParent, onRestoreFocus,
+  views, projection, threadId, active, onParent,
 }: {
-  views: Pick<ReturnType<typeof useBoundThreadPanelViews>, 'viewKey' | 'mode' | 'switchMode'>
-  projection: Pick<ThreadProjection, 'thread' | 'models'>
+  views: Pick<ReturnType<typeof useBoundThreadPanelViews>, 'viewKey'>
+  projection: Pick<ThreadProjection, 'thread'>
   threadId: string
-  selected: boolean
   active: boolean
-  onReport?: (report: ThreadPresentation) => void
-  onParent?: (parentThreadId: string) => void
-  onRestoreFocus?: () => void
+  onParent: (parentThreadId: string) => void
 }) {
-  const latest = useRef({ views, projection, threadId, selected, active, onParent, onRestoreFocus })
-  const returnFocus = useRef<HTMLElement | null>(null)
-  const returnFocusKey = useRef<string | null>(null)
-  const restoreFocus = useRef(false)
+  const latest = useRef({ views, projection, threadId, active, onParent })
   const mounted = useRef(false)
-  const lastKey = useRef(views.viewKey)
   useLayoutEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
   useLayoutEffect(() => {
-    if (lastKey.current !== views.viewKey) {
-      lastKey.current = views.viewKey
-      restoreFocus.current = false
-      returnFocus.current = null
-      returnFocusKey.current = null
-    }
-    latest.current = { views, projection, threadId, selected, active, onParent, onRestoreFocus }
+    latest.current = { views, projection, threadId, active, onParent }
   })
-  const act = useCallback((viewKey: string, action: PresentationAction, trigger?: HTMLElement) => {
+  const act = useCallback((viewKey: string, action: 'parent') => {
     const current = latest.current
-    if (!mounted.current || !current.active || !current.selected || current.views.viewKey !== viewKey) {
+    if (!mounted.current || !current.active || current.views.viewKey !== viewKey) {
       return
     }
     const thread = current.projection.thread?.threadId === current.threadId
       ? current.projection.thread : null
-    if (action === 'close-debug') {
-      restoreFocus.current = true
-      current.views.switchMode('conversation')
-    } else if (action === 'restore-focus') {
-      if (current.views.mode !== 'conversation' || !restoreFocus.current) {
-        return
-      }
-      restoreFocus.current = false
-      if (current.onRestoreFocus) {
-        current.onRestoreFocus()
-      } else {
-        const element = returnFocus.current
-        if (returnFocusKey.current === viewKey && element?.isConnected && !element.closest('[hidden], [inert]')) {
-          element.focus()
-        }
-      }
-    } else if (action === 'debug') {
-      if (thread || current.threadId === '') {
-        returnFocus.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
-        returnFocusKey.current = viewKey
-        current.views.switchMode('debug')
-      }
-    } else if (thread?.parentThreadId && action === 'parent') {
-      current.onParent?.(thread.parentThreadId)
+    if (thread?.parentThreadId && action === 'parent') {
+      current.onParent(thread.parentThreadId)
     }
   }, [])
-  useEffect(() => {
-    if (!active || !selected) {
-      restoreFocus.current = false
-    }
-  }, [views.viewKey, active, selected])
   const thread = projection.thread?.threadId === threadId ? projection.thread : null
   const identity = thread ? threadIdentity(projection) : null
-  const parentHref = thread?.parentThreadId && !onParent
-    ? `/threads/${encodeURIComponent(thread.parentThreadId)}` : null
-  const report = useMemo<ThreadPresentation>(() => ({
-    viewKey: views.viewKey, threadId: thread?.threadId ?? null, mode: views.mode,
+  return useMemo<ThreadPresentation>(() => ({
+    viewKey: views.viewKey,
+    threadId: thread?.threadId ?? null,
     name: thread?.parentThreadId && thread.name === 'main' ? null : thread?.name ?? null,
-    parentThreadId: thread?.parentThreadId ?? null, parentHref, identity,
+    parentThreadId: thread?.parentThreadId ?? null,
+    identity,
     act,
-  }), [views.viewKey, views.mode, thread?.threadId, thread?.name, thread?.parentThreadId, parentHref, identity, act])
-  const callback = useRef(onReport)
-  useLayoutEffect(() => { callback.current = onReport })
-  useEffect(() => {
-    if (selected) {
-      callback.current?.(report)
-    }
-  }, [selected, report])
-  return report
+  }), [views.viewKey, thread?.threadId, thread?.name, thread?.parentThreadId, identity, act])
 }

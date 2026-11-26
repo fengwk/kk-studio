@@ -3,7 +3,9 @@ import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import '@/shared/ui/layout/list-row.css'
 import { useI18n } from '@/shared/i18n'
 import { formatExecutionModelLabel } from '@/features/catalog'
-import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
+import { useContext } from 'react'
+import { ThreadInspectionButton } from '@/features/thread/runtime/panes/ThreadInspectionButton'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { formatThreadStatusLabel } from './thread-status-format'
 import { threadTreeOutcome, type ActiveThreadTreeRow } from './active-thread-tree'
 import './thread-tree.css'
@@ -14,6 +16,7 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
   currentThreadId?: string
 }) {
   const { t } = useI18n()
+  const canInspect = useContext(ThreadNavigationContext) != null
   return (
     <ol className="thread-tree-list">
       {rows.map((row) => {
@@ -23,13 +26,8 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
         const statusClass = outcome
           ? `is-${outcome.toLowerCase()}`
           : `is-${node.status.toLowerCase()}`
-        return (
-          <li key={node.threadId} className="thread-tree-row"
-            data-depth={row.depth} data-thread-id={node.threadId}
-            data-status={node.status}
-            data-execution-control={node.executionControl}
-            aria-current={node.threadId === currentThreadId ? 'true' : undefined}>
-            <ThreadLink threadId={node.threadId} className="thread-tree-link" title={node.threadId}>
+        const content = (
+            <>
               <span className="thread-tree-connectors" aria-hidden="true">
                 {row.ancestorContinues.map((continues, index) => (
                   <span key={index} className={continues ? 'is-continuing' : ''} />
@@ -65,7 +63,19 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
                   {formatExecutionModelLabel(node.execution)}
                 </span>
               </span>
-            </ThreadLink>
+            </>
+        )
+        return (
+          <li key={node.threadId} className="thread-tree-row"
+            data-depth={row.depth} data-thread-id={node.threadId}
+            data-status={node.status}
+            data-execution-control={node.executionControl}
+            aria-current={node.threadId === currentThreadId ? 'true' : undefined}>
+            {canInspect ? (
+              <ThreadInspectionButton threadId={node.threadId} className="thread-tree-link" title={node.threadId}>
+                {content}
+              </ThreadInspectionButton>
+            ) : <div className="thread-tree-link">{content}</div>}
           </li>
         )
       })}

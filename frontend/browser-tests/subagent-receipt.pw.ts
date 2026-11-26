@@ -33,13 +33,14 @@ test.describe('Subagent receipt card', () => {
       const order = await cards.nth(index).evaluate((element) => {
         const header = element.querySelector('.thread-disclosure-header')!
         const text = header.querySelector('.thread-disclosure-header-text')!
-        const link = header.querySelector('a')!
+        const action = header.querySelector('.thread-subagent-receipt-source')!
         const toggle = header.querySelector('.thread-disclosure-toggle')!
         return {
           textFirst: header.firstElementChild === text.parentElement,
           lastIsToggle: header.lastElementChild === toggle,
-          separate: !toggle.contains(link),
-          ordered: link.getBoundingClientRect().right <= toggle.getBoundingClientRect().left,
+          separate: !toggle.contains(action),
+          ordered: action.getBoundingClientRect().right <= toggle.getBoundingClientRect().left,
+          actionTag: action.tagName,
           returnedVisible: text.textContent?.includes('已返回'),
         }
       })
@@ -49,6 +50,7 @@ test.describe('Subagent receipt card', () => {
         separate: true,
         ordered: true,
         returnedVisible: false,
+        actionTag: 'BUTTON',
       })
     }
 
@@ -88,12 +90,21 @@ test.describe('Subagent receipt card', () => {
 
     // 同一来源 subagent 的两条回执各自保留身份与独立来源链接；可见文字不含 UUID。
     for (const index of [0, 4]) {
-      const link = cards.nth(index).getByRole('link', { name: '查看子 Agent 执行' })
-      await expect(link).toHaveAttribute('href', '/threads/child-thread-1')
-      await expect(link).toHaveText('查看执行')
+      const action = cards.nth(index).getByRole('button', { name: '查看子 Agent 执行' })
+      await expect(action).toHaveAttribute('type', 'button')
+      expect(await action.getAttribute('href')).toBeNull()
+      await expect(action).toHaveText('查看执行')
     }
+    await cards.nth(0).getByRole('button', { name: '查看子 Agent 执行' }).click()
+    await expect(page.getByLabel('selected thread')).toHaveText('child-thread-1')
 
     await page.screenshot({ path: testInfo.outputPath('subagent-receipt-collapsed.png') })
+  })
+
+  test('hides source actions when the harness has no pane navigation provider', async ({ page }) => {
+    await page.goto(`${HARNESS_URL}?without-pane`)
+    await expect(page.locator('.thread-subagent-receipt-source')).toHaveCount(0)
+    await expect(page.locator('.thread-subagent-receipt')).toHaveCount(6)
   })
 
   test('expands to the result first and the full task in the body without inner scrolling', async ({ page }, testInfo) => {
@@ -176,7 +187,7 @@ test.describe('Subagent receipt card', () => {
     await expect(longErrorCard.locator('.thread-disclosure-body')).toContainText('partial diagnostics')
   })
 
-  test('toggles with the keyboard and keeps the source link separately focusable', async ({ page }) => {
+  test('toggles with the keyboard and keeps the source action separately focusable', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto(HARNESS_URL)
 
@@ -190,16 +201,18 @@ test.describe('Subagent receipt card', () => {
     await page.keyboard.press(' ')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
-    // DOM 顺序与视觉一致：来源链接在最后的展开按钮之前。
+    // DOM 顺序与视觉一致：来源按钮在最后的展开按钮之前。
     await toggle.focus()
     await page.keyboard.press('Shift+Tab')
     const focused = await page.evaluate(() => ({
       tag: document.activeElement?.tagName ?? '',
+      type: document.activeElement?.getAttribute('type') ?? '',
       href: document.activeElement?.getAttribute('href') ?? '',
       label: document.activeElement?.getAttribute('aria-label') ?? '',
     }))
-    expect(focused.tag).toBe('A')
-    expect(focused.href).toBe('/threads/child-thread-2')
+    expect(focused.tag).toBe('BUTTON')
+    expect(focused.type).toBe('button')
+    expect(focused.href).toBe('')
     expect(focused.label).toBe('查看子 Agent 执行')
   })
 

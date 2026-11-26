@@ -26,31 +26,9 @@ export type BoundThreadPanelController = Pick<
 >
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
-interface BoundThreadPreviewOptions {
-  /**
-   * 本地视图身份：本地分支/新建草稿没有 API threadId（都传 ""），Debug 模式、滚动位置
-   * 与检查器选中必须按目标稳定字段区分，否则换绑到另一份草稿会复用上一份的 Debug 视图
-   * 与预览结果。缺省时回退到真实 threadId（已绑定 Thread 与只读查看的唯一身份）。
-   */
-  viewKey?: string
-  /**
-   * 当前界面草稿选中的 model / environment；由根控制面传入，使 Debug 预览按界面当前选择
-   * 请求服务端只读规划，不要求先行持久化分支设置。缺省时回退到 Thread branchSettings。
-   */
-  debugSettings?: HarnessModelRequestDebugRequestDTO | null
-  historyLoading?: boolean
-  historyError?: string | null
-  onRetryHistory?: () => void
-}
-
-export function useBoundThreadPanelViews(
-  threadId: string,
-  controller: BoundThreadPanelController,
-  previewOptions?: BoundThreadPreviewOptions,
-) {
+export function useBoundThreadPanelViews(threadId: string, controller: BoundThreadPanelController) {
   const { t } = useI18n()
-  // 视图身份只用于本地视图状态（模式/滚动/选中）；API 调用仍只用真实 threadId。
-  const viewKey = previewOptions?.viewKey ?? threadId
+  const viewKey = threadId
   const {
     mode,
     switchMode: internalSwitchMode,
@@ -61,14 +39,10 @@ export function useBoundThreadPanelViews(
     initialEventsScrollTop,
   } = useThreadPanelViewState(viewKey, controller.bodyRef, controller.events)
 
-  const rawDebugModel = previewOptions?.debugSettings !== undefined
-    ? previewOptions.debugSettings?.model
-    : getBuiltinModelSelection(controller.thread?.branchSettings?.execution)
+  const rawDebugModel = getBuiltinModelSelection(controller.thread?.branchSettings?.execution)
   const debugModelName = rawDebugModel?.modelName ?? null
   const debugModelVariant = rawDebugModel?.variant ?? null
-  const debugEnvironmentName = previewOptions?.debugSettings !== undefined
-    ? (previewOptions.debugSettings?.environmentName ?? null)
-    : (controller.thread?.branchSettings?.environmentName ?? null)
+  const debugEnvironmentName = controller.thread?.branchSettings?.environmentName ?? null
 
   const debugRequest = useMemo<HarnessModelRequestDebugRequestDTO | null>(() => {
     if (!debugModelName) {
@@ -161,9 +135,6 @@ export function useBoundThreadPanelViews(
       mode === 'debug' ? (
         <ThreadEventView
           events={controller.events}
-          historyLoading={previewOptions?.historyLoading}
-          historyError={previewOptions?.historyError}
-          onRetryHistory={previewOptions?.onRetryHistory}
           selectedEventId={selectedEventId}
           onSelectedEventIdChange={(id) => {
             if (id != null) {

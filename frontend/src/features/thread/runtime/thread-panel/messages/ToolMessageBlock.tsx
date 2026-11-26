@@ -27,7 +27,7 @@ import {
 import { buildToolMessageView } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
 import { useApprovalReviewVisibleElsewhere } from '@/features/thread/runtime/interactions/approval-review-context'
 import { parseTaskReceipt } from '@/features/thread/runtime/state/task-tool-parser'
-import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
+import { ThreadInspectionButton } from '@/features/thread/runtime/panes/ThreadInspectionButton'
 import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
@@ -246,7 +246,7 @@ export function ToolMessageBlock({
     ?? (isTask && view.resultMessage == null ? message.childThreadId : null)
   const actions = taskThreadId != null
     ? (
-      <ThreadLink
+      <ThreadInspectionButton
         className="thread-tool-thread-link"
         threadId={taskThreadId}
         title={t('ai.runtime.disclosure.viewSubagentExecution')}
@@ -254,7 +254,7 @@ export function ToolMessageBlock({
       >
         <ArrowUpRight aria-hidden="true" />
         <span>{t('ai.runtime.notification.entry.viewSubagentExecution')}</span>
-      </ThreadLink>
+      </ThreadInspectionButton>
     )
     : undefined
 

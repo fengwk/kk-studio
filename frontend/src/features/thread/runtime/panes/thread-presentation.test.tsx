@@ -1,12 +1,11 @@
-import { act, fireEvent, renderHook, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import { threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
-import type { ModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
+import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/lib/clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
@@ -20,38 +19,20 @@ const thread: HarnessThreadDTO = {
     environmentName: null,
   },
 }
-const model: ModelDTO = {
-  providerName: 'provider', type: 'MODEL', name: 'model', modelId: 'actual-model', description: null,
-  version: '1', createdAt: 0, updatedAt: 0,
-  config: {
-    limit: { context: 10000, output: 1000 },
-    abilities: { tools: true, reasoning: true, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
-    defaultVariant: 'deep', variants: [{ id: 'deep', reasoningEffort: 'high', promptCacheRetention: 'NONE' }],
-    pricing: {
-      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
-      rules: [],
-      changes: []
-    },
-  },
-}
 
-function options() {
+function options(onParent = vi.fn(), active = true) {
   return {
-    views: { viewKey: 'thread:child', mode: 'conversation' as 'conversation' | 'debug', switchMode: vi.fn() },
-    projection: { thread: thread as HarnessThreadDTO | undefined, models: [model] },
-    threadId: 'child', selected: true, active: true, onReport: vi.fn(),
-    onParent: vi.fn(),
+    views: { viewKey: 'thread:child' },
+    projection: { thread },
+    threadId: 'child', active, onParent,
   }
 }
 
-describe('visible thread presentation', () => {
-  it('uses the real branch variant as identity without consulting catalog reasoning facts', () => {
-    // 身份只来自 branch settings 快照，catalog 未加载（无 models）也不改变结果。
+describe('child thread presentation', () => {
+  it('uses the actual branch model variant as identity, independent of a loaded catalog', () => {
     expect(threadIdentity({ thread })).toBe('researcher · model (deep)')
     expect(threadIdentity({ thread: undefined })).toBeNull()
-    // 在运行时边界注入非法 null，验证空值保护。
     expect(Reflect.apply(threadIdentity, undefined, [{ thread: null }])).toBeNull()
-    // variant 全空白时只显示规范 model ref，不伪造 default variant，也不换算 reasoningEffort。
     expect(threadIdentity({
       thread: {
         ...thread,
@@ -63,158 +44,48 @@ describe('visible thread presentation', () => {
     })).toBe('researcher · model')
   })
 
-  it('reports only selected views and keeps callbacks stable without render loops', () => {
-    const initial = options()
-    const { result, rerender } = renderHook(useThreadPresentation, { initialProps: initial })
-    const report = result.current
-    expect(initial.onReport).toHaveBeenCalledTimes(1)
-    rerender({ ...initial, onReport: vi.fn() })
-    expect(result.current).toBe(report)
-    expect(initial.onReport).toHaveBeenCalledTimes(1)
-    rerender({ ...initial, selected: false, views: { ...initial.views, mode: 'debug' } })
-    expect(initial.onReport).toHaveBeenCalledTimes(1)
-    act(() => report.act(report.viewKey, 'parent'))
-    expect(initial.onParent).not.toHaveBeenCalled()
-  })
-
-  it('scopes stable actions to the latest committed key, active layer and actual parent', () => {
-    const initial = options()
-    const restore = vi.fn()
-    const { result, rerender } = renderHook(useThreadPresentation, { initialProps: { ...initial, onRestoreFocus: restore } })
-    const action = result.current.act
-    act(() => {
-      action('stale', 'debug')
-      action('thread:child', 'debug')
-      action('thread:child', 'parent')
-      action('thread:child', 'close-debug')
+  it('only invokes the latest parent callback for the current active thread view', () => {
+    const initialCallback = vi.fn()
+    const { result, rerender } = renderHook(useThreadPresentation, {
+      initialProps: options(initialCallback),
     })
-    expect(initial.views.switchMode.mock.calls).toEqual([['debug'], ['conversation']])
-    expect(initial.onParent).toHaveBeenCalledWith('parent')
-    expect(restore).not.toHaveBeenCalled()
-    act(() => action('thread:child', 'restore-focus'))
-    expect(restore).toHaveBeenCalledOnce()
-    const next = { ...initial, onRestoreFocus: restore, active: false }
-    rerender(next)
-    act(() => action('thread:child', 'debug'))
-    expect(initial.views.switchMode).toHaveBeenCalledTimes(2)
-    rerender({ ...next, active: true, views: { ...initial.views, viewKey: 'thread:new' } })
+    const action = result.current.act
+    act(() => action('stale', 'parent'))
     act(() => action('thread:child', 'parent'))
-    expect(initial.onParent).toHaveBeenCalledOnce()
+    expect(initialCallback).toHaveBeenCalledExactlyOnceWith('parent')
+
+    const inactiveCallback = vi.fn()
+    rerender({ ...options(inactiveCallback, false) })
+    act(() => action('thread:child', 'parent'))
+    expect(inactiveCallback).not.toHaveBeenCalled()
+
+    const changedCallback = vi.fn()
+    rerender({ ...options(changedCallback), threadId: 'other' })
+    act(() => action('thread:child', 'parent'))
+    expect(changedCallback).not.toHaveBeenCalled()
     expect(result.current.act).toBe(action)
   })
 
-  it('does not pass an unconfirmed child off as the hidden root, but supports draft Debug', () => {
-    const initial = options()
-    const { result, rerender } = renderHook(useThreadPresentation, { initialProps: initial })
-    rerender({ ...initial, threadId: 'unknown' })
-    expect(result.current).toMatchObject({ threadId: null, name: null, identity: null, parentThreadId: null })
-    act(() => {
-      result.current.act('thread:child', 'debug')
-      result.current.act('thread:child', 'parent')
-    })
-    expect(initial.views.switchMode).not.toHaveBeenCalled()
-    expect(initial.onParent).not.toHaveBeenCalled()
-    rerender({ ...initial, threadId: '', projection: { thread: undefined, models: [] } })
-    act(() => result.current.act('thread:child', 'debug'))
-    expect(initial.views.switchMode).toHaveBeenCalledWith('debug')
-  })
-
-  it('restores readonly trigger focus after Debug closes and renders a real direct-parent link', async () => {
-    setLocale('zh-CN')
-    const trigger = document.createElement('button')
-    document.body.append(trigger)
-    trigger.focus()
-    const initial = { ...options(), onParent: undefined }
-    const { result, rerender } = renderHook(useThreadPresentation, { initialProps: initial })
-    act(() => result.current.act('thread:child', 'debug'))
-    rerender({ ...initial, views: { ...initial.views, mode: 'debug' } })
-    trigger.blur()
-    act(() => result.current.act('thread:child', 'close-debug'))
-    rerender(initial)
-    expect(trigger).not.toHaveFocus()
-    act(() => result.current.act('thread:child', 'restore-focus'))
-    await waitFor(() => expect(trigger).toHaveFocus())
-    expect(result.current.parentHref).toBe('/threads/parent')
-    render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
-    expect(screen.getByRole('link', { name: '回到父 Agent' })).toHaveAttribute('href', '/threads/parent')
-    expect(screen.getByText('researcher · model (deep)')).toHaveAttribute('title', 'researcher · model (deep)')
-    trigger.remove()
-  })
-
-  it('does not consume readonly restore intent before the host confirms visibility or after disposal', () => {
-    const trigger = document.createElement('button')
-    document.body.append(trigger)
-    const initial = { ...options(), onParent: undefined }
-    const { result, rerender, unmount } = renderHook(useThreadPresentation, { initialProps: initial })
-    const action = result.current.act
-    act(() => action('thread:child', 'debug', trigger))
-    rerender({ ...initial, views: { ...initial.views, mode: 'debug' } })
-    act(() => {
-      action('thread:child', 'close-debug')
-      action('thread:child', 'restore-focus')
-    })
-    expect(trigger).not.toHaveFocus()
-    rerender(initial)
-    act(() => action('thread:child', 'restore-focus'))
-    expect(trigger).toHaveFocus()
-    trigger.blur()
-    unmount()
-    act(() => action('thread:child', 'debug', trigger))
-    expect(initial.views.switchMode).toHaveBeenCalledTimes(2)
-    trigger.remove()
-  })
-
-  it('omits a child default main name and uses its actual agent identity', () => {
-    const initial = options()
-    const { result, rerender } = renderHook(useThreadPresentation, { initialProps: {
-      ...initial, projection: { ...initial.projection, thread: { ...thread, name: 'main' } },
-    } })
-    expect(result.current.name).toBeNull()
-    expect(result.current.identity).toBe('researcher · model (deep)')
-    rerender({ ...initial, projection: { models: [], thread: { ...thread, name: 'main' } } })
-    expect(result.current.identity).toBe('researcher · model (deep)')
-  })
-
-  it('offers only direct-parent navigation, never topbar Debug or subagent actions', () => {
-    setLocale('zh-CN')
-    const initial = options()
-    const { result } = renderHook(useThreadPresentation, { initialProps: initial })
-    const host = render(<ThreadPresentationActions view={null} />)
-    expect(screen.queryByRole('button')).toBeNull()
-    host.rerender(<ThreadPresentationActions view={result.current} />)
-    fireEvent.click(screen.getByRole('button', { name: '回到父 Agent' }))
-    expect(initial.onParent).toHaveBeenCalledWith('parent')
-    expect(initial.views.switchMode).not.toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
-    host.rerender(<ThreadPresentationActions view={{ ...result.current, mode: 'debug' }} />)
-    expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
-    expect(document.querySelector('.workspace-read-actions')).toBeNull()
-    host.rerender(<ThreadPresentationActions view={{
-      ...result.current, viewKey: '', threadId: null, identity: null, parentThreadId: null,
-    }} />)
-    expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
-    expect(document.querySelector('.workspace-view-identity')).toBeNull()
-    expect(document.querySelector('.workspace-view-short-id')).toBeNull()
-  })
-
-  it('shows the first eight characters of the real thread id and copies the full one', async () => {
-    // 测试意图：子代理顶栏只展示 8 位短 ID，完整 ID 只在悬停提示与复制目标里，不参与路由。
+  it('uses a button for parent navigation and preserves child identity and copy behavior', async () => {
     setLocale('zh-CN')
     const threadId = '0f3c9a2e-1111-4000-8000-000000000001'
+    const onParent = vi.fn()
     const initial = {
-      ...options(),
+      ...options(onParent),
       threadId,
-      projection: { thread: { ...thread, threadId }, models: [model] },
+      projection: { thread: { ...thread, threadId } },
     }
     const { result } = renderHook(useThreadPresentation, { initialProps: initial })
-    render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
+    render(<ThreadPresentationActions view={result.current} />)
 
     expect(screen.getByText('0f3c9a2e')).toHaveAttribute('title', threadId)
-    // 完整 UUID 不作为可见文本铺开，短 ID 也不进入任何路由地址。
     expect(document.body.textContent).not.toContain('1111-4000')
     expect(screen.queryByRole('link')).toBeNull()
     expect(screen.getByRole('button', { name: '回到父 Agent' })).toBeInTheDocument()
+    expect(screen.getByText('researcher · model (deep)')).toHaveAttribute('title', 'researcher · model (deep)')
+
+    fireEvent.click(screen.getByRole('button', { name: '回到父 Agent' }))
+    expect(onParent).toHaveBeenCalledExactlyOnceWith('parent')
 
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
     fireEvent.click(screen.getByRole('button', { name: '复制 Thread ID' }))
@@ -223,14 +94,14 @@ describe('visible thread presentation', () => {
     ))
   })
 
-  it('keeps the short id and copy action out of non-subagent thread headers', () => {
-    // 测试意图：根 thread 顶栏不需要自身 ID，也没有“回到父 Agent”语义。
-    const initial = options()
+  it('does not offer child identity or parent navigation for a root thread', () => {
+    const rootThread = { ...thread, parentThreadId: null }
     const { result } = renderHook(useThreadPresentation, { initialProps: {
-      ...initial, projection: { ...initial.projection, thread: { ...thread, parentThreadId: null } },
+      ...options(), projection: { thread: rootThread },
     } })
-    render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
+    render(<ThreadPresentationActions view={result.current} />)
     expect(document.querySelector('.workspace-view-short-id')).toBeNull()
     expect(screen.queryByRole('button', { name: '复制 Thread ID' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '回到父 Agent' })).toBeNull()
   })
 })

@@ -45,7 +45,7 @@
   overflow-wrap: anywhere;
 }
 
-/* 来源跳转是独立链接，可见文字只保留「查看执行」，完整 ID 只在 href 中。 */
+/* 来源是独立操作，可见文字只保留「查看执行」。 */
 .thread-subagent-receipt-source {
   display: inline-flex;
   align-items: center;

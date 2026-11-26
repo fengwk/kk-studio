@@ -1,6 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
@@ -94,15 +93,9 @@ function renderNotification(
   onOpenThread?: (threadId: string) => void,
 ) {
   return render(
-    <MemoryRouter>
-      {onOpenThread ? (
-        <ThreadNavigationContext.Provider value={onOpenThread}>
-          <EntryMessageBlock message={message} />
-        </ThreadNavigationContext.Provider>
-      ) : (
-        <EntryMessageBlock message={message} />
-      )}
-    </MemoryRouter>,
+    <ThreadNavigationContext.Provider value={onOpenThread ?? vi.fn()}>
+      <EntryMessageBlock message={message} />
+    </ThreadNavigationContext.Provider>,
   )
 }
 
@@ -181,15 +174,20 @@ describe('SubagentReceipt collapsed summary', () => {
     expect(container.querySelector('.thread-entry-row')).toBeNull()
     expect(container.querySelector('.thread-entry-icon')).toBeNull()
 
-    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
-    expect(link).toHaveAttribute('href', '/threads/child-thread-1')
-    expect(link).toHaveAttribute('title', '查看子 Agent 执行')
-    // 来源链接和展开按钮是同级独立控件，链接位于按钮之前，且不显示完整 threadId。
-    expect(link).not.toHaveTextContent('child-thread-1')
+    const sourceButton = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(sourceButton).toHaveAttribute('type', 'button')
+    expect(sourceButton).toHaveAttribute('title', '查看子 Agent 执行')
+    // 来源按钮和展开按钮是同级独立控件，来源动作不显示完整 threadId。
+    expect(sourceButton).not.toHaveTextContent('child-thread-1')
     expect(
-      link.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      sourceButton.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
-    expect(toggle.contains(link)).toBe(false)
+    expect(toggle.contains(sourceButton)).toBe(false)
+  })
+
+  it('renders no source action without a pane navigation provider', () => {
+    render(<EntryMessageBlock message={subagentMessage(receiptEnvelope({ state: 'completed', result: 'done' }))} />)
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).not.toBeInTheDocument()
   })
 
   it('falls back to the generic subagent label when the envelope has no agent name', () => {
@@ -284,7 +282,7 @@ describe('SubagentReceipt expansion', () => {
   })
 
   it('opens and closes the summary line with the keyboard', async () => {
-    // 测试意图：摘要是原生按钮，Enter/Space 都能展开收起，来源链接保持独立可聚焦。
+    // 测试意图：摘要是原生按钮，Enter/Space 都能展开收起，来源动作保持独立。
     const user = userEvent.setup()
     const { container } = renderNotification(
       subagentMessage(receiptEnvelope({ agent: 'coder', state: 'completed', result: 'done' })),
@@ -298,7 +296,7 @@ describe('SubagentReceipt expansion', () => {
     await user.keyboard(' ')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
-    expect(screen.getByRole('link')).toHaveAttribute('href', '/threads/child-thread-1')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' })).toHaveAttribute('type', 'button')
   })
 
   it('keeps the expanded state when the same entry is re-rendered', async () => {
@@ -306,13 +304,14 @@ describe('SubagentReceipt expansion', () => {
     const message = subagentMessage(
       receiptEnvelope({ agent: 'coder', state: 'completed', result: 'done' }),
     )
-    const { container, rerender } = renderNotification(message)
+    const onOpenThread = vi.fn()
+    const { container, rerender } = renderNotification(message, onOpenThread)
     await user.click(toggleOf(container))
 
     rerender(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={onOpenThread}>
         <EntryMessageBlock message={{ ...message }} />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
 
     expect(toggleOf(container)).toHaveAttribute('aria-expanded', 'true')
@@ -372,11 +371,7 @@ describe('SubagentReceipt identity and safety', () => {
       ),
     ]
 
-    const { container } = render(
-      <MemoryRouter>
-        <MessageList messages={messages} />
-      </MemoryRouter>,
-    )
+    const { container } = render(<MessageList messages={messages} />)
 
     const cards = container.querySelectorAll('.thread-subagent-receipt')
     expect(cards).toHaveLength(2)
@@ -410,7 +405,7 @@ describe('SubagentReceipt identity and safety', () => {
       expect(toggle).toHaveAttribute('aria-expanded', 'false')
       fireEvent.click(toggle)
       expect(screen.getByRole('button', { name: '收起详情' })).toHaveAttribute('aria-expanded', 'true')
-      expect(screen.queryByRole('link')).toBeNull()
+      expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
       expect(container.textContent).not.toContain('subagent_result')
     } finally {
       scrollHeight.mockRestore()
@@ -428,19 +423,23 @@ describe('SubagentReceipt identity and safety', () => {
 
     expect(screen.getByText('子 Agent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
   })
 
   it('uses the actual fallback source thread for the label, title and navigation', () => {
     // 未提供通知来源时，信封中的线程成为实际导航来源；可见文字不展示完整 threadId。
+    const onOpenThread = vi.fn()
     const { container } = renderNotification(
       subagentMessage(receiptEnvelope({
         threadId: '00000000-0000-4000-8000-000000000004', state: 'completed', result: 'done',
       }), null),
+      onOpenThread,
     )
-    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
-    expect(link).toHaveAttribute('title', '查看子 Agent 执行')
-    expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
+    const button = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(button).toHaveAttribute('title', '查看子 Agent 执行')
+    expect(button).toHaveAttribute('type', 'button')
+    fireEvent.click(button)
+    expect(onOpenThread).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000004')
     expect(container.textContent).not.toContain('00000000-0000-4000-8000-000000000004')
   })
 
@@ -476,7 +475,9 @@ describe('SubagentReceipt identity and safety', () => {
       onOpenThread,
     )
 
-    fireEvent.click(screen.getByRole('link'))
+    const button = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(button).toHaveAttribute('type', 'button')
+    fireEvent.click(button)
     expect(onOpenThread).toHaveBeenCalledWith('child-thread-1')
   })
 })
@@ -501,6 +502,6 @@ describe('SubagentReceipt scope', () => {
     expect(screen.queryByText('opaque system fact')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
     expect(screen.getByText('opaque system fact')).toBeInTheDocument()
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
   })
 })

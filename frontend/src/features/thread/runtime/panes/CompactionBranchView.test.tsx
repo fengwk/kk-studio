@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CompactionBranchView } from '@/features/thread/runtime/panes/CompactionBranchView'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -113,15 +112,13 @@ function snapshot(status: 'RUNNING' | 'IDLE'): HarnessThreadSnapshotDTO {
   }
 }
 
-function renderBranch(onBack?: () => void) {
+function renderBranch(onBack: () => void) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
   return render(
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-        <MemoryRouter>
-          <CompactionBranchView threadId={CHILD_ID} afterEntryId={CUT_ID} onBack={onBack} />
-        </MemoryRouter>
+        <CompactionBranchView threadId={CHILD_ID} afterEntryId={CUT_ID} onBack={onBack} />
       </ApplicationEventProvider>
     </QueryClientProvider>,
   )
@@ -136,7 +133,7 @@ describe('CompactionBranchView', () => {
   it('projects entries after the cut from the shared full Thread snapshot', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot('IDLE'))
 
-    const { container } = renderBranch()
+    const { container } = renderBranch(vi.fn())
 
     expect(await screen.findByText('draft')).toBeVisible()
     expect(screen.getByRole('status')).toHaveTextContent('上下文压缩失败 · 候选摘要')
@@ -162,7 +159,7 @@ describe('CompactionBranchView', () => {
       stoppedThreads: [],
     })
 
-    renderBranch()
+    renderBranch(vi.fn())
 
     const stop = await screen.findByRole('button', { name: '停止' })
     fireEvent.click(stop)

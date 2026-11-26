@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActiveThreadTree } from '@/features/thread/runtime/panes/ActiveThreadTree'
 import { useActiveThreadTree } from '@/features/thread/runtime/queries/useActiveThreadTree'
@@ -51,7 +50,7 @@ function TreeHarness({ rootId, currentThreadId }: { rootId: string; currentThrea
   return <ActiveThreadTree tree={tree} currentThreadId={currentThreadId} />
 }
 
-function renderTree(rootId: string, currentThreadId?: string) {
+function renderTree(rootId: string, currentThreadId?: string, onOpenThread = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
   return {
@@ -60,9 +59,9 @@ function renderTree(rootId: string, currentThreadId?: string) {
     ...render(
       <QueryClientProvider client={queryClient}>
         <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-          <MemoryRouter>
+          <ThreadNavigationContext.Provider value={onOpenThread}>
             <TreeHarness rootId={rootId} currentThreadId={currentThreadId} />
-          </MemoryRouter>
+          </ThreadNavigationContext.Provider>
         </ApplicationEventProvider>
       </QueryClientProvider>,
     ),
@@ -110,7 +109,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /worker/ })).toBeInTheDocument()
   })
 
   it('subscribes to the response root from a bound child and reads back its own cached key', async () => {
@@ -120,9 +119,9 @@ describe('ActiveThreadTree', () => {
       { ...treeNode(IDLE_ID, WORKER_ID, true, 'review'), agentName: 'Reviewer', status: 'WAITING' },
     ])
     const { sockets, queryClient } = renderTree(WORKER_ID, WORKER_ID)
-    const link = await screen.findByRole('link', { name: /Explorer/ })
+    const link = await screen.findByRole('button', { name: /Explorer/ })
     expect(link).toHaveTextContent('轮次：7 · 工具：12')
-    expect(screen.getByRole('link', { name: /Reviewer/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Reviewer/ })).toBeInTheDocument()
     expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
@@ -136,7 +135,7 @@ describe('ActiveThreadTree', () => {
       name: 'snapshot',
       data: { nodes: pushed },
     }))
-    await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('已停止'))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Explorer/ })).toHaveTextContent('已停止'))
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     expect(harnessService.getThreadTree).toHaveBeenLastCalledWith(
       WORKER_ID,
@@ -150,13 +149,13 @@ describe('ActiveThreadTree', () => {
     const worker = treeNode(WORKER_ID, ROOT_ID, true, 'worker')
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([treeNode(ROOT_ID, null, false, 'root'), worker])
     const { queryClient } = renderTree(ROOT_ID)
-    await screen.findByRole('link', { name: /worker/ })
+    await screen.findByRole('button', { name: /worker/ })
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'), worker, { ...worker, turnCount: 99 },
     ])
     await act(async () => { await queryClient.invalidateQueries({ queryKey: ['threads', 'tree', ROOT_ID] }) })
     expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
-    expect(screen.getByRole('link', { name: /worker/ })).toHaveTextContent('轮次：1')
+    expect(screen.getByRole('button', { name: /worker/ })).toHaveTextContent('轮次：1')
   })
 
   beforeEach(() => {
@@ -164,7 +163,7 @@ describe('ActiveThreadTree', () => {
     setLocale('zh-CN')
   })
 
-  it('renders only active subagents plus ancestors, with whole-row links and no root row', async () => {
+  it('renders only active subagents plus ancestors, with whole-row buttons and no root row', async () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'),
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
@@ -174,14 +173,11 @@ describe('ActiveThreadTree', () => {
     renderTree(ROOT_ID)
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: /worker/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /worker/ })).toBeInTheDocument()
     })
-    expect(screen.queryByRole('link', { name: 'root' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'root' })).not.toBeInTheDocument()
     expect(screen.queryByText('idle-child')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /worker/ })).toHaveAttribute(
-      'href',
-      `/threads/${encodeURIComponent(WORKER_ID)}`,
-    )
+    expect(screen.getByRole('button', { name: /worker/ })).toHaveAttribute('type', 'button')
     expect(screen.getByText('1 个活跃')).toBeInTheDocument()
   })
 
@@ -220,7 +216,7 @@ describe('ActiveThreadTree', () => {
       })
     })
 
-    expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /worker/ })).toBeInTheDocument()
     expect(screen.getByText('1 个活跃')).toBeInTheDocument()
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toEqual(pushed)
@@ -237,18 +233,16 @@ describe('ActiveThreadTree', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-          <MemoryRouter>
-            <ThreadNavigationContext.Provider value={observe}>
-              <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
-            </ThreadNavigationContext.Provider>
-          </MemoryRouter>
+          <ThreadNavigationContext.Provider value={observe}>
+            <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
+          </ThreadNavigationContext.Provider>
         </ApplicationEventProvider>
       </QueryClientProvider>,
     )
 
-    const link = await screen.findByRole('link', { name: /worker/ })
-    expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
-    fireEvent.click(link, { button: 0 })
+    const button = await screen.findByRole('button', { name: /worker/ })
+    expect(button.closest('li')).toHaveAttribute('aria-current', 'true')
+    fireEvent.click(button)
     expect(observe).toHaveBeenCalledWith(WORKER_ID)
   })
 
@@ -258,7 +252,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
     const { queryClient } = renderTree(ROOT_ID)
-    await screen.findByRole('link', { name: /worker/ })
+    await screen.findByRole('button', { name: /worker/ })
 
     vi.mocked(harnessService.getThreadTree).mockRejectedValue(new Error('boom'))
     await act(async () => {
@@ -268,7 +262,7 @@ describe('ActiveThreadTree', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent('Agent 关系刷新失败')
     })
-    expect(screen.getByRole('link', { name: /worker/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /worker/ })).toBeInTheDocument()
   })
 
   it('keeps known active descendants while a refetch is still in flight', async () => {
@@ -279,7 +273,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
     const { queryClient } = renderTree(ROOT_ID)
-    await screen.findByRole('link', { name: /worker/ })
+    await screen.findByRole('button', { name: /worker/ })
 
     let resolveTree: ((value: ReturnType<typeof treeNode>[]) => void) | null = null
     vi.mocked(harnessService.getThreadTree).mockReturnValue(
@@ -292,7 +286,7 @@ describe('ActiveThreadTree', () => {
     })
 
     // 请求未返回：仍是已知的活跃后代，没有错误提示，也没有“没有活跃”的假象。
-    expect(screen.getByRole('link', { name: /worker/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /worker/ })).toBeInTheDocument()
     expect(screen.getByText('1 个活跃')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(containerTextAbsent()).toBe(true)
@@ -301,7 +295,7 @@ describe('ActiveThreadTree', () => {
       resolveTree?.([treeNode(ROOT_ID, null, false, 'root')])
     })
     await waitFor(() => {
-      expect(screen.queryByRole('link', { name: /worker/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /worker/ })).not.toBeInTheDocument()
     })
   })
 
@@ -318,7 +312,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    await screen.findByRole('link', { name: /worker/ })
+    await screen.findByRole('button', { name: /worker/ })
   })
 
   /** fake timers 下 waitFor/findBy 的超时依赖真实定时器会挂起，这里显式清空零延迟定时器与微任务。 */
@@ -345,7 +339,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
     const { sockets } = renderTree(ROOT_ID)
-    await screen.findByRole('link', { name: /worker/ })
+    await screen.findByRole('button', { name: /worker/ })
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     const first = sockets.openLatest()
     expect(first.sentMessages()).toEqual([
@@ -387,7 +381,7 @@ describe('ActiveThreadTree', () => {
         data: { nodes: pushed },
       }))
       await flushApplicationEvents()
-      expect(screen.getByRole('link', { name: /reconnected worker/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /reconnected worker/ })).toBeInTheDocument()
       expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -400,7 +394,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
     const { sockets, queryClient } = renderTree(ROOT_ID)
-    await screen.findByRole('link', { name: /worker/ })
+    await screen.findByRole('button', { name: /worker/ })
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     const socket = sockets.openLatest()
 
@@ -422,7 +416,7 @@ describe('ActiveThreadTree', () => {
       name: 'snapshot',
       data: { nodes: pushed },
     }))
-    expect(await screen.findByRole('link', { name: /resynced worker/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /resynced worker/ })).toBeInTheDocument()
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toEqual(pushed)
   })
@@ -437,15 +431,15 @@ describe('ActiveThreadTree', () => {
     const { unmount } = render(
       <QueryClientProvider client={queryClient}>
         <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-          <MemoryRouter>
+          <ThreadNavigationContext.Provider value={vi.fn()}>
             <RefcountHarness rootId={ROOT_ID} />
-          </MemoryRouter>
+          </ThreadNavigationContext.Provider>
         </ApplicationEventProvider>
       </QueryClientProvider>,
     )
 
     await waitFor(() => {
-      expect(screen.getAllByRole('link', { name: /worker/ })).toHaveLength(2)
+      expect(screen.getAllByRole('button', { name: /worker/ })).toHaveLength(2)
     })
     // 同一执行根上的两个面板只有一条 wire 订阅与一次权威回读。
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
@@ -498,8 +492,8 @@ describe('ActiveThreadTree', () => {
 
     renderTree(ROOT_ID)
 
-    const runningLink = await screen.findByRole('link', { name: /running-worker/ })
-    const waitingLink = await screen.findByRole('link', { name: /waiting-worker/ })
+    const runningLink = await screen.findByRole('button', { name: /running-worker/ })
+    const waitingLink = await screen.findByRole('button', { name: /waiting-worker/ })
 
     // 普通运行状态用动态小图标表达，避免重复状态文字。
     const runningStatus = runningLink.querySelector('.thread-tree-status')
@@ -532,7 +526,7 @@ describe('ActiveThreadTree', () => {
 
     renderTree(ROOT_ID)
 
-    const link = await screen.findByRole('link', { name: /stopped-running/ })
+    const link = await screen.findByRole('button', { name: /stopped-running/ })
     // 运行态图标仍表达运行中，绝不被 STOPPED 遮盖为“已停止”。
     expect(link.querySelector('.thread-tree-status')).toHaveAttribute('aria-label', '运行中')
     // STOPPED 作为独立 execution control 标签呈现
@@ -545,7 +539,7 @@ describe('ActiveThreadTree', () => {
       treeNode(WORKER_ID, ROOT_ID, true, 'closing-worker', 'EXIT_PENDING'),
     ])
     renderTree(ROOT_ID)
-    const link = await screen.findByRole('link', { name: /closing-worker/ })
+    const link = await screen.findByRole('button', { name: /closing-worker/ })
     const status = link.querySelector('.thread-tree-status')
     expect(status).toHaveTextContent('')
     expect(status).toHaveAttribute('aria-label', '等待退出确认')
@@ -564,7 +558,7 @@ describe('ActiveThreadTree', () => {
 
     renderTree(ROOT_ID)
 
-    const link = await screen.findByRole('link', { name: /worker/ })
+    const link = await screen.findByRole('button', { name: /worker/ })
     expect(link.querySelector('.thread-tree-status')).toHaveAttribute('aria-label', '运行中')
     expect(link).not.toHaveTextContent('已完成')
   })

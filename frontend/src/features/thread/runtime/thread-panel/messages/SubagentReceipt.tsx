@@ -6,7 +6,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
-import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
+import { ThreadInspectionButton } from '@/features/thread/runtime/panes/ThreadInspectionButton'
 import {
   discloseText,
   disclosureHint,
@@ -43,7 +43,7 @@ const STATE_ICONS: Record<SubagentReceiptState, LucideIcon> = {
  * SUBAGENT_RESULT 专属轻量信息卡，统一使用只读消息容器。
  *
  * <p>默认 0 行：摘要展示 agent、真实终态图标与任务短预览；来源跳转是独立的
- * ThreadLink，可见文字只有「查看执行」，不重复长 UUID。展开后先展示结果，
+ * ThreadInspectionButton，可见文字只有「查看执行」，不重复长 UUID。展开后先展示结果，
  * 再展示任务原文与部分结果；失败原因固定为 preview 顶部的错误块，收起最多
  * 3 行且受 1500 字符限制，展开完整显示。非法信封明确显示错误，不伪装成回执正文。
  */
@@ -181,7 +181,7 @@ export function SubagentReceipt({
         </span>
       )}
       actions={sourceThreadId != null ? (
-        <ThreadLink
+        <ThreadInspectionButton
           className="thread-subagent-receipt-source"
           threadId={sourceThreadId}
           title={t('ai.runtime.disclosure.viewSubagentExecution')}
@@ -189,7 +189,7 @@ export function SubagentReceipt({
         >
           <ArrowUpRight aria-hidden="true" />
           <span>{t('ai.runtime.notification.entry.viewSubagentExecution')}</span>
-        </ThreadLink>
+        </ThreadInspectionButton>
       ) : undefined}
       preview={preview}
       body={body}

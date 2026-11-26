@@ -269,8 +269,10 @@ describe('ThreadPaneRenderer', () => {
     await waitFor(() => expect(screen.getByRole('textbox')).toBeVisible())
 
     // Inspect child thread and navigate back
-    const childLink = screen.getByRole('link', { name: /Child worker/ })
-    await user.click(childLink)
+    const childAction = screen.getByRole('button', { name: /Child worker/ })
+    expect(childAction).toHaveAttribute('type', 'button')
+    expect(childAction).not.toHaveAttribute('href')
+    await user.click(childAction)
     const backBtn = await screen.findByRole('button', { name: '回到父 Agent' })
     await user.click(backBtn)
     expect(screen.queryByRole('button', { name: '回到父 Agent' })).toBeNull()

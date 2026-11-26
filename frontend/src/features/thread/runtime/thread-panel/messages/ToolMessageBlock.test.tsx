@@ -1,8 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { TaskToolRenderer } from '@/features/thread/runtime/thread-panel/messages/TaskToolRenderer'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
 import { ResourceBlobUrlContext } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
@@ -1236,8 +1236,9 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.textContent).not.toContain('后台执行')
   })
 
-  it('puts the canonical result link in the header without a UUID and falls back cleanly', async () => {
+  it('puts the canonical result action in the header without a UUID and falls back cleanly', async () => {
     const user = userEvent.setup()
+    const onOpenThread = vi.fn()
     const resumeArguments = JSON.stringify({
       subagent_type: 'coder',
       prompt: 'continue working on subtask',
@@ -1265,18 +1266,20 @@ describe('ToolMessageBlock per-tool bodies', () => {
     })
 
     const { container, unmount } = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={onOpenThread}>
         <ToolMessageBlock
           message={callMessage}
           result={resultWithCanonicalDetails}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
 
     // 导航只使用 task.result 指定的 threadId，Header 收起时不展示完整 UUID。
-    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
-    expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    const link = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(link).toHaveAttribute('type', 'button')
+    await user.click(link)
+    expect(onOpenThread).toHaveBeenCalledWith('00000000-0000-0000-0000-000000000002')
     expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
     expect(container.querySelector('.thread-tool-summary-detail')).toHaveTextContent('coder')
     expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('thread_id')
@@ -1301,15 +1304,15 @@ describe('ToolMessageBlock per-tool bodies', () => {
       contents: [text('Raw output without details receipt.')],
     })
     const { unmount: unmount2 } = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={callMessage}
           result={resultWithoutDetails}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).not.toBeInTheDocument()
     expect(screen.queryByText('Raw output without details receipt.')).not.toBeInTheDocument()
     await user.click(expandButton()!)
     expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
@@ -1317,16 +1320,16 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     // 有结果但回执 UUID 非法时，也不得回退到调用参数或 invocation 子线程 ID。
     const { unmount: unmount3 } = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={callMessage}
           result={{ ...resultWithCanonicalDetails, details: { kind: 'task.result', status: 'completed', thread_id: 'invalid' },
             contents: [text('Invalid receipt output')] }}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).not.toBeInTheDocument()
     expect(screen.queryByText('Invalid receipt output')).not.toBeInTheDocument()
     await user.click(expandButton()!)
     expect(screen.getByText('Invalid receipt output')).toBeInTheDocument()
@@ -1348,16 +1351,16 @@ describe('ToolMessageBlock per-tool bodies', () => {
       contents: [text('Failure explanation detail')],
     })
     const failed = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={callMessage}
           result={failedResult}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000003')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' }))
+      .toHaveAttribute('type', 'button')
     expect(failed.container.querySelector('.thread-tool-error')).toHaveTextContent(
       'Subagent dispatch rejected: budget exceeded',
     )
@@ -1367,15 +1370,15 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     // 通用错误 details 没有回执时不使用 invocation 子线程 ID，错误原文仍保留。
     const genericError = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={callMessage}
           result={{ ...failedResult, details: {}, contents: [text('Generic failure detail')] }}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).not.toBeInTheDocument()
     expect(genericError.container.querySelector('.thread-tool-error')).toHaveTextContent(
       'Subagent dispatch rejected: budget exceeded',
     )
@@ -1392,25 +1395,25 @@ describe('ToolMessageBlock per-tool bodies', () => {
       }),
     })
     const { rerender } = render(
-      <MemoryRouter><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></MemoryRouter>,
+      <ThreadNavigationContext.Provider value={vi.fn()}><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></ThreadNavigationContext.Provider>,
     )
-    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' }))
+      .toHaveAttribute('type', 'button')
     rerender(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={{ ...call, invocationStatus: 'CANCELLED' }}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' }))
+      .toHaveAttribute('type', 'button')
     expect(screen.queryByText('resume pending')).not.toBeInTheDocument()
     await user.click(expandButton()!)
     expect(screen.getByText('resume pending')).toBeInTheDocument()
     rerender(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock message={call} renderer={TaskToolRenderer} result={message({
           phase: 'result', toolName: 'task', rendererKey: 'task',
           details: {
@@ -1419,10 +1422,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
           },
           contents: [text('subagent report')],
         })} />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' }))
+      .toHaveAttribute('type', 'button')
     expect(screen.queryByText('00000000-0000-0000-0000-000000000002')).not.toBeInTheDocument()
   })
 
@@ -1436,7 +1439,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       contents: [],
     })
     const { container } = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={message({
             phase: 'call', toolName: 'task', rendererKey: 'task',
@@ -1445,18 +1448,18 @@ describe('ToolMessageBlock per-tool bodies', () => {
           result={result}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
 
-    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000021')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' }))
+      .toHaveAttribute('type', 'button')
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
   })
 
   it('keeps the task result action in the header and the prompt in the details', async () => {
     const user = userEvent.setup()
     const { container } = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock message={message({
           phase: 'call', toolName: 'task', rendererKey: 'task',
           arguments: JSON.stringify({ subagent_type: 'explorer', prompt: 'first task prompt' }),
@@ -1468,10 +1471,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
           },
           contents: [text('subagent report')],
         })} />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
-    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
-    expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    const link = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(link).toHaveAttribute('type', 'button')
     expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
     // 调用正文与操作入口不争同一个区域：preview 为空，prompt 进详情。
     expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
@@ -1479,13 +1482,13 @@ describe('ToolMessageBlock per-tool bodies', () => {
     await user.click(expandButton()!)
     const details = container.querySelector('.thread-tool-details') as HTMLElement
     expect(within(details).getByText('first task prompt')).toBeInTheDocument()
-    expect(within(details).queryByRole('link')).toBeNull()
+    expect(within(details).queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
   })
 
   it('shows synchronous task completion, report, and child navigation', async () => {
     const user = userEvent.setup()
     const { container } = render(
-      <MemoryRouter>
+      <ThreadNavigationContext.Provider value={vi.fn()}>
         <ToolMessageBlock
           message={message({
             phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'SUCCEEDED',
@@ -1501,12 +1504,12 @@ describe('ToolMessageBlock per-tool bodies', () => {
           })}
           renderer={TaskToolRenderer}
         />
-      </MemoryRouter>,
+      </ThreadNavigationContext.Provider>,
     )
 
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 已完成')
-    expect(screen.getByRole('link', { name: '查看子 Agent 执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    expect(screen.getByRole('button', { name: '查看子 Agent 执行' }))
+      .toHaveAttribute('type', 'button')
     await user.click(expandButton()!)
     expect(screen.getByText('subagent report')).toBeInTheDocument()
   })

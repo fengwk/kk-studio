@@ -1,7 +1,7 @@
 .thread-tree-list { margin: 0; padding: 2px 0; list-style: none; }
 .thread-tree-row { margin: 0; }
-.thread-tree-link { display: flex; align-items: stretch; padding: 0 10px; color: inherit; text-decoration: none; min-width: 0; font-size: var(--font-size-xs); }
-.thread-tree-link:hover, .thread-tree-link:focus-visible { background: var(--surface-hover); }
+.thread-tree-link { display: flex; align-items: stretch; padding: 0 10px; color: inherit; width: 100%; min-width: 0; font-size: var(--font-size-xs); }
+button.thread-tree-link:hover, .thread-tree-link:focus-visible { background: var(--surface-hover); }
 .thread-tree-row[aria-current='true'] .thread-tree-link { background: var(--surface-active); }
 .thread-tree-content { flex-wrap: wrap; gap: 3px 8px; padding: 5px 0; overflow-wrap: anywhere; }
 .thread-tree-identity { font-weight: 600; }

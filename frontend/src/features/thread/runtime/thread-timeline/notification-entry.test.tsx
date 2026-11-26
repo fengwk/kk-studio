@@ -1,5 +1,4 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
@@ -138,15 +137,9 @@ function renderNotification(
   onOpenThread?: (threadId: string) => void,
 ) {
   return render(
-    <MemoryRouter>
-      {onOpenThread ? (
-        <ThreadNavigationContext.Provider value={onOpenThread}>
-          <EntryMessageBlock message={message} />
-        </ThreadNavigationContext.Provider>
-      ) : (
-        <EntryMessageBlock message={message} />
-      )}
-    </MemoryRouter>,
+    <ThreadNavigationContext.Provider value={onOpenThread ?? vi.fn()}>
+      <EntryMessageBlock message={message} />
+    </ThreadNavigationContext.Provider>,
   )
 }
 
@@ -245,8 +238,8 @@ describe('NOTIFICATION timeline projection', () => {
 })
 
 describe('NotificationEntryBlock', () => {
-  it('renders a collapsed info card with agent, terminal state, task preview and an independent source link', () => {
-    // 测试意图：SUBAGENT_RESULT 默认折叠为一行摘要，来源是独立链接，完整 task/result 不提前进入 DOM。
+  it('renders a collapsed info card with agent, terminal state, task preview and an independent source action', () => {
+    // 测试意图：SUBAGENT_RESULT 默认折叠为一行摘要，来源按钮独立，完整 task/result 不提前进入 DOM。
     const { container } = renderNotification(
       notificationMessage(
         'SUBAGENT_RESULT',
@@ -272,8 +265,8 @@ describe('NotificationEntryBlock', () => {
     expect(block?.querySelector('.thread-disclosure-toggle'))
       .toHaveAttribute('aria-expanded', 'false')
 
-    const link = screen.getByRole('link', { name: '查看子 Agent 执行' })
-    expect(link).toHaveAttribute('href', '/threads/child-thread-1')
+    const link = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(link).toHaveAttribute('type', 'button')
     expect(link).toHaveAttribute('title', '查看子 Agent 执行')
     expect(link).not.toHaveTextContent('child-thread-1')
 
@@ -314,8 +307,8 @@ describe('NotificationEntryBlock', () => {
     ).toBeTruthy()
   })
 
-  it('navigates in-pane when the Thread link is clicked', () => {
-    // 测试意图：回执 ThreadLink 通过 ThreadNavigationContext 在当前 pane 导航，而不是整页跳转。
+  it('opens the source thread through the pane navigation callback', () => {
+    // 测试意图：回执来源动作通过 pane 导航回调打开子 Thread。
     const onOpenThread = vi.fn()
     renderNotification(
       notificationMessage(
@@ -325,7 +318,9 @@ describe('NotificationEntryBlock', () => {
       onOpenThread,
     )
 
-    fireEvent.click(screen.getByRole('link', { name: '查看子 Agent 执行' }))
+    const button = screen.getByRole('button', { name: '查看子 Agent 执行' })
+    expect(button).toHaveAttribute('type', 'button')
+    fireEvent.click(button)
     expect(onOpenThread).toHaveBeenCalledWith('child-thread-1')
   })
 
@@ -400,7 +395,7 @@ describe('NotificationEntryBlock', () => {
     expect(container.querySelector('.thread-disclosure-error')).not.toBeNull()
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
     expect(container.textContent).not.toContain('subagent_result')
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
   })
 
   it('rejects a receipt that belongs to a different source thread', () => {
@@ -414,7 +409,7 @@ describe('NotificationEntryBlock', () => {
     )
 
     expect(screen.getByText('子 Agent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
   })
 
   it('renders an unknown kind as a collapsed plain system notification without subagent affordances', () => {
@@ -426,7 +421,7 @@ describe('NotificationEntryBlock', () => {
     expect(screen.getByText('系统通知')).toBeInTheDocument()
     expect(screen.queryByText('opaque system fact')).toBeNull()
     expect(container.querySelector('.thread-subagent-receipt')).toBeNull()
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看子 Agent 执行' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
     expect(screen.getByText('opaque system fact')).toBeInTheDocument()

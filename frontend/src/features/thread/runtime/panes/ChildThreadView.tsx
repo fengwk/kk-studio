@@ -1,13 +1,12 @@
-import { useLayoutEffect, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { ThreadPane } from '@/features/thread/runtime/panes/ThreadPane'
 import {
   useThreadProjection,
   type ThreadProjection,
 } from '@/features/thread/runtime/useThreadProjection'
 import { useBoundThreadPanelViews } from '@/features/thread/runtime/controllers/useBoundThreadPanelViews'
-import { isDebugCloseEscape, useThreadPresentation, type ThreadPresentation } from './thread-presentation'
+import { useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
-import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import '@/features/thread/runtime/panes/child-thread-view.css'
 import type { EnvironmentSummaryDTO } from '@/shared/api/generated/contracts'
@@ -17,14 +16,10 @@ interface ThreadViewProps {
   /** 纯展示组件消费必填的投影，自身不再拥有或自建订阅 */
   projection: ThreadProjection
   environments: EnvironmentSummaryDTO[]
-  /** 查看层/独立地址的返回入口（顶部标题区）。 */
+  /** 查看层返回入口（顶部标题区）。 */
   navigation?: ReactNode
-  /** 只读查看（子代理）：标题带只读标识。 */
-  readOnly?: boolean
-  selected?: boolean
   active?: boolean
-  onPresentation?: (report: ThreadPresentation) => void
-  onParent?: (parentThreadId: string) => void
+  onParent: (parentThreadId: string) => void
 }
 
 /**
@@ -36,56 +31,31 @@ export function ThreadView({
   projection,
   environments,
   navigation,
-  readOnly = false,
-  selected = true,
   active = true,
-  onPresentation,
   onParent,
 }: ThreadViewProps) {
   const { t } = useI18n()
   const threadId = explicitThreadId ?? projection.threadId
   // 子线程没有自己的环境选择：只读展示当前冻结的环境并标明跟随主对话；执行根自身不显示该行。
   const childEnvironmentName = projection.runtimeLabels.environmentName
-  const showChildEnvironment = readOnly && projection.thread?.parentThreadId != null
-  // 只读视图自持视图状态（Conversation/Debug 与滚动恢复），不进入根控制面。
-  const views = useBoundThreadPanelViews(threadId, projection, {
-    viewKey: `thread:${threadId}`,
-    historyLoading: projection.messagesLoading,
-    historyError: projection.unavailable ? t('ai.runtime.thread.unavailable')
-      : projection.messagesError ? t('ai.chat.history.loadFailed') : null,
-    onRetryHistory: projection.unavailable ? undefined : projection.retrySnapshotSync,
-  })
+  const showChildEnvironment = projection.thread?.parentThreadId != null
+  const views = useBoundThreadPanelViews(threadId, projection)
   const presentation = useThreadPresentation({
     views,
     projection,
     threadId,
-    selected,
     active,
-    onReport: onPresentation,
     onParent,
   })
-  useLayoutEffect(() => {
-    if (onPresentation == null && presentation.mode === 'conversation') {
-      presentation.act(presentation.viewKey, 'restore-focus')
-    }
-  }, [onPresentation, presentation])
   return (
-    <div className="bound-thread-view" onKeyDown={(event) => {
-      if (onPresentation == null && presentation.mode === 'debug' && isDebugCloseEscape(event)) {
-        event.preventDefault()
-        event.stopPropagation()
-        presentation.act(presentation.viewKey, 'close-debug')
-      }
-    }}>
-      {onPresentation == null ? <header className="agent-pane-thread-heading">
-        {views.mode === 'debug' ? <Button variant="secondary" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
-          {t('ai.runtime.debug.close')}
-        </Button> : presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
-        {views.mode !== 'debug' ? <div className="agent-pane-thread-caption">
+    <div className="bound-thread-view">
+      <header className="agent-pane-thread-heading">
+        {presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
+        <div className="agent-pane-thread-caption">
           {presentation.name ? <h2 className="agent-pane-thread-title" title={presentation.name}>{presentation.name}</h2> : null}
-          {readOnly ? <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span> : null}
-        </div> : null}
-      </header> : null}
+          <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
+        </div>
+      </header>
       {showChildEnvironment ? (
         <div className="thread-readonly-environment">
           {childEnvironmentName
@@ -110,25 +80,18 @@ interface ConnectedThreadViewProps {
   threadId: string
   environments: EnvironmentSummaryDTO[]
   navigation?: ReactNode
-  readOnly?: boolean
-  selected?: boolean
   active?: boolean
-  onPresentation?: (report: ThreadPresentation) => void
-  onParent?: (parentThreadId: string) => void
+  onParent: (parentThreadId: string) => void
 }
 
 /**
- * 独立/子代理视图连接入口：只在自己的组件入口获取一次投影，向下传递给 ThreadView，
- * 避免外层父组件重复订阅。默认只读。
+ * 子线程查看层只获取一次投影，向下传递给只读的 ThreadView。
  */
 export function ConnectedThreadView({
   threadId,
   environments,
   navigation,
-  readOnly = true,
-  selected = true,
   active = true,
-  onPresentation,
   onParent,
 }: ConnectedThreadViewProps) {
   const projection = useThreadProjection(threadId)
@@ -138,10 +101,7 @@ export function ConnectedThreadView({
       projection={projection}
       environments={environments}
       navigation={navigation}
-      readOnly={readOnly}
-      selected={selected}
       active={active}
-      onPresentation={onPresentation}
       onParent={onParent}
     />
   )

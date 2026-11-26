@@ -1,7 +1,6 @@
 import { useRef } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
-import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { ThreadPanel } from '@/features/thread/runtime/thread-panel'
 import { MetaMessageBlock } from '@/features/thread/runtime/thread-panel/messages/MetaMessageBlock'
 import { useCompactionBranch } from '@/features/thread/runtime/queries/useCompactionBranch'
@@ -20,7 +19,7 @@ export function CompactionBranchView({
   threadId: string
   /** 分支 FORK 之前的切点。 */
   afterEntryId: string
-  onBack?: () => void
+  onBack: () => void
 }) {
   const { t } = useI18n()
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -46,13 +45,7 @@ export function CompactionBranchView({
         heading={(
           <>
             <header className="compaction-branch-header">
-              {onBack != null ? (
-                <Button variant="secondary" size="compact" onClick={onBack}>{t('ai.runtime.compactionBranch.back')}</Button>
-              ) : thread?.parentThreadId != null ? (
-                <ThreadLink className="btn-secondary is-compact" threadId={thread.parentThreadId}>
-                  {t('ai.runtime.childThread.back')}
-                </ThreadLink>
-              ) : null}
+              <Button variant="secondary" size="compact" onClick={onBack}>{t('ai.runtime.compactionBranch.back')}</Button>
               <h2 className="compaction-branch-title">{t('ai.runtime.compactionBranch.title')}</h2>
               <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
               {running ? (

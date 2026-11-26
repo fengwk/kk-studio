@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -61,11 +60,17 @@ function eventHost(client: QueryClient, sockets: FakeWebSocketHarness) {
   return (children: ReactNode) => (
     <QueryClientProvider client={client}>
       <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-        <MemoryRouter>{children}</MemoryRouter>
+        {children}
       </ApplicationEventProvider>
     </QueryClientProvider>
   )
 }
+async function findChildRow(): Promise<HTMLElement> {
+  const row = await screen.findByRole('listitem')
+  expect(row).toHaveAttribute('data-thread-id', CHILD)
+  return row
+}
+
 function renderActiveTree({ withEnvironmentsHint = false }: { withEnvironmentsHint?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
@@ -93,7 +98,9 @@ describe('execution tree HTTP Instant contract', () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderActiveTree()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('轮次：3 · 工具：5')
+    const row = await findChildRow()
+    expect(row).toHaveTextContent('轮次：3 · 工具：5')
+    expect(row.querySelector('a[href]')).toBeNull()
     expect(transport).toHaveBeenCalledTimes(1)
     expect(transport.mock.calls[0][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])
@@ -114,7 +121,7 @@ describe('execution tree HTTP Instant contract', () => {
     const sockets = new FakeWebSocketHarness()
     const host = eventHost(client, sockets)
     const { rerender } = render(host(<BoundActiveTree threadId={CHILD} />))
-    await screen.findByRole('link', { name: /Explorer/ })
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
     socket.emitServer({ type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0' })
@@ -130,7 +137,7 @@ describe('execution tree HTTP Instant contract', () => {
     rerender(host(<BoundActiveTree threadId={CHILD} />))
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
     expect(transport.mock.calls[1][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
-    expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('轮次：3 · 工具：5')
+    expect(await findChildRow()).toHaveTextContent('轮次：3 · 工具：5')
   })
 
   it.each([
@@ -148,14 +155,14 @@ describe('execution tree HTTP Instant contract', () => {
     const socket = sockets.openLatest()
     await act(async () => { await Promise.resolve() })
     expect(socket.sentMessages()).toEqual([])
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
   })
 
   it('applies authoritative tree snapshots directly without an event-triggered GET', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
     socket.emitServer({
@@ -178,14 +185,14 @@ describe('execution tree HTTP Instant contract', () => {
 
     await waitFor(() => expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(pushed))
     expect(transport).toHaveBeenCalledTimes(callsBeforeSnapshot)
-    expect(screen.getByRole('link')).toHaveTextContent('pushed latest')
+    expect(screen.getByRole('listitem')).toHaveTextContent('pushed latest')
   })
 
   it('keeps the cache and reports a malformed-scope snapshot without an HTTP second writer', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
     const oldScope = [node(OTHER_ROOT, null), node(CHILD, OTHER_ROOT)]
@@ -207,7 +214,7 @@ describe('execution tree HTTP Instant contract', () => {
     const valid = [node(ROOT, null), node(CHILD, ROOT)]
     reply(valid)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
 
@@ -243,7 +250,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(initial)
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
@@ -285,7 +292,7 @@ describe('execution tree HTTP Instant contract', () => {
 
     reply([node(ROOT, null), node(CHILD, ROOT)])
     fireEvent.click(screen.getByRole('button', { name: 'refresh tree' }))
-    await screen.findByRole('link')
+    await findChildRow()
     expect(transport).toHaveBeenCalledTimes(2)
   })
 
@@ -293,7 +300,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
 
@@ -330,7 +337,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
     expect(transport).toHaveBeenCalledTimes(1)
@@ -370,7 +377,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
 
@@ -409,7 +416,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
 
@@ -447,7 +454,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('fences the old overflow read at subscribe ACK before an immediate new ref', async () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     const resource = { kind: 'thread-tree', id: ROOT } as const
     const notice = { type: 'snapshot-ref', resource } as const
@@ -472,7 +479,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree()
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
 
@@ -512,7 +519,7 @@ describe('execution tree HTTP Instant contract', () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderActiveTree({ withEnvironmentsHint: true })
-    await screen.findByRole('link')
+    await findChildRow()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(2))
     expect(socket.sentMessages()).toEqual(expect.arrayContaining([

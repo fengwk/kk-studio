@@ -156,7 +156,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
         threadId={CHILD_THREAD_ID}
         projection={projection}
         environments={[]}
-        readOnly
+        onParent={vi.fn()}
       />,
       { wrapper },
     )
@@ -187,7 +187,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
         threadId={CHILD_THREAD_ID}
         projection={projection}
         environments={[]}
-        readOnly
+        onParent={vi.fn()}
       />,
       { wrapper },
     )
@@ -208,7 +208,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
         threadId={CHILD_THREAD_ID}
         projection={initialProjection}
         environments={[]}
-        readOnly
+        onParent={vi.fn()}
       />,
       { wrapper },
     )
@@ -259,7 +259,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
         threadId={CHILD_THREAD_ID}
         projection={appliedProjection}
         environments={[]}
-        readOnly
+        onParent={vi.fn()}
       />,
     )
 
@@ -299,7 +299,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
         threadId={CHILD_THREAD_ID}
         projection={projection}
         environments={[]}
-        readOnly
+        onParent={vi.fn()}
       />,
       { wrapper },
     )
@@ -361,7 +361,8 @@ describe('子线程只读环境展示', () => {
   it('只读显示“环境：NAS · 跟随主对话”，中英文同步且无括号补充说明', () => {
     const projection = childProjection('NAS')
     render(
-      <ThreadView threadId={CHILD_THREAD_ID} projection={projection} environments={[]} readOnly />,
+      <ThreadView threadId={CHILD_THREAD_ID} projection={projection} environments={[]}
+        onParent={vi.fn()} />,
       { wrapper },
     )
 
@@ -379,7 +380,7 @@ describe('子线程只读环境展示', () => {
         threadId={CHILD_THREAD_ID}
         projection={childProjection(null)}
         environments={[]}
-        readOnly
+        onParent={vi.fn()}
       />,
       { wrapper },
     )
@@ -392,7 +393,8 @@ describe('子线程只读环境展示', () => {
     snapshot.thread.parentThreadId = null
     const projection = createMockProjection(snapshot)
     render(
-      <ThreadView threadId={CHILD_THREAD_ID} projection={projection} environments={[]} readOnly />,
+      <ThreadView threadId={CHILD_THREAD_ID} projection={projection} environments={[]}
+        onParent={vi.fn()} />,
       { wrapper },
     )
 

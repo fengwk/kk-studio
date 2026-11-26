@@ -16,11 +16,13 @@ for (const width of [900, 360, 320]) {
     await expect(tree.locator('[data-thread-id="worker"] .thread-tree-status')).toHaveAttribute('aria-label', '等待异步结果')
     await expect(tree.locator('[data-thread-id="deep"] .thread-tree-status')).toHaveAttribute('aria-label', '运行中')
 
-    const deep = tree.locator('[data-thread-id="deep"] a')
+    const deep = tree.locator('[data-thread-id="deep"] button')
+    await expect(deep).toHaveAttribute('type', 'button')
+    expect(await deep.getAttribute('href')).toBeNull()
     await deep.click()
     await expect(page.getByLabel('selected')).toHaveText('deep')
     await expect(tree.locator('[data-thread-id="deep"]')).toHaveAttribute('aria-current', 'true')
-    await tree.locator('[data-thread-id="worker"] a').click()
+    await tree.locator('[data-thread-id="worker"] button').click()
     await expect(page.getByLabel('selected')).toHaveText('worker')
 
     const sizes = await tree.evaluate((element) => ({ client: element.clientWidth, scroll: element.scrollWidth }))
