@@ -10,7 +10,7 @@ import { IdeWorkspaceProvider } from '@/features/environment/ide/IdeWorkspacePro
 import { VsCodePaneRenderer } from '@/features/environment/ide/VsCodePaneRenderer'
 import { DraftPaneRenderer, ThreadPaneRenderer } from '@/features/thread/workspace'
 import { WorkspaceShell, type WorkspaceShellProps } from '@/features/workspace/WorkspaceShell'
-import type { PaneRendererProps, PaneRenderers } from '@/features/workspace/pane-target'
+import type { PaneRendererProps, PaneRenderers, PaneTarget } from '@/features/workspace/pane-target'
 import { workspaceKeys } from '@/features/workspace/queries'
 import { createSpace, listSpaces } from '@/features/workspace/workspace-api'
 import { useI18n } from '@/shared/i18n'
@@ -19,8 +19,8 @@ import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { NameDialog } from '@/shared/ui/overlays/NameDialog'
 
-function CanvasPane({ target }: PaneRendererProps<{ kind: 'canvas'; canvasId: string }>) {
-  return <CanvasWorkbench canvasId={target.canvasId} />
+function CanvasPane({ target }: PaneRendererProps<Extract<PaneTarget, { kind: 'canvas' }>>) {
+  return <CanvasWorkbench canvasId={target.canvasId} viewId={target.viewId} />
 }
 const renderers = { canvas: CanvasPane, vscode: VsCodePaneRenderer, thread: ThreadPaneRenderer, draft: DraftPaneRenderer } satisfies PaneRenderers
 const account = (hasUnsentContent: boolean) => <AccountMenu hasUnsentContent={hasUnsentContent} />

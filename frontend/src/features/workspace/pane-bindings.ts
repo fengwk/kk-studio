@@ -11,9 +11,16 @@ export function newDraft(folderId?: string): Extract<PaneTarget, { kind: 'draft'
 
 export function reconcileBindings(state: BindingState, exists: (target: PaneTarget) => boolean): BindingState {
   let bindings = state.bindings
+  const primaryCanvases = new Set<string>()
   for (const id of paneIds(state.layout)) {
     const target = bindings[id]
-    if (!target || !exists(target)) bindings = { ...bindings, [id]: newDraft() }
+    if (!target || !exists(target)) {
+      bindings = { ...bindings, [id]: newDraft() }
+    } else if (target.kind === 'canvas' && target.viewId === undefined) {
+      // Older layouts could have several unscoped views. Keep the first on the original keys.
+      if (primaryCanvases.has(target.canvasId)) bindings = { ...bindings, [id]: { ...target, viewId: id } }
+      primaryCanvases.add(target.canvasId)
+    }
   }
   return bindings === state.bindings ? state : { ...state, bindings }
 }
@@ -40,6 +47,17 @@ export function bindPane(state: BindingState, paneId: string, target: PaneTarget
         focusedPaneId: source,
       }
     }
+  }
+  if (target.kind === 'canvas') {
+    const current = state.bindings[paneId]
+    if (sameTarget(current, target)) return { ...state, focusedPaneId: paneId }
+    const { canvasId } = target
+    const primaryOpen = ids.some(id => {
+      const other = state.bindings[id]
+      return other?.kind === 'canvas' && other.canvasId === canvasId && other.viewId === undefined
+    })
+    if (primaryOpen) target = { ...target, viewId: paneId }
+    else if (target.viewId !== undefined) target = { kind: 'canvas', canvasId }
   }
   const bindings = { ...state.bindings, [paneId]: target }
   if (target.kind === 'thread') {

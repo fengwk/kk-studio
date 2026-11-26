@@ -33,20 +33,16 @@ const STORE_NAME = 'drafts'
 const SESSION_INDEX = 'sessionKey'
 
 interface CanvasDraftRecord {
-  /** 唯一主键：`${userId}:${canvasId}:${editingSessionId}:${nodeId}` */
+  /** 唯一主键：`${sessionKey}:${nodeId}` */
   id: string
   userId: string
   canvasId: string
   editingSessionId: string
   nodeId: string
-  /** 对应 `sessionKey` 复合检索索引：`${userId}:${canvasId}:${editingSessionId}` */
+  /** 对应 `sessionKey` 复合检索索引：`${userId}:${canvasViewKey}:${editingSessionId}` */
   sessionKey: string
   draft: CanvasNodeDraft
   updatedAt: number
-}
-
-function buildRecordKey(userId: string, canvasId: string, editingSessionId: string, nodeId: string): string {
-  return `${userId}:${canvasId}:${editingSessionId}:${nodeId}`
 }
 
 function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions) {
@@ -58,7 +54,7 @@ function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions) {
   return {
     userId,
     editingSessionId,
-    sessionKey: buildSessionKey(userId, canvasId, editingSessionId),
+    sessionKey: buildSessionKey(userId, canvasId, editingSessionId, options?.viewId),
   }
 }
 
@@ -151,7 +147,7 @@ export async function saveCanvasDraft(
 ): Promise<void> {
   const scope = resolveScope(canvasId, options)
   const record: CanvasDraftRecord = {
-    id: buildRecordKey(scope.userId, canvasId, scope.editingSessionId, nodeId),
+    id: `${scope.sessionKey}:${nodeId}`,
     userId: scope.userId,
     canvasId,
     editingSessionId: scope.editingSessionId,
@@ -210,7 +206,7 @@ export async function deleteCanvasDraft(
   options?: CanvasLocalStoreOptions,
 ): Promise<void> {
   const scope = resolveScope(canvasId, options)
-  const id = buildRecordKey(scope.userId, canvasId, scope.editingSessionId, nodeId)
+  const id = `${scope.sessionKey}:${nodeId}`
 
   const factory = resolveIdbFactory(options)
   if (!factory) {
@@ -268,7 +264,7 @@ export async function ackCanvasDrafts(
 
   if (!factory) {
     for (const ack of acks) {
-      const key = buildRecordKey(scope.userId, canvasId, scope.editingSessionId, ack.nodeId)
+      const key = `${scope.sessionKey}:${ack.nodeId}`
       const record = memoryFallbackStore.get(key)
       if (record && record.draft) {
         const field = ack.field === 'group' ? 'groupId' : ack.field
@@ -290,7 +286,7 @@ export async function ackCanvasDrafts(
       const store = tx.objectStore(STORE_NAME)
 
       for (const ack of acks) {
-        const key = buildRecordKey(scope.userId, canvasId, scope.editingSessionId, ack.nodeId)
+        const key = `${scope.sessionKey}:${ack.nodeId}`
         const getReq = store.get(key)
         getReq.onsuccess = () => {
           const record = getReq.result as CanvasDraftRecord | undefined

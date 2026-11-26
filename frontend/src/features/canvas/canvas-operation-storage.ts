@@ -42,12 +42,12 @@ export interface CanvasDraftAck {
 
 /** 冻结的待确认操作：id、命令体、顺序与编辑基线一经入队即不可变。 */
 export interface CanvasPendingOperation {
-  /** 主键：`${userId}:${canvasId}:${editingSessionId}:${idempotencyKey}` */
+  /** 主键：`${sessionKey}:${idempotencyKey}` */
   id: string
   userId: string
   canvasId: string
   editingSessionId: string
-  /** 复合检索索引：`${userId}:${canvasId}:${editingSessionId}` */
+  /** 复合检索索引：`${userId}:${canvasViewKey}:${editingSessionId}` */
   sessionKey: string
   idempotencyKey: string
   /** 冻结的命令批次（含顺序），重放时原样提交 */
@@ -85,7 +85,7 @@ function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions): Reso
   return {
     userId,
     editingSessionId,
-    sessionKey: buildSessionKey(userId, canvasId, editingSessionId),
+    sessionKey: buildSessionKey(userId, canvasId, editingSessionId, options?.viewId),
   }
 }
 
@@ -281,15 +281,16 @@ export function buildPendingOperation(input: {
   canvasId: string
   userId: string
   editingSessionId: string
+  viewId?: string
   idempotencyKey: string
   commands: CanvasCommandDTO[]
   ack?: CanvasDraftAck[]
   sequence: number
   createdAt: number
 }): CanvasPendingOperation {
-  const sessionKey = buildSessionKey(input.userId, input.canvasId, input.editingSessionId)
+  const sessionKey = buildSessionKey(input.userId, input.canvasId, input.editingSessionId, input.viewId)
   return {
-    id: `${input.userId}:${input.canvasId}:${input.editingSessionId}:${input.idempotencyKey}`,
+    id: `${sessionKey}:${input.idempotencyKey}`,
     userId: input.userId,
     canvasId: input.canvasId,
     editingSessionId: input.editingSessionId,

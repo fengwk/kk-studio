@@ -171,6 +171,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   const nodeId = NODE_FN
 
   function setupHook(options?: {
+    viewId?: string
     flushFunctionConfig?: (nodeId: string) => Promise<void>
     resolveFunctionVersion?: (nodeId: string) => CanvasFunctionVersionDTO | null
   }) {
@@ -180,6 +181,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     const resolveFunctionVersion = options?.resolveFunctionVersion ?? (() => FUNCTION_VERSION_A)
     const { result } = renderHook(() => useCanvasFunctionRun({
       canvasId,
+      viewId: options?.viewId,
       queryClient,
       setToast,
       flushFunctionConfig,
@@ -208,6 +210,34 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
     expect(persistedBeforeSend).not.toBeNull()
     expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+  })
+
+  it('starts an independent Function Run attempt without replaying or clearing the primary view record', async () => {
+    cleanupTestStorage()
+    const viewId = crypto.randomUUID()
+    const oldRequestId = crypto.randomUUID()
+    // Seed the primary view's legacy pending attempt for this same node.
+    savePendingFunctionRun({
+      canvasId,
+      nodeId,
+      request: { requestId: oldRequestId, expectedVersion: FUNCTION_VERSION_A },
+      basisRequestId: null,
+      createdAt: 1,
+    })
+    let persistedBeforeSend: ReturnType<typeof loadPendingFunctionRun> = null
+    const start = vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockClear().mockImplementationOnce(async (_cid, _nid, req) => {
+      persistedBeforeSend = loadPendingFunctionRun(canvasId, nodeId, viewId)
+      return run(req.requestId, 'RUNNING', 'QUEUED')
+    })
+    const { result } = setupHook({ viewId })
+    await act(async () => { await result.current.startFunctionRun(nodeId) })
+    expect(start).toHaveBeenCalledTimes(1)
+    const [sentCanvas, sentNode, request] = start.mock.calls[0]
+    expect([sentCanvas, sentNode]).toEqual([canvasId, nodeId])
+    expect(request.requestId).not.toBe(oldRequestId)
+    expect(persistedBeforeSend).toMatchObject({ request })
+    expect(loadPendingFunctionRun(canvasId, nodeId, viewId)).toBeNull()
+    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(oldRequestId)
   })
 
   it('错误分类：403 Forbidden 属于不可重试终态，清除 pending 记录', async () => {
