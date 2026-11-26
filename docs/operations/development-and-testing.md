@@ -638,9 +638,9 @@ model、variant、Tool catalog 和 Environment `READY` 全部匹配；未知 cos
 | `--report-root DIR` | 默认 `reports/performance`；拒绝 root、仓库根、非目录和 symlink |
 | `--skip-build` | 复用 `kk-studio-app:performance-baseline` |
 
-runner 使用 Node built-in `fetch`，单请求 timeout `5000ms`，固定使用
-[deploy/test](../../deploy/test/README.md) 的离线 mock 与其默认宿主端口，不读真实凭证、不启动
-Daemon。
+runner 使用 Node 内置 `fetch`，单请求超时 `5000ms`。隔离栈就绪后，用预置 Studio 测试账号登录，
+后续 API 请求只向同源发送会话 Cookie，不跟随重定向。运行使用
+[deploy/test](../../deploy/test/README.md) 的离线 mock 和默认宿主端口，不读取真实凭证、不启动 Daemon。
 
 运行开始与退出都无确认提示地执行同名测试栈的 `down --volumes --remove-orphans`，
 删除 PostgreSQL/MinIO 数据；`--skip-build` 只跳过镜像构建，不取消这项副作用。
@@ -649,15 +649,18 @@ Daemon。
 | 场景 | 并发 | 请求 | error | p95 | throughput RPS | 最少样本 |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
-| `catalog` | 16 | `GET /api/platform/models`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
-| `canvas` | 4 | `POST /api/canvas/canvases`，验证创建结果，测量创建事务 | 0 | `<=1500ms` | `>=5` | 20 |
+| `catalog` | 16 | 带会话 Cookie 请求 `GET /api/platform/models`，验证目录列表（隔离栈未预置模型时为空） | 0 | `<=500ms` | `>=25` | 20 |
+| `canvas` | 4 | `POST /api/chat-spaces/{spaceId}/canvases`，验证 HTTP 200 和 `{kind, id, treeVersion}` | 0 | `<=1500ms` | `>=5` | 20 |
+
+计时前为每个 Canvas worker 创建独立空间并读取根目录及初始树版本。预热和测量使用同一批空间；
+每个 worker 串行创建画布，每次写入使用新的幂等键，下一次请求的 `expectedTreeVersion` 取自上次回执。
 
 阈值与响应校验由 [`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 定义。
 这是本机免费回归基线，不是容量规划；以本次 `reports/performance/latest/report.md` 的样本、
 错误、延迟与吞吐判断是否通过，字段契约失败应先按正确性问题处理。
 
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
-fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
+fail closed。空间以及 Canvas 预热和测量期间创建的行会保留，超时或中断的请求也可能已创建行；
 runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
 TERM 时脚本执行 `down --volumes --remove-orphans`。只创建不删除的事务不能与包含删除的
 create+delete 工作负载结果比较。

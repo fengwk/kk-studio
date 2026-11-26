@@ -121,8 +121,8 @@ test('frozen threshold values fail closed for errors, latency, throughput, and s
   assert.match(evaluateScenario('canvas', tooFew).failures.join(' '), /samples/)
 })
 
-test('response validators enforce health, catalog page, and canvas DTO contracts', () => {
-  // The resource or page is the response body, not a nested data member.
+test('response validators enforce health, catalog list, and Canvas receipt contracts', () => {
+  // Lists and receipts are returned directly, not under a nested data member.
   assert.doesNotThrow(() => validateHealthResponse({ status: 200, json: { status: 'UP' } }))
   assert.throws(
     () => validateHealthResponse({ status: 200, json: { status: 'DOWN' } }),
@@ -131,18 +131,17 @@ test('response validators enforce health, catalog page, and canvas DTO contracts
 
   const catalogResponse = {
     status: 200,
-    json: [
-        {
-          providerName: 'offline',
-          name: 'acceptance-stub',
-          modelId: 'upstream-stub',
-          config: {
-            defaultVariant: 'default',
-            variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
-            limit: { context: 4096 },
-          },
-        },
-  ]
+    json: [{
+      type: 'MODEL',
+      providerName: 'offline',
+      name: 'acceptance-stub',
+      modelId: 'upstream-stub',
+      config: {
+        defaultVariant: 'default',
+        variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
+        limit: { context: 4096 },
+      },
+    }],
   }
   assert.equal(validateCatalogResponse(catalogResponse).length, 1)
   // modelId 是上游模型名称，必须存在，不能被误当作数据库身份字段拒绝。
@@ -155,52 +154,45 @@ test('response validators enforce health, catalog page, and canvas DTO contracts
     () => validateCatalogResponse({ status: 200, json: {} }),
     /catalog data must be an array/,
   )
-  assert.throws(
-    () => validateCatalogResponse({ status: 200, json: [] }),
-    /catalog data must not be empty/,
-  )
+  // The canvas-test profile seeds no models; an empty list is a valid Catalog response.
+  assert.deepEqual(validateCatalogResponse({ status: 200, json: [] }), [])
+  assert.equal(validateCatalogResponse({
+    status: 200,
+    json: [{
+      type: 'GROUP',
+      name: 'fallback',
+      group: {
+        members: [{ modelName: 'acceptance-stub', variant: 'default' }],
+        fallbackStatusCodes: [],
+        cooldownSeconds: 0,
+      },
+      config: { limit: { context: 4096 } },
+    }],
+  }).length, 1)
   assert.throws(
     () =>
       validateCatalogResponse({
         status: 200,
-        json: [{ providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }],
+        json: [{ type: 'MODEL', providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }],
       }),
     /defaultVariant/,
   )
 
   const id = '00000000-0000-4000-8000-000000000001'
-  assert.doesNotThrow(() =>
-    validateCanvasCreateResponse({
-      status: 201,
-      json: { id, title: 'baseline', revision: '0' },
-    }),
-  )
-  assert.throws(
-    () =>
-      validateCanvasCreateResponse({
-        status: 201,
-        json: { id, title: 'baseline', revision: '0', threadId: id },
-      }),
-    /threadId/,
-  )
-  // 新旧字段并存也属于契约漂移，不能因 revision 合法而放行。
-  assert.throws(
-    () =>
-      validateCanvasCreateResponse({
-        status: 201,
-        json: { id, title: 'baseline', revision: '0', version: '0' },
-      }),
-    /must not expose version/,
-  )
-  // 缺失、旧 version-only 或非规范 revision 都不能充当同步坐标系。
-  for (const fields of [{}, { version: '0' }, { revision: '01' }, { revision: 0 }]) {
+  const receipt = { kind: 'CANVAS', id, treeVersion: '1' }
+  assert.deepEqual(validateCanvasCreateResponse({ status: 200, json: receipt }), receipt)
+  assert.throws(() => validateCanvasCreateResponse({ status: 201, json: receipt }), /expected HTTP 200/)
+  for (const [patch, expected] of [
+    [{ kind: 'SESSION' }, /kind=CANVAS/],
+    [{ revision: '0' }, /only/],
+    [{ id: 'bad' }, /canonical UUID/],
+    [{ treeVersion: undefined }, /treeVersion/],
+    [{ treeVersion: '01' }, /treeVersion/],
+    [{ treeVersion: 1 }, /treeVersion/],
+  ]) {
     assert.throws(
-      () =>
-        validateCanvasCreateResponse({
-          status: 201,
-          json: { id, title: 'baseline', ...fields },
-        }),
-      /revision/,
+      () => validateCanvasCreateResponse({ status: 200, json: { ...receipt, ...patch } }),
+      expected,
     )
   }
 })
@@ -323,46 +315,94 @@ test(
   { timeout: 30_000 },
   async () => {
     const reportRoot = mkdtempSync(path.join(tmpdir(), 'performance-fake-report-'))
-    const canvases = new Map()
-    const unexpectedRequests = []
+    const session = `studio_session=${randomUUID()}`
+    const spaces = new Map()
+    const keys = new Set()
+    const violations = []
+    let loginCount = 0
+    let firstWrites = 0
+    // Hold the first write in each space until all four workers are active.
+    let releaseFirstWrites
+    const allWorkersActive = new Promise((resolve) => { releaseFirstWrites = resolve })
     const server = createServer(async (request, response) => {
-      const requestUrl = new URL(request.url, 'http://127.0.0.1')
-      if (request.method === 'GET' && requestUrl.pathname === '/actuator/health') {
-        sendJson(response, 200, { status: 'UP' })
-        return
+      const { method, url, headers } = request
+      try {
+        if (method === 'GET' && url === '/actuator/health') {
+          assert.equal(headers.cookie, undefined)
+          return sendJson(response, 200, { status: 'UP' })
+        }
+        if (method === 'POST') {
+          assert.equal(headers.origin, baseUrl)
+          assert.equal(headers['content-type'], 'application/json')
+        }
+        if (method === 'POST' && url === '/api/auth/login') {
+          assert.deepEqual(JSON.parse(await readRequestBody(request)), { username: 'kkstudio', password: 'kkstudio' })
+          assert.equal(++loginCount, 1)
+          response.setHeader('Set-Cookie', `${session}; Path=/; HttpOnly; SameSite=Strict`)
+          return sendJson(response, 200, { id: randomUUID(), username: 'kkstudio', role: 'ADMIN', profile: null })
+        }
+        assert.equal(loginCount, 1)
+        assert.equal(headers.cookie, session)
+        if (method === 'GET' && url === '/api/platform/models') {
+          return sendJson(response, 200, [])
+        }
+        if (method === 'POST') {
+          const key = headers['idempotency-key']
+          assert.match(key, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
+          assert.equal(keys.has(key), false, 'each logical write gets a fresh key')
+          keys.add(key)
+        }
+        if (method === 'POST' && url === '/api/chat-spaces') {
+          const { title, rootFolderName, ...extra } = JSON.parse(await readRequestBody(request))
+          assert.deepEqual(extra, {})
+          assert.match(title, /^performance-/)
+          assert.ok(rootFolderName)
+          const id = randomUUID()
+          spaces.set(id, {
+            folder: { id: randomUUID(), name: rootFolderName, children: [], resources: [] },
+            version: 0,
+            inflight: false,
+            treeReads: 0,
+          })
+          return sendJson(response, 200, {
+            id, title, version: '0', archivedAt: null,
+            defaultAgentName: null, defaultEnvironmentId: null, defaultYoloEnabled: false,
+          })
+        }
+        const [, spaceId, resource] = url.match(/^\/api\/chat-spaces\/([^/]+)\/(tree|canvases)$/) ?? []
+        const space = spaces.get(spaceId)
+        assert.ok(space, `unexpected ${method} ${url}`)
+        if (method === 'GET' && resource === 'tree') {
+          assert.equal(++space.treeReads, 1)
+          return sendJson(response, 200, { treeVersion: String(space.version), folders: [space.folder] })
+        }
+        assert.equal(method, 'POST')
+        assert.equal(resource, 'canvases')
+        assert.equal(space.treeReads, 1)
+        assert.equal(space.inflight, false, 'writes to each space must be serial')
+        space.inflight = true
+        const { folderId, title, expectedTreeVersion, ...extra } = JSON.parse(await readRequestBody(request))
+        assert.deepEqual(extra, {})
+        assert.equal(folderId, space.folder.id)
+        assert.match(title, /^performance-/)
+        assert.equal(expectedTreeVersion, String(space.version))
+        if (space.version === 0) {
+          if (++firstWrites === 4) releaseFirstWrites()
+          await allWorkersActive
+        }
+        space.inflight = false
+        return sendJson(response, 200, { kind: 'CANVAS', id: randomUUID(), treeVersion: String(++space.version) })
+      } catch (error) {
+        violations.push(error)
+        sendJson(response, 400, { title: 'Unexpected benchmark request' })
       }
-      if (request.method === 'GET' && requestUrl.pathname === '/api/platform/models') {
-        sendJson(response, 200, [
-            {
-              providerName: 'offline',
-              name: 'acceptance-stub',
-              modelId: 'upstream-stub',
-              config: {
-                defaultVariant: 'default',
-                variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
-                limit: { context: 4096 },
-              },
-            },
-        ])
-        return
-      }
-      if (request.method === 'POST' && requestUrl.pathname === '/api/canvas/canvases') {
-        const body = JSON.parse(await readRequestBody(request))
-        const id = randomUUID()
-        const canvas = { id, title: body.title, revision: '0' }
-        canvases.set(id, canvas)
-        sendJson(response, 201, canvas)
-        return
-      }
-      unexpectedRequests.push(`${request.method} ${requestUrl.pathname}`)
-      sendJson(response, 404, { type: 'about:blank', title: 'Not Found', status: 404, code: 'not_found' })
     })
 
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const address = server.address()
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
     try {
       const result = await runBenchmark({
-        baseUrl: `http://127.0.0.1:${address.port}`,
+        baseUrl,
         durationSeconds: 1,
         reportRoot,
         startupTimeoutMs: 2_000,
@@ -380,15 +420,17 @@ test(
           image: { reference: 'fake:image', id: 'fake-image' },
         },
       })
+      assert.deepEqual(violations, [])
       assert.equal(result.summary.status, 'pass')
-      // Both warmup and measurement create rows; no list or delete request is needed.
       const canvasScenario = result.summary.scenarios.find((scenario) => scenario.id === 'canvas')
       assert.equal(canvasScenario.name, 'Canvas create transaction')
-      assert.equal(canvasScenario.path, '/api/canvas/canvases')
-      assert.equal(canvases.size, canvasScenario.warmup.success + canvasScenario.metrics.success)
-      assert.ok(canvases.size > 0)
-      assert.ok([...canvases.values()].every((canvas) => canvas.title.startsWith('performance-')))
-      assert.deepEqual(unexpectedRequests, [])
+      assert.equal(canvasScenario.path, '/api/chat-spaces/{spaceId}/canvases')
+      assert.equal(spaces.size, 4)
+      assert.equal(firstWrites, 4)
+      assert.equal(new Set([...spaces.values()].map(({ folder }) => folder.id)).size, 4)
+      const creates = [...spaces.values()].reduce((sum, space) => sum + space.version, 0)
+      assert.equal(canvasScenario.warmup.error, 0)
+      assert.equal(creates, canvasScenario.warmup.success + canvasScenario.metrics.success)
       assert.equal('cleanup' in result.summary, false)
       assert.equal(result.summary.scenarios.length, 3)
       for (const scenario of result.summary.scenarios) {
@@ -401,8 +443,11 @@ test(
           scenario.id,
         )
       }
-      assert.ok(existsSync(path.join(reportRoot, 'latest', 'report.md')))
+      for (const file of ['report.md', 'summary.json']) {
+        assert.equal(readFileSync(path.join(result.latestDir, file), 'utf8').includes(session), false)
+      }
     } finally {
+      releaseFirstWrites()
       await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
       rmSync(reportRoot, { recursive: true, force: true })
     }

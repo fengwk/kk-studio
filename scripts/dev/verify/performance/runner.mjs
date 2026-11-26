@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { loginE2eStudio } from '../../../../deploy/reliability/e2e-studio-login.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
 
 const THIS_FILE = fileURLToPath(import.meta.url)
@@ -57,7 +58,7 @@ export const SCENARIOS = Object.freeze([
     id: 'canvas',
     name: 'Canvas create transaction',
     concurrency: 4,
-    path: '/api/canvas/canvases',
+    path: '/api/chat-spaces/{spaceId}/canvases',
   }),
 ])
 
@@ -285,27 +286,30 @@ export function validateCatalogResponse(response) {
   if (!Array.isArray(data)) {
     throw new BenchmarkError('catalog data must be an array')
   }
-  if (data.length === 0) {
-    throw new BenchmarkError('catalog data must not be empty')
-  }
   if (data.length > 20) {
     throw new BenchmarkError(`catalog data exceeds the 20-model benchmark bound: ${data.length}`)
   }
 
   for (const [index, model] of data.entries()) {
     requireObject(model, `catalog result ${index}`)
-    requireText(model.providerName, `catalog result ${index}.providerName`)
     requireText(model.name, `catalog result ${index}.name`)
-    requireText(model.modelId, `catalog result ${index}.modelId`)
     requireObject(model.config, `catalog result ${index}.config`)
-    requireText(model.config.defaultVariant, `catalog result ${index}.config.defaultVariant`)
-    if (!Array.isArray(model.config.variants) || model.config.variants.length === 0) {
-      throw new BenchmarkError(`catalog result ${index}.config.variants must be a non-empty array`)
-    }
-    requireObject(model.config.limit, `catalog result ${index}.config.limit`)
-    const context = Number(model.config.limit.context)
-    if (!Number.isFinite(context) || context <= 0) {
-      throw new BenchmarkError(`catalog result ${index}.config.limit.context must be positive`)
+    if (model.type === 'MODEL') {
+      requireText(model.providerName, `catalog result ${index}.providerName`)
+      requireText(model.modelId, `catalog result ${index}.modelId`)
+      requireText(model.config.defaultVariant, `catalog result ${index}.config.defaultVariant`)
+      if (!Array.isArray(model.config.variants) || model.config.variants.length === 0) {
+        throw new BenchmarkError(`catalog result ${index}.config.variants must be a non-empty array`)
+      }
+      requireObject(model.config.limit, `catalog result ${index}.config.limit`)
+      const context = model.config.limit.context
+      if (!Number.isInteger(context) || context <= 0) {
+        throw new BenchmarkError(`catalog result ${index}.config.limit.context must be a positive integer`)
+      }
+    } else if (model.type === 'GROUP') {
+      requireObject(model.group, `catalog result ${index}.group`)
+    } else {
+      throw new BenchmarkError(`catalog result ${index}.type must be MODEL or GROUP`)
     }
     for (const forbidden of [
       'id',
@@ -323,26 +327,13 @@ export function validateCatalogResponse(response) {
 }
 
 export function validateCanvasCreateResponse(response) {
-  if (!response || response.status < 200 || response.status >= 300) {
-    throw new BenchmarkError(`canvas create expected a 2xx response, got ${response?.status}`)
-  }
+  requireStatus(response, 200, 'canvas create')
   const canvas = response.json
   requireObject(canvas, 'canvas create data')
-  if (typeof canvas.id !== 'string' || !UUID_PATTERN.test(canvas.id)) {
-    throw new BenchmarkError(`canvas create id must be a canonical UUID: ${JSON.stringify(canvas.id)}`)
-  }
-  // CanvasDocumentDTO 使用十进制字符串 revision 作为同步游标。
-  if (typeof canvas.revision !== 'string' || !DECIMAL_PATTERN.test(canvas.revision)) {
-    throw new BenchmarkError(`canvas create revision must be a canonical decimal string`)
-  }
-  if (Object.prototype.hasOwnProperty.call(canvas, 'threadId')) {
-    throw new BenchmarkError('canvas create response must not expose threadId')
-  }
-  if (Object.prototype.hasOwnProperty.call(canvas, 'graphVersion')) {
-    throw new BenchmarkError('canvas create response must not expose graphVersion')
-  }
-  if (Object.prototype.hasOwnProperty.call(canvas, 'version')) {
-    throw new BenchmarkError('canvas create response must not expose version')
+  requireCanonical(canvas.id, UUID_PATTERN, 'canvas create id', 'UUID')
+  requireCanonical(canvas.treeVersion, DECIMAL_PATTERN, 'canvas create treeVersion', 'decimal string')
+  if (canvas.kind !== 'CANVAS' || Object.keys(canvas).length !== 3) {
+    throw new BenchmarkError('canvas create must return only kind=CANVAS, id and treeVersion')
   }
   return canvas
 }
@@ -376,10 +367,6 @@ export async function runBenchmark({
   const startedAt = now().toISOString()
   const stopState = { requested: false, signal: null }
   const manager = createRequestManager(baseUrl, stopState)
-  const state = {
-    canvasTitlePrefix: `performance-${runId}-`,
-    canvasSequence: 0,
-  }
   const scenarioResults = []
   let runError = null
 
@@ -394,6 +381,7 @@ export async function runBenchmark({
 
   try {
     await waitForHealthy(manager, stopState, startupTimeoutMs)
+    await manager.login()
     for (const scenario of SCENARIOS) {
       if (stopState.requested) {
         runError = new InterruptedError(stopState.signal)
@@ -406,7 +394,7 @@ export async function runBenchmark({
           scenario,
           manager,
           stopState,
-          state,
+          runId,
           durationSeconds: normalizedDuration,
         })
       } catch (error) {
@@ -606,7 +594,7 @@ export function renderReport(summary) {
     `- Compose: \`${summary.isolation.composeFile}\`, profile \`${summary.isolation.profile}\`.`,
     `- Services: ${summary.isolation.services.map((service) => `\`${service}\``).join(', ')}.`,
     `- Real Provider: \`${summary.isolation.realProvider}\`; daemon: \`${summary.isolation.daemon}\`.`,
-    '- Canvas create rows (including warmup and possibly interrupted requests) persist until isolated test database/volume cleanup; the runner does not delete them.',
+    '- Worker spaces and Canvas create rows (including warmup and possibly interrupted requests) persist until isolated test database/volume cleanup; the runner does not delete them.',
     '- Canvas create-only results are not comparable to the former create+delete workload.',
     '',
     '## Failure details',
@@ -624,10 +612,15 @@ export function renderReport(summary) {
 
 function createRequestManager(baseUrl, stopState) {
   const activeControllers = new Set()
-  const normalizedBaseUrl = baseUrl.replace(/\/$/, '')
+  const origin = new URL(baseUrl).origin
+  let cookie
 
   return {
-    async request(method, requestPath, body) {
+    async login() {
+      if (stopState.requested) throw new InterruptedError(stopState.signal)
+      cookie = await loginE2eStudio(origin, REQUEST_TIMEOUT_MS)
+    },
+    async request(method, requestPath, body, idempotencyKey) {
       if (stopState.requested) {
         throw new InterruptedError(stopState.signal)
       }
@@ -643,9 +636,13 @@ function createRequestManager(baseUrl, stopState) {
         const headers = {
           Accept: 'application/json',
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(cookie && requestPath.startsWith('/api/') ? { Cookie: cookie } : {}),
+          ...(method === 'GET' ? {} : { Origin: origin }),
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
         }
-        const response = await fetch(`${normalizedBaseUrl}${requestPath}`, {
+        const response = await fetch(`${origin}${requestPath}`, {
           method,
+          redirect: 'error',
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal,
@@ -708,8 +705,8 @@ async function waitForHealthy(manager, stopState, timeoutMs) {
   )
 }
 
-async function runScenario({ scenario, manager, stopState, state, durationSeconds }) {
-  const operation = operationFor(scenario.id, manager, state)
+async function runScenario({ scenario, manager, stopState, runId, durationSeconds }) {
+  const operation = await operationFor(scenario, manager, runId)
   const warmup = await runPhase({
     operation,
     concurrency: scenario.concurrency,
@@ -804,26 +801,41 @@ export async function runPhase({ operation, concurrency, durationMs, stopState, 
   }
 }
 
-function operationFor(scenarioId, manager, state) {
-  if (scenarioId === 'health') {
-    return async () => {
-      validateHealthResponse(await manager.request('GET', '/actuator/health'))
-    }
+async function operationFor(scenario, manager, runId) {
+  if (scenario.id === 'health') {
+    return async () => validateHealthResponse(await manager.request('GET', scenario.path))
   }
-  if (scenarioId === 'catalog') {
-    return async () => {
-      validateCatalogResponse(
-        await manager.request('GET', '/api/platform/models'),
-      )
-    }
+  if (scenario.id === 'catalog') {
+    return async () => validateCatalogResponse(await manager.request('GET', scenario.path))
   }
-  if (scenarioId === 'canvas') {
+  if (scenario.id === 'canvas') {
+    // Provision outside the timed phases and keep each worker's cursor across both phases.
+    const workers = []
+    for (let index = 0; index < scenario.concurrency; index += 1) {
+      const title = `performance-${runId}-${index}`
+      const space = await manager.request('POST', '/api/chat-spaces', { title, rootFolderName: 'Canvas' }, randomUUID())
+      requireStatus(space, 200, 'create benchmark space')
+      const spaceId = space.json?.id
+      requireCanonical(spaceId, UUID_PATTERN, 'benchmark space id', 'UUID')
+      const tree = await manager.request('GET', `/api/chat-spaces/${spaceId}/tree`)
+      requireStatus(tree, 200, 'read benchmark tree')
+      const folderId = tree.json?.folders?.[0]?.id
+      const treeVersion = tree.json?.treeVersion
+      requireCanonical(folderId, UUID_PATTERN, 'benchmark root folder id', 'UUID')
+      requireCanonical(treeVersion, DECIMAL_PATTERN, 'benchmark treeVersion', 'decimal string')
+      workers.push({ title, folderId, treeVersion, sequence: 0, path: scenario.path.replace('{spaceId}', spaceId) })
+    }
     return async (workerIndex) => {
-      const title = `${state.canvasTitlePrefix}${workerIndex}-${state.canvasSequence++}`
-      validateCanvasCreateResponse(await manager.request('POST', '/api/canvas/canvases', { title }))
+      const worker = workers[workerIndex]
+      const receipt = validateCanvasCreateResponse(await manager.request('POST', worker.path, {
+        folderId: worker.folderId,
+        title: `${worker.title}-${worker.sequence++}`,
+        expectedTreeVersion: worker.treeVersion,
+      }, randomUUID()))
+      worker.treeVersion = receipt.treeVersion
     }
   }
-  throw new Error(`unknown scenario operation: ${scenarioId}`)
+  throw new Error(`unknown scenario operation: ${scenario.id}`)
 }
 
 function failedScenarioResult(scenario, durationSeconds, error) {
@@ -958,6 +970,12 @@ function requireStatus(response, expected, label) {
 function requireObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new BenchmarkError(`${label} must be an object`)
+  }
+}
+
+function requireCanonical(value, pattern, label, format) {
+  if (typeof value !== 'string' || !pattern.test(value)) {
+    throw new BenchmarkError(`${label} must be a canonical ${format}`)
   }
 }
 
