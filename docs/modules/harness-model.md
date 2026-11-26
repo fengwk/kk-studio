@@ -183,8 +183,6 @@ baseUrl 必须是不含 user-info、query、fragment 的 http(s) 地址。非 2x
 
 同一类型的规则范围必须互斥。token 范围选择费率，time 与 service tier 分别选择倍率；统一 `factor` 作用于全部费用项，逐项倍率可覆盖它。time 与 service-tier 命中时倍率相乘。每个 `changes` 项用 ISO `from` 日期（UTC、含当天）起替换完整的 `base` 与 `rules`，不是对旧费率做增量修补。
 
-已移除 request-body 条件定价。旧历史中的 `requestBodyPricing` 哈希与布尔快照仅由历史 codec 解码和保留，不参与当前价格匹配、费用计算或从当前配置重建事实。缺少该历史字段不改变当前定价结果。
-
 缺少 `pricing` 时不产生费用，不能补成零；完整零费率或合法的零用量可以产生真实 `$0`。定价规则所需的请求时刻、service tier 等事实缺失，或独立 reasoning 费率需要而 usage 未报告可信推理子集时，费用为未知而不是零。
 
 ### 分类与未知事实

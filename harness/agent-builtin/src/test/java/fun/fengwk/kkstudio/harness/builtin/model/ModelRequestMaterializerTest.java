@@ -460,7 +460,6 @@ class ModelRequestMaterializerTest {
             ModelSelection.model(model, variant),
             null,
             null,
-            null,
             effort),
         null);
   }

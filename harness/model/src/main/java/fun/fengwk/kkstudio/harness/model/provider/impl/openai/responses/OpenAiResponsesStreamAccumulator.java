@@ -375,7 +375,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
             serviceTier,
             rawUsageJson,
             Collections.unmodifiableList(resolved.diagnostics()),
-            null,
             null);
 
     finishedCompletion = new ProviderCompletion(response);

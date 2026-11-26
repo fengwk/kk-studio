@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,7 +15,6 @@ import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -299,24 +297,6 @@ class PlatformModelGatewayTest {
               run(gateway(new Resolution(scripted(nullPayload)), new ConcurrencyAdmission(1))));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
     }
-  }
-
-  /**
-   * A provider-supplied legacy request-body snapshot is discarded when pricing has no such rule.
-   */
-  @Test
-  void discardsUnrequestedRequestBodySnapshot() {
-    ProviderResponse forged =
-        response()
-            .withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of("a".repeat(64), true)));
-    PlatformModelGateway gateway =
-        new PlatformModelGateway(
-            new Resolution(
-                scripted((request, handler) -> handler.onComplete(new ProviderCompletion(forged)))),
-            () -> BUSY_DELAY,
-            new ConcurrencyAdmission(1));
-    ModelGateway.Succeeded succeeded = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
-    assertNull(succeeded.completion().response().requestBodyPricing());
   }
 
   private static ModelGateway.Outcome run(PlatformModelGateway gateway) {

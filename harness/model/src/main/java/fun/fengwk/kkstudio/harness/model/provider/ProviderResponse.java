@@ -6,7 +6,6 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,9 +26,6 @@ import java.util.Set;
  *
  * <p>{@code decodeDurationMillis} 是 Harness 观测的流式生成计时（首个非空输出 delta 到成功回调观察时间的毫秒数），不是 Provider
  * 报告的事实：Provider 构造响应时一律为 null，仅 runtime 在成功提交前冻结。null 表示无可信流计时。
- *
- * <p>{@code requestBodyPricing} 是 Harness 在成功 attempt 上观察最终编码请求体后冻结的条件指纹快照，不是 Provider 报告的事实；
- * Provider 构造响应时一律为 null，adapter 未提供请求体观察或没有任何 request-body 条件时保持 null。它绝不包含请求正文。
  */
 public record ProviderResponse(
     List<ProviderContentBlock> blocks,
@@ -39,8 +35,7 @@ public record ProviderResponse(
     String serviceTier,
     String rawUsageJson,
     List<ProviderToolCallDiagnostic> toolCallDiagnostics,
-    Long decodeDurationMillis,
-    RequestBodyPricingSnapshot requestBodyPricing) {
+    Long decodeDurationMillis) {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT;
 
@@ -71,8 +66,7 @@ public record ProviderResponse(
       String serviceTier,
       String rawUsageJson,
       List<ProviderToolCallDiagnostic> toolCallDiagnostics,
-      Long decodeDurationMillis,
-      RequestBodyPricingSnapshot requestBodyPricing) {
+      Long decodeDurationMillis) {
     this(
         semanticBlocks(text, thinking, toolCalls),
         stopReason,
@@ -81,33 +75,7 @@ public record ProviderResponse(
         serviceTier,
         rawUsageJson,
         toolCallDiagnostics,
-        decodeDurationMillis,
-        requestBodyPricing);
-  }
-
-  public ProviderResponse(
-      String text,
-      String thinking,
-      List<ProviderToolCall> toolCalls,
-      GenerationStopReason stopReason,
-      ModelUsage usage,
-      String requestId,
-      String serviceTier,
-      String rawUsageJson,
-      List<ProviderToolCallDiagnostic> toolCallDiagnostics,
-      Long decodeDurationMillis) {
-    this(
-        text,
-        thinking,
-        toolCalls,
-        stopReason,
-        usage,
-        requestId,
-        serviceTier,
-        rawUsageJson,
-        toolCallDiagnostics,
-        decodeDurationMillis,
-        null);
+        decodeDurationMillis);
   }
 
   public ProviderResponse(
@@ -130,7 +98,6 @@ public record ProviderResponse(
         serviceTier,
         rawUsageJson,
         toolCallDiagnostics,
-        null,
         null);
   }
 
@@ -153,7 +120,6 @@ public record ProviderResponse(
         serviceTier,
         rawUsageJson,
         List.of(),
-        null,
         null);
   }
 
@@ -182,7 +148,7 @@ public record ProviderResponse(
       callBlocks.add(new ProviderToolCallBlock(call, nativeDataByCallId.get(call.id())));
     }
     updated.addAll(insertAt, callBlocks);
-    return copyWithBlocks(updated, decodeDurationMillis, requestBodyPricing);
+    return copyWithBlocks(updated, decodeDurationMillis);
   }
 
   /** 返回以给定 Harness 观测计时替换后的副本；其余事实原样保留（{@code null} 表示无可信流计时）。 */
@@ -190,19 +156,10 @@ public record ProviderResponse(
     if (Objects.equals(decodeDurationMillis, value)) {
       return this;
     }
-    return copyWithBlocks(blocks, value, requestBodyPricing);
+    return copyWithBlocks(blocks, value);
   }
 
-  /** 返回以给定 request-body 条件快照替换后的副本；其余事实原样保留（{@code null} 表示没有可信观察）。 */
-  public ProviderResponse withRequestBodyPricing(RequestBodyPricingSnapshot value) {
-    if (Objects.equals(requestBodyPricing, value)) {
-      return this;
-    }
-    return copyWithBlocks(blocks, decodeDurationMillis, value);
-  }
-
-  private ProviderResponse copyWithBlocks(
-      List<ProviderContentBlock> value, Long durationMillis, RequestBodyPricingSnapshot pricing) {
+  private ProviderResponse copyWithBlocks(List<ProviderContentBlock> value, Long durationMillis) {
     return new ProviderResponse(
         value,
         stopReason,
@@ -211,8 +168,7 @@ public record ProviderResponse(
         serviceTier,
         rawUsageJson,
         toolCallDiagnostics,
-        durationMillis,
-        pricing);
+        durationMillis);
   }
 
   /** 将有序内容块中的通用语义投影为兼容读取视图。 */

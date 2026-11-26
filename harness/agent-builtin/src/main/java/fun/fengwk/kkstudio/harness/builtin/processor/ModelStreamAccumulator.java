@@ -180,8 +180,7 @@ final class ModelStreamAccumulator {
         response.serviceTier(),
         response.rawUsageJson(),
         response.toolCallDiagnostics(),
-        response.decodeDurationMillis(),
-        response.requestBodyPricing());
+        response.decodeDurationMillis());
   }
 
   private String textGap(String complete) {

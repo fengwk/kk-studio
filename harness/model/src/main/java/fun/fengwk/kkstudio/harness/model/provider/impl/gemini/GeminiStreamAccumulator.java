@@ -201,7 +201,6 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
             usageSnapshot.serviceTier(),
             usageSnapshot.rawUsageJson(),
             List.of(),
-            null,
             null);
 
     return new ProviderCompletion(response);

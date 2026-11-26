@@ -321,7 +321,6 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
             serviceTier,
             usage.rawUsageJson(),
             Collections.unmodifiableList(resolved.diagnostics()),
-            null,
             null);
     return new ProviderCompletion(response);
   }

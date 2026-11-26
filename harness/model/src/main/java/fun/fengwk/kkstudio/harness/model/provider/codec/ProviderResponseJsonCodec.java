@@ -18,7 +18,6 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
@@ -66,7 +65,6 @@ public final class ProviderResponseJsonCodec {
           "rawUsageJson",
           "toolCallDiagnostics",
           "decodeDurationMillis");
-  private static final Set<String> RESPONSE_OPTIONAL_FIELDS = orderedSet("requestBodyPricing");
   private static final Set<String> TOOL_CALL_FIELDS =
       orderedSet("id", "name", "argumentsJson", "historyAction");
   private static final Set<String> DIAGNOSTIC_FIELDS =
@@ -121,12 +119,6 @@ public final class ProviderResponseJsonCodec {
     } else {
       node.put("decodeDurationMillis", response.decodeDurationMillis());
     }
-    if (response.requestBodyPricing() != null) {
-      ObjectNode pricing = node.putObject("requestBodyPricing");
-      for (Map.Entry<String, Boolean> entry : response.requestBodyPricing().matches().entrySet()) {
-        pricing.put(entry.getKey(), entry.getValue());
-      }
-    }
     return node;
   }
 
@@ -142,7 +134,7 @@ public final class ProviderResponseJsonCodec {
   public ProviderResponse decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
     ObjectNode node = object(value, "response");
-    requireFields(node, RESPONSE_FIELDS, RESPONSE_OPTIONAL_FIELDS, "response");
+    requireFields(node, RESPONSE_FIELDS, "response");
     ArrayNode encodedBlocks = array(node.get("blocks"), "blocks");
     List<ProviderContentBlock> blocks = new ArrayList<>(encodedBlocks.size());
     for (JsonNode item : encodedBlocks) {
@@ -164,7 +156,6 @@ public final class ProviderResponseJsonCodec {
       diagnosticList.add(decodeToolCallDiagnostic(item));
     }
     Long decodeDurationMillis = nullableNonNegativeLong(node, "decodeDurationMillis");
-    RequestBodyPricingSnapshot requestBodyPricing = decodeRequestBodyPricing(node);
     return new ProviderResponse(
         blocks,
         stopReason,
@@ -173,25 +164,7 @@ public final class ProviderResponseJsonCodec {
         serviceTier,
         rawUsageJson,
         diagnosticList,
-        decodeDurationMillis,
-        requestBodyPricing);
-  }
-
-  private RequestBodyPricingSnapshot decodeRequestBodyPricing(ObjectNode node) {
-    JsonNode value = node.get("requestBodyPricing");
-    if (value == null || value.isNull()) {
-      return null;
-    }
-    ObjectNode pricing = object(value, "requestBodyPricing");
-    Map<String, Boolean> matches = new LinkedHashMap<>();
-    for (String fingerprint : pricing.propertyNames()) {
-      JsonNode matched = pricing.get(fingerprint);
-      if (matched == null || !matched.isBoolean()) {
-        throw new IllegalArgumentException("requestBodyPricing values must be boolean");
-      }
-      matches.put(fingerprint, matched.booleanValue());
-    }
-    return new RequestBodyPricingSnapshot(matches);
+        decodeDurationMillis);
   }
 
   private ObjectNode encodeToolCallDiagnostic(ProviderToolCallDiagnostic diagnostic) {

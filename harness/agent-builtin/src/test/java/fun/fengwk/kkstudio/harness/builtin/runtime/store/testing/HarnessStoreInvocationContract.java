@@ -149,7 +149,6 @@ public abstract class HarnessStoreInvocationContract {
             null,
             "{}",
             List.of(),
-            null,
             null);
 
     // 1. 插入 READY modelInvocation 并推进到包含 blocks 的 SUCCEEDED
