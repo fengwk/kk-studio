@@ -22,7 +22,8 @@ vi.mock('@/shared/api/client', async (importOriginal) => {
 })
 
 const mockedRequest = vi.mocked(request)
-const sendStorageKey = 'kk-studio.session-send:workspace-draft:["u1","space-1","draft-1"]'
+const draftId = '10000000-0000-4000-8000-000000000003'
+const sendStorageKey = `kk-studio.session-send:workspace-draft:${JSON.stringify(['u1', 'space-1', draftId])}`
 
 const READY_AGENTS: AgentSummaryDTO[] = [
   { name: 'default-agent', description: null, modelName: 'gpt-test', variant: 'high', driver: 'builtin' },
@@ -68,7 +69,7 @@ function renderDraftPane({
                 defaultEnvironmentId,
                 defaultYoloEnabled: false,
               }}
-              target={{ kind: 'draft', draftId: 'draft-1', folderId: 'folder-1' }}
+              target={{ kind: 'draft', draftId, folderId: 'folder-1' }}
               active
               replace={replace}
               open={vi.fn()}
@@ -102,7 +103,7 @@ describe('DraftPaneRenderer', () => {
       if (endpoint === 'GET /api/platform/environment-summaries') return READY_ENVS
       if (endpoint === 'POST /api/chat-spaces/{spaceId}/sessions') {
         // The complete wire body and key must already be durable when the request starts.
-        expect(sessionStorage.getItem(sendStorageKey)).toBe(JSON.stringify({ key: 'draft-1', body: params.body, rejected: false }))
+        expect(sessionStorage.getItem(sendStorageKey)).toBe(JSON.stringify({ key: draftId, body: params.body, rejected: false }))
         return { sessionId: 'sess-1', threadId: 'thread-new', commandId: 'cmd-1', treeVersion: '1' }
       }
       if (endpoint === 'GET /api/harness/threads/{threadId}/snapshot') {
@@ -132,13 +133,13 @@ describe('DraftPaneRenderer', () => {
           yoloEnabled: false,
         }),
       }),
-      { idempotencyKey: 'draft-1' },
+      { idempotencyKey: draftId },
     )
   })
 
   it('restores the editable draft independently of the first-send record', async () => {
     mockedRequest.mockResolvedValue([])
-    localStorage.setItem('kk-studio.composer-draft:workspace-draft:draft-1', JSON.stringify({
+    localStorage.setItem(`kk-studio.composer-draft:workspace-draft:${draftId}`, JSON.stringify({
       parts: [{ type: 'text', text: 'Previous unsent draft' }],
     }))
 
@@ -176,6 +177,9 @@ describe('DraftPaneRenderer', () => {
     new ApiError('network lost', 0, 'network_error'),
     new ApiError('timed out', undefined, 'timeout'),
     new ApiError('unavailable', 503),
+    // A generic 409 (or the same reason at another status) is not a proven key conflict.
+    new ApiError('other conflict', 409, 'conflict', undefined, 'OTHER_CONFLICT'),
+    new ApiError('proxy failure', 502, undefined, undefined, 'IDEMPOTENCY_KEY_REUSED'),
   ])('shows retry after $message and unlocks on INVALID_FOLDER', async (failure) => {
     const user = userEvent.setup()
     let sessionCall = 0
@@ -201,6 +205,8 @@ describe('DraftPaneRenderer', () => {
     // Network failure renders retry alert and locks editor
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('未收到发送结果')
+    const frozen = sessionStorage.getItem(sendStorageKey)
+    expect(JSON.parse(frozen!)).toMatchObject({ key: draftId, rejected: false })
     await user.click(screen.getByRole('button', { name: '重试' }))
 
     // A definite rejection unlocks editing without removing the record before success.
@@ -212,9 +218,10 @@ describe('DraftPaneRenderer', () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-recovered' }))
   })
 
-  it('keeps a pending first send intact when a retry requires login', async () => {
+  // The frozen key can be the original draft ID or one rotated after a confirmed conflict.
+  it.each([draftId, '10000000-0000-4000-8000-000000000011'])('keeps the frozen send %s intact when retry requires login', async (key) => {
     const body = { message: [{ type: 'TEXT', text: 'May already be accepted' }], yoloEnabled: true }
-    const frozen = JSON.stringify({ key: 'draft-1', body, rejected: false })
+    const frozen = JSON.stringify({ key, body, rejected: false })
     sessionStorage.setItem(sendStorageKey, frozen)
     const post = vi.fn()
       .mockRejectedValueOnce(new ApiError('login required', 401, 'unauthorized', undefined, 'NOT_AUTHENTICATED'))
@@ -237,7 +244,7 @@ describe('DraftPaneRenderer', () => {
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith({ kind: 'thread', threadId: 'thread-recovered' }))
     expect(post.mock.calls).toEqual(Array.from({ length: 2 }, () => [
-      { path: { spaceId: 'space-1' }, body }, { idempotencyKey: 'draft-1' },
+      { path: { spaceId: 'space-1' }, body }, { idempotencyKey: key },
     ]))
     expect(sessionStorage.getItem(sendStorageKey)).toBeNull()
   })

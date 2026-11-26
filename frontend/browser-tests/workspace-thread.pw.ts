@@ -1,3 +1,4 @@
+import type { BrowserContext } from '@playwright/test'
 import { expect, test, type Page } from './fixture'
 
 const harness = '/browser-tests/workspace-thread-harness.html'
@@ -6,6 +7,8 @@ const draftId = '10000000-0000-4000-8000-000000000003'
 const folderId = '10000000-0000-4000-8000-000000000004'
 const sessionId = '10000000-0000-4000-8000-000000000005'
 const ids = ['10000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000007', '10000000-0000-4000-8000-000000000008']
+const secondThreadId = '10000000-0000-4000-8000-000000000009'
+const secondSessionId = '10000000-0000-4000-8000-000000000010'
 const execution = { driver: 'builtin', settings: { modelName: 'Code model', variant: 'max' } }
 const branchSettings = { agentName: 'assistant', execution, environmentName: null }
 const api = `/api/chat-spaces/${spaceId}`
@@ -34,13 +37,13 @@ async function captureWidths(page: Page, state: string) {
   await page.setViewportSize({ width: 1440, height: 900 })
 }
 
-async function serve(page: Page, { agents = true, admin = false, rejectFolder = false, rejectFirstSession = false, loseFirstResponse = false } = {}) {
+async function serve(target: Page | BrowserContext, { agents = true, admin = false, rejectFolder = false, rejectFirstSession = false, loseFirstResponse = false } = {}) {
   const posts: { path: string; key: string | undefined; body: unknown }[] = []
   const creations = new Map<string, { body: string | null; result: { sessionId: string; threadId: string; commandId: string; treeVersion: string } }>()
-  let text = ''
+  const messages = new Map<string, string>()
   let rejectedFirstSession = false
-  await page.routeWebSocket('**/ws/events', () => {})
-  await page.route('**/api/**', async (route) => {
+  await target.routeWebSocket('**/ws/events', () => {})
+  await target.route('**/api/**', async (route) => {
     const req = route.request()
     const path = new URL(req.url()).pathname
     const json = (value: unknown) => route.fulfill({ json: value })
@@ -62,27 +65,30 @@ async function serve(page: Page, { agents = true, admin = false, rejectFolder = 
         const key = req.headers()['idempotency-key']
         const prior = creations.get(key)
         if (prior) {
-          if (prior.body !== req.postData()) return route.fulfill({ status: 409 })
+          if (prior.body !== req.postData()) return route.fulfill({ status: 409, contentType: 'application/problem+json', body: JSON.stringify({ code: 'conflict', reason: 'IDEMPOTENCY_KEY_REUSED' }) })
           return json(prior.result)
         }
-        text = body.message[0].text
-        const result = { sessionId, threadId: ids[0], commandId: draftId, treeVersion: '2' }
+        const first = creations.size === 0
+        const result = { sessionId: first ? sessionId : secondSessionId, threadId: first ? ids[0] : secondThreadId, commandId: key, treeVersion: first ? '2' : '3' }
         creations.set(key, { body: req.postData(), result })
+        messages.set(result.threadId, body.message[0].text)
         if (loseFirstResponse && creations.size === 1) return route.abort('connectionreset')
         return json(result)
       }
       if (body.title === 'Taken') return route.fulfill({ status: 409, contentType: 'application/problem+json', body: JSON.stringify({ reason: 'THREAD_NAME_EXISTS' }) })
       return json({ sessionId, threadId: path.endsWith('/branches') ? ids[1] : ids[2], treeVersion: '3' })
     }
-    for (const id of ids) {
+    for (const id of [...ids, secondThreadId]) {
+      const responseSessionId = id === secondThreadId ? secondSessionId : sessionId
+      const text = messages.get(id) ?? messages.get(ids[0]) ?? ''
       const referenceThread = text === referenceMessage
-      const thread = { name: 'main', threadId: id, sessionId, parentThreadId: null, rootThreadId: id,
+      const thread = { name: 'main', threadId: id, sessionId: responseSessionId, parentThreadId: null, rootThreadId: id,
         headEntryId: referenceThread ? 'current-assistant' : 'end', yoloEnabled: false, nextCommandSequence: '2', version: '1',
         status: referenceThread ? 'RUNNING' : 'IDLE', executionControl: 'RUNNABLE',
         branchSettings, createdAt: 1790812800, updatedAt: 1790812800 }
       if (path === `/api/harness/threads/${id}/tree`) return json([{ ...thread, kind: 'USER', agentName: 'assistant', execution, turnCount: 1, toolCallCount: 0 }])
       if (path === `/api/harness/threads/${id}`) {
-        const base = { sessionId, createdAt: 1790812800, usageCost: null }
+        const base = { sessionId: responseSessionId, createdAt: 1790812800, usageCost: null }
         return json({ version: '1', thread, baseEntryId: null, entries: [
           { ...base, entryId: 'root', parentEntryId: null, entryType: 'ROOT', payload: { settings: branchSettings } },
           { ...base, entryId: 'message', parentEntryId: 'root', entryType: 'MESSAGE', payload: { message: { role: 'USER', contents: [{ type: 'text', text }] } } },
@@ -239,6 +245,49 @@ for (const reload of [false, true]) {
     expect(posts.creations.size).toBe(1)
   })
 }
+
+test('a first-send key conflict in another tab preserves the draft until an explicit new send', async ({ page, context }) => {
+  // Both tabs restore the same draft identity; the server accepts A but drops its receipt.
+  const posts = await serve(context, { loseFirstResponse: true })
+  await page.goto(harness)
+  await page.getByRole('textbox').fill('First tab message')
+  await sendButton(page).click()
+  await expect(page.getByRole('alert')).toContainText('The send result is unknown')
+
+  const second = await context.newPage()
+  await second.goto(harness)
+  const editor = second.getByRole('textbox')
+  await expect(editor).toHaveText('First tab message')
+  const message = 'Second tab message'
+  await editor.fill(message)
+  await sendButton(second).click()
+  const conflict = second.getByRole('alert')
+  await expect(conflict).toContainText('This draft was already used to send a different message')
+  await expect(editor).toHaveText(message)
+  await expect(editor).toBeEditable()
+  await expect(unsent(second)).toHaveAttribute('data-unsent', 'true')
+  expect(posts.map(({ key }) => key)).toEqual([draftId, draftId])
+  expect(posts.creations.size).toBe(1)
+
+  // Reload must keep the conflict editable, without offering to repeat its frozen request.
+  await second.reload()
+  await expect(conflict).toContainText('Your message was not sent')
+  await expect(second.getByRole('button', { name: 'Retry' })).toHaveCount(0)
+  await expect(editor).toHaveText(message)
+  await expect(editor).toBeEditable()
+  expect(posts).toHaveLength(2)
+
+  const corrected = 'Edited second tab message'
+  await editor.fill(corrected)
+  await sendButton(second).click()
+  await expect(second.getByText('Thread 9', { exact: true })).toBeVisible()
+  await expect(second.getByText(corrected, { exact: true })).toBeVisible()
+  expect(posts).toHaveLength(3)
+  expect(posts[2].key).not.toBe(draftId)
+  expect(posts[2].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  expect(posts[2].body).toMatchObject({ message: [{ type: 'TEXT', text: corrected }] })
+  expect(posts.creations.size).toBe(2)
+})
 
 test('a determined application rejection allows correcting and resending the first message', async ({ page }) => {
   const posts = await serve(page, { rejectFirstSession: true })

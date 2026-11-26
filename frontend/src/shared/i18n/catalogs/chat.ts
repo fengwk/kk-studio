@@ -20,6 +20,10 @@ export const chatCatalog = {
     'en-US': 'The send result is unknown. Retry to recover the original session.',
     'zh-CN': '未收到发送结果。重试以继续原会话。',
   },
+  'ai.runtime.draft.sendConflict': {
+    'en-US': 'This draft was already used to send a different message. Your message was not sent. Send again to start a new session.',
+    'zh-CN': '此草稿已用于发送另一条消息。你的消息未发送，再次发送可创建新会话。',
+  },
   'ai.runtime.draft.invalidFolder': {
     'en-US': 'This folder is no longer available. Choose another folder to send your message.',
     'zh-CN': '此目录已不可用。请选择其他目录后再发送。',
