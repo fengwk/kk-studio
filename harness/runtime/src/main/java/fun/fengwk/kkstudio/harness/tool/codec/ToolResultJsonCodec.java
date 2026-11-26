@@ -10,6 +10,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.BoundedOutputStream;
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
@@ -17,7 +18,6 @@ import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.ArrayList;

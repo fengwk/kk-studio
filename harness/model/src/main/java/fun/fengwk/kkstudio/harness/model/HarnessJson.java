@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.harness.model;
 
-import tools.jackson.core.StreamReadFeature;
+import static fun.fengwk.kkstudio.common.json.JsonValues.strictBuilder;
+import static fun.fengwk.kkstudio.common.json.JsonValues.strictDecimalBuilder;
+
 import tools.jackson.core.json.JsonFactory;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.cfg.JsonNodeFeature;
@@ -11,31 +12,27 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Harness 共用的 JSON 读取器。
  *
- * <p>普通树、十进制精度和 canonical 选项分别保持原有数值语义；调用方不得改变其配置。{@link #LENIENT_DECIMAL} 只用于读取
- * 上游报文中最需要“能读出一点信息”的两类内容：错误正文（重复键或尾随 token 不应丢弃整份诊断），以及仅用于推导事件名的原生 SSE
- * payload（容忍解析差异好过退回默认事件名）；它不用于任何会被持久化或回放的业务解码。
- *
- * <p>{@link #STRICT_DECIMAL} 与 common 的 {@code JsonValues} 树读取配置等价，但本模块是可独立编译的叶子模块，不依赖
- * common，因此模型、runtime 与平台的 codec 统一使用本类；common 层继续由 {@code JsonValues} 服务。两处配置修改必须同步，
- * 否则跨层报文会出现数值精度或重复键语义差异。
+ * <p>普通树、十进制精度和 canonical 选项分别保持原有数值语义；调用方不得改变其配置。{@link #LENIENT_DECIMAL} 只用于读取 上游错误正文及用于推导事件名的原生
+ * SSE payload，不用于持久化或回放的业务解码。
  */
 public final class HarnessJson {
 
-  public static final ObjectMapper STRICT = strict(JsonMapper.builder()).build();
+  public static final ObjectMapper STRICT = strictBuilder(JsonMapper.builder()).build();
 
-  public static final ObjectMapper STRICT_DECIMAL = decimal(JsonMapper.builder()).build();
+  public static final ObjectMapper STRICT_DECIMAL =
+      strictDecimalBuilder(JsonMapper.builder()).build();
 
-  /** 上游错误正文与原生 SSE payload 的容错读取器：保留十进制精度，但不对重复键或尾随 token 失败。 */
+  /** 保留十进制精度，允许重复键，其余语法检查沿用 Jackson 默认配置。 */
   public static final ObjectMapper LENIENT_DECIMAL =
       JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   public static final ObjectMapper STRICT_CANONICAL =
-      decimal(JsonMapper.builder())
+      strictDecimalBuilder(JsonMapper.builder())
           .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
           .build();
 
   public static final ObjectMapper STRICT_OPTIONS =
-      decimal(JsonMapper.builder())
+      strictDecimalBuilder(JsonMapper.builder())
           .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
           .enable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
           .build();
@@ -44,16 +41,6 @@ public final class HarnessJson {
 
   /** 使用调用方提供的输入限制，但保留严格十进制解析语义。 */
   public static ObjectMapper strictDecimal(JsonFactory factory) {
-    return decimal(JsonMapper.builder(factory)).build();
-  }
-
-  private static JsonMapper.Builder strict(JsonMapper.Builder builder) {
-    return builder
-        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
-
-  private static JsonMapper.Builder decimal(JsonMapper.Builder builder) {
-    return strict(builder).enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+    return strictDecimalBuilder(JsonMapper.builder(factory)).build();
   }
 }

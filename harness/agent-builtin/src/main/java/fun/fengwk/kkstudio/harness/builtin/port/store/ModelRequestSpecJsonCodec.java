@@ -4,11 +4,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.codec.InvocationJsonSupport;
 import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 

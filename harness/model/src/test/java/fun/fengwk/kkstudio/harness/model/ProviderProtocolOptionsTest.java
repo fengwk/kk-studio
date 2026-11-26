@@ -37,9 +37,11 @@ class ProviderProtocolOptionsTest {
   void canonicalizesWhitespaceAndPreservesKeyOrderAndNumericSemantics() {
     ProviderProtocolOptions options =
         new ProviderProtocolOptions(
-            "{ \"thinking\" : { \"budget_tokens\" : 4096 } , \"ratio\" : 1.10 }");
+            "{ \"thinking\" : { \"budget_tokens\" : 4096 } , \"ratio\" : 1.123456789012345678900 , \"tiny\" : 1e-324 }");
 
-    assertEquals("{\"thinking\":{\"budget_tokens\":4096},\"ratio\":1.1}", options.canonicalJson());
+    assertEquals(
+        "{\"thinking\":{\"budget_tokens\":4096},\"ratio\":1.1234567890123456789,\"tiny\":1E-324}",
+        options.canonicalJson());
   }
 
   /** 非 object、严格 JSON 语法错误、重复键、trailing token 都明确失败，且消息不回显 payload。 */

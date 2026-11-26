@@ -3,14 +3,12 @@ package fun.fengwk.kkstudio.common.json;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
-import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.deser.std.StdDeserializer;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
@@ -48,14 +46,11 @@ public final class StrictJson {
   public static StrictJson create(Consumer<JsonMapper.Builder> customizer) {
     Objects.requireNonNull(customizer, "customizer");
     JsonMapper.Builder builder =
-        JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        JsonValues.strictDecimalBuilder(JsonMapper.builder())
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
             .enable(MapperFeature.INFER_RECORD_GETTERS_FROM_COMPONENTS_ONLY)

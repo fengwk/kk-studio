@@ -3,13 +3,10 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadConstraints;
-import tools.jackson.core.StreamReadFeature;
 import tools.jackson.core.json.JsonFactory;
 import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -26,7 +23,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -79,18 +77,15 @@ public final class CanvasFunctionRunStateCodec {
           "durationMs");
 
   private static final ObjectMapper MAPPER =
-      JsonMapper.builder(
-              JsonFactory.builder()
-                  // 只把 number 预算对齐 CanvasJson；其余读取限制保持 Jackson 默认，不抬高无关上限。
-                  .streamReadConstraints(
-                      StreamReadConstraints.builder()
-                          .maxNumberLength(CanvasJson.MAX_LENGTH)
-                          .build())
-                  .build())
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // 与 CanvasJson 一致：浮点按 BigDecimal 读回，避免高精度/极值 args 退化成 double、下溢或 Infinity。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+      JsonValues.strictDecimalBuilder(
+              JsonMapper.builder(
+                  JsonFactory.builder()
+                      // 只把 number 预算对齐 CanvasJson；其余读取限制保持 Jackson 默认。
+                      .streamReadConstraints(
+                          StreamReadConstraints.builder()
+                              .maxNumberLength(CanvasJson.MAX_LENGTH)
+                              .build())
+                      .build()))
           .build();
 
   public String initial(CanvasFunctionFrozenRun run) {

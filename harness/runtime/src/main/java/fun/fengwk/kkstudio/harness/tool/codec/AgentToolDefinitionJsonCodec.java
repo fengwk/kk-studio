@@ -6,8 +6,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
