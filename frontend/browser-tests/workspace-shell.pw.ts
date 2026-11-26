@@ -268,6 +268,38 @@ test('responsive sidebar drawer, collapse rail, resize and acceptance screenshot
   await expect(page.locator('.workspace-sidebar')).toBeVisible()
 })
 
+// Fullscreen removes sidebar controls without discarding layout; a space switch reloads only that space's width.
+test('retains sidebar layout through fullscreen and isolates width across spaces', async ({ page }) => {
+  await setup(page)
+  await page.goto(path)
+  const sidebar = page.locator('.workspace-sidebar')
+  const rail = page.locator('.workspace-rail')
+  const separator = page.getByRole('separator', { name: 'Resize sidebar' })
+  await page.getByRole('tab', { name: 'Status' }).click()
+  await separator.press('ArrowRight')
+  await page.getByRole('button', { name: 'Close sidebar' }).click()
+  await expect(rail).toBeVisible()
+
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click()
+  await expect(sidebar).toHaveCount(0)
+  await expect(rail).toHaveCount(0)
+  await page.getByRole('button', { name: 'Exit fullscreen' }).click()
+  await expect(rail).toBeVisible()
+  await rail.getByRole('button', { name: 'Open sidebar' }).click()
+  await expect(separator).toHaveAttribute('aria-valuenow', '280')
+  await expect(page.getByRole('tab', { name: 'Status' })).toHaveAttribute('aria-selected', 'true')
+
+  const spaceTrigger = page.locator('.workspace-space-trigger')
+  await spaceTrigger.click()
+  await page.getByRole('menuitem', { name: 'Support' }).click()
+  await expect(spaceTrigger).toHaveText('Support')
+  await expect(separator).toHaveAttribute('aria-valuenow', '264')
+  await spaceTrigger.click()
+  await page.getByRole('menuitem', { name: 'Studio' }).click()
+  await expect(spaceTrigger).toHaveText('Studio')
+  await expect(separator).toHaveAttribute('aria-valuenow', '280')
+})
+
 test('creates root and child folders inline, handles errors, renames with F2 and deletes', async ({ page }) => {
   await setup(page)
   await page.goto(path)

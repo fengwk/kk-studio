@@ -31,6 +31,7 @@ import {
   patchSchedule,
   runScheduleNow,
 } from './workspace-api'
+import '@/shared/ui/layout/list-row.css'
 import './workspace-schedules.css'
 
 export interface WorkspaceSchedulesProps {
@@ -56,8 +57,7 @@ function ScheduleHistoryPanel({
   open: (target: PaneTarget, anchor?: HTMLElement | null) => void
 }) {
   const { locale, t } = useI18n()
-  const newerRef = useRef<HTMLButtonElement>(null)
-  const olderRef = useRef<HTMLButtonElement>(null)
+  const pagerRef = useRef<HTMLDivElement>(null)
   const pendingFocusRef = useRef<'newer' | 'older' | null>(null)
   const runsQuery = useQuery({
     queryKey: workspaceKeys.scheduleRuns(spaceId, scheduleId, cursorState.current),
@@ -72,9 +72,9 @@ function ScheduleHistoryPanel({
     const hasNewerPage = cursorState.previous.length > 0
     const hasOlderPage = Boolean(runsQuery.data.olderCursor)
     if (direction === 'older' && !hasOlderPage && hasNewerPage) {
-      newerRef.current?.focus()
+      pagerRef.current?.querySelector<HTMLButtonElement>('[data-page="newer"]')?.focus()
     } else if (direction === 'newer' && !hasNewerPage && hasOlderPage) {
-      olderRef.current?.focus()
+      pagerRef.current?.querySelector<HTMLButtonElement>('[data-page="older"]')?.focus()
     }
   }, [cursorState.previous.length, runsQuery.data, runsQuery.isPlaceholderData])
 
@@ -120,8 +120,8 @@ function ScheduleHistoryPanel({
                     onClick={event => open({ kind: 'thread', threadId: targetThread.id }, event.currentTarget)}
                   >
                     <time dateTime={isoTime} title={fullTime}>{runTime}</time>
-                    <span className="workspace-schedule-record-main">
-                      <span className="workspace-schedule-record-label" title={targetThread.title}>
+                    <span className="ui-list-row workspace-schedule-record-main">
+                      <span className="ui-list-row-label" title={targetThread.title}>
                         {targetThread.title}
                       </span>
                       <ChevronRight aria-hidden="true" />
@@ -149,12 +149,11 @@ function ScheduleHistoryPanel({
       )}
 
       {(hasNewer || hasOlder) && (
-        <div className="workspace-schedule-pager">
-          <button
-            ref={newerRef}
-            type="button"
-            className="workspace-schedule-pager-btn"
-            data-ui-focus="row"
+        <div ref={pagerRef} className="workspace-schedule-pager">
+          <Button
+            data-page="newer"
+            variant="secondary"
+            size="compact"
             disabled={!hasNewer}
             onClick={() => {
               if (!runsQuery.isFetching) {
@@ -164,12 +163,11 @@ function ScheduleHistoryPanel({
             }}
           >
             {t('workspace.schedule.newer')}
-          </button>
-          <button
-            ref={olderRef}
-            type="button"
-            className="workspace-schedule-pager-btn"
-            data-ui-focus="row"
+          </Button>
+          <Button
+            data-page="older"
+            variant="secondary"
+            size="compact"
             disabled={!hasOlder}
             onClick={() => {
               if (!runsQuery.isFetching && olderCursor) {
@@ -179,7 +177,7 @@ function ScheduleHistoryPanel({
             }}
           >
             {t('workspace.schedule.older')}
-          </button>
+          </Button>
         </div>
       )}
     </div>
