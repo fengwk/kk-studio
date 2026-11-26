@@ -292,7 +292,7 @@ function RealtimeProbe({
   report: (message: string) => void
 }) {
   useWorkspaceRealtime(space.id)
-  return <WorkspaceSchedules space={space} tree={tree} open={open} report={report} />
+  return <WorkspaceSchedules userId={id(99)} space={space} tree={tree} open={open} report={report} />
 }
 
 describe('WorkspaceSchedules', () => {
@@ -435,7 +435,7 @@ describe('WorkspaceSchedules', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceSchedules space={sampleSpace} tree={sampleTree} open={open} report={report} />
+        <WorkspaceSchedules userId={id(99)} space={sampleSpace} tree={sampleTree} open={open} report={report} />
       </QueryClientProvider>,
     )
 
@@ -576,7 +576,7 @@ describe('WorkspaceSchedules', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceSchedules space={sampleSpace} tree={sampleTree} open={vi.fn()} report={vi.fn()} />
+        <WorkspaceSchedules userId={id(99)} space={sampleSpace} tree={sampleTree} open={vi.fn()} report={vi.fn()} />
       </QueryClientProvider>,
     )
 
@@ -813,7 +813,7 @@ describe('WorkspaceSchedules', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceSchedules space={sampleSpace} tree={sampleTree} open={vi.fn()} report={report} />
+        <WorkspaceSchedules userId={id(99)} space={sampleSpace} tree={sampleTree} open={vi.fn()} report={report} />
       </QueryClientProvider>,
     )
 
@@ -889,6 +889,7 @@ describe('WorkspaceSchedules', () => {
       version: '1',
     }
     let listFails = false
+    const runKeys: Array<string | null> = []
 
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = new URL(String(input), 'http://localhost')
@@ -901,7 +902,10 @@ describe('WorkspaceSchedules', () => {
         return jsonResponse({ code: 'VERSION_CONFLICT', reason: 'VERSION_CONFLICT', detail: 'stale' }, 409)
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}/runs` && method === 'POST') {
-        return jsonResponse({ detail: 'run failed' }, 500)
+        runKeys.push(new Headers(init?.headers).get('idempotency-key'))
+        return runKeys.length === 1
+          ? jsonResponse({ detail: 'run failed' }, 500)
+          : jsonResponse({ code: 'not_found', reason: 'RESOURCE_NOT_FOUND', detail: 'Schedule no longer exists' }, 404)
       }
       if (url.pathname === `/api/chat-spaces/${spaceId}/schedules/${schedule1Id}/runs` && method === 'GET') {
         return jsonResponse({ detail: 'history failed' }, 500)
@@ -922,7 +926,7 @@ describe('WorkspaceSchedules', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceSchedules space={sampleSpace} tree={sampleTree} open={vi.fn()} report={report} />
+        <WorkspaceSchedules userId={id(99)} space={sampleSpace} tree={sampleTree} open={vi.fn()} report={report} />
       </QueryClientProvider>,
     )
 
@@ -932,7 +936,14 @@ describe('WorkspaceSchedules', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '立即运行' }))
-    await waitFor(() => expect(report).toHaveBeenCalledWith('run failed'))
+    // A 5xx is uncertain; only the explicit application refusal releases the original key.
+    expect(await screen.findByRole('status')).toHaveTextContent('未收到运行回执。')
+    fireEvent.click(screen.getByRole('button', { name: 'Err Task的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '重试获取运行回执' }))
+    await waitFor(() => expect(report).toHaveBeenCalledWith('Schedule no longer exists'))
+    expect(runKeys[0]).toBeTruthy()
+    expect(runKeys).toEqual([runKeys[0], runKeys[0]])
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '「Err Task」的执行记录' }))
     expect(await screen.findByText('请求失败')).toBeInTheDocument()

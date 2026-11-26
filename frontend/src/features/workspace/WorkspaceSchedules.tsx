@@ -4,7 +4,6 @@ import { ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
 import { ApiError, apiErrorDetail } from '@/shared/api/client'
 import type { ChatSpaceDTO, ScheduleDTO, WorkspaceTreeDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
-import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Switch } from '@/shared/ui/controls/Switch'
@@ -12,6 +11,7 @@ import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { Menu } from '@/shared/ui/overlays/Menu'
 import type { PaneTarget } from './pane-target'
+import { manualRunScope, manualRunState, requestManualRun, useManualRunState } from './manual-schedule-run'
 import { workspaceKeys } from './queries'
 import { ScheduleEditorDialog } from './ScheduleEditorDialog'
 import {
@@ -29,12 +29,12 @@ import {
   listScheduleRuns,
   listSchedules,
   patchSchedule,
-  runScheduleNow,
 } from './workspace-api'
 import '@/shared/ui/layout/list-row.css'
 import './workspace-schedules.css'
 
 export interface WorkspaceSchedulesProps {
+  userId: string
   space: ChatSpaceDTO
   tree: WorkspaceTreeDTO
   open: (target: PaneTarget, anchor?: HTMLElement | null) => void
@@ -184,7 +184,7 @@ function ScheduleHistoryPanel({
   )
 }
 
-export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSchedulesProps) {
+export function WorkspaceSchedules({ userId, space, tree, open, report }: WorkspaceSchedulesProps) {
   const { locale, t } = useI18n()
   const queryClient = useQueryClient()
   const baseId = useId().replace(/[^a-zA-Z0-9_-]/gu, '')
@@ -198,7 +198,7 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
   const [cursorState, setCursorState] = useState<HistoryCursorState>(INITIAL_HISTORY_CURSORS)
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLButtonElement } | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
-  const [runningId, setRunningId] = useState<string | null>(null)
+  useManualRunState()
   const [editor, setEditor] = useState<{ schedule: ScheduleDTO | null; reloadCount?: number } | null>(null)
   const [deleting, setDeleting] = useState<{
     schedule: ScheduleDTO
@@ -247,10 +247,9 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
   }
 
   async function handleRunNow(schedule: ScheduleDTO) {
-    if (runningId === schedule.id) return
-    setRunningId(schedule.id)
     try {
-      await runScheduleNow(space.id, schedule.id, createUuid())
+      const scope = manualRunScope(userId, space.id, schedule.id)
+      if (await requestManualRun(scope, space.id, schedule.id) !== 'received') return
       setExpandedId(schedule.id)
       setCursorState(INITIAL_HISTORY_CURSORS)
       await Promise.all([
@@ -259,8 +258,6 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
       ])
     } catch (error) {
       report(error instanceof ApiError ? apiErrorDetail(error) ?? t('shared.requestFailed') : t('shared.requestFailed'))
-    } finally {
-      setRunningId(current => (current === schedule.id ? null : current))
     }
   }
 
@@ -312,6 +309,7 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
         ) : (
           <ul className="workspace-schedule-list" aria-label={t('workspace.schedules')}>
             {schedules.map(schedule => {
+              const runState = manualRunState(manualRunScope(userId, space.id, schedule.id))
               const isExpanded = expandedId === schedule.id
               const historyId = `${baseId}-history-${schedule.id}`
               const showNextRun = schedule.enabled && schedule.nextDueAt != null && schedule.nextDueAt > now
@@ -349,8 +347,8 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
                           onClose={() => setMenu(null)}
                           items={[
                             {
-                              label: t('workspace.schedule.runNow'),
-                              disabled: runningId === schedule.id,
+                              label: t(runState === 'retry' ? 'workspace.schedule.retryRun' : 'workspace.schedule.runNow'),
+                              disabled: runState === 'running',
                               onSelect: () => void handleRunNow(schedule),
                             },
                             {
@@ -362,6 +360,8 @@ export function WorkspaceSchedules({ space, tree, open, report }: WorkspaceSched
                       )}
                     </div>
                   </div>
+
+                  {runState === 'retry' && <p role="status" className="workspace-schedule-empty">{t('workspace.schedule.runPending')}</p>}
 
                   {showNextRun && schedule.nextDueAt != null && (
                     <time
