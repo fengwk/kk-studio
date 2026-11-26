@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import type { ChatSpaceDTO } from '@/shared/api/generated/contracts'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { hasExactKeys, isRecord } from '@/shared/lib/value'
+import { MAX_PANES } from './panes/model'
 
 /**
  * What one workspace pane shows. The workspace stores it per pane ID in the browser.
@@ -10,13 +11,13 @@ import { hasExactKeys, isRecord } from '@/shared/lib/value'
  *   and keys the unsent text; `folderId` is set when the draft was started from a directory,
  *   otherwise the first top-level folder is used when sending.
  * - `thread`: a public Thread of this space.
- * - `canvas`: a Canvas of this space. Omit `viewId` for the primary view; additional views use their pane ID.
+ * - `canvas`: a Canvas of this space. Omit `viewSlot` for the primary view; additional views use a reusable Canvas-local slot.
  * - `vscode`: one VS Code workbench view of an environment.
  */
 export type PaneTarget =
   | { kind: 'draft'; draftId: string; folderId?: string }
   | { kind: 'thread'; threadId: string }
-  | { kind: 'canvas'; canvasId: string; viewId?: string }
+  | { kind: 'canvas'; canvasId: string; viewSlot?: number }
   | { kind: 'vscode'; environmentId: string; viewId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
@@ -31,9 +32,11 @@ export function isPaneTarget(value: unknown): value is PaneTarget {
     case 'thread':
       return hasExactKeys(value, ['kind', 'threadId']) && isCanonicalUuid(value.threadId)
     case 'canvas':
-      return isCanonicalUuid(value.canvasId) && (value.viewId === undefined
+      return isCanonicalUuid(value.canvasId) && (value.viewSlot === undefined
         ? hasExactKeys(value, ['kind', 'canvasId'])
-        : hasExactKeys(value, ['kind', 'canvasId', 'viewId']) && isCanonicalUuid(value.viewId))
+        : hasExactKeys(value, ['kind', 'canvasId', 'viewSlot'])
+          && typeof value.viewSlot === 'number' && Number.isInteger(value.viewSlot)
+          && value.viewSlot >= 1 && value.viewSlot < MAX_PANES)
     case 'vscode':
       return hasExactKeys(value, ['kind', 'environmentId', 'viewId'])
         && isCanonicalUuid(value.environmentId) && isCanonicalUuid(value.viewId)

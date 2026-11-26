@@ -162,7 +162,6 @@ export function useCanvasController(canvasId: string, viewId?: string) {
     isNodeInFlight,
   } = useCanvasFunctionRun({
     canvasId,
-    viewId,
     queryClient,
     setToast,
     flushFunctionConfig,
@@ -327,7 +326,6 @@ export function useCanvasController(canvasId: string, viewId?: string) {
     discardPendingRun,
     localPendingErrors,
     isNodeInFlight,
-    viewId,
     uploadFiles,
     toggleAddMenu,
     closeAddMenu,

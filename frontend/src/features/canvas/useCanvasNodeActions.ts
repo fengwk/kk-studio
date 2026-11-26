@@ -288,12 +288,16 @@ export function useCanvasNodeActions({
     }
     try {
       await executeCommands(commands)
-      dismissDraft(nodeId)
+      if (scope.draftsRef.current[nodeId]?.generation === draft.generation) {
+        dismissDraft(nodeId)
+        setState((current) => current.textEditor?.nodeId === nodeId
+          ? { ...current, textEditor: null } : current)
+      }
       setToast(t('canvas.toast.draftRetrySucceeded'))
     } catch {
       // 冲突处理分支会自动刷新草稿状态
     }
-  }, [dismissDraft, drafts, executeCommands, scope, setToast, snapshot, t])
+  }, [dismissDraft, drafts, executeCommands, scope, setState, setToast, snapshot, t])
 
   return {
     renameNode,

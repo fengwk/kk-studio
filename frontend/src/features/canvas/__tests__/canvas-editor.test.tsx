@@ -57,7 +57,6 @@ function createController(
   snapshotQuery: UseQueryResult<CanvasSnapshotDTO, Error>,
 ): CanvasController {
   return {
-    viewId: undefined,
     state,
     snapshot,
     projectedSnapshot: null,

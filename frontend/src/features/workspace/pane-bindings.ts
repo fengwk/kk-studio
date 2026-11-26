@@ -1,6 +1,6 @@
 import { createUuid } from '@/shared/lib/uuid'
 import type { PaneTarget } from './pane-target'
-import { canSplit, needsSinglePane, paneIds, projectLayout, splitPane, swapPanes, type PaneState, type Rect } from './panes/model'
+import { canSplit, MAX_PANES, needsSinglePane, paneIds, projectLayout, splitPane, swapPanes, type PaneState, type Rect } from './panes/model'
 
 type BindingState = PaneState<PaneTarget>
 type Unsent = (paneId: string) => boolean
@@ -9,17 +9,33 @@ export function newDraft(folderId?: string): Extract<PaneTarget, { kind: 'draft'
   return { kind: 'draft', draftId: createUuid(), ...(folderId ? { folderId } : {}) }
 }
 
+function firstFreeViewSlot(used: ReadonlySet<number>): number | undefined {
+  for (let slot = 1; slot < MAX_PANES; slot++) {
+    if (!used.has(slot)) return slot
+  }
+}
+
 export function reconcileBindings(state: BindingState, exists: (target: PaneTarget) => boolean): BindingState {
   let bindings = state.bindings
   const primaryCanvases = new Set<string>()
+  const viewSlots = new Map<string, Set<number>>()
   for (const id of paneIds(state.layout)) {
     const target = bindings[id]
     if (!target || !exists(target)) {
       bindings = { ...bindings, [id]: newDraft() }
-    } else if (target.kind === 'canvas' && target.viewId === undefined) {
-      // Older layouts could have several unscoped views. Keep the first on the original keys.
-      if (primaryCanvases.has(target.canvasId)) bindings = { ...bindings, [id]: { ...target, viewId: id } }
-      primaryCanvases.add(target.canvasId)
+    } else if (target.kind === 'canvas') {
+      const used = viewSlots.get(target.canvasId) ?? new Set<number>()
+      viewSlots.set(target.canvasId, used)
+      if (target.viewSlot === undefined && !primaryCanvases.has(target.canvasId)) {
+        primaryCanvases.add(target.canvasId)
+      } else {
+        const slot = target.viewSlot !== undefined && !used.has(target.viewSlot)
+          ? target.viewSlot : firstFreeViewSlot(used)
+        if (slot !== undefined) {
+          used.add(slot)
+          if (target.viewSlot !== slot) bindings = { ...bindings, [id]: { ...target, viewSlot: slot } }
+        }
+      }
     }
   }
   return bindings === state.bindings ? state : { ...state, bindings }
@@ -52,12 +68,15 @@ export function bindPane(state: BindingState, paneId: string, target: PaneTarget
     const current = state.bindings[paneId]
     if (sameTarget(current, target)) return { ...state, focusedPaneId: paneId }
     const { canvasId } = target
-    const primaryOpen = ids.some(id => {
-      const other = state.bindings[id]
-      return other?.kind === 'canvas' && other.canvasId === canvasId && other.viewId === undefined
-    })
-    if (primaryOpen) target = { ...target, viewId: paneId }
-    else if (target.viewId !== undefined) target = { kind: 'canvas', canvasId }
+    const views = ids.filter(id => id !== paneId).map(id => state.bindings[id])
+    const primaryOpen = views.some(other => other?.kind === 'canvas' && other.canvasId === canvasId && other.viewSlot === undefined)
+    if (primaryOpen) {
+      const used = new Set(views.flatMap(other => other?.kind === 'canvas' && other.canvasId === canvasId && other.viewSlot !== undefined
+        ? [other.viewSlot] : []))
+      const slot = target.viewSlot !== undefined && !used.has(target.viewSlot)
+        ? target.viewSlot : firstFreeViewSlot(used)
+      if (slot !== undefined) target = { ...target, viewSlot: slot }
+    } else if (target.viewSlot !== undefined) target = { kind: 'canvas', canvasId }
   }
   const bindings = { ...state.bindings, [paneId]: target }
   if (target.kind === 'thread') {

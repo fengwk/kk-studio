@@ -25,7 +25,7 @@ export interface CanvasLinkSelection {
 
 type CanvasTextEditorState =
   | { mode: 'create'; nodeId: null; name: string; markdown: string }
-  | { mode: 'edit'; nodeId: string; name: string; markdown: string }
+  | { mode: 'edit'; nodeId: string; name: string; markdown: string; baseline: { name: string; resourceIds: string[] } }
 
 export interface CanvasLocalState {
   selectedIds: string[]
