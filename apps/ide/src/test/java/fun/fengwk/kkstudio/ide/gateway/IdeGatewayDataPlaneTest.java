@@ -62,6 +62,8 @@ class IdeGatewayDataPlaneTest {
   private static final DaemonConnectionIdentity IDENTITY =
       new DaemonConnectionIdentity(ENV, "daemon-1");
 
+  private final IdeStudioSessionMonitor sessionMonitor = mock(IdeStudioSessionMonitor.class);
+
   @Test
   void rejectsCrossSiteOrUnsafePath() throws IOException {
     ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
@@ -71,7 +73,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest crossSiteReq = browserRequest();
     when(crossSiteReq.getMethod()).thenReturn("GET");
@@ -102,7 +105,8 @@ class IdeGatewayDataPlaneTest {
             new FakeEnvironmentTunnels(),
             authorizer,
             mock(IdeBrowserSessionHandler.class),
-            mock(IdeRemoteDataPlaneForwarder.class));
+            mock(IdeRemoteDataPlaneForwarder.class),
+            sessionMonitor);
     HttpServletRequest request = browserRequest();
     when(request.getMethod()).thenReturn("GET");
     when(request.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
@@ -131,7 +135,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -163,7 +168,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("POST");
@@ -259,7 +265,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -343,7 +350,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -382,7 +390,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     HttpServletResponse res = mock(HttpServletResponse.class);
@@ -450,7 +459,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     HttpServletResponse res = mock(HttpServletResponse.class);
@@ -523,7 +533,8 @@ class IdeGatewayDataPlaneTest {
             new FakeEnvironmentTunnels(),
             authorizer,
             mock(IdeBrowserSessionHandler.class),
-            mock(IdeRemoteDataPlaneForwarder.class));
+            mock(IdeRemoteDataPlaneForwarder.class),
+            sessionMonitor);
 
     HttpServletRequest folder = browserRequest();
     when(folder.getParameter("folder")).thenReturn("/managed/zero.code-workspace");
@@ -579,7 +590,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     // 1. HEAD request returns without writing body
     HttpServletRequest headReq = browserRequest();
@@ -643,7 +655,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -680,7 +693,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -729,7 +743,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -768,7 +783,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -801,7 +817,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");
@@ -838,7 +855,8 @@ class IdeGatewayDataPlaneTest {
     IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
 
     IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+        new IdeGatewayDataPlane(
+            registry, tunnels, authorizer, sessionHandler, forwarder, sessionMonitor);
 
     HttpServletRequest req = browserRequest();
     when(req.getMethod()).thenReturn("GET");

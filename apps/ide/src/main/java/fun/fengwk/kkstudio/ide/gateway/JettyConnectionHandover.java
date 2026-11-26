@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.eclipse.jetty.ee11.servlet.ServletContextRequest;
+import org.eclipse.jetty.io.Connection;
 import org.eclipse.jetty.server.ConnectionMetaData;
 import org.eclipse.jetty.server.HttpStream;
 import org.eclipse.jetty.server.Request;
@@ -40,6 +41,10 @@ public final class JettyConnectionHandover {
             metadata.getConnection().getEndPoint(),
             metadata.getConnector().getServer().getThreadPool(),
             tunnel);
+    if (request.getAttribute(IdeStudioSessionMonitor.LISTENER_ATTRIBUTE)
+        instanceof Connection.Listener listener) {
+      connection.addEventListener(listener);
+    }
     coreRequest.setAttribute(HttpStream.UPGRADE_CONNECTION_ATTRIBUTE, connection);
 
     coreResponse.setStatus(status);
