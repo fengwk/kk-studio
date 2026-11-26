@@ -277,7 +277,7 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 子 TURN_START(COMPACTION_BRANCH_INPUT) -> Driver generation -> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
-平台按当前请求实际发送的 system 与历史估算输入 token，`输入 + reserve` 超过 `min(会话模型上下文窗口, 压缩模型上下文窗口)` 时可先压缩同一历史；provider 报告上下文溢出时也可触发压缩。最近一次完整压缩之后，若当前请求前还没有成功完成的 `INPUT` 或 `CONTINUATION` 回合，不论上次压缩由什么触发，再次超过预算或溢出时都保留真实失败，不启动新的自动压缩。显式 `/compact` 和内置 `compact` 工具不受这个重试窗口限制；它们与自动压缩共用同一预算和切点规则。
+平台按当前请求实际发送的 system 与历史估算输入 token，`输入 + reserve` 超过 `min(会话模型上下文窗口, 压缩模型上下文窗口)` 时可先压缩同一历史；provider 报告上下文溢出时也可触发压缩。最近一次完整压缩之后，若当前请求前还没有成功完成的 `INPUT` 或 `CONTINUATION` 回合，不论上次压缩由什么触发，再次超过预算或溢出时都保留真实失败，不启动新的自动压缩。显式 `compactThread` 请求和内置 `compact` 工具不受这个重试窗口限制；它们与自动压缩共用同一预算和切点规则。
 
 压缩在同一 Session 的 `COMPACTION` branch Thread 中执行。该分支继承 owner 的系统基线与约束，使用专用摘要指令；完成后将摘要结果结算到 owner Thread。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结触发原因、执行模型、输出预算、切点与子身份，后来排队的输入不会污染它。
 

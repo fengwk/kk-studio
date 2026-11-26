@@ -269,7 +269,7 @@ class ModelsDevCatalogParserTest {
   }
 
   @Test
-  void legacySimpleTokenPricesAndTtlRemainSupported() {
+  void importsSimpleTokenPricesAndCacheWriteTtl() {
     Map<String, ModelCatalogCandidateDTO> candidates =
         index(parser.parse(resource("models-dev.json")));
     ModelCatalogCandidateDTO sonnet = candidates.get("opencode/claude-sonnet-4-6");

@@ -526,7 +526,7 @@ export async function runWorkspaceContractMatrix(ui) {
 
   await run(
     'ui.workspace.task_status.async_thread_approval',
-    'Task 回执链接子 Thread；根控制区汇聚并向子 Thread 提交审批',
+    'Task 卡在当前窗格打开子 Thread；根控制区汇聚并向子 Thread 提交审批',
     async (caseArt) => {
       await ensureSignedIn?.()
       await withWorkspaceUiFixture(
@@ -540,18 +540,18 @@ export async function runWorkspaceContractMatrix(ui) {
             has: page.locator('.thread-tool-name', { hasText: 'task' }),
           }).last()
           await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
-          const link = taskCard.locator('.thread-tool-thread-link')
-          await link.waitFor({ state: 'visible', timeout: 10_000 })
-          const href = await link.getAttribute('href')
-          const childThreadId = href?.split('/').at(-1)
-          assert(
-            /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(childThreadId ?? '')
-              && href === `/threads/${childThreadId}`,
-            `unexpected thread link href: ${href}`,
-          )
-          await link.click()
+          const inspect = taskCard.locator('button.thread-tool-thread-link')
+          await inspect.click({ timeout: 10_000 })
           const childView = page.locator('[data-pane-active] .bound-thread-view')
-          await childView.waitFor({ state: 'visible', timeout: 15_000 })
+          const childIdentity = childView.locator('.workspace-view-short-id')
+          await childIdentity.waitFor({ state: 'visible', timeout: 15_000 })
+          const childThreadId = await childIdentity.getAttribute('title')
+          assert(
+            /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(childThreadId ?? ''),
+            'the child pane did not display a Thread identity',
+          )
+          const childSnapshot = await getThreadSnapshot(apiCtx, childThreadId)
+          assert(childSnapshot.thread?.rootThreadId === fixture.threadId, 'opened Thread does not belong to the expected execution root')
           assert(
             new URL(page.url()).pathname === `/chat-spaces/${fixture.space.id}`
               && await childView.locator('.composer-editor').count() === 0,

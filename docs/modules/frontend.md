@@ -96,9 +96,6 @@ Thread Snapshot 只有一份 query 缓存，通过
 再按恢复后的 head 重订阅；GET 失败也会按缓存中的 head 恢复订阅，保留同步错误，等待有效数据或显式重试。
 超出单帧预算时，`snapshot-ref` 的顶层 `version` 用于在同一物理连接内跨重订阅去重：已尝试或已覆盖的版本
 不会立即再读，较新的溢出版本仍可触发恢复。物理重连后重新计算去重边界，因为同版本的临时状态也可能变化。
-手动压缩可用性不在 Snapshot 内：根控制区在命令面板显示时或时间线存在失败/停止压缩卡时按需查询
-`/api/harness/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
-它只影响命令提示与卡片按钮的可用性，压缩提交仍由服务端按 `expectedVersion` 判断。
 
 执行树通过 HTTP 确认真正的执行根，随后由 WS 推送完整 `snapshot`（`data.nodes`），重连也会推送。
 `resync` 和手动刷新发送 `refresh` 控制帧，不新增订阅。仅收到不带 version 的 `snapshot-ref` 时才合并
@@ -145,13 +142,11 @@ RUNNABLE 时提供“停止并处理”的既有 Stop 入口，不开放放弃�
 
 ### Thread Debug
 
-Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，保留原 layout，
-其他原可见 pane 保持稳定挂载且置为 hidden 与 inert，输入控制区挂起，上传注册表保持挂载；
-单顶栏左上角提供“关闭 Debug”，不渲染会话返回行并隐藏布局选择器；
-退出时完整恢复原 layout、可见 pane、阅读滚动与焦点。主区域包含下一次请求预览、事件与详情：
-宽 Pane 三列等宽，窄 Pane 页签切换，选择/关闭详情保留焦点返回路径；Escape 优先由内部检查器或
-弹层消费，未消费时才触发外层退出 Debug。Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
-诊断 POST 携带当前界面选中的 model 与可空 environmentName，复用服务端只读规划；
+从根 Thread 的 Composer 执行 `/debug`，在同一窗格切换到只读诊断。输入控制区暂停，不改工作区布局；
+用“关闭 Debug”退出时恢复对话阅读位置和 Composer 焦点。主区域包含下一次请求预览、事件与详情：
+宽 Pane 三列，窄 Pane 用页签切换。内部检查器和弹层先处理 Escape，未处理时退出 Debug。
+Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
+诊断 POST 从已加载的 Thread 设置取得 model 与可空 environmentName，复用服务端只读规划；
 模型、环境与调用身份共同隔离查询，迟到响应不能覆盖当前选择，也不写回历史或触发执行。
 响应区分 NEXT_REQUEST_PREVIEW 与活动 FROZEN_INVOCATION，包含发送/过滤工具、稳定 Skill 路径
 与冻结请求，排除 credential、认证 header 和 Base64 正文。Subagent 详情展示自己的能力声明与
@@ -160,12 +155,11 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 运行中的 Thread 另给 FROZEN_INVOCATION：只读取当时已存在的活动 Invocation 的冻结请求，不新建、
 复制或延长任何持久事实。事件详情可按需重建某个历史模型输出的请求：
 普通模型输出的请求前缀严格截断在该输出的 parent，压缩结果使用冻结的子执行重建；
-展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。本地新建分支草稿进入 Debug 可只读检查已有事件与历史请求，
-绝不为此预创建 Thread。
+展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。
 
 ## Workspace 与 Thread 提交控制
 
-工作区以 `(userId, space.id)` 挂载：Chat Space 在 [`SpaceDefaults`](../../frontend/src/features/workspace/SpaceDefaults.tsx) 中配置默认 Agent、Environment 与 YOLO 开关；新建空间继承当前空间默认值，新空白草稿窗格继承当前空间的默认设置，已有 Thread、分支草稿与 fork 沿各自历史恢复设置，不被改写。
+工作区以 `(userId, space.id)` 挂载：Chat Space 在 [`SpaceDefaults`](../../frontend/src/features/workspace/SpaceDefaults.tsx) 中配置默认 Agent、Environment 与 YOLO 开关；新建空间继承当前空间默认值，新空白草稿窗格继承当前空间的默认设置，已有 Thread、分支与 fork 沿各自历史恢复设置，不受空间默认值改动影响。
 Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A，旧绑定的迟到结果
 也不能改写当前 UI 或清除新 pending 记录，原 Thread 的草稿持久化仍按自身身份处理。
 
@@ -198,10 +192,8 @@ view 绑定（`PaneTarget`）与布局，不复制 Thread、draft 或执行状�
 配置差异按 `SET_EXECUTION` → `SET_ENVIRONMENT`
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲或停止状态保留本地草稿随下一条输入提交；YOLO 走独立控制入口。
 执行根仍有正在运行的子代理时，环境菜单提示切换对正在运行的子 Agent 同样生效；
-提示只说明生效范围，不改变切换与提交路径。窗格标题由 `PaneHeader` 呈现；
-工作区内只读子代理不渲染第二层标题栏或只读 badge，
-其真实身份（agent 名称与 `modelName (variant)`；默认 main
-不作为独立身份）与只读动作直接在子视图与工作区标题中呈现，并提供返回直属父 Agent 入口。
+提示只说明生效范围，不改变切换与提交路径。窗格标题由 `PaneHeader` 呈现。子 Thread 的查看头部显示实际 Agent、
+`modelName (variant)`、可复制的 Thread ID 与只读状态；返回时恢复前一层。
 模型与变体组合统一使用括号格式，包括输入区底栏及其提示、设置变更记录、执行树和 Agent 卡片；
 变体来自实际选择，不换算为 reasoningEffort。模型引用和单独选择模型的选项都使用全局逻辑
 `modelName`，不拼接 `providerName`；名称本身可以包含斜杠。GROUP 选择不带组级 Variant。
@@ -230,10 +222,10 @@ IndexedDB 在同一事务保存草稿与已合并的回执身份；响应和 sna
 NOTIFICATION 使用系统样式展示，不进入人类消息队列、上下键历史或草稿。
 审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
 `ThreadPaneRenderer` 按执行身份分流：根 Thread 提供人工输入与控制，子代理只读取
-Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属父 Agent 入口；
+Snapshot 与用量，展示实际身份，并在顶部提供返回动作；
 身份未确认时不挂载控制 Hook。
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
-来自子线程的待办提供 `subagent` 链接，由 `ThreadLink` 复用 pane 的就地查看路径，链接不显示 UUID。进入子代理后，标题区显示
+来自子线程的待办提供 `subagent` 按钮，通过 `ThreadInspectionButton` 在原窗格查看，不把 UUID 当作按钮文案。进入子代理后，标题区显示
 Thread ID 前 8 位，悬停查看完整值，复制按钮复制完整 ID。
 执行结果与任务回执始终交给直接派发的父 Agent，不走根订阅。
 子线程只读视图在顶部显示“环境：<名称> · 跟随主对话”：环境名取该 Thread Snapshot 冻结的值，
@@ -292,12 +284,9 @@ IDE 目录复制与子代理 ID 复制使用固定尺寸的原地反馈：成功
 根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
 RUNNING、EXIT_PENDING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
-树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；返回导航基于当前快照的
-直属父 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开父级，不依赖浏览栈
-`goBack`，根层保持挂载但隐藏且 inert，草稿、上传和阅读位置不被重建。已绑定根通过 `/subagent` 命令、
-只读顶栏通过“查看 subagent 执行”动作打开轻量执行树面板，展示包含嵌套与 turns/tools 计数且排除根的完整
-`historyRows`，未绑定草稿禁用该命令。
-修饰键与中键保留独立 Thread 地址的浏览器行为。刷新失败明确提示，不伪造最新树。
+树行、Task 卡和系统回执使用 `ThreadInspectionButton` 在当前窗格打开只读子 Thread。根层保持挂载但隐藏，
+保留草稿、上传和阅读位置；返回时弹出当前查看层，不动浏览器历史。内部执行没有公开的页面地址；
+公开 Thread 通过 Chat Space 深链打开。执行树刷新失败保留最后有效快照并显示错误。
 输入编排由 `ThreadComposer` 持有，DOM、光标、IME 与 Pill 由 `ComposerEditor` 隔离。
 工具卡片按各自 invocation 的结果判定终态：同批其他调用尚未物化 durable 结果时，
 已完成调用仍显示其结果，等待审批的调用保持未决。结果配对使用
@@ -324,8 +313,7 @@ Thread 的待处理卡片读取 Invocation 事实：`WAITING_INPUT` 呈现冻结
 不依赖 `continueModel`；`TURN_END(FAILED)` 显示回合内 `ASSISTANT_ERROR` 错误码映射出的一句原因；
 `TURN_END(STOPPED)` 显示已停止。卡片位于原压缩回合位置（此前对话之后、后续对话之前）。
 已压缩卡片默认折叠，展开后完整摘要复用 `SystemMessageCard` 外壳与 `SystemMessageBody` 安全 Markdown，不支持
-的 XML 标签保留为普通文本，摘要只读取 `COMPACTION.payload.summaryText`。失败与停止卡片在原位置提供“重新压缩”，
-可用性与命令面板同源，Thread 忙或不可压缩时禁用并显示原因。
+的 XML 标签保留为普通文本，摘要只读取 `COMPACTION.payload.summaryText`。
 
 带分支 Thread id 的卡片提供“查看执行”。执行视图复用子代理的只读对话外壳与助手输出，沿用 Thread 快照和实时流，
 仅投影共享快照中切点之后的分支内容。对话不显示祖先历史、压缩指令或工具气泡；内部指令、用量和被停用工具的结果可按需展开诊断。
@@ -413,10 +401,8 @@ Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责
 MCP Card 只消费摘要投影，编辑时读取详情（URL 与 headers 的 `configured` 事实）并用 generation fence
 保护迟到响应；headers 从不回读，界面只能保持、替换或清除已保存的映射。
 Environment 列表卡片摘要显示连接状态、当前或上次 Daemon 版本以及一条运行或待处理状态。
-“管理”集中提供编辑、安装、卸载、更新、轮换 Token 和删除；没有版本记录的离线卡片另有安装快捷入口。
-展开管理弹窗的“诊断详情”可检查宿主、能力、卡片版本与已应用版本、代理及最近事件。能力键是完整标识符，
-按整键换行，不在词中断开。事件的级别（信息 / 警告）与类型（连接中 / 已就绪 / 已断开 / 更新失败）
-用本地化名称，原始协议码只留在 `title` 提示；服务端给出的事件消息是名称下的次要说明，原样保留。
+卡片提供安装或覆盖、管理、编辑与删除。“管理”直接展示宿主、能力、配置与最近事件，并提供更新、卸载和轮换 Token。
+能力键是完整标识符，按整键换行。事件级别、类型和说明按当前语言显示，原始协议码留在 `title` 提示。
 事件区在读取中显示加载状态，失败时可就地重试，仅在读取成功且无记录时显示空态。列表首载失败在内容区重试，
 后台列表刷新失败时保留卡片，在工具栏提示并重试；单卡运行快照读取失败不会把缓存中的配置或进度当成当前结果。
 创建/编辑复用同一表单：名称仅创建时可改，备注、Studio 地址、Bash、LSP 与代理都属于卡片配置；保存整体提交
@@ -603,7 +589,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
 
-Runtime 查看层、执行选择面板、命名与问卷的普通操作复用 Button，文本字段复用 TextInput/TextArea，纯图标动作复用 IconButton；局部样式只保留领域布局与必要密度。工作区使用唯一顶栏呈现当前查看身份，Debug 独占期间在左上提供“关闭 Debug”；子执行最左是“回到父 agent”，取当前执行的直接父身份，不同时显示“回到对话”。Debug 与 subagent 选择只从根输入区命令进入。
+Runtime 查看层、执行选择面板、命名与问卷的普通操作复用 Button，文本字段复用 TextInput/TextArea，纯图标动作复用 IconButton；局部样式只保留领域布局与必要密度。窗格标题呈现绑定的资源；Thread 内容区提供当前查看层的身份与返回动作。根 Thread 的 Debug 由 Composer 命令进入，子执行从执行树、回执或压缩卡打开。
 
 一个操作区只有一个突出的主动作。编辑、查看和取消采用次级或无框动作；删除、拒绝等明确使用 danger 语义，不能因外观统一而取消确认、在途禁用或并发围栏。多动作卡使用非交互外壳和独立操作，不嵌套按钮，不让编辑/删除触发进入或新建。
 加载、空态和错误分别说明真实情况。失败保留输入和明确重试；空态给出下一步，不把失败当空数据。成功提示短暂且不重复；需要决定或恢复的错误留在相关操作处。正常数据由单连接推送失效与权威回读更新，不要求用户手动刷新。

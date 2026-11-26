@@ -1088,14 +1088,6 @@ export const settingsCatalog = {
     'en-US': 'Process-level runtime budgets for processors, events and work notification.',
     'zh-CN': '处理器、事件与工作通知的进程级运行预算。',
   },
-  'settings.section.advanced.resource.title': {
-    'en-US': 'Resource budget',
-    'zh-CN': '资源预算',
-  },
-  'settings.section.advanced.resource.description': {
-    'en-US': 'Per-request resource budgets.',
-    'zh-CN': '单次请求的资源预算。',
-  },
   'settings.section.advanced.processor.title': {
     'en-US': 'Processor',
     'zh-CN': '处理器',

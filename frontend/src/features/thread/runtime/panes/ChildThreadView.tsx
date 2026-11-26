@@ -1,10 +1,9 @@
-import { type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { ThreadPane } from '@/features/thread/runtime/panes/ThreadPane'
 import {
   useThreadProjection,
   type ThreadProjection,
 } from '@/features/thread/runtime/useThreadProjection'
-import { useBoundThreadPanelViews } from '@/features/thread/runtime/controllers/useBoundThreadPanelViews'
 import { useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { useI18n } from '@/shared/i18n'
@@ -39,9 +38,7 @@ export function ThreadView({
   // 子线程没有自己的环境选择：只读展示当前冻结的环境并标明跟随主对话；执行根自身不显示该行。
   const childEnvironmentName = projection.runtimeLabels.environmentName
   const showChildEnvironment = projection.thread?.parentThreadId != null
-  const views = useBoundThreadPanelViews(threadId, projection)
   const presentation = useThreadPresentation({
-    views,
     projection,
     threadId,
     active,
@@ -67,10 +64,7 @@ export function ThreadView({
         projection={projection}
         environments={environments}
         activity={{}}
-        views={{
-          mainView: views.mainView,
-          initialConversationScrollTop: views.initialConversationScrollTop,
-        }}
+        views={{ initialConversationScrollTop: null }}
       />
     </div>
   )

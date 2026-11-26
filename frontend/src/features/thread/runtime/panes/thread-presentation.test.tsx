@@ -22,7 +22,6 @@ const thread: HarnessThreadDTO = {
 
 function options(onParent = vi.fn(), active = true) {
   return {
-    views: { viewKey: 'thread:child' },
     projection: { thread },
     threadId: 'child', active, onParent,
   }
@@ -51,17 +50,17 @@ describe('child thread presentation', () => {
     })
     const action = result.current.act
     act(() => action('stale', 'parent'))
-    act(() => action('thread:child', 'parent'))
+    act(() => action('child', 'parent'))
     expect(initialCallback).toHaveBeenCalledExactlyOnceWith('parent')
 
     const inactiveCallback = vi.fn()
     rerender({ ...options(inactiveCallback, false) })
-    act(() => action('thread:child', 'parent'))
+    act(() => action('child', 'parent'))
     expect(inactiveCallback).not.toHaveBeenCalled()
 
     const changedCallback = vi.fn()
     rerender({ ...options(changedCallback), threadId: 'other' })
-    act(() => action('thread:child', 'parent'))
+    act(() => action('child', 'parent'))
     expect(changedCallback).not.toHaveBeenCalled()
     expect(result.current.act).toBe(action)
   })

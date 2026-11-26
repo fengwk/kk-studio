@@ -175,8 +175,8 @@ describe('system settings schema renderer', () => {
       groups: [
         {
           key: 'advanced.synthetic',
-          labelKey: 'settings.section.advanced.resource.title',
-          descriptionKey: 'settings.section.advanced.resource.description',
+          labelKey: 'settings.section.advanced.processor.title',
+          descriptionKey: 'settings.section.advanced.processor.description',
           fields: [
             {
               path: 'advanced.syntheticFlag',

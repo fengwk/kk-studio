@@ -182,8 +182,8 @@ Dispatcher 与 admission 上限属于启动配置，subagent 预算由运行时 
 保存当前镜像标识、运行配置与可恢复的数据备份。镜像构建成功只证明产物生成，
 发布前的验证入口见[开发与测试](development-and-testing.md)。
 
-目标 Schema 与现有数据库不匹配时，先备份并按下文在独立空库初始化当前 V1。
-旧 V1 若已创建公开测试管理员，必须使用独立新库；修复 Flyway 校验和不会移除那个账号。配置同步只覆盖配置，不恢复会话、空间、画布或运行历史；上传渠道技能包也需另行备份。
+目标 Schema 与现有数据库不匹配时，先停在部署前检查，由数据所有者决定是否按下文备份并从独立空库初始化。
+配置同步只恢复配置，不恢复会话、空间、画布或运行历史；上传渠道技能包也需另行备份。
 
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不会按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
@@ -192,11 +192,7 @@ Dispatcher 与 admission 上限属于启动配置，subagent 预算由运行时 
 
 同版本日常升级且数据面兼容时，App 节点可以逐个替换。节点收到 SIGTERM 后先停止 claim 与本地执行准入，按物理句柄在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`（默认 60s）内等待本机 body 与资源结束；剩余同一总 deadline 用于中断未结束的本地 body、向 Daemon 发送 GOAWAY、释放路由租约，并移交可 reattach 的远端工具（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#processor)）。总预算默认是 `60s + 30s = 90s`，下层不得各自重新开启 30 秒；仍有物理执行或本地资源时，退出证明与日志目录锁保留到 JVM 退出。容器或进程管理器必须给足 Spring 100s 与容器 120s（例如 `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s`、Docker Compose `stop_grace_period: 120s`、`docker run --stop-timeout 120`），否则会被提前 SIGKILL，在途执行只能按崩溃恢复处理。不得用无界 `ExecutorService.close` 等待替代显式 deadline。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
 
-Flyway 校验失败时停止切换并查明差异。标准 `repair` 只用于已经执行并核对过一次性 DDL 后的 V1 checksum 更新；
-手工修改 `flyway_schema_history` 或用 `repair` 绕过结构差异、伪造 checksum 会破坏校验依据，不能使用。
-有数据的数据库不能重放 V1，也不能依靠运行时兼容层启动。需要空库时走独立的
-[共享数据库重建](development-and-testing.md#共享数据库重建)，它通过产品配置导出、数据库备份与重建、当前 Schema
-初始化和产品导入恢复配置，不是自动迁移。
+Flyway 校验失败时停止切换，保留原库与备份。结构调整走[空库重建与恢复](#空库重建与恢复)：先导出配置并备份，再由当前 V1 初始化目标库。
 
 ### 空库重建与恢复
 

@@ -1,6 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import type { ThreadProjection } from '../useThreadProjection'
-import type { useBoundThreadPanelViews } from '../controllers/useBoundThreadPanelViews'
 import { formatModelLabel } from '@/features/catalog'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
@@ -42,26 +41,25 @@ export function threadIdentity(projection: Pick<ThreadProjection, 'thread'>): st
 
 /** 父级返回动作只允许由当前可见且激活的子 Thread 查看层触发。 */
 export function useThreadPresentation({
-  views, projection, threadId, active, onParent,
+  projection, threadId, active, onParent,
 }: {
-  views: Pick<ReturnType<typeof useBoundThreadPanelViews>, 'viewKey'>
   projection: Pick<ThreadProjection, 'thread'>
   threadId: string
   active: boolean
   onParent: (parentThreadId: string) => void
 }) {
-  const latest = useRef({ views, projection, threadId, active, onParent })
+  const latest = useRef({ projection, threadId, active, onParent })
   const mounted = useRef(false)
   useLayoutEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
   useLayoutEffect(() => {
-    latest.current = { views, projection, threadId, active, onParent }
+    latest.current = { projection, threadId, active, onParent }
   })
   const act = useCallback((viewKey: string, action: 'parent') => {
     const current = latest.current
-    if (!mounted.current || !current.active || current.views.viewKey !== viewKey) {
+    if (!mounted.current || !current.active || current.threadId !== viewKey) {
       return
     }
     const thread = current.projection.thread?.threadId === current.threadId
@@ -73,11 +71,11 @@ export function useThreadPresentation({
   const thread = projection.thread?.threadId === threadId ? projection.thread : null
   const identity = thread ? threadIdentity(projection) : null
   return useMemo<ThreadPresentation>(() => ({
-    viewKey: views.viewKey,
+    viewKey: threadId,
     threadId: thread?.threadId ?? null,
     name: thread?.parentThreadId && thread.name === 'main' ? null : thread?.name ?? null,
     parentThreadId: thread?.parentThreadId ?? null,
     identity,
     act,
-  }), [views.viewKey, thread?.threadId, thread?.name, thread?.parentThreadId, identity, act])
+  }), [threadId, thread?.threadId, thread?.name, thread?.parentThreadId, identity, act])
 }

@@ -6,10 +6,6 @@ export const environmentCatalog = {
     'en-US': 'Workspace IDE',
     'zh-CN': '工作区 IDE',
   },
-  'ai.ide.close': {
-    'en-US': 'Close',
-    'zh-CN': '关闭',
-  },
   'ai.ide.dismiss': {
     'en-US': 'Dismiss',
     'zh-CN': '忽略',
@@ -229,10 +225,6 @@ export const environmentCatalog = {
   'ai.environment.deleteConfirm': {
     'en-US': 'Are you sure you want to delete environment "{{name}}"?',
     'zh-CN': '确认删除环境「{{name}}」？',
-  },
-  'ai.environment.install': {
-    'en-US': "Install / overwrite",
-    'zh-CN': "安装 / 覆盖",
   },
   'ai.environment.uninstall': {
     'en-US': "Uninstall",
