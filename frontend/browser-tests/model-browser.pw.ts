@@ -369,7 +369,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     expect(calls).not.toContain('PUT /api/platform/models/main')
   })
 
-  test('changing a create-form model replaces unsupported retention with automatic NONE and submits it', async ({
+  test('switching to an automatic-cache model preserves the chosen retention until the user accepts the default', async ({
     page,
   }) => {
     const { createBodies } = await installFakeCatalogServer(page)
@@ -386,7 +386,11 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await modelId.fill('auto-model')
     await expect(dialog.getByText('自动（由提供商管理）')).toBeVisible()
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveCount(0)
-    await expect(dialog.getByRole('button', { name: '创建', exact: true })).toBeEnabled()
+    const useDefault = dialog.getByRole('button', { name: /^使用服务端默认档位/ })
+    await expect(useDefault).toBeVisible()
+    expect(createBodies).toHaveLength(0)
+    await useDefault.click()
+    await expect(useDefault).toHaveCount(0)
     await dialog.getByRole('button', { name: '创建', exact: true }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     expect(createBodies).toHaveLength(1)

@@ -1525,7 +1525,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     for (String id : variantIds) {
       ModelVariantDTO variant = new ModelVariantDTO();
       variant.setId(id);
-      variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
+      variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
     }
     config.setVariants(variants);

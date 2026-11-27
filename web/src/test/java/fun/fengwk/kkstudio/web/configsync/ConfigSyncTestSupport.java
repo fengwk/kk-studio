@@ -151,7 +151,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return new Yaml().dump(document);
   }
 
-  /** 一个合法、带可辨识精度与 protocolOptionsJson 的 Model config。 */
+  /** 使用兼容 Chat 端点的默认档位，带可辨识精度与 protocolOptionsJson 的 Model config。 */
   protected static ModelConfigDTO modelConfig(String protocolOptionsJson, String inputPrice) {
     ModelLimitDTO limit = new ModelLimitDTO();
     limit.setContext(4096);
@@ -178,7 +178,6 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     variant.setId("default");
     variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     variant.setProtocolOptionsJson(protocolOptionsJson);
-    variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
 
     ModelConfigDTO config = new ModelConfigDTO();
     config.setLimit(limit);

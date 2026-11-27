@@ -43,9 +43,8 @@ class CanvasCommandUploadAuthorizationTest {
     @SuppressWarnings("unchecked")
     ObjectProvider<CanvasUploadOwnership> ownershipProvider = mock(ObjectProvider.class);
     when(ownershipProvider.getIfAvailable()).thenReturn(uploadOwnership);
-    when(canvasStore.lockDocument(canvasId))
-        .thenReturn(
-            Optional.of(new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH)));
+    when(canvasStore.requireLockedDocument(canvasId))
+        .thenReturn(new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH));
     when(uploadOwnership.lockReady(uploadId, userId)).thenThrow(DomainException.notFound("upload"));
     CanvasCommandService service =
         new CanvasCommandService(
@@ -92,9 +91,8 @@ class CanvasCommandUploadAuthorizationTest {
     @SuppressWarnings("unchecked")
     ObjectProvider<CanvasUploadOwnership> ownershipProvider = mock(ObjectProvider.class);
     when(ownershipProvider.getIfAvailable()).thenReturn(uploadOwnership);
-    when(canvasStore.lockDocument(canvasId))
-        .thenReturn(
-            Optional.of(new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH)));
+    when(canvasStore.requireLockedDocument(canvasId))
+        .thenReturn(new CanvasDocument(canvasId, "canvas", 0L, Instant.EPOCH, Instant.EPOCH));
     when(canvasStore.findCommandDedup(eq(canvasId), any())).thenReturn(Optional.empty());
     when(canvasStore.listNodes(canvasId)).thenReturn(List.of());
     when(canvasStore.listGroups(canvasId)).thenReturn(List.of());
