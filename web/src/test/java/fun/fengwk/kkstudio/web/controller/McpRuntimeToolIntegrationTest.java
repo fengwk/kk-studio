@@ -405,7 +405,7 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     config.setPricing(pricing);
     ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
-    variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
+    variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     config.setVariants(List.of(variant));
     config.setDefaultVariant("default");
     model.setConfig(config);
